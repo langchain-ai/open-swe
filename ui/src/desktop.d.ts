@@ -18,6 +18,10 @@ export interface DesktopProject {
   addedAt: number
   /** Terminal/panel scope for the project itself, before a thread exists. */
   scopeId: string
+  /** The Open SWE project this folder belongs to; older desktop builds omit it. */
+  projectId?: string | null
+  /** The GitHub repository the folder is a clone of, if any; older builds omit it. */
+  repo?: string | null
 }
 
 /**
@@ -28,6 +32,7 @@ export interface DesktopLocalThread {
   id: string
   cwd: string
   worktreePath: string | null
+  managedTaskFolder?: boolean
   /** Worktrees this app created for the thread, removed when it is discarded. */
   ownedWorktrees: Array<string>
   bridgeId: string | null
@@ -154,8 +159,17 @@ declare global {
   interface Window {
     /** This bundle's own build identity, stamped by vite.config.ts at build time. */
     __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
+    /** The Navigation API: Chromium, and so the desktop app, has it; TypeScript's DOM types don't yet. */
+    navigation?: Pick<
+      EventTarget,
+      "addEventListener" | "removeEventListener"
+    > & {
+      readonly canGoBack: boolean
+      readonly canGoForward: boolean
+    }
     openSweDesktop?: {
       isDesktop: true
+      taskWorkspaces?: boolean
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
@@ -176,6 +190,11 @@ declare global {
       }) => Promise<DesktopLocalThread | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
+      /** Missing before desktop builds that link folders to Open SWE projects. */
+      linkProject?: (input: {
+        cwd: string
+        projectId: string | null
+      }) => Promise<DesktopProject | null>
       getVersion: () => Promise<string>
       getUpdateState: () => Promise<DesktopUpdateState>
       installUpdate: () => Promise<boolean>
@@ -187,7 +206,7 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack" | "langsmith") => Promise<boolean>
+      connectService: (provider: "slack" | "github") => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
@@ -198,7 +217,8 @@ declare global {
        */
       prepareLocalThread: (input: {
         threadId: string
-        cwd: string
+        cwd?: string
+        taskWorkspace?: boolean
         workspaceMode?: DesktopWorkspaceMode
         baseBranch?: string | null
       }) => Promise<{ bridgeId: string; repo: string | null }>
@@ -209,6 +229,7 @@ declare global {
       }) => Promise<string>
       /** Serve the thread's checkout again before its next run. */
       ensureLocalBridge: (threadId: string) => Promise<boolean>
+      openTaskFolder?: (threadId: string) => Promise<boolean>
       getLocalThread: (threadId: string) => Promise<DesktopLocalThread | null>
       listLocalThreads: () => Promise<Array<DesktopLocalThread>>
       /** Forget a deleted thread and remove the worktrees this app made for it. */

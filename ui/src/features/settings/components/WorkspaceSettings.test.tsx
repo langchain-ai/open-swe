@@ -21,7 +21,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
-import { invalidationTopic } from "@/lib/invalidations/topics"
+import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -159,8 +159,7 @@ async function invalidateWorkspaces() {
   await act(async () => {
     await clients.at(-1)?.invalidateQueries({
       predicate: (query) =>
-        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
-        false,
+        queryTopics(query).includes(invalidationTopic("workspaces")),
     })
     await vi.advanceTimersByTimeAsync(1)
   })
@@ -170,7 +169,7 @@ describe("WorkspaceSettingsPanel", () => {
   it("preserves saved effort while a subagent uses the parent model", () => {
     const onChange = vi.fn()
     const props = {
-      label: "Open SWE Agent subagents",
+      label: "Robin Agent subagents",
       models: [
         {
           id: "openai:gpt-6.1-sol",
@@ -190,7 +189,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
     const effort = () =>
       screen.getByRole("combobox", {
-        name: "Open SWE Agent subagents reasoning effort",
+        name: "Robin Agent subagents reasoning effort",
       }) as HTMLButtonElement
     expect(effort().disabled).toBe(true)
     expect(effort().textContent).toContain("Parent run")
@@ -254,6 +253,36 @@ describe("WorkspaceSettingsPanel", () => {
     expect(channel.getAttribute("target")).toBe("_blank")
   })
 
+  it("never exposes channel IDs while names load or cannot be resolved", async () => {
+    mockApis({ ...RECORD, slack_channel_ids: ["C1", "C2"] })
+    let finish!: (directory: { channels: []; refreshing: boolean }) => void
+    vi.mocked(api.listSlackChannels).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    renderPage()
+
+    const channel = await screen.findByRole("link", { name: "Slack channel 1" })
+    expect(channel.textContent).not.toContain("C1")
+    expect(
+      screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
+    ).toContain("C2")
+    const secondKitchen = screen.getByRole("switch", {
+      name: "Kitchen mode for Slack channel 2",
+    })
+    fireEvent.click(secondKitchen)
+    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    expect(
+      screen
+        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
+        .getAttribute("aria-checked")
+    ).toBe("false")
+    await act(async () => finish({ channels: [], refreshing: false }))
+    expect(channel.textContent).toBe("Slack channel 1")
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
@@ -313,6 +342,7 @@ describe("WorkspaceSettingsPanel", () => {
     mockApis()
     renderPage(false)
     await screen.findByLabelText("Workspace name")
+    expect(await screen.findByRole("link", { name: "#oss-help" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
 
@@ -414,7 +444,11 @@ describe("WorkspaceSettingsPanel", () => {
         expect(
           within(general).queryByRole("button", { name: "Cancel" })
         ).toBeNull()
-        expect(within(general).getByRole("status").textContent).toContain(
+        const sandbox = screen
+          .getByRole("heading", { name: "Sandbox Image" })
+          .closest("section")!
+        expect(within(general).queryByRole("status")).toBeNull()
+        expect(within(sandbox).getByRole("status").textContent).toContain(
           savedStatus === "refreshing"
             ? "Rebuilding sandbox image"
             : "rebuild queued"
@@ -447,7 +481,7 @@ describe("WorkspaceSettingsPanel", () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
         expect(
-          within(general).getByRole(outcome === "unknown" ? "alert" : "status")
+          within(sandbox).getByRole(outcome === "unknown" ? "alert" : "status")
             .textContent
         ).toContain(
           outcome === "unknown"
@@ -466,7 +500,7 @@ describe("WorkspaceSettingsPanel", () => {
         })
         await invalidateWorkspaces()
         expect(
-          within(general).getByRole(outcome === "success" ? "status" : "alert")
+          within(sandbox).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
         ).toContain(
           outcome === "unknown"
@@ -598,6 +632,9 @@ describe("WorkspaceSettingsPanel", () => {
       ).rules[0].name
     ).toBe("updated-service")
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("LangSmith Access"), {
+      target: { value: "projects:read, datasets:read" },
+    })
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
@@ -608,6 +645,10 @@ describe("WorkspaceSettingsPanel", () => {
           proxy_config: {
             ...proxy,
             rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+          access_delegation: {
+            mode: "EXPLICIT",
+            permissions: ["projects:read", "datasets:read"],
           },
         },
       })
@@ -751,6 +792,16 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
+    const imageSection = rebuilding.closest("section")!
+    expect(within(imageSection).getByRole("status").textContent).toContain(
+      "Rebuilding sandbox image"
+    )
+    expect(within(imageSection).queryByText("Image ready")).toBeNull()
+    expect(
+      within(
+        screen.getByRole("button", { name: "Save" }).closest("section")!
+      ).queryByRole("status")
+    ).toBeNull()
   }, 15_000)
 
   it("offers every accessible repository as its default", async () => {
@@ -784,8 +835,9 @@ describe("WorkspaceSettingsPanel", () => {
       name: /acme\/api\s*Private/,
     })
     expect(option.closest("section")).toBeNull()
-    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    expect(screen.queryByText("acme/legacy")).toBeNull()
+    const picker = within(screen.getByRole("dialog"))
+    expect(picker.getByText("oss")).toBeTruthy()
+    expect(picker.queryByText("legacy")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
     expect(
       screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })

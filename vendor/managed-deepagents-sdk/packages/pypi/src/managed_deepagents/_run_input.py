@@ -1,18 +1,24 @@
 """Config defaults for native LangGraph execution."""
 
+import asyncio
 from collections.abc import AsyncIterator, Iterator, Mapping
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AsyncExitStack
 from contextvars import Token
+from functools import cached_property
 from typing import Any, cast
+from uuid import UUID
 
+from langchain_core.callbacks import AsyncCallbackManager
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.tracers.langchain import LangChainTracer
+from langchain_core.tracers.schemas import Run
 from langgraph._internal._config import ensure_config, patch_configurable
 from langgraph._internal._constants import CONFIG_KEY_CHECKPOINTER, CONFIG_KEY_RUNTIME
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import StateSnapshot
-from langsmith import get_tracing_context, tracing_context
 
 from managed_deepagents._channels.binding import (
     ChannelBinding,
@@ -22,6 +28,7 @@ from managed_deepagents._channels.binding import (
 )
 from managed_deepagents._channels.delivery import (
     INPUT_SOURCE,
+    deliver_run_failure,
     deliver_run_result,
     delivers_result,
 )
@@ -37,6 +44,7 @@ from managed_deepagents._telemetry.otel import (
     trace_id_from_metadata,
 )
 from managed_deepagents.run_context import is_managed_key
+from managed_deepagents.run_resources import _current_resources
 
 #: Run ``configurable`` key deepagents uses to name the agent that started an async subagent.
 _PARENT_KEY = "deepagents_parent"
@@ -61,32 +69,109 @@ def graph_default_config(config: Mapping[str, object] | None) -> RunnableConfig:
     return cast("RunnableConfig", prepared)
 
 
+class ManagedTurnTracer(LangChainTracer):
+    """Close a managed invocation's trace tree when its root finishes."""
+
+    @cached_property
+    def roots(self) -> list[Run]:
+        return []
+
+    @property
+    def root(self) -> Run | None:
+        return self.roots[0] if self.roots else None
+
+    def copy_with_metadata_defaults(
+        self, *, metadata: Mapping[str, str] | None = None, tags: list[str] | None = None
+    ) -> LangChainTracer:
+        tracer = super().copy_with_metadata_defaults(metadata=metadata, tags=tags)
+        if isinstance(tracer, ManagedTurnTracer):
+            tracer.roots = self.roots
+        return tracer
+
+    def _start_trace(self, run: Run) -> None:
+        if self.root is None:
+            self.roots.append(run)
+            run.metadata.pop("end_reason", None)
+        elif self.root.end_time is not None:
+            run.extra["__disabled"] = True
+        super()._start_trace(run)
+
+    def _errored_chain_run(
+        self, error: BaseException, inputs: dict[str, object] | None, run_id: UUID
+    ) -> Run:
+        run = super()._errored_chain_run(error, inputs, run_id)
+        if run is self.root:
+            reason = "failed"
+            if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
+                reason = "cancelled" if isinstance(error, GeneratorExit) else "failed"
+                pending: list[BaseException] = [error]
+                seen: set[int] = set()
+                while pending:
+                    cause = pending.pop()
+                    if id(cause) in seen:
+                        continue
+                    seen.add(id(cause))
+                    if isinstance(cause, TimeoutError) or type(cause).__name__ == "UserTimeout":
+                        reason = "failed"
+                        break
+                    if type(cause).__name__ == "UserInterrupt":
+                        reason = (
+                            "superseded"
+                            if str(cause).startswith("superseded by run ")
+                            and "(multitask_strategy=interrupt)" in str(cause)
+                            else "cancelled"
+                        )
+                    pending.extend(arg for arg in cause.args if isinstance(arg, BaseException))
+                    if cause.__cause__ is not None:
+                        pending.append(cause.__cause__)
+                if reason != "failed":
+                    run.error = None
+            run.metadata["end_reason"] = reason
+        return run
+
+    def _end_trace(self, run: Run) -> None:
+        if run is self.root:
+            run.metadata.setdefault("end_reason", "failed" if run.error else "completed")
+            pending = list(run.child_runs)
+            while pending:
+                child = pending.pop()
+                pending.extend(child.child_runs)
+                if child.end_time is None:
+                    child.end(end_time=run.end_time)
+                    self._update_run_single(child)
+                    child.extra["__disabled"] = True
+        super()._end_trace(run)
+
+    @classmethod
+    def for_run(cls, config: RunnableConfig) -> RunnableConfig:
+        """Preserve tracing destinations and parents while isolating invocation lifecycle."""
+        manager = AsyncCallbackManager.configure(inheritable_callbacks=config.get("callbacks"))
+        for handler in list(manager.handlers):
+            if not isinstance(handler, LangChainTracer):
+                continue
+            tracer = cls(
+                example_id=handler.example_id,
+                project_name=handler.project_name,
+                address=handler.address,
+                client=handler.client,
+                tags=handler.tags,
+                metadata=handler.tracing_metadata,
+                run_map=dict(handler.run_map),
+                order_map=dict(handler.order_map),
+                _external_run_ids=dict(handler._external_run_ids),  # noqa: SLF001
+            )
+            manager.remove_handler(handler)
+            manager.add_handler(tracer)
+        return {**config, "callbacks": manager}
+
+
 class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     """Remove ingress transport before native context conversion, on every execution.
 
     Each step sees the run's channel and thread; when the stream ends, the run's
-    result goes to its thread origin, or a scheduled run's ``deliver_to``.
+    result goes to its thread origin, or a scheduled run's ``deliver_to``. A
+    scheduled run that raises reports the failure there before it raises.
     """
-
-    replicate_traces: bool = True
-
-    def _tracing(self, config: RunnableConfig | None) -> AbstractContextManager[None]:
-        project = ensure_config(self.config, config)["configurable"].get("__langsmith_project__")
-        if self.replicate_traces or not project:
-            return nullcontext()
-        context = get_tracing_context()
-        replicas = [
-            replica
-            for replica in context["replicas"] or ()
-            if replica.get("project_name") == project
-        ]
-        if not replicas:
-            return nullcontext()
-        context["replicas"] = replicas
-        parent = context["parent"]
-        if parent is not None:
-            context["parent"] = parent.model_copy(update={"replicas": replicas})
-        return tracing_context(**context)
 
     def stream(
         self,
@@ -105,23 +190,25 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         iterator = super().stream(input, config, context=context, **kwargs)
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread, output)
-                log_token = enter_log_context(log)
+                tokens = _enter_step(binding, routing, thread, log, output)
                 try:
-                    with self._tracing(config):
-                        item = next(iterator)
+                    item = next(iterator)
                 except StopIteration:
                     self._deliver(thread, merged, routing, output)
                     return
+                except Exception as error:
+                    if not isinstance(error, GraphBubbleUp):
+                        await_if_needed(
+                            self._deliver_failure(thread, merged, routing, output, error)
+                        )
+                    raise
                 finally:
-                    exit_log_context(log_token)
                     _exit_step(tokens)
                 yield item
         finally:
             log_token = enter_log_context(log)
             try:
-                with self._tracing(config):
-                    iterator.close()
+                iterator.close()
             finally:
                 exit_log_context(log_token)
 
@@ -139,26 +226,35 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         log = run_log_context(self.config, config)
         output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
+        config = ManagedTurnTracer.for_run(ensure_config(self.config, config))
         iterator = super().astream(input, config, context=context, **kwargs)
+        resources = AsyncExitStack()
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread, output)
-                log_token = enter_log_context(log)
+                tokens = _enter_step(binding, routing, thread, log, output)
                 try:
-                    with self._tracing(config):
+                    resource_token = _current_resources.set(resources)
+                    try:
                         item = await anext(iterator)
+                    finally:
+                        _current_resources.reset(resource_token)
                 except StopAsyncIteration:
                     await self._adeliver(thread, merged, routing, output)
                     return
+                except Exception as error:
+                    if not isinstance(error, GraphBubbleUp):
+                        await self._deliver_failure(thread, merged, routing, output, error)
+                    raise
                 finally:
-                    exit_log_context(log_token)
                     _exit_step(tokens)
                 yield item
         finally:
             log_token = enter_log_context(log)
             try:
-                with self._tracing(config):
+                try:
                     await iterator.aclose()
+                finally:
+                    await resources.aclose()
             finally:
                 exit_log_context(log_token)
 
@@ -170,6 +266,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         output: RunOutput | None,
     ) -> None:
         """Send the finished stream's result to the run's thread origin or ``deliver_to``."""
+        thread = thread.moved()
         if not delivers_result(thread, merged, routing):
             return
         if output is not None:
@@ -197,6 +294,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         routing: Mapping[str, object] | None,
         output: RunOutput | None,
     ) -> None:
+        thread = thread.moved()
         if not delivers_result(thread, merged, routing):
             return
         if output is not None:
@@ -249,10 +347,51 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             stateless=True,
         )
 
+    async def _deliver_failure(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput | None,
+        error: Exception,
+    ) -> None:
+        """Report the raised run's failure where its result would have gone."""
+        thread = thread.moved()
+        if not delivers_result(thread, merged, routing):
+            return
+        await deliver_run_failure(
+            thread,
+            merged,
+            error,
+            routing=routing,
+            subagent=_lead_thread_id(self.config, merged) is not None,
+            stateless=output is not None,
+        )
+
     def _keeps_state(self, config: RunnableConfig) -> bool:
         """Whether the run's state can be read back; a stateless run's cannot."""
         checkpointer = config["configurable"].get(CONFIG_KEY_CHECKPOINTER, self.checkpointer)
         return isinstance(checkpointer, BaseCheckpointSaver)
+
+
+def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
+    """One log context per run, under the trace id ingress handed over.
+
+    A nested managed graph reuses its parent's context.
+    """
+    parent = current_log_context()
+    if parent is not None:
+        return parent
+    merged = ensure_config(defaults, config)
+    metadata: Mapping[str, object] = merged.get("metadata") or {}
+    log = LogContext(trace_id=trace_id_from_metadata(metadata))
+    for key, value in (
+        ("run_id", metadata.get("run_id")),
+        ("thread_id", merged["configurable"].get("thread_id")),
+    ):
+        if isinstance(value, str) and value:
+            log.attributes[key] = value
+    return log
 
 
 #: Lists the checkpoint LangGraph writes before a run's input.
@@ -262,6 +401,7 @@ _StepTokens = tuple[
     Token[ChannelBinding | None],
     Token[Mapping[str, object] | None],
     Token[RunThread | None],
+    Token[LogContext | None],
     Token[RunOutput | None],
 ]
 
@@ -270,19 +410,22 @@ def _enter_step(
     binding: ChannelBinding | None,
     routing: Mapping[str, object] | None,
     thread: RunThread,
+    log: LogContext,
     output: RunOutput | None,
 ) -> _StepTokens:
     return (
         _current_channel.set(binding),
         _current_routing.set(routing),
         _current_thread.set(thread),
+        enter_log_context(log),
         _current_output.set(output),
     )
 
 
 def _exit_step(tokens: _StepTokens) -> None:
-    channel, routing, thread, output = tokens
+    channel, routing, thread, log, output = tokens
     _current_output.reset(output)
+    exit_log_context(log)
     _current_thread.reset(thread)
     _current_routing.reset(routing)
     _current_channel.reset(channel)
@@ -315,12 +458,6 @@ def run_thread(
     )
 
 
-class SingleProjectManagedAgent(ManagedCompiledAgent):
-    """Keep requested-project runs from also being copied to the deployment project."""
-
-    replicate_traces = False
-
-
 def _lead_thread_id(
     defaults: Mapping[str, object] | None, config: Mapping[str, object] | None
 ) -> str | None:
@@ -345,26 +482,6 @@ def _lead_thread_id(
     ):
         return None
     return thread_id
-
-
-def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
-    """One log context per run, under the trace id ingress handed over.
-
-    A nested managed graph reuses its parent's context.
-    """
-    parent = current_log_context()
-    if parent is not None:
-        return parent
-    merged = ensure_config(defaults, config)
-    metadata: Mapping[str, object] = merged.get("metadata") or {}
-    log = LogContext(trace_id=trace_id_from_metadata(metadata))
-    for key, value in (
-        ("run_id", metadata.get("run_id")),
-        ("thread_id", merged["configurable"].get("thread_id")),
-    ):
-        if isinstance(value, str) and value:
-            log.attributes[key] = value
-    return log
 
 
 def execution_context(

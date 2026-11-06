@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   MagnifyingGlassRegularIcon,
   WarningRegularIcon,
@@ -62,6 +63,7 @@ export interface OwnershipPickerProps {
   workspaceSlug: string | null
   onChange: (ids: Array<string>) => void
   searchPlaceholder: string
+  matchesItem?: (item: PickerItem, search: string) => boolean
   filter?: PickerFilter
   filters?: Array<PickerFilter>
   manual?: ManualEntry
@@ -74,12 +76,7 @@ export interface OwnershipPickerProps {
 }
 
 function matchesSearch(item: PickerItem, search: string): boolean {
-  const needle = search.trim().toLowerCase()
-  if (!needle) return true
-  return (
-    item.label.toLowerCase().includes(needle) ||
-    item.id.toLowerCase().includes(needle)
-  )
+  return new FuzzySearch(search).matches(item.label, item.id)
 }
 
 /**
@@ -101,6 +98,7 @@ export function OwnershipPicker({
   workspaceSlug,
   onChange,
   searchPlaceholder,
+  matchesItem = matchesSearch,
   filter,
   filters,
   manual,
@@ -142,7 +140,7 @@ export function OwnershipPicker({
     .map((id) => rows.get(id))
     .filter((item): item is PickerItem => !!item)
   const rest = [...rows.values()].filter(
-    (item) => !draftSet.has(item.id) && matchesSearch(item, search)
+    (item) => !draftSet.has(item.id) && matchesItem(item, search)
   )
   const available = rest.filter(
     (item) => !ownedElsewhere(item) && passesFilter(item)
@@ -412,12 +410,16 @@ export function OwnershipPicker({
                       " and "
                     )}. Change the filters above to show more ${pluralNoun}.`}
                 >
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={`${hiddenCount} hidden by the filter`}
                     type="button"
-                    className="cursor-help underline decoration-dotted underline-offset-4"
+                    className="h-auto cursor-help border-0 px-0 underline decoration-dotted underline-offset-4"
                   >
                     {hiddenCount} hidden by the filter
-                  </button>
+                  </Button>
                 </Tooltip>
               )}
             </span>

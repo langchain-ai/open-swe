@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** The one config file the packaged desktop app and the `oswe` CLI share. */
+/** The one config file the packaged desktop app and the `robin` CLI share. */
 export interface SharedConfig {
   backendUrl: string | null;
   /** CLI sessions by backend origin: a session only works on the backend that minted it. */

@@ -200,13 +200,19 @@ export function WorkspacesSection({
   const qc = useQueryClient()
   const workspaces = useWorkspaceOptions()
   const options = workspaces.data
-  // Channel names are an admin's view; everyone else sees the stored ids.
-  const channelDirectory = useSlackChannelDirectory(isAdmin)
-  const channelLabel = (id: string) =>
-    slackChannelLabel(channelDirectory.data, id)
-
+  const channelDirectory = useSlackChannelDirectory(true)
   const [adding, setAdding] = useState(false)
   const [createDraft, setCreateDraft] = useState<WorkspaceDraft>(EMPTY_DRAFT)
+  const channelIds = [
+    ...new Set([
+      ...(options?.workspaces.flatMap(
+        (workspace) => workspace.slack_channel_ids
+      ) ?? []),
+      ...createDraft.slackChannelIds,
+    ]),
+  ]
+  const channelLabel = (id: string) =>
+    slackChannelLabel(channelDirectory.data, id, channelIds)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -244,8 +250,8 @@ export function WorkspacesSection({
       title="Workspaces"
       description={
         isAdmin
-          ? "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Open a workspace to change its name, repositories, Slack channels, instructions, scripts, model defaults, review settings, and MCP connections. To publish a new sandbox image, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to capture it."
-          : "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
+          ? "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Open a workspace to change its name, repositories, Slack channels, instructions, scripts, model defaults, review settings, and MCP connections. To publish a new sandbox image, start a new agent thread, open the + menu, enable admin mode, and ask Robin to capture it."
+          : "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Robin to make the change."
       }
     >
       {workspaces.isLoading ? (

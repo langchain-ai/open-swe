@@ -1,13 +1,12 @@
 import asyncio
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-from langgraph_sdk.client import LangGraphClient
 
 from openswe import event_claims
 from openswe.slack import move as slack_move
+from openswe.slack import routed_work
 from openswe.slack import thinking as slack_thinking
 from openswe.slack.channels import SlackChannel
 from openswe.slack.records import lookup_slack_thread_id
@@ -65,6 +64,11 @@ class _LangGraph:
             {"source": "slack", "source_context": {"slack_thread": slack_thread}}
         )
         self.runs = _Runs()
+        _INDEXED.append(self)
+
+
+# The thread index (``THREADS``) and runtime (``RUNTIMES``) the backend uses: the newest fake's.
+_INDEXED: list[_LangGraph] = []
 
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -87,6 +91,28 @@ def statuses(monkeypatch: pytest.MonkeyPatch) -> list[StatusCall]:
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.001)
     monkeypatch.setattr(slack_thinking, "_STATUS_RETRY_DELAYS", (0.0, 0.0))
+    _INDEXED.clear()
+
+    async def indexed(thread_id: str) -> SimpleNamespace | None:
+        if not _INDEXED:
+            return None
+        thread = await _INDEXED[-1].threads.get(thread_id)
+        return SimpleNamespace(thread_id=thread_id, runtime="mda", metadata=thread["metadata"])
+
+    async def update(thread_id: str, metadata: dict[str, object]) -> None:
+        await _INDEXED[-1].threads.update(thread_id=thread_id, metadata=metadata)
+
+    async def has_active_run(thread_id: str) -> bool:
+        runs = _INDEXED[-1].runs
+        return bool(await runs.list(thread_id, status="running", limit=1))
+
+    monkeypatch.setattr(routed_work.THREADS, "get", indexed)
+    monkeypatch.setattr(routed_work.THREADS, "update", update)
+    monkeypatch.setattr(
+        type(routed_work.RUNTIMES),
+        "runs_on",
+        lambda _self, _runtime: SimpleNamespace(has_active_run=has_active_run),
+    )
     return calls
 
 
@@ -117,7 +143,7 @@ async def test_breakout_mid_run_moves_the_working_status(
         )
         await _ticks()
         result = await slack_move.move_slack_thread(
-            client, "thread-1", {"channel_id": "C1", "thread_ts": "1.0"}, "C2", "Breakout"
+            "thread-1", {"channel_id": "C1", "thread_ts": "1.0"}, "C2", "Breakout"
         )
         moved_at = len(statuses)
         await _ticks()
@@ -162,7 +188,6 @@ async def test_moving_out_of_a_code_channel_releases_it_and_stops_its_steps(
 
     assert await stream.moved_away() is False
     await slack_move.rebind_slack_thread(
-        client,
         "thread-1",
         SlackThreadRef(channel_id="C0", thread_ts="0"),
         SlackThreadRef(channel_id="C2", thread_ts="2.0"),
@@ -185,7 +210,6 @@ async def test_unverifiable_rebind_reverts_before_releasing_the_destination(
 
     with pytest.raises(slack_move.SlackRebindError) as failure:
         await slack_move.rebind_slack_thread(
-            client,
             "thread-1",
             SlackThreadRef(channel_id="C1", thread_ts="1.0"),
             SlackThreadRef(channel_id="C0", thread_ts="0"),
@@ -209,7 +233,6 @@ async def test_unrevertable_rebind_keeps_the_destination(
 
     with pytest.raises(slack_move.SlackRebindError) as failure:
         await slack_move.rebind_slack_thread(
-            client,
             "thread-1",
             SlackThreadRef(channel_id="C1", thread_ts="1.0"),
             SlackThreadRef(channel_id="C0", thread_ts="0"),
@@ -241,7 +264,7 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
         )
         await _ticks()
         await slack_move.move_slack_thread(
-            client, "thread-1", {"channel_id": "C1", "thread_ts": "1.0"}, "C2", "Breakout"
+            "thread-1", {"channel_id": "C1", "thread_ts": "1.0"}, "C2", "Breakout"
         )
         moved_at = len(statuses)
         client.threads.failing_reads = 5
@@ -254,27 +277,27 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
     assert statuses[-1] == ("C2", "2.0", "")
 
 
-@pytest.mark.parametrize("explicit, target", [(None, "C1"), ("C3", "C3")])
+@pytest.mark.parametrize("explicit, target", [("C1", "C1"), ("C3", "C3"), ("D1", "D1")])
 async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
-    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str | None, target: str
+    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str, target: str
 ) -> None:
-    client = cast(LangGraphClient, _LangGraph({"channel_id": "C1", "thread_ts": "1.0"}))
+    source = "D1" if target == "D1" else "C1"
+    _LangGraph({"channel_id": source, "thread_ts": "1.0"})
     config = {
         "configurable": {
             "thread_id": "thread-1",
             "workspace": "engineering",
-            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            "slack_thread": {"channel_id": source, "thread_ts": "1.0"},
         }
     }
     monkeypatch.setattr(move_thread, "get_config", lambda: config)
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
-    monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
     monkeypatch.setattr(
-        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != "C1"))
+        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != source))
     )
     root = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)
-    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
+    await slack_move.bind_slack_thread_id(source, "1.0", "thread-1")
 
     result = await move_thread.slack_move_thread("Breakout", explicit)
     assert result["success"] is True

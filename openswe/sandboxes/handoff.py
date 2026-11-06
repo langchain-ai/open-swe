@@ -15,6 +15,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
+from openswe.bridge.store import Bridge, BridgeStore
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 
@@ -32,8 +33,8 @@ cp "$(git rev-parse --git-path index)" "$index" 2>/dev/null || rm -f "$index"
 GIT_INDEX_FILE="$index" git add -A
 tree=$(GIT_INDEX_FILE="$index" git write-tree)
 rm -f "$index"
-wip=$(git -c user.name=open-swe -c user.email=open-swe@users.noreply.github.com \
-  commit-tree "$tree" -p HEAD -m "Open SWE handoff")
+wip=$(git -c user.name=Robin -c user.email=open-swe@users.noreply.github.com \
+  commit-tree "$tree" -p HEAD -m "Robin handoff")
 git update-ref refs/open-swe/handoff "$wip"
 git bundle create {bundle} refs/open-swe/handoff --not --remotes=origin 2>/dev/null
 git update-ref -d refs/open-swe/handoff
@@ -123,6 +124,14 @@ async def complete_handoff(
     if not isinstance(source_id, str) or source_id == target.id:
         return
     repo = _repo(metadata)
+    # A move to the cloud carries the checkout once MDA's sandbox exists, by when the Mac
+    # it left may be gone: the thread then continues from the branch as pushed.
+    if Bridge.bridge_id_of(source_id) and not await BridgeStore.is_connected(source_id):
+        logger.warning(
+            "A thread's checkout stayed on a Mac that disconnected before its carry",
+            extra={"handoff_thread": thread_id, "handoff_from": source_id},
+        )
+        repo = None
     if repo is not None:
         bundle = f"/tmp/open-swe-handoff-{thread_id}.bundle"
         source = await connect_sandbox(source_id, thread_id=thread_id)

@@ -1,6 +1,7 @@
 """The channel directory behind the workspace Slack picker."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -48,9 +49,7 @@ class _FakeClient:
     async def conversations_list(self, **kwargs: Any) -> dict[str, Any]:
         return await self._page("conversations_list", kwargs)
 
-    async def conversations_info(
-        self, *, channel: str, include_num_members: bool = False
-    ) -> dict[str, Any]:
+    async def conversations_info(self, *, channel: str) -> dict[str, Any]:
         return {"channel": self.info[channel]}
 
 
@@ -60,7 +59,6 @@ def _install(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> list[float
         yield client
 
     monkeypatch.setattr(channels.SlackClient, "bot", fake_slack_client)
-    monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "xoxb-test")
     slept: list[float] = []
 
     async def fake_sleep(seconds: float) -> None:
@@ -161,6 +159,18 @@ async def test_channel_events_keep_the_directory_current(monkeypatch: pytest.Mon
     directory = await channel_options.list_slack_channels()
     assert [(option.id, option.name) for option in directory.channels] == [("C1", "new-name")]
     assert (await SlackChannel.resolve("#new-name")) is not None
+
+
+async def test_cached_display_name_survives_metadata_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    known = SlackChannel.from_payload({"id": "C1", "name": "engineering"})
+    assert known is not None
+    known.fetched_at = datetime.fromtimestamp(0, UTC)
+    monkeypatch.setattr(SlackChannel, "_row", AsyncMock(return_value=known))
+    _install(monkeypatch, _FakeClient([], []))
+
+    assert await SlackChannel.name_for("C1") == "engineering"
 
 
 @pytest.mark.usefixtures("registry_db")

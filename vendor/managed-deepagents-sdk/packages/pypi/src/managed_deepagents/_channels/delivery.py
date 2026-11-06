@@ -6,6 +6,7 @@ resume, a task notification that woke the agent, or a scheduled run. A run that
 paused shows its pending interrupts in a Trigger thread, or posts a notice with a
 Studio link to a GitHub or Linear conversation; a run that finished posts its
 answers there. A scheduled run without an origin posts to its ``deliver_to``.
+A scheduled run that raises reports the failure to the same place.
 
 A scheduled run that starts a new Trigger thread, with its answer or with a
 notice that it waits on a decision, hands its own thread to that thread's
@@ -44,13 +45,8 @@ from managed_deepagents._channels.trigger.tracing_project import tracer_session_
 from managed_deepagents._channels.trigger.transport import TriggerTransport, start_trigger_thread
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents._log import logger
-from managed_deepagents._schedule_auth import hand_off_scheduled_thread, schedule_execution
-from managed_deepagents._thread_record import (
-    THREAD_CONVERSATION_METADATA,
-    ThreadRecord,
-    origin_from_binding,
-    thread_record_metadata,
-)
+from managed_deepagents._schedule_auth import schedule_execution
+from managed_deepagents._thread_handoff import hand_off_thread
 
 if TYPE_CHECKING:
     from langchain_core.runnables.config import RunnableConfig
@@ -60,6 +56,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.types import HttpDelivery
     from managed_deepagents._channels.trigger.types import (
         TriggerChannelInterrupt,
+        TriggerChannelRuntimeEventType,
         TriggerStartedThread,
     )
     from managed_deepagents._channels.types import ChannelMessage, MessageContent
@@ -70,6 +67,10 @@ if TYPE_CHECKING:
 INPUT_SOURCE = "input"
 #: What a new Trigger thread posted when a scheduled run pauses says.
 PAUSED_NOTICE = "This scheduled run is waiting for a decision."
+#: What a scheduled run that fails posts where Trigger cannot show the failure.
+FAILED_NOTICE = "This scheduled run failed."
+#: What a new Trigger thread posted when a scheduled run fails says; Trigger replies in it.
+FAILED_THREAD_NOTICE = "This scheduled run failed. Details in this thread ⬇️"
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,54 @@ async def deliver_run_result(
         await _deliver_answer(run, config, final, boundary, opening=opening, deliver_to=deliver_to)
 
 
+async def deliver_run_failure(
+    run: RunThread,
+    config: RunnableConfig,
+    error: Exception,
+    *,
+    routing: Mapping[str, object] | None = None,
+    subagent: bool,
+    stateless: bool = False,
+) -> None:
+    """Report a scheduled run that raised where its result would have gone.
+
+    A Trigger thread gets ``run.failed``, so Trigger shows the failure there; a
+    new-thread schedule opens its thread with a notice, as does ``deliver_to``.
+    Only trusted cron fires report here: Trigger ingress reports the runs it
+    started. Only a known-safe message leaves the run, and reporting never
+    replaces its error.
+    """
+    if subagent or not is_trusted_schedule_delivery_run(
+        config["configurable"], config.get("metadata")
+    ):
+        return
+    from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415 - avoids an import cycle
+        _missing_connection_failure_message,
+    )
+
+    binding = run.origin
+    deliver_to = None if binding is not None else _scheduled_deliver_to(config, routing)
+    message = _missing_connection_failure_message(error)
+    thread_id = config["configurable"].get("thread_id")
+    run_id = run_id_of(config)
+    try:
+        opening = None if stateless else _opening_of(binding, deliver_to, config, routing)
+        if opening is not None:
+            action_id = failed_action_id(run_id) if run_id else str(uuid.uuid4())
+            opened = await _open_thread(opening, run, config, FAILED_THREAD_NOTICE, action_id)
+            if opened is not None and thread_id and run_id:
+                await _report_run_event(
+                    opened, str(thread_id), run_id, "run.failed", message=message
+                )
+        elif binding is None:
+            if deliver_to is not None:
+                await _deliver_to_target(deliver_to, message or FAILED_NOTICE)
+        elif binding["transport"] == "trigger_server" and thread_id and run_id:
+            await _report_run_event(binding, str(thread_id), run_id, "run.failed", message=message)
+    except Exception as failure:  # noqa: BLE001 - reporting a failure never replaces it
+        logger.error("channel failure report failed (%s)", logger.safe_error_label(failure))
+
+
 async def _deliver_pause(
     run: RunThread, config: RunnableConfig, opening: _Opening | None, pending: Sequence[Interrupt]
 ) -> None:
@@ -147,6 +196,20 @@ async def _deliver_pause(
         await _report_pause(binding, str(thread_id), run_id, pending)
 
 
+async def _report_pause(
+    binding: ChannelBinding, run_thread_id: str, run_id: str, pending: Sequence[Interrupt]
+) -> None:
+    """Show a paused run's pending interrupts in its Trigger thread.
+
+    Sends ``run.interrupted``, so Trigger shows the approval in the thread and
+    its answer resumes ``run_thread_id`` (an async subagent's own thread). Only
+    Trigger channels show interrupts this way; HTTP channels post a notice.
+    """
+    await _report_run_event(
+        binding, run_thread_id, run_id, "run.interrupted", interrupts=_forwarded(pending)
+    )
+
+
 async def _deliver_answer(
     run: RunThread,
     config: RunnableConfig,
@@ -158,8 +221,10 @@ async def _deliver_answer(
 ) -> None:
     """Post a finished run's answers in the thread it opens, its origin, or ``deliver_to``."""
     binding = run.origin
-    # A channel declared with ``reply="none"`` leaves replying to the agent.
-    if binding is not None and not channel_auto_replies_for_name(binding["name"]):
+    # A channel declared with ``auto_post=False`` leaves replying to the agent,
+    # as does a run its handler started with ``auto_post`` False or on a thread
+    # of its own choosing without ``auto_post``.
+    if binding is not None and not _replies(binding):
         return
     values = final.values if isinstance(final.values, Mapping) else {}
     output = {"messages": values.get("messages")}
@@ -183,6 +248,12 @@ async def _deliver_answer(
             config["configurable"], config.get("metadata") or {}
         )
         await _post_direct(binding, content, scheduled=scheduled)
+
+
+def _replies(binding: ChannelBinding) -> bool:
+    """Whether a run posts its final answer to its binding's target."""
+    reply = binding.get("reply")
+    return channel_auto_replies_for_name(binding["name"]) if reply is None else reply == "auto"
 
 
 def run_boundary(boundary: StateSnapshot | None, messages: object) -> str | None:
@@ -222,6 +293,11 @@ def reply_action_id(run_id: str) -> str:
 def paused_action_id(run_id: str) -> str:
     """The Trigger action id of a paused run's notice, the same when the run is retried."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"mda-paused:{run_id}"))
+
+
+def failed_action_id(run_id: str) -> str:
+    """The Trigger action id of a failed run's notice, the same when the run is retried."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"mda-failed:{run_id}"))
 
 
 def _scheduled_deliver_to(
@@ -325,23 +401,7 @@ async def _hand_off(run: RunThread, config: RunnableConfig, conversation: Channe
     execution = schedule_execution(config["configurable"])
     if execution is None or not run.thread.id:
         raise RuntimeError("Scheduled thread handoff is unavailable")
-    record = thread_record_metadata(
-        ThreadRecord(
-            origin=origin_from_binding(conversation, None),
-            participants={person.id: person.role for person in run.thread.participants},
-        )
-    )
-    await hand_off_scheduled_thread(
-        {
-            "thread": run.thread.id,
-            "execution": execution,
-            "conversation": {
-                "provider": conversation["provider"],
-                "source_thread_key": conversation["source_thread_key"],
-            },
-        },
-        {**record, THREAD_CONVERSATION_METADATA: conversation["source_thread_key"]},
-    )
+    await hand_off_thread(run.thread, execution, conversation)
 
 
 async def _deliver_to_target(deliver_to: NormalizedScheduleDeliverTo, text: str) -> None:
@@ -390,13 +450,31 @@ async def _post_direct(
     except Exception as error:
         if scheduled:
             raise
-        logger.error("channel reply failed (%s)", logger.safe_error_label(error))
+        reason = logger.safe_error_label(error)
+        if isinstance(error, NoReplyTransportError):
+            reason = f"{reason}: {error}"
+        logger.error(
+            "channel reply failed (channel=%s): %s",
+            logger.log_identifier(binding["name"]),
+            reason,
+            error=error,
+        )
+
+
+class NoReplyTransportError(RuntimeError):
+    """The channel has no transport that posts a run's answer."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the channel has no `post`, so it cannot post the run's answer. "
+            'Add `post` to the channel, or set `reply` to "none"'
+        )
 
 
 async def _post_to_transport(binding: ChannelBinding, message: ChannelMessage) -> None:
     transport = messaging_transport_for_name(binding["name"])
     if transport is None:
-        raise RuntimeError("Channel delivery is unavailable")
+        raise NoReplyTransportError
     posted = transport.post(
         message=message,
         target=binding["target"],
@@ -406,15 +484,16 @@ async def _post_to_transport(binding: ChannelBinding, message: ChannelMessage) -
         await posted
 
 
-async def _report_pause(
-    binding: ChannelBinding, run_thread_id: str, run_id: str, pending: Sequence[Interrupt]
+async def _report_run_event(
+    binding: ChannelBinding,
+    run_thread_id: str,
+    run_id: str,
+    event_type: TriggerChannelRuntimeEventType,
+    *,
+    interrupts: list[TriggerChannelInterrupt] | None = None,
+    message: str | None = None,
 ) -> None:
-    """Show a paused run's pending interrupts in its Trigger thread.
-
-    Sends ``run.interrupted``, so Trigger shows the approval in the thread and
-    its answer resumes ``run_thread_id`` (an async subagent's own thread). Only
-    Trigger channels show interrupts this way; HTTP channels post a notice.
-    """
+    """Send a runtime event about the run to its Trigger thread; it never fails the run."""
     if binding["transport"] != "trigger_server":
         return
     from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415 - avoids an import cycle
@@ -427,7 +506,7 @@ async def _report_pause(
         target = _TriggerTargetModel.model_validate(binding["target"])
         client = create_trigger_client()
         if client is None:
-            logger.error("channel interrupt: Trigger channel is unavailable")
+            logger.error("channel %s: Trigger channel is unavailable", event_type)
             return
         route: RuntimeEventRoute = {
             "delivery_id": binding["delivery_id"],
@@ -436,15 +515,16 @@ async def _report_pause(
         }
         started: StartedIngressRun = {"thread_id": run_thread_id, "run_id": run_id}
         body = _runtime_event(
-            "run.interrupted",
+            event_type,
             route,
             started,
-            _forwarded(pending),
+            interrupts,
+            message,
             tracer_session_id=await tracer_session_id(),
         )
         await _best_effort(client.post_runtime_event(target.channel_id, body))
-    except Exception as error:  # noqa: BLE001 - reporting a pause never fails the run
-        logger.error("channel interrupt report failed (%s)", logger.safe_error_label(error))
+    except Exception as error:  # noqa: BLE001 - reporting a run event never fails the run
+        logger.error("channel %s report failed (%s)", event_type, logger.safe_error_label(error))
 
 
 async def _notify_paused(
@@ -490,8 +570,10 @@ def _forwarded(pending: Sequence[Interrupt]) -> list[TriggerChannelInterrupt]:
 
 
 __all__ = [
+    "FAILED_NOTICE",
     "INPUT_SOURCE",
     "PAUSED_NOTICE",
+    "deliver_run_failure",
     "deliver_run_result",
     "delivers_result",
     "reply_action_id",

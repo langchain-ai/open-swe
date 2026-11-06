@@ -1,0 +1,19 @@
+{
+  "name": "robin",
+  "displayName": "Robin",
+  "version": "0.1.0",
+  "description": "Mirror Claude Code sessions into Robin threads, use Robin's MCP tools, and find a session's thread",
+  "author": {
+    "name": "LangChain"
+  },
+  "repository": "https://github.com/langchain-ai/open-swe",
+  "license": "MIT",
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Robin URL",
+      "description": "Origin of your Robin deployment",
+      "default": "https://openswe.langchain.dev"
+    }
+  }
+}

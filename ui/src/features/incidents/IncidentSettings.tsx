@@ -84,7 +84,7 @@ function PolicyForm({
     <form onSubmit={onSubmit} className="space-y-space-4">
       <SettingsSection
         title="Incidents"
-        description="Investigate matching Slack channels and maintain incident summaries with Open SWE."
+        description="Investigate matching Slack channels and maintain incident summaries with Robin."
       >
         <SlackConnectionStatus settings={settings} />
         <SettingsRow
@@ -208,11 +208,9 @@ function SlackConnectionStatus({
   const { connection, policy } = settings
   const connectionError =
     connection.error ||
-    (!connection.slack_configured
-      ? "Slack is not configured. Connect the workspace before enabling Incidents."
-      : connection.required_scopes_present === false
-        ? "Required Slack scopes are missing."
-        : null)
+    (connection.required_scopes_present === false
+      ? "Required Slack scopes are missing."
+      : null)
   return (
     <div className="px-space-4 py-space-4">
       <div className="flex items-start gap-space-3">

@@ -3,14 +3,21 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { AppCommandPalette } from "./AppCommandPalette"
+import { AppCommandPalette, buildPaletteResults } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
-  cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  cloudThread: {
+    id: "cloud-1",
+    title: "Cloud result",
+  } as AgentThread,
+}))
+
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: { login: "alice" } }),
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -37,6 +44,7 @@ vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  localStorage.clear()
 })
 
 const commands: Array<AppCommand> = [
@@ -75,6 +83,35 @@ describe("AppCommandPalette", () => {
     expect(mocks.fetchNextPage).toHaveBeenCalledOnce()
   })
 
+  it("keeps server-resolved Slack threads and opens a PR review from a link", async () => {
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+    const input = screen.getByRole("combobox")
+    fireEvent.change(input, {
+      target: {
+        value: "https://example.slack.com/archives/C123/p1788431248678809",
+      },
+    })
+    expect(
+      await screen.findByRole("option", { name: "Cloud result" })
+    ).toBeTruthy()
+
+    fireEvent.change(input, {
+      target: {
+        value:
+          "https://github.com/langchain-ai/open-swe/pull/42/files#diff-123",
+      },
+    })
+    fireEvent.click(
+      await screen.findByRole("option", { name: /Open Review Page/ })
+    )
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/agents/reviews/$owner/$repo/$number",
+      params: { owner: "langchain-ai", repo: "open-swe", number: "42" },
+    })
+  })
+
   it("closes on Escape", () => {
     const onOpenChange = vi.fn()
     render(
@@ -84,4 +121,10 @@ describe("AppCommandPalette", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+})
+
+it("finds typoed app commands", () => {
+  expect(
+    buildPaletteResults(commands, [], "> settngs").map((result) => result.id)
+  ).toContain("command:settings")
 })

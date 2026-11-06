@@ -6,12 +6,27 @@ managed adapter — never on these core types.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypeAlias, Union
+from typing import (
+    TYPE_CHECKING,
+    Literal,
+    NotRequired,
+    Protocol,
+    TypeAlias,
+    Union,
+    runtime_checkable,
+)
 
 from langchain_core.messages import ContentBlock
-from typing_extensions import ReadOnly, TypeAliasType, TypedDict
+from typing_extensions import ReadOnly, TypeAliasType, TypedDict, TypeVar
+
+if TYPE_CHECKING:
+    from langgraph_sdk.schema import ThreadState
+
+    from managed_deepagents._channels.http.types import ChannelName
+    from managed_deepagents._channels.reply import ChannelReplyResult
+    from managed_deepagents._channels.run_input import ChannelRunResult
 
 JsonValue = TypeAliasType(
     "JsonValue",
@@ -62,6 +77,8 @@ ChannelDestination = (
     | ChannelDestinationProviderThread
     | ChannelDestinationProviderConversation
 )
+"""Where a schedule's deprecated ``deliver_to`` posts; ``auto_post`` takes a
+``ChannelTarget`` instead."""
 
 
 MessageContent: TypeAlias = str | list[ContentBlock]
@@ -108,7 +125,10 @@ ChannelReply: TypeAlias = Literal["auto", "none"]
 ``"auto"`` (the default) posts the agent's last reply once the run succeeds,
 and ``"none"`` leaves replying to the agent, through ``runtime.channel.post``
 or its own tools. Either way the channel keeps its other updates, such as
-Slack's status and reactions."""
+Slack's status and reactions.
+
+Experimental: this may change in a minor release.
+"""
 
 CHANNEL_REPLIES: frozenset[ChannelReply] = frozenset({"auto", "none"})
 """Every ``ChannelReply``, for channels that check one."""
@@ -127,6 +147,59 @@ class ChannelInfo:
     event: ChannelEvent | None
     #: The provider's payload, in the run its message started only.
     raw_event: JsonValue = None
+    #: Where the channel posts: the provider conversation that ``post`` and the
+    #: run's answers go to, which is the conversation the thread came from, in
+    #: every run of the thread. ``None`` for a provider without a typed target,
+    #: such as ``channels.http()``.
+    target: ChannelTarget | None = None
+
+
+@dataclass(frozen=True)
+class SlackChannelTarget:
+    """A Slack conversation: a channel, DM or group, and its thread."""
+
+    #: The conversation id (``C…``, ``D…`` or ``G…``), Slack's ``channel``.
+    conversation_id: str
+    #: The thread's root message, Slack's ``thread_ts``.
+    thread_ts: str | None = None
+    provider: Literal["slack"] = "slack"
+    #: The channel's name, needed only to tell apart two channels of one
+    #: provider. ``None`` is the channel the target is used with.
+    channel: str | None = None
+
+
+@dataclass(frozen=True)
+class GitHubChannelTarget:
+    """A GitHub issue or pull request."""
+
+    #: ``owner/name``.
+    repository: str
+    #: The issue or pull request number.
+    number: int
+    provider: Literal["github"] = "github"
+    #: The channel's name; see ``SlackChannelTarget.channel``.
+    channel: str | None = None
+
+
+@dataclass(frozen=True)
+class LinearChannelTarget:
+    """A Linear issue, and the comment thread or agent session on it."""
+
+    organization_id: str
+    issue_id: str
+    #: The issue's identifier, such as ``ENG-123``.
+    identifier: str | None = None
+    #: The root comment of the thread replies go to.
+    comment_id: str | None = None
+    #: The agent session replies go to.
+    session_id: str | None = None
+    provider: Literal["linear"] = "linear"
+    #: The channel's name; see ``SlackChannelTarget.channel``.
+    channel: str | None = None
+
+
+ChannelTarget: TypeAlias = SlackChannelTarget | GitHubChannelTarget | LinearChannelTarget
+"""Where a channel posts, by provider; narrow it on ``provider`` or its class."""
 
 
 class PostedChannelMessageRequired(TypedDict):
@@ -139,7 +212,10 @@ class PostedChannelMessage(PostedChannelMessageRequired, total=False):
 
 
 class PostedChannelThread(PostedChannelMessage):
-    """A post that started a new provider thread."""
+    """A post that started a new provider thread.
+
+    Experimental: this may change in a minor release.
+    """
 
     thread_id: str
     """The LangGraph thread replies in the new provider thread run on."""
@@ -178,6 +254,73 @@ def normalize_channel_destination(
     raise ValueError(f"unsupported channel destination type: {dest_type!r}")
 
 
+# The shapes every provider channel shares: a handler's thread, what it returns,
+# and its handler. ``channels.github``, ``channels.linear`` and ``channels.slack``
+# build on these. String forward references: reply and run_input import this module.
+
+ChannelEventResult: TypeAlias = "ChannelRunResult | ChannelReplyResult | None"
+"""What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
+string, a message such as ``HumanMessage(...)``, or state such as
+``{"messages": [...]}``), one run on the event's conversation; or a list of runs
+with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
+``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
+``message`` where the event came from."""
+
+
+@runtime_checkable
+class ChannelThread(Protocol):
+    """The conversation's thread an event belongs to.
+
+    A handler runs before any run exists, so this is not a run's runtime. Every
+    channel's thread (``GitHubChannelThread``, ``LinearChannelThread``,
+    ``SlackChannelThread``) has these.
+    """
+
+    @property
+    def id(self) -> str:
+        """The thread a run the handler starts runs on."""
+        ...
+
+    @property
+    def channel(self) -> ChannelName:
+        """The channel the event came through."""
+        ...
+
+    async def get_state(self) -> ThreadState | None:
+        """The thread's state; ``None`` when no run started on it yet."""
+        ...
+
+
+_Event = TypeVar("_Event")
+_Thread = TypeVar("_Thread", bound=ChannelThread, default=ChannelThread)
+
+ChannelEventCallback: TypeAlias = Callable[
+    [_Event, _Thread],
+    "ChannelEventResult | Awaitable[ChannelEventResult]",
+]
+"""A handler: decides what an event starts, given the event and its thread."""
+
+
+class ReadsThreadState:
+    """``get_state`` for a channel's thread dataclass, which declares the
+    ``_get_state`` reader field the channel fills while a handler decides."""
+
+    __slots__ = ()
+
+    _get_state: Callable[[], Awaitable[ThreadState | None]] | None
+
+    async def get_state(self) -> ThreadState | None:
+        """The thread's state, as Agent Server's ``threads.get_state`` reads it:
+        its ``values`` (such as ``messages``) as its last run left them, ``next``,
+        ``tasks`` and ``interrupts``; ``None`` when no run started on it yet.
+        Read as the conversation's own runs read it. Only a handler deciding an
+        event can read it.
+        """
+        if self._get_state is None:
+            raise RuntimeError("only a handler deciding an event can read its thread's state")
+        return await self._get_state()
+
+
 __all__ = [
     "ChannelAddress",
     "ChannelContentMessage",
@@ -185,9 +328,13 @@ __all__ = [
     "ChannelError",
     "ChannelErrorCode",
     "ChannelEvent",
+    "ChannelEventCallback",
+    "ChannelEventResult",
     "ChannelMessage",
     "ChannelNativeMessage",
+    "ChannelThread",
     "JsonValue",
     "PostedChannelMessage",
+    "ReadsThreadState",
     "normalize_channel_destination",
 ]

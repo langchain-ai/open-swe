@@ -11,6 +11,9 @@ import { Switch } from "@langchain/macaw-components/Switch"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
+import { useSession } from "@/lib/session"
+import { useProfileSettings } from "./ProfileSwitchRow"
 import {
   notificationsEnabled,
   notificationsSupported,
@@ -26,7 +29,7 @@ import type {
   UserPreferences,
 } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -53,6 +56,8 @@ const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
 export function GeneralSettings() {
   const { theme, setTheme } = useTheme()
+  const { profile, ready, save } = useProfileSettings()
+  const session = useSession()
   const qc = useQueryClient()
   const pendingPreferences = useMutationState({
     filters: {
@@ -202,6 +207,34 @@ export function GeneralSettings() {
         />
       </SettingsSection>
 
+      <SettingsSection title="Slack">
+        <SettingsRow
+          label="Personal kitchen channel"
+          description={
+            session.data?.slack_user_id
+              ? "Open SWE responds to your messages in this channel without an @mention. Only your messages get kitchen handling; workspace kitchen channels stay unchanged. Choose an internal channel Open SWE has joined. Clear to turn off."
+              : "Link Slack in Connections to choose a channel where Open SWE responds to your messages without an @mention."
+          }
+          control={
+            <SlackChannelCombobox
+              aria-label="Personal kitchen channel"
+              placeholder="No personal kitchen"
+              value={profile?.personal_kitchen_channel_id || null}
+              disabled={!ready || !session.data?.slack_user_id}
+              eligible={(channel) =>
+                channel.is_member &&
+                !channel.is_ext_shared &&
+                !channel.is_pending_ext_shared
+              }
+              onValueChange={(value) =>
+                save({ personal_kitchen_channel_id: value ?? "" })
+              }
+              className="w-56 max-w-full"
+            />
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection title="Notifications">
         <SettingsRow
           label="Desktop notifications"
@@ -210,7 +243,7 @@ export function GeneralSettings() {
               ? "Your browser doesn't support desktop notifications."
               : denied
                 ? "Permission was denied. Re-enable it in your browser's site settings."
-                : "Notify me when an agent run finishes."
+                : "Notify me when an agent run finishes or someone mentions me. Mentions I miss here arrive as a Slack DM."
           }
           control={
             <Switch

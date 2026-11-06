@@ -1,7 +1,7 @@
-"""Event endpoints: an ``on_event`` value that is a URL or an ``httpx.Request``.
+"""Endpoints: an ``on_event`` or ``resolve_user`` value that is a URL or an ``httpx.Request``.
 
-Rather than a function, MDA asks that service of yours what the event starts,
-for logic that lives outside the deployment.
+Rather than a function, MDA asks that service of yours what the event starts, or
+who a delivery runs as, for logic that lives outside the deployment.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import re
 import time
 import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, NotRequired, Protocol, cast
 from urllib.parse import urlsplit
 
@@ -25,23 +26,26 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
 from typing_extensions import TypedDict, TypeIs, TypeVar
 
+from managed_deepagents._channels.reply import ChannelReplyResult, reply
 from managed_deepagents._channels.types import JsonValue
 
 if TYPE_CHECKING:
-    from managed_deepagents._channels.run_input import ChannelRunOptions, ChannelRunResult
+    from managed_deepagents._channels.run_input import ChannelRun, ChannelRunResult
+    from managed_deepagents._channels.types import ChannelMessage
 
 _TIMEOUT_SECONDS = 60.0
-"""How long the service may take to answer one attempt."""
+"""How long an event endpoint may take to answer one attempt."""
 _RETRY_DELAYS_SECONDS = (1.0, 5.0)
-"""The pauses before trying again after a network error, HTTP 429 or a 5xx: three
-attempts in all, each with the same webhook ID, so a receiver that dedupes on it
-acts once."""
+"""An event endpoint's pauses before trying again: three attempts in all."""
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 """The largest answer read; run input may carry images."""
-_ANSWER_SHAPE = "event endpoint answer must be null or { input, context?, metadata?, webhook? }"
+_ANSWER_SHAPE = (
+    'event endpoint answer must be null, { type: "reply", message } or '
+    "{ input, context?, metadata?, webhook? }"
+)
 SERVICE_SECRET_ENV = "MDA_SERVICE_SECRET"  # noqa: S105 - an env var's name
 """The deployment's env var holding the secret it shares with your services:
-every event endpoint request is signed with it, as Standard Webhooks does.
+every endpoint request is signed with it, as Standard Webhooks does.
 Several, separated by whitespace or commas, each sign the request, for
 rotation."""
 _SECRET_PREFIX = "whsec_"  # noqa: S105 - a format prefix, not a secret
@@ -57,7 +61,10 @@ _SECRET_SHAPE = (
 EventEndpoint = str | httpx.Request
 """Where an ``on_event`` key's events go when a service of yours decides what they
 start: its URL, or an ``httpx.Request`` that also carries headers, such as a
-credential the service checks. See :func:`endpoint_handler`."""
+credential the service checks. See :func:`endpoint_handler`.
+
+Experimental: this may change in a minor release.
+"""
 
 _cached_keys: tuple[str, tuple[bytes, ...]] | None = None
 
@@ -97,6 +104,8 @@ class EndpointEvent(TypedDict, Generic[_K, _P]):
     ``EndpointEvent[Literal["AgentSessionEvent.created"], LinearSessionCreatedPayload]``
     types one event key's payload; ``LinearEndpointRequest`` and
     ``GitHubEndpointRequest`` are the unions of a channel's keys.
+
+    Experimental: this may change in a minor release.
     """
 
     key: _K
@@ -114,7 +123,10 @@ class _EndpointThreadChannel(TypedDict):
 
 
 class EndpointThread(TypedDict):
-    """The conversation's thread an endpoint request is about."""
+    """The conversation's thread an endpoint request is about.
+
+    Experimental: this may change in a minor release.
+    """
 
     id: str
     """The thread the run starts on, or that waits on an interrupt."""
@@ -135,6 +147,8 @@ class EndpointRequest(TypedDict, Generic[_E]):
     key; in Python, a union alias can't take the key, so a receiver of one key
     names it as ``EndpointRequest[EndpointEvent[Literal[key], Payload]]``, with the
     payload types the package exports, or narrows on ``request["event"]["key"]``.
+
+    Experimental: this may change in a minor release.
     """
 
     event: _E
@@ -145,21 +159,32 @@ class EndpointRequest(TypedDict, Generic[_E]):
 class EndpointAnswer(TypedDict):
     """The run an endpoint answers with: its input, and the run options a handler
     may set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start
-    nothing."""
+    nothing.
+
+    Experimental: this may change in a minor release.
+    """
 
     input: str | dict[str, JsonValue]
-    """The run's input, as a handler returns it: text, or state such as
-    ``{"messages": ...}``. Never a list, which a handler's ``(input, options)``
-    tuple would be confused with."""
+    """The run's input, as a handler's run takes it: text, or state such as
+    ``{"messages": ...}``. Never a list."""
     context: NotRequired[dict[str, JsonValue]]
     """Run context, as ``agent.invoke(input, context=...)`` takes it."""
     metadata: NotRequired[dict[str, JsonValue]]
-    """Metadata for the run; see ``ChannelRunOptions``."""
+    """Metadata for the run; see ``ChannelRun``."""
     webhook: NotRequired[str]
-    """A URL the Agent Server POSTs the finished run to; see ``ChannelRunOptions``."""
+    """A URL the Agent Server POSTs the finished run to; see ``ChannelRun``."""
+
+
+@with_config(ConfigDict(extra="forbid"))
+class _EndpointReply(TypedDict):
+    """An endpoint's ``{"type": "reply", "message"}`` answer, as ``resolve_user``'s."""
+
+    type: Literal["reply"]
+    message: dict[str, object]
 
 
 _ANSWER: TypeAdapter[EndpointAnswer | None] = TypeAdapter(EndpointAnswer | None)
+_REPLY: TypeAdapter[_EndpointReply] = TypeAdapter(_EndpointReply)
 
 
 def signature_headers(
@@ -209,7 +234,9 @@ class _ChannelThread(Protocol):
 
 _Event = TypeVar("_Event", bound=_ChannelEvent)
 
-EndpointHandler = Callable[[_Event, _ChannelThread], Awaitable["ChannelRunResult | None"]]
+EndpointHandler = Callable[
+    [_Event, _ChannelThread], Awaitable["ChannelRunResult | ChannelReplyResult | None"]
+]
 """The handler an endpoint stands for; see :func:`endpoint_handler`."""
 
 EventFields = Callable[[_Event], Mapping[str, object]]
@@ -242,30 +269,23 @@ def endpoint_handler(
     event ``fields`` beside the payload and an ``httpx.Request``'s
     headers, signed when the deployment has ``MDA_SERVICE_SECRET``, and
     starts the run the service answers with: ``{"input",
-    "context"?, "metadata"?, "webhook"?}``. ``null`` or HTTP 204 starts nothing. A
-    network error before the answer, HTTP 429 or a 5xx is tried again, up to three
-    attempts. Any other answer, one cut off, a redirect, or no answer within 60
-    seconds fails the handler, as a handler that raises does. The URL is https,
+    "context"?, "metadata"?, "webhook"?}``. ``null`` or HTTP 204 starts nothing;
+    ``{"type": "reply", "message"}`` starts nothing too, and posts ``message`` where
+    the event came from, as a handler's ``reply()`` does. A network error before
+    the answer, HTTP 429 or a 5xx is tried again, up to three attempts. Any other
+    answer, one cut off, a redirect, or no answer within 60 seconds fails the
+    handler, as a handler that raises does. The URL is https,
     or http to a loopback host for local development, without credentials in it.
 
     The webhook ID is ``msg_<deliveryId>`` for the call that starts the run, and
     ``msg_<deliveryId>_interrupted`` for the one that asks whether to tell the
     conversation its thread waits on a decision.
     """
-    template = endpoint if isinstance(endpoint, httpx.Request) else None
-    target = _endpoint_url(str(template.url) if template is not None else str(endpoint), label)
-    # A malformed secret raises when the channel is declared, not on each event.
-    _signing_keys()
-    sent = {
-        **dict(template.headers if template else {}),
-        "content-type": "application/json",
-        "accept": "application/json",
-    }
-    # The template's own framing doesn't describe the JSON MDA sends.
-    for name in ("content-length", "host", "transfer-encoding"):
-        sent.pop(name, None)
+    client = EndpointClient(endpoint, label, "event endpoint")
 
-    async def handler(event: _Event, thread: _ChannelThread) -> ChannelRunResult | None:
+    async def handler(
+        event: _Event, thread: _ChannelThread
+    ) -> ChannelRunResult | ChannelReplyResult | None:
         interrupted = bool(getattr(thread, "interrupted", False))
         # The channel's own fields can't stand in for the ones every event has.
         sent_event: dict[str, object] = {
@@ -277,57 +297,168 @@ def endpoint_handler(
         sent_thread: EndpointThread = {"id": thread.id, "channel": {"name": thread.channel.name}}
         if interrupted:
             sent_thread["interrupted"] = True
-        # The exact bytes sent are the ones signed.
-        body = json.dumps({"event": sent_event, "thread": sent_thread}).encode()
         msg_id = f"msg_{event.delivery_id}{'_interrupted' if interrupted else ''}"
-        for delay in _RETRY_DELAYS_SECONDS:
-            try:
-                return await _post(target, sent, msg_id, body)
-            except (_RetryableError, httpx.TransportError):
-                await asyncio.sleep(delay)
-        return await _post(target, sent, msg_id, body)
+        answer = await client.ask(
+            msg_id,
+            json.dumps({"event": sent_event, "thread": sent_thread}).encode(),
+            EndpointLimits(_TIMEOUT_SECONDS, _RETRY_DELAYS_SECONDS),
+        )
+        return _run_result(answer)
 
     _endpoint_handlers.add(handler)
     return handler
+
+
+@dataclass(frozen=True)
+class EndpointLimits:
+    """How long a service of yours may take, and how often MDA asks it."""
+
+    seconds: float
+    """How long the service may take to answer: each attempt, or, with ``total``,
+    all of them and the pauses between."""
+    retry_delays: Sequence[float]
+    """The pauses before trying again after a network error, HTTP 429 or a 5xx,
+    each attempt with the same webhook ID, so a receiver that dedupes on it acts
+    once."""
+    total: bool = False
+
+
+class EndpointClient:
+    """The client of a service of yours that an endpoint names.
+
+    Requests carry an ``httpx.Request``'s headers, signed when the deployment has
+    ``MDA_SERVICE_SECRET``. A bad URL or secret raises when the client is made,
+    as the endpoint is declared. Errors call the service ``name``, such as
+    ``event endpoint``.
+    """
+
+    def __init__(self, endpoint: EventEndpoint, label: str, name: str) -> None:
+        template = endpoint if isinstance(endpoint, httpx.Request) else None
+        self._target = _endpoint_url(
+            str(template.url) if template is not None else str(endpoint), label
+        )
+        # A malformed secret raises when the endpoint is declared, not on each call.
+        _signing_keys()
+        self._headers = {
+            **dict(template.headers if template else {}),
+            "content-type": "application/json",
+            "accept": "application/json",
+        }
+        # The template's own framing doesn't describe the JSON MDA sends.
+        for header in ("content-length", "host", "transfer-encoding"):
+            self._headers.pop(header, None)
+        self._name = name
+
+    async def ask(self, msg_id: str, body: bytes, limits: EndpointLimits) -> JsonValue | None:
+        """POST ``body``, signed as webhook ``msg_id``; the JSON answer, or ``None`` for HTTP 204.
+
+        Any other answer, one cut off, a redirect, or a timeout raises
+        ``RuntimeError``.
+        """
+        if not limits.total:
+            return await self._attempts(msg_id, body, limits)
+        try:
+            async with asyncio.timeout(limits.seconds):
+                return await self._attempts(msg_id, body, limits)
+        except TimeoutError:
+            raise RuntimeError(self._too_late(limits.seconds)) from None
+
+    async def _attempts(self, msg_id: str, body: bytes, limits: EndpointLimits) -> JsonValue | None:
+        for delay in limits.retry_delays:
+            try:
+                return await self._post(msg_id, body, limits.seconds)
+            except (_RetryableError, httpx.TransportError):
+                await asyncio.sleep(delay)
+        return await self._post(msg_id, body, limits.seconds)
+
+    def _too_late(self, seconds: float) -> str:
+        return f"{self._name} did not answer within {seconds:g} seconds"
+
+    async def _post(self, msg_id: str, body: bytes, seconds: float) -> JsonValue | None:
+        """One attempt, signed afresh: Standard Webhooks timestamps each."""
+        headers = {
+            **self._headers,
+            **signature_headers(_signing_keys(), msg_id, int(time.time()), body),
+        }
+        # One deadline for the whole answer, as the TypeScript runtime's: httpx's
+        # own timeouts limit each read, so a trickled answer would outlast them.
+        try:
+            async with (
+                asyncio.timeout(seconds),
+                httpx.AsyncClient(timeout=seconds, follow_redirects=False) as client,
+                client.stream("POST", self._target, headers=headers, content=body) as response,
+            ):
+                if response.status_code == 204:  # noqa: PLR2004 - No Content
+                    return None
+                if not response.is_success:
+                    status = response.status_code
+                    retried = status == 429 or status >= 500  # noqa: PLR2004 - Too Many Requests, 5xx
+                    error = _RetryableError if retried else RuntimeError
+                    raise error(f"{self._name} answered HTTP {status}")
+                try:
+                    return await _bounded_json(response, self._name)
+                except httpx.TimeoutException:
+                    raise
+                except httpx.TransportError:
+                    # Not tried again: the service answered, so it may have acted on it.
+                    raise RuntimeError(f"{self._name} answer was cut off") from None
+        except (TimeoutError, httpx.TimeoutException):
+            # Not tried again: the service may still be acting on it.
+            raise RuntimeError(self._too_late(seconds)) from None
 
 
 class _RetryableError(RuntimeError):
     """An answer worth trying again: HTTP 429 or a 5xx."""
 
 
-async def _post(
-    target: str, sent: dict[str, str], msg_id: str, body: bytes
-) -> ChannelRunResult | None:
-    """One attempt, signed afresh: Standard Webhooks timestamps each."""
-    headers = {**sent, **signature_headers(_signing_keys(), msg_id, int(time.time()), body)}
-    # One deadline for the whole answer, as the TypeScript runtime's: httpx's
-    # own timeouts limit each read, so a trickled answer would outlast them.
-    try:
-        async with (
-            asyncio.timeout(_TIMEOUT_SECONDS),
-            httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False) as client,
-            client.stream("POST", target, headers=headers, content=body) as response,
-        ):
-            if response.status_code == 204:  # noqa: PLR2004 - No Content
-                return None
-            if not response.is_success:
-                status = response.status_code
-                retried = status == 429 or status >= 500  # noqa: PLR2004 - Too Many Requests, 5xx
-                error = _RetryableError if retried else RuntimeError
-                raise error(f"event endpoint answered HTTP {status}")
-            try:
-                answer = await _bounded_json(response)
-            except httpx.TimeoutException:
-                raise
-            except httpx.TransportError:
-                # Not tried again: the service answered, so it may have acted on it.
-                raise RuntimeError("event endpoint answer was cut off") from None
-    except (TimeoutError, httpx.TimeoutException):
-        # Not tried again: the service may still be acting on it.
-        raise RuntimeError(
-            f"event endpoint did not answer within {_TIMEOUT_SECONDS:g} seconds"
-        ) from None
-    return _run_result(answer)
+_FRAMING_HEADERS = ("content-length", "host", "transfer-encoding")
+"""A template's own framing, which doesn't describe the body MDA sends."""
+
+
+class EndpointForwarder:
+    """A service of yours that a provider's deliveries are forwarded to, as received.
+
+    The endpoint is a URL, or an ``httpx.Request`` whose headers each request
+    carries. A bad URL or secret raises when the forwarder is made, as the
+    endpoint is declared.
+    """
+
+    def __init__(self, endpoint: EventEndpoint, label: str) -> None:
+        template = endpoint if isinstance(endpoint, httpx.Request) else None
+        self._target = _endpoint_url(
+            str(template.url) if template is not None else str(endpoint), label
+        )
+        # A malformed secret raises when the endpoint is declared, not on each call.
+        _signing_keys()
+        self._headers = httpx.Headers(template.headers if template else {})
+        for header in _FRAMING_HEADERS:
+            self._headers.pop(header, None)
+        self.host = urlsplit(self._target).netloc
+        """The target's host, the one part of it a log line names."""
+
+    async def forward(
+        self, msg_id: str, body: bytes, headers: Mapping[str, str], seconds: float
+    ) -> str | None:
+        """POST ``body`` once, with ``headers`` over the template's, signed as webhook ``msg_id``.
+
+        ``None`` when the service answers 2xx; otherwise why not, for a log
+        line: ``HTTP <status>``, ``timeout`` or ``network error``. Its answer
+        is never read, and no redirect is followed.
+        """
+        sent = httpx.Headers(self._headers)
+        sent.update(headers)
+        sent.update(signature_headers(_signing_keys(), msg_id, int(time.time()), body))
+        try:
+            async with (
+                asyncio.timeout(seconds),
+                httpx.AsyncClient(timeout=seconds, follow_redirects=False) as client,
+                client.stream("POST", self._target, headers=sent, content=body) as response,
+            ):
+                return None if response.is_success else f"HTTP {response.status_code}"
+        except (TimeoutError, httpx.TimeoutException):
+            return "timeout"
+        except httpx.HTTPError:
+            return "network error"
 
 
 def _endpoint_url(url: str, label: str) -> str:
@@ -362,35 +493,39 @@ def _is_loopback(hostname: str) -> bool:
         return False
 
 
-async def _bounded_json(response: httpx.Response) -> JsonValue:
+async def _bounded_json(response: httpx.Response, name: str) -> JsonValue:
     """The answer as JSON, read only up to ``_MAX_RESPONSE_BYTES``."""
     declared = response.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > _MAX_RESPONSE_BYTES:
-        raise RuntimeError("event endpoint answer is too large")
+        raise RuntimeError(f"{name} answer is too large")
     body = bytearray()
     async for chunk in response.aiter_bytes():
         body.extend(chunk)
         if len(body) > _MAX_RESPONSE_BYTES:
-            raise RuntimeError("event endpoint answer is too large")
+            raise RuntimeError(f"{name} answer is too large")
     try:
         return cast("JsonValue", json.loads(body))
     except ValueError:
-        raise RuntimeError("event endpoint answer is not JSON") from None
+        raise RuntimeError(f"{name} answer is not JSON") from None
 
 
-def _run_result(body: JsonValue) -> ChannelRunResult | None:
-    """The run the answer names; the channel checks the input and options as a handler's."""
+def _run_result(body: JsonValue) -> ChannelRunResult | ChannelReplyResult | None:
+    """The run the answer names, or its reply; the channel checks the input and
+    options as a handler's."""
     try:
+        if isinstance(body, dict) and "input" not in body:
+            return reply(cast("ChannelMessage", _REPLY.validate_python(body)["message"]))
         answer = _ANSWER.validate_python(body)
-    except ValidationError:
+    except (ValidationError, TypeError):
         raise RuntimeError(_ANSWER_SHAPE) from None
     if answer is None:
         return None
-    options: ChannelRunOptions = {}
+    run: ChannelRun = {"input": answer["input"]}
     if "context" in answer:
-        options["context"] = answer["context"]
+        run["context"] = answer["context"]
     if "metadata" in answer:
-        options["metadata"] = answer["metadata"]
+        run["metadata"] = answer["metadata"]
     if "webhook" in answer:
-        options["webhook"] = answer["webhook"]
-    return (answer["input"], options)
+        run["webhook"] = answer["webhook"]
+    # A list holds a run with options; a dict alone would be state.
+    return [run]

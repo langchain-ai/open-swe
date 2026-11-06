@@ -2,8 +2,8 @@
 
 Records live in PostgreSQL (``automation`` and ``automation_trigger``); each
 schedule trigger owns one LangGraph cron, whose input names the automation.
-GitHub triggers fire from the GitHub webhook, and every inbound event is
-claimed once per automation in ``event_claim`` before it runs.
+GitHub and Linear triggers fire from MDA's channels, which start the runs planned
+here; every inbound event is claimed once per automation in ``event_claim`` first.
 """
 
 import json
@@ -12,11 +12,13 @@ import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun, GitHubTriggerEvent
+from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -34,12 +36,11 @@ from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.database import postgres
 from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
-from openswe.github.comments import fence_github_comment_body
 from openswe.github.http import github_reauth_message
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
-from openswe.input_messages import InputMessageContext, build_run_input
+from openswe.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -48,8 +49,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
 from openswe.threads.access import agent_version_metadata, resolve_run_email
 from openswe.threads.creation import create_thread
+from openswe.threads.store import THREADS
 from openswe.users import User
-from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
@@ -60,16 +61,8 @@ logger = logging.getLogger(__name__)
 _AGENT_ASSISTANT_ID = "agent"
 AGENT_SCHEDULE_JOB_KIND = "agent_schedule"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-GitHubEvent = Literal[
-    "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
-]
-# How a run's prompt names each GitHub event; "closed" also fires for merges.
-GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
-    "issues.opened": "an issue was opened",
-    "pull_request.opened": "a pull request was opened",
-    "pull_request.closed": "a pull request was closed",
-    "pull_request.merged": "a pull request was merged",
-}
+# "closed" also fires for merges.
+GitHubEvent = GitHubTriggerEvent
 SlackTriggerEvent = Literal["message.posted"]
 SLACK_EVENT_DESCRIPTIONS: dict[SlackTriggerEvent, str] = {
     "message.posted": "a message was posted",
@@ -78,12 +71,10 @@ SlackSenders = Literal["anyone", "people", "bots"]
 _SLACK_TRIGGER_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 _SLACK_MESSAGE_MAX_CHARS = 8_000
 LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
-LINEAR_EVENT_DESCRIPTIONS: dict[LinearTriggerEvent, str] = {
-    "issue.created": "an issue was created",
-    "issue.labeled": "a label was added to an issue",
-}
-_LINEAR_TEAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,9}$")
-_LINEAR_DESCRIPTION_MAX_CHARS = 8_000
+_LINEAR_TEAM_KEY_RE = re.compile(TEAM_KEY_PATTERN)
+# Each automation run a Linear delivery starts gets a thread of its own, named by both.
+_LINEAR_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:linear-automation")
+_GITHUB_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:github-automation")
 _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
@@ -445,6 +436,11 @@ async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
         )
 
 
+async def record_run_error(record: dict[str, Any], error: str) -> None:
+    """Show ``error`` on the automation, as a failed launch does."""
+    await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+
+
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
     automation_id = _uuid(schedule_id)
     if automation_id is None:
@@ -639,7 +635,7 @@ async def _require_watchable_slack_channel(channel_id: str) -> None:
         raise HTTPException(422, "externally shared Slack channels can't trigger automations")
     if channel.payload.get("is_member") is not True:
         raise HTTPException(
-            422, f"invite Open SWE to #{channel.name or channel_id} so it sees its messages"
+            422, f"invite Robin to #{channel.name or channel_id} so it sees its messages"
         )
 
 
@@ -890,7 +886,10 @@ async def _schedule_thread_metadata(cfg: RunConfig) -> dict[str, Any] | None:
     """Metadata of the public system thread an automation run executes on, if it is one."""
     if cfg.source != "schedule" or not cfg.thread_id or cfg.github_login or cfg.user_email:
         return None
-    metadata = thread_metadata(await langgraph_client().threads.get(cfg.thread_id))
+    thread = await THREADS.get(cfg.thread_id)
+    if thread is None:
+        return None
+    metadata = dict(thread.metadata)
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
         return None
     return metadata
@@ -999,6 +998,22 @@ async def _agent_run_config(
     return {"configurable": configurable, "metadata": agent_version_metadata()}
 
 
+async def _automation_identity(record: dict[str, Any]) -> SystemIdentity:
+    """Who the run works for: the automation, and the creator it may DM its result to."""
+    identity: SystemIdentity = {
+        "id": f"system:schedule:{record['id']}",
+        "display_name": record.get("name") or "Scheduled automation",
+        "platform": "open-swe",
+    }
+    creator = record.get("created_by")
+    user = await User.for_login("github", creator) if isinstance(creator, str) and creator else None
+    if user is not None and user.slack_user_id:
+        identity["content"] = prompt(
+            "runs/automation-creator", login=creator, slack_user_id=user.slack_user_id
+        )
+    return identity
+
+
 async def _launch_agent_schedule_record(
     record: dict[str, Any],
     *,
@@ -1069,13 +1084,7 @@ async def _launch_agent_schedule_record(
         input=build_run_input(
             str(record["prompt"]) if prompt is None else prompt,
             input_context,
-            systems=[
-                {
-                    "id": f"system:schedule:{schedule_id}",
-                    "display_name": record.get("name") or "Scheduled automation",
-                    "platform": "open-swe",
-                }
-            ],
+            systems=[await _automation_identity(record)],
         ),
         source="schedule",
         thread_title=None,
@@ -1133,73 +1142,64 @@ def _github_events(event_type: str, payload: dict[str, Any]) -> set[GitHubEvent]
     return set()
 
 
-async def _github_event_prompt(
-    record: dict[str, Any], event_type: str, payload: dict[str, Any], event: GitHubEvent
-) -> str:
-    subject_value = payload.get("issue" if event_type == "issues" else "pull_request")
-    subject: dict[str, Any] = subject_value if isinstance(subject_value, dict) else {}
-    author_value = subject.get("user")
-    author: dict[str, Any] = author_value if isinstance(author_value, dict) else {}
-    login = str(author.get("login") or "")
-    lines = [
-        f"{'Issue' if event_type == 'issues' else 'Pull request'}: "
-        f"#{subject.get('number', '')} {subject.get('title', '')}",
-        f"URL: {subject.get('html_url', '')}",
-        f"Author: {login}",
-    ]
-    if event_type == "pull_request":
-        base_value, head_value = subject.get("base"), subject.get("head")
-        base: dict[str, Any] = base_value if isinstance(base_value, dict) else {}
-        head: dict[str, Any] = head_value if isinstance(head_value, dict) else {}
-        lines += [
-            f"Base: {base.get('ref', '')}  Head: {head.get('ref', '')}",
-            f"Merged: {'yes' if subject.get('merged') is True else 'no'}",
-        ]
-    context = "\n".join(lines) + f"\n\n{subject.get('body') or ''}"
-    registered = bool(await User.known_logins([login]))
-    return prompt(
-        "runs/github-automation-event",
-        prompt=record["prompt"],
-        event_description=GITHUB_EVENT_DESCRIPTIONS[event],
-        event_context=fence_github_comment_body(context, registered=registered),
-    )
-
-
-async def _github_trigger_matches(
-    repo_full_name: str, events: set[GitHubEvent]
-) -> list[tuple[dict[str, Any], GitHubEvent]]:
-    """Enabled automations with a GitHub trigger on this repository for one of ``events``."""
+async def github_automation_rules(repo_full_name: str) -> list[dict[str, Any]]:
+    """The enabled automations with a GitHub trigger on ``repo_full_name`` (lowercased),
+    for MDA's channel to match."""
     async with transaction() as conn:
-        records = await _load_records(
+        return await _load_records(
             conn,
             "WHERE a.enabled AND a.id IN (SELECT automation_id FROM automation_trigger "
             "WHERE kind = 'github' AND match_key = :repo)",
             {"repo": repo_full_name},
         )
-    matches: list[tuple[dict[str, Any], GitHubEvent]] = []
-    for record in records:
-        # Only this repository's triggers: another GitHub trigger on the same
-        # automation configures events for its own repository.
-        configured = {
-            event
-            for trigger in record.get("triggers") or []
-            if trigger.get("kind") == "github"
-            and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
-            for event in (trigger.get("config") or {}).get("events") or []
-        }
-        fired = sorted(event for event in events if event in configured)
-        if fired:
-            # The most specific event names the run: a merge over a plain close.
-            matches.append(
-                (record, "pull_request.merged" if "pull_request.merged" in fired else fired[0])
-            )
-    return matches
 
 
-async def launch_github_automations(
-    event_type: str, payload: dict[str, Any], delivery_id: str
-) -> list[dict[str, Any]]:
-    """Run every automation a GitHub delivery triggers, each at most once per delivery."""
+def github_trigger_events(record: dict[str, Any], repo_full_name: str) -> list[GitHubEvent]:
+    """The events the automation's GitHub triggers on ``repo_full_name`` fire on.
+
+    Only this repository's triggers: another GitHub trigger on the same automation
+    configures events for its own repository.
+    """
+    configured = {
+        event
+        for trigger in record.get("triggers") or []
+        if trigger.get("kind") == "github"
+        and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
+        for event in (trigger.get("config") or {}).get("events") or []
+    }
+    return sorted(configured & set(get_args(GitHubTriggerEvent)))
+
+
+async def _fired_github_automation(
+    fired: FiredGitHubAutomation, repo_full_name: str
+) -> dict[str, Any] | None:
+    """The automation the channel matched, when it is enabled and fires on ``fired.event``
+    in the repository, so a call can't start another automation."""
+    try:
+        automation_id = uuid.UUID(fired.automation_id)
+    except ValueError:
+        return None
+    async with transaction() as conn:
+        records = await _load_records(conn, "WHERE a.enabled AND a.id = :id", {"id": automation_id})
+    if not records or fired.event not in github_trigger_events(records[0], repo_full_name):
+        return None
+    return records[0]
+
+
+async def plan_github_automations(
+    event_type: str,
+    payload: dict[str, Any],
+    delivery_id: str,
+    fired: Sequence[FiredGitHubAutomation],
+) -> list[GitHubThreadRun]:
+    """The run of every automation MDA's channel matched a GitHub delivery to.
+
+    The channel matches and writes each run's prompt; each automation must be
+    enabled and fire on the event in the delivery's repository. Each is claimed once
+    per delivery, and its run planned on a thread of its own for that delivery. A
+    call sent again for a delivery plans the runs it already claimed again, on the
+    same threads, where the channel starts each delivery's run once.
+    """
     events = _github_events(event_type, payload)
     if not events:
         return []
@@ -1233,20 +1233,20 @@ async def launch_github_automations(
         )
         return []
     full_name = f"{owner_login}/{repo_name}".lower()
-    matches = await _github_trigger_matches(full_name, events)
-    if not matches:
-        logger.info(
-            "No GitHub automations matched the delivery",
-            extra={"github_delivery": delivery_id, "github_repo": full_name},
-        )
-        return []
     # Pull request events on a public repository run only for org members; issue
     # automations keep firing for any author, as before, with a narrowed token.
     if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
         return []
-    results: list[dict[str, Any]] = []
+    runs: list[GitHubThreadRun] = []
     private = repo_private_from_payload(payload)
-    for record, event in matches:
+    for each in fired:
+        record = await _fired_github_automation(each, full_name) if each.event in events else None
+        if record is None:
+            logger.warning(
+                "GitHub automation the channel matched doesn't fire on the delivery",
+                extra={"schedule_id": each.automation_id, "github_delivery": delivery_id},
+            )
+            continue
         schedule_id = record["id"]
         if record.get("admin_thread") is True and private is not True:
             # Saving refuses this, but a repository can go public afterwards.
@@ -1259,7 +1259,7 @@ async def launch_github_automations(
         try:
             claimed = await event_claims.claim(
                 _DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL
-            )
+            ) or await event_claims.held(_DELIVERY_CLAIM_SCOPE, claim_key)
         except Exception:
             logger.exception(
                 "Failed to claim GitHub automation delivery",
@@ -1267,16 +1267,15 @@ async def launch_github_automations(
             )
             continue
         if not claimed:
-            logger.info(
-                "Skipping already-claimed GitHub automation delivery",
-                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
-            )
             continue
         try:
-            result = await _launch_agent_schedule_record(
+            run = await _planned_github_automation(
                 record,
                 repo=f"{owner_login}/{repo_name}",
-                prompt=await _github_event_prompt(record, event_type, payload, event),
+                thread_id=str(
+                    uuid.uuid5(_GITHUB_AUTOMATION_THREADS, f"{schedule_id}/{delivery_id}")
+                ),
+                prompt=each.prompt,
                 # An outsider can open an issue on a public repository, so the
                 # run it starts reaches only that repository.
                 token_repositories=event_token_repositories(
@@ -1284,29 +1283,54 @@ async def launch_github_automations(
                 ),
             )
         except Exception:
-            logger.exception(
-                "Failed to launch GitHub automation", extra={"schedule_id": schedule_id}
+            logger.exception("Failed to plan GitHub automation", extra={"schedule_id": schedule_id})
+            # Released, so the channel's call sent again plans it afresh.
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+            continue
+        if run is None:
+            logger.error(
+                "GitHub automation plans no run",
+                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
             )
             await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
             continue
-        if result.get("status") != "started":
-            logger.error(
-                "GitHub automation did not start",
-                extra={
-                    "schedule_id": schedule_id,
-                    "github_delivery": delivery_id,
-                    "launch_status": result.get("status"),
-                },
-            )
-            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-        results.append(result)
-    return results
+        runs.append(run)
+    return runs
 
 
-async def launch_github_issue_automations(
-    payload: dict[str, Any], delivery_id: str
-) -> list[dict[str, Any]]:
-    return await launch_github_automations("issues", {"action": "opened", **payload}, delivery_id)
+async def _planned_github_automation(
+    record: dict[str, Any],
+    *,
+    repo: str,
+    thread_id: str,
+    prompt: str,
+    token_repositories: list[str] | None,
+) -> GitHubThreadRun | None:
+    """The automation's run in ``repo``; ``None`` when its workspace can't run it there."""
+    from openswe.github.channel import CHANNEL as GITHUB_CHANNEL
+
+    workspace = _record_workspace(record)
+    if not await WORKSPACES.slug_exists(workspace):
+        # Running in another workspace would hand it that workspace's settings
+        # and connections, which nobody chose for it.
+        error = f"workspace {workspace!r} no longer exists"
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        return None
+    try:
+        await require_repo_access_for_workspace(repo)
+    except HTTPException as exc:
+        await _put_run_state(record, {"last_error": str(exc.detail), "last_error_at": now_iso()})
+        return None
+    return GitHubThreadRun(
+        **await _planned_channel_automation(
+            record,
+            channel=GITHUB_CHANNEL,
+            thread_id=thread_id,
+            prompt=prompt,
+            repo=_repo_dict(repo),
+            token_repositories=token_repositories,
+        )
+    )
 
 
 _SLACK_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_message)", re.IGNORECASE)
@@ -1472,175 +1496,169 @@ async def launch_slack_automations(
     return results
 
 
-def _named(items: object) -> dict[str, str]:
-    """``{id: name}`` for a Linear list of ``{id, name}`` objects."""
-    if not isinstance(items, list):
-        return {}
-    return {
-        str(item["id"]): str(item.get("name") or "")
-        for item in items
-        if isinstance(item, dict) and item.get("id")
-    }
-
-
-def _linear_issue_events(payload: dict[str, Any]) -> tuple[set[LinearTriggerEvent], set[str]]:
-    """The trigger events one Linear delivery stands for, and the label names it added."""
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    if payload.get("type") != "Issue" or not isinstance(data, dict):
-        return set(), set()
-    if payload.get("action") == "create":
-        return {"issue.created"}, set()
-    updated_from = payload.get("updatedFrom")
-    if payload.get("action") != "update" or not isinstance(updated_from, dict):
-        return set(), set()
-    before = updated_from.get("labelIds")
-    after = data.get("labelIds")
-    if not isinstance(before, list) or not isinstance(after, list):
-        return set(), set()
-    added = {str(label) for label in after} - {str(label) for label in before}
-    names = _named(data.get("labels"))
-    added_names = {names.get(label_id, "") for label_id in added} - {""}
-    return ({"issue.labeled"}, added_names) if added else (set(), set())
-
-
-def _linear_team_key(data: dict[str, Any]) -> str:
-    team = data.get("team")
-    if isinstance(team, dict) and isinstance(team.get("key"), str) and team["key"]:
-        return team["key"].upper()
-    identifier = data.get("identifier")
-    if isinstance(identifier, str) and "-" in identifier:
-        return identifier.rsplit("-", 1)[0].upper()
-    return ""
-
-
-def _linear_trigger_fires(
-    config: dict[str, Any],
-    team: str,
-    event: LinearTriggerEvent,
-    *,
-    labels: set[str],
-    added_labels: set[str],
-    project: str,
-) -> bool:
-    if config.get("team") != team or event not in (config.get("events") or []):
-        return False
-    wanted_project = config.get("project")
-    if wanted_project and wanted_project.lower() != project.lower():
-        return False
-    wanted = {label.lower() for label in config.get("labels") or []}
-    if not wanted:
-        return True
-    candidates = added_labels if event == "issue.labeled" else labels
-    return bool(wanted & {label.lower() for label in candidates})
-
-
-async def _linear_event_prompt(
-    record: dict[str, Any],
-    data: dict[str, Any],
-    event: LinearTriggerEvent,
-    *,
-    team: str,
-    labels: set[str],
-    project: str,
-) -> str:
-    creator = data.get("creator") if isinstance(data.get("creator"), dict) else {}
-    creator_email = creator.get("email") if isinstance(creator, dict) else None
-    state = data.get("state") if isinstance(data.get("state"), dict) else {}
-    lines = [
-        f"Issue: {data.get('identifier') or ''} {data.get('title') or ''}",
-        f"URL: {data.get('url') or ''}",
-        f"Team: {team}",
-        f"Project: {project or '(none)'}",
-        f"Labels: {', '.join(sorted(labels)) or '(none)'}",
-        f"State: {state.get('name') if isinstance(state, dict) else ''}",
-        f"Creator: {creator.get('name') if isinstance(creator, dict) else ''}",
-    ]
-    description = str(data.get("description") or "")[:_LINEAR_DESCRIPTION_MAX_CHARS]
-    context = "\n".join(lines) + f"\n\n{description}"
-    registered = bool(await User.login_for_email(creator_email))
-    return prompt(
-        "runs/linear-automation-event",
-        prompt=record["prompt"],
-        event_description=LINEAR_EVENT_DESCRIPTIONS[event],
-        event_context=fence_github_comment_body(context, registered=registered),
-    )
-
-
-async def launch_linear_automations(
-    payload: dict[str, Any], delivery_id: str
-) -> list[dict[str, Any]]:
-    """Run every automation a Linear issue delivery triggers, each at most once per delivery."""
-    events, added_labels = _linear_issue_events(payload)
-    if not events:
-        return []
-    if not delivery_id:
-        logger.warning("Linear automation delivery is missing a delivery ID")
-        return []
-    data: dict[str, Any] = payload["data"]
-    team = _linear_team_key(data)
-    if not _LINEAR_TEAM_KEY_RE.fullmatch(team):
-        return []
-    labels = set(_named(data.get("labels")).values()) - {""}
-    project_value = data.get("project")
-    project = str(project_value.get("name") or "") if isinstance(project_value, dict) else ""
+async def linear_automation_rules(team: str) -> list[dict[str, Any]]:
+    """The enabled automations with a Linear trigger on ``team``, for MDA's channel to match."""
     async with transaction() as conn:
-        records = await _load_records(
+        return await _load_records(
             conn,
             "WHERE a.enabled AND a.id IN (SELECT automation_id FROM automation_trigger "
             "WHERE kind = 'linear' AND match_key = :team)",
             {"team": team},
         )
-    results: list[dict[str, Any]] = []
-    for record in records:
-        schedule_id = record["id"]
-        match = next(
-            (
-                (trigger.get("config") or {}, event)
-                for trigger in record.get("triggers") or []
-                if trigger.get("kind") == "linear"
-                for event in sorted(events)
-                if _linear_trigger_fires(
-                    trigger.get("config") or {},
-                    team,
-                    event,
-                    labels=labels,
-                    added_labels=added_labels,
-                    project=project,
-                )
+
+
+def linear_trigger_configs(record: dict[str, Any], team: str) -> list[dict[str, Any]]:
+    """The automation's Linear trigger configs on ``team``."""
+    return [
+        trigger.get("config") or {}
+        for trigger in record.get("triggers") or []
+        if trigger.get("kind") == "linear" and (trigger.get("config") or {}).get("team") == team
+    ]
+
+
+async def plan_linear_automation(request: PlanLinearAutomation) -> LinearAutomationRun | None:
+    """The run an automation starts for a Linear issue event MDA's channel matched it to.
+
+    The channel matches and writes the run's prompt; the backend claims the automation once per delivery, within
+    its trigger's hourly cap, and writes and signs the run, on a thread of its own the
+    channel starts it on. The automation must be enabled and have a trigger on the
+    event's team for that event, so a call can't start another automation. A repeat
+    for a delivery already claimed plans the same run again: the channel starts a
+    thread's run for a delivery once.
+    """
+    try:
+        automation_id = uuid.UUID(request.automation_id)
+    except ValueError:
+        return None
+    async with transaction() as conn:
+        records = await _load_records(conn, "WHERE a.enabled AND a.id = :id", {"id": automation_id})
+    record = records[0] if records else None
+    config = next(
+        (
+            config
+            for config in (linear_trigger_configs(record, request.team) if record else [])
+            if request.event in (config.get("events") or [])
+        ),
+        None,
+    )
+    if record is None or config is None:
+        return None
+    schedule_id = record["id"]
+    claim_prefix = f"{schedule_id}:linear:{request.team}:"
+    claim_key = f"{claim_prefix}{request.delivery_id}"
+    claimed = await _claim_delivery(
+        claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id
+    )
+    if not claimed and not await event_claims.held(_DELIVERY_CLAIM_SCOPE, claim_key):
+        return None
+    workspace = _record_workspace(record)
+    if not await WORKSPACES.slug_exists(workspace):
+        error = f"workspace {workspace!r} no longer exists"
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        return None
+    try:
+        return await _planned_linear_automation(record, request)
+    except Exception:
+        # Released, so the channel's call sent again plans it afresh.
+        await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        raise
+
+
+async def _planned_linear_automation(
+    record: dict[str, Any], request: PlanLinearAutomation
+) -> LinearAutomationRun:
+    from openswe.linear.session import LINEAR_CHANNEL
+
+    return LinearAutomationRun(
+        **await _planned_channel_automation(
+            record,
+            channel=LINEAR_CHANNEL,
+            thread_id=str(
+                uuid.uuid5(_LINEAR_AUTOMATION_THREADS, f"{record['id']}/{request.delivery_id}")
             ),
-            None,
+            prompt=request.prompt,
         )
-        if match is None:
-            continue
-        config, event = match
-        claim_prefix = f"{schedule_id}:linear:{team}:"
-        claim_key = f"{claim_prefix}{delivery_id}"
-        if not await _claim_delivery(
-            claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id
-        ):
-            continue
-        try:
-            result = await _launch_agent_schedule_record(
-                record,
-                repo=None,
-                prompt=await _linear_event_prompt(
-                    record, data, event, team=team, labels=labels, project=project
-                ),
-            )
-        except Exception:
-            logger.exception(
-                "Failed to launch Linear automation", extra={"schedule_id": schedule_id}
-            )
-            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-            continue
-        if result.get("status") != "started":
-            logger.error(
-                "Linear automation did not start",
-                extra={"schedule_id": schedule_id, "launch_status": result.get("status")},
-            )
-            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-        results.append(result)
-    return results
+    )
+
+
+async def _planned_channel_automation(
+    record: dict[str, Any],
+    *,
+    channel: str,
+    thread_id: str,
+    prompt: str,
+    repo: dict[str, str] | None = None,
+    token_repositories: list[str] | None = None,
+) -> dict[str, Any]:
+    """Index ``thread_id`` as ``channel``'s and sign the automation's run on it.
+
+    What the channel starts the run with: ``thread_id``, ``input``, ``context``,
+    ``metadata`` and ``webhook``. A token scope is recorded on the thread as it is
+    indexed, so a thread whose scope couldn't be written starts nothing.
+    """
+    from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
+    from openswe.threads.router import (
+        adopt_channel_run,
+        channel_run_metadata,
+        channel_run_starting,
+    )
+    from openswe.threads.runtimes import RUNTIMES
+
+    schedule_id = record["id"]
+    admin_thread = _admin_thread_enabled(record)
+    run_config = await _agent_run_config(record, thread_id, repo, admin_thread=admin_thread)
+    metadata = _agent_run_metadata(record, thread_id, repo, admin_thread=admin_thread)
+    if token_repositories is not None:
+        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
+    if admin_thread:
+        metadata["system_authorization"] = {
+            "schedule_id": schedule_id,
+            "invocation_id": run_config["configurable"]["invocation_id"],
+        }
+    input_context: InputMessageContext = {
+        "sender_id": f"system:schedule:{schedule_id}",
+        "surface": "automation",
+        "kind": "system",
+    }
+    run_input = build_run_input(
+        prompt,
+        input_context,
+        systems=[await _automation_identity(record)],
+    )
+    await adopt_channel_run(thread_id, channel, metadata=metadata)
+    planned = await prepare_durable_run(
+        _AGENT_ASSISTANT_ID,
+        run_config,
+        {CHANNEL_METADATA_KEY: channel},
+        source="schedule",
+    )
+    rewritten = await RUNTIMES.mda_runtime.run_payload(
+        thread_id,
+        {
+            "assistant_id": _AGENT_ASSISTANT_ID,
+            "config": planned,
+            "metadata": planned["metadata"],
+        },
+        thread_metadata={},
+    )
+    await channel_run_starting(thread_id)
+    await _put_run_state(
+        record,
+        {
+            "last_thread_id": thread_id,
+            "last_triggered_at": now_iso(),
+            "last_error": None,
+            "last_error_at": None,
+        },
+    )
+    return {
+        "thread_id": uuid.UUID(thread_id),
+        "input": run_input,
+        "context": rewritten["context"],
+        "metadata": channel_run_metadata(planned["metadata"]),
+        "webhook": COMPLETION_WEBHOOK_URL or None,
+    }
 
 
 async def launch_scheduled_agent_run(

@@ -88,16 +88,41 @@ body.version-mismatch {
     --color-primary-foreground: var(--text-brand-on-fill);
 }
 
+@theme inline {
+    --color-user-message: var(--bg-user-message);
+}
+
+/* Structure comes from tone steps (page, then rail, then composer) rather than
+   divider lines, so the composer and user bubbles sit a step above the rail
+   and borders sit a step lower than Macaw's defaults. */
+html.dark,
+.dark[data-theme-scope] {
+    --bg-elevated: var(--neutral-200);
+    --bg-elevated-hover: var(--neutral-300);
+    --bg-user-message: var(--neutral-200);
+    --border-default: var(--neutral-300);
+    --border-subtle: var(--neutral-200);
+}
+
 :root {
+    --bg-user-message: var(--bg-surface-level-2);
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: var(--radius-md);
-    /* Height of the right panel's tab bar; the empty-state launcher offsets by
-       it so its cards center against the whole panel. */
-    --workspace-topbar-height: 2.25rem;
+    /* Height of the right panel's tab bar. It matches the thread header (h-11)
+       so their lines meet and the panel toggle keeps its spot whether the
+       panel is open or collapsed; the empty-state launcher offsets by it so
+       its cards center against the whole panel. */
+    --workspace-topbar-height: 2.75rem;
 }
 
 @layer utilities {
+  /* Placeholder instructions need readable contrast on every field surface. */
+  input:placeholder-shown::placeholder,
+  textarea:placeholder-shown::placeholder {
+    color: var(--text-secondary);
+  }
+
   /* Menus are opaque: a translucent tint let page content bleed through. */
   .dropdown-glass {
     background: var(--dropdown-glass-background, var(--bg-elevated));

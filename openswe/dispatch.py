@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Self
 from urllib.parse import urlparse
+from uuid import UUID
 
 from langgraph.types import Durability
 from langgraph_sdk import get_client
@@ -36,6 +37,7 @@ from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, ConfigDict
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.config import ENV
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.input_messages import (
@@ -61,9 +63,11 @@ LangGraphRunConfig = dict[str, Any]
 
 
 _PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+# Who a run is for, which the backend works out for each run and never takes from its caller.
 TURN_ATTRIBUTION_FIELDS = frozenset(
     {
         "user_id",
+        ACTING_USER_KEY,
         "ls_repo_provider",
         "ls_attribution_identifier",
         "ls_git_repo",
@@ -93,6 +97,19 @@ class RunMetadata(BaseModel):
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
+#: Names the MDA channel (``linear``, ``github``, ...) that owns a thread or started a
+#: run, in run metadata and in the thread index's metadata alike. The channel answers
+#: in its conversation, failures included, and starts every run on its threads, so the
+#: backend neither replies there nor starts runs on them.
+CHANNEL_METADATA_KEY = "channel"
+
+
+def channel_of(metadata: Mapping[str, object] | None) -> str | None:
+    """The MDA channel ``metadata`` (a run's or a thread's) names, whatever the provider."""
+    channel = (metadata or {}).get(CHANNEL_METADATA_KEY)
+    return channel if isinstance(channel, str) and channel else None
+
+
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (
@@ -105,9 +122,10 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
 )
 
 
-async def _dispatch_input(
+async def dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
+    """The attributed input of a run ``configurable`` starts, saying ``content``."""
     surface: Surface = (
         source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
@@ -146,6 +164,9 @@ async def _dispatch_input(
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)
+    if not sender_id and cfg.auth_provider == "langsmith" and cfg.user_id:
+        sender_id = f"user:{cfg.user_id}"
+        sender = {"id": sender_id}
     if not sender_id and login:
         sender_id = f"github:{login}"
         sender = {"id": sender_id, "github_login": login}
@@ -280,10 +301,21 @@ def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
 def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
     """Config for a system-started run that continues a thread where its last run left off."""
     configurable: dict[str, Any] = {"thread_id": thread_id}
+    if metadata.get("repo_explicitly_none") is True:
+        configurable["repo_explicitly_none"] = True
     for key in ("source", "repo", "github_login", "started_by_id", "triggering_user_email"):
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
+    owner = metadata.get("owner_login")
+    if isinstance(owner, str) and owner.startswith("user:"):
+        configurable.update(
+            user_id=owner.removeprefix("user:"),
+            auth_provider="langsmith",
+            repo_explicitly_none=True,
+        )
+        configurable.pop("github_login", None)
+        configurable.pop("repo", None)
     workspace = thread_workspace(metadata)
     if workspace is not None:
         configurable["workspace"] = workspace
@@ -330,7 +362,9 @@ async def _run_user_metadata(
     if cfg.background_task_completion:
         return metadata
     try:
-        if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
+        if cfg.auth_provider == "langsmith" and cfg.user_id:
+            user = await User.get(UUID(cfg.user_id))
+        elif (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
         elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
             user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
@@ -351,6 +385,41 @@ async def _run_user_metadata(
     return metadata
 
 
+async def prepare_durable_run(
+    assistant_id: str,
+    config: LangGraphRunConfig | None,
+    metadata: Mapping[str, object] | None,
+    *,
+    source: str,
+    as_sender: bool = False,
+) -> LangGraphRunConfig:
+    """The config and metadata a durable run starts with, wherever it is created.
+
+    The run is attributed to the person its config names (``user_id``), and acts as them
+    (``ACTING_USER_KEY``) only when they started it: ``as_sender`` for a message they
+    sent from the dashboard, and a channel's own run, which MDA starts as its verified
+    sender. Any other run, such as a wakeup, an event match or a task message, acts as
+    no one, whoever it is attributed to.
+    """
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = {
+        key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
+    } | recorded.model_dump(exclude_none=True)
+    run_metadata.update(await _run_user_metadata(config, source=source))
+    user_id = run_metadata.get("user_id")
+    if user_id is not None and (as_sender or channel_of(run_metadata) is not None):
+        run_metadata[ACTING_USER_KEY] = user_id
+    conversation_type = _slack_conversation_type(source, config)
+    if conversation_type is not None:
+        run_metadata["slack_conversation_type"] = conversation_type
+    run_config = prepare_run_config(config, run_metadata)
+    if "user_id" not in run_metadata:
+        configurable = run_config["configurable"]
+        if isinstance(configurable, dict):
+            configurable.pop("user_id", None)
+    return run_config
+
+
 async def create_durable_run(
     thread_id: str,
     assistant_id: str,
@@ -366,30 +435,23 @@ async def create_durable_run(
     if_not_exists: str = "create",
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    as_sender: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
     means the caller already created and titled the thread. Agent and reviewer
     threads run on Managed Deep Agents; the request goes here regardless and
-    ``openswe.threads.router`` routes it.
+    ``openswe.threads.router`` routes it. ``as_sender`` is for a run the person it is
+    attributed to started themselves (``prepare_durable_run``).
     """
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
+    run_config = await prepare_durable_run(
+        assistant_id, config, metadata, source=source, as_sender=as_sender
+    )
     recorded = RunMetadata.of_run(assistant_id, config)
-    run_metadata = {
-        key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
-    } | recorded.model_dump(exclude_none=True)
-    run_metadata.update(await _run_user_metadata(config, source=source))
-    conversation_type = _slack_conversation_type(source, config)
-    if conversation_type is not None:
-        run_metadata["slack_conversation_type"] = conversation_type
-    run_config = prepare_run_config(config, run_metadata)
-    if "user_id" not in run_metadata:
-        configurable = run_config["configurable"]
-        if isinstance(configurable, dict):
-            configurable.pop("user_id", None)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,
@@ -464,7 +526,7 @@ async def dispatch_agent_run(
                 systems=systems,
             )
             if context is not None
-            else await _dispatch_input(content, source, configurable)
+            else await dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
     return await create_durable_run(

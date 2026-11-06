@@ -15,7 +15,7 @@ from typing import Any, Self
 from openswe.review_guide.buttons import APPROVE, MARK_READY, NEXT
 from openswe.review_guide.context import GuideContext, GuideUnavailableError
 from openswe.review_guide.github import fetch_head
-from openswe.review_guide.messages import Stage, refresh_progress, retire
+from openswe.review_guide.messages import ChunkMessage, Stage, refresh_progress, retire
 from openswe.review_guide.sessions import GuideMode
 from openswe.review_guide.walk import OnScreen, Reader, Walk
 from openswe.run_config import RunConfig
@@ -35,6 +35,7 @@ from openswe.walkthrough.plan import (
     FileSplits,
     claim,
 )
+from openswe.walkthrough.record import PlanMovedError
 
 _ONE_PER_TURN = (
     "you already put something on screen this turn; end your turn and wait for the reader"
@@ -94,17 +95,28 @@ class _State:
         return bool(run_id) and self.walk.shown_by_run == run_id
 
     async def save(self, stage: Stage | None = None) -> None:
-        await self.ctx.session.save_walk(self.walk)
+        await self.ctx.session.save_walk(self.walk, finished=stage == "finished")
         if stage is not None:
             await refresh_progress(self.ctx.session, self.reader, stage=stage)
 
     async def retire(self, shown: OnScreen | None, note: str) -> None:
         if shown is not None:
-            await retire(self.channel_id, shown.message_ts, shown.message_text, note)
+            await retire(self.channel_id, shown.message_ts, shown.message_text, note, shown=shown)
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""
-        posted = await send_slack_reply(shown.message_text, "progress", options=[NEXT])
+        chunk = ChunkMessage(shown)
+        await chunk.prepare()
+        try:
+            blocks = chunk.blocks(buttons=[NEXT])
+        except SlackRequestError as exc:
+            return {
+                "success": False,
+                "error": exc.code,
+                "retry": True,
+                "hint": "Shorten or split the chunk before showing it again.",
+            }
+        posted = await send_slack_reply(shown.message_text, "progress", blocks=blocks)
         if posted["success"] is not True:
             return posted
         replaced = self.walk.withdraw()
@@ -148,7 +160,7 @@ async def walkthrough_show_lines(
         state = await _State.load()
         lines = claim(show, state.reader.remaining(state.reader.unseen))
         code = await state.ctx.workspace.checkout.render(lines)
-    except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
+    except (GuideUnavailableError, PlanMovedError, *PLANNING_ERRORS) as exc:
         return {"success": False, "error": str(exc)}
     if state.shown_this_turn():
         return {"success": False, "error": _ONE_PER_TURN}
@@ -227,7 +239,7 @@ async def _plan(
     try:
         ctx = await GuideContext.current()
         result = await change(ctx)
-    except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
+    except (GuideUnavailableError, PlanMovedError, *PLANNING_ERRORS) as exc:
         return {"success": False, "error": str(exc)}
     state = await _State.of(ctx)
     return state.report(

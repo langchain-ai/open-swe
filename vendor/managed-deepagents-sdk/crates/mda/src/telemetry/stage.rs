@@ -8,7 +8,7 @@
 use std::time::Instant;
 
 use crate::command::CommandCompletion;
-use crate::error::ErrorCategory;
+use crate::error::{ErrorCategory, ErrorCode, Failure};
 
 use super::facts::{facts, update_facts};
 use super::otel_logger::serialized_name;
@@ -25,6 +25,8 @@ pub enum Stage {
     Bake,
     Deploy,
     WaitReady,
+    ScheduleSync,
+    ChannelSetup,
     EnvSetup,
     DepsInstall,
     ServerStart,
@@ -43,6 +45,8 @@ impl Stage {
             Self::Bake => "bake",
             Self::Deploy => "deploy",
             Self::WaitReady => "wait_ready",
+            Self::ScheduleSync => "schedule_sync",
+            Self::ChannelSetup => "channel_setup",
             Self::EnvSetup => "env_setup",
             Self::DepsInstall => "deps_install",
             Self::ServerStart => "server_start",
@@ -63,7 +67,7 @@ pub struct CurrentStage {
 #[derive(Clone, Copy)]
 enum StageOutcome {
     Success,
-    Failure(ErrorCategory),
+    Failure(Failure),
     Cancelled,
 }
 
@@ -72,7 +76,7 @@ impl From<CommandCompletion> for StageOutcome {
     fn from(completion: CommandCompletion) -> Self {
         match completion {
             CommandCompletion::Succeeded => Self::Success,
-            CommandCompletion::Failed(category) => Self::Failure(category),
+            CommandCompletion::Failed(failure) => Self::Failure(failure),
             CommandCompletion::Cancelled => Self::Cancelled,
         }
     }
@@ -89,7 +93,14 @@ impl StageOutcome {
 
     fn error_category(self) -> Option<ErrorCategory> {
         match self {
-            Self::Failure(category) => Some(category),
+            Self::Failure(failure) => Some(failure.category),
+            Self::Success | Self::Cancelled => None,
+        }
+    }
+
+    fn error_code(self) -> Option<ErrorCode> {
+        match self {
+            Self::Failure(failure) => Some(failure.code),
             Self::Success | Self::Cancelled => None,
         }
     }
@@ -124,6 +135,7 @@ fn record(started: Instant, outcome: StageOutcome) {
     tracing::info!(
         duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         outcome = outcome.name(),
+        error_code = outcome.error_code().as_ref().and_then(serialized_name),
         error_category = outcome.error_category().as_ref().and_then(serialized_name),
         "stage completed"
     );
@@ -146,20 +158,47 @@ mod tests {
 
         let logs = capture(no_facts, || {
             record(started, StageOutcome::Success);
-            record(started, StageOutcome::Failure(ErrorCategory::Toolchain));
+            record(
+                started,
+                StageOutcome::Failure(ErrorCategory::Toolchain.into()),
+            );
+            record(
+                started,
+                StageOutcome::Failure(Failure {
+                    category: ErrorCategory::Authentication,
+                    code: ErrorCode::ChannelRequiresUserKey,
+                }),
+            );
             record(started, StageOutcome::Cancelled);
         });
 
-        assert_eq!(logs.len(), 3);
+        assert_eq!(logs.len(), 4);
         assert!(matches!(
             attribute(&logs[0], "duration_ms"),
             Some(opentelemetry::logs::AnyValue::Int(ms)) if ms >= 25
         ));
         assert_eq!(attribute(&logs[0], "outcome"), text("success"));
         assert_eq!(attribute(&logs[0], "error_category"), None);
+        assert_eq!(attribute(&logs[0], "error_code"), None);
         assert_eq!(attribute(&logs[1], "outcome"), text("failure"));
         assert_eq!(attribute(&logs[1], "error_category"), text("toolchain"));
-        assert_eq!(attribute(&logs[2], "outcome"), text("cancelled"));
+        assert_eq!(attribute(&logs[1], "error_code"), text("unclassified"));
+        assert_eq!(
+            attribute(&logs[2], "error_category"),
+            text("authentication")
+        );
+        assert_eq!(
+            attribute(&logs[2], "error_code"),
+            text("channel_requires_user_key")
+        );
+        assert_eq!(attribute(&logs[3], "outcome"), text("cancelled"));
+    }
+
+    #[test]
+    fn deploy_reports_what_follows_the_rollout_as_stages_of_their_own() {
+        assert_eq!(Stage::WaitReady.as_str(), "wait_ready");
+        assert_eq!(Stage::ScheduleSync.as_str(), "schedule_sync");
+        assert_eq!(Stage::ChannelSetup.as_str(), "channel_setup");
     }
 
     // No test in this crate calls `init_facts`, so telemetry is off here.

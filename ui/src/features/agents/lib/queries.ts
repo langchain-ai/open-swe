@@ -1,4 +1,9 @@
-import { threadFamily, sidebarRefreshInterval } from "./sidebarThreads"
+import {
+  mergeTaskFamily,
+  sidebarRefreshInterval,
+  taskWorkerTopics,
+  threadFamily,
+} from "./sidebarThreads"
 import {
   queryOptions,
   useInfiniteQuery,
@@ -30,11 +35,12 @@ import type {
   WorkflowApprovalStatus,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { pendingSenderName } from "./queuedMessages"
 import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
-import type { Skill, SkillInput } from "@/lib/api"
+import type { SessionUser, Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -48,6 +54,7 @@ export const agentThreadKeys = {
     includeAutomations: boolean
     owned: boolean
     includeClaudeCode: boolean
+    includeSlack: boolean
   }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
@@ -58,6 +65,7 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  goal: (threadId: string) => ["agent-threads", threadId, "goal"] as const,
   backgroundOutput: (threadId: string, taskId: string) =>
     ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
@@ -93,8 +101,9 @@ function patchAgentThread(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
-    prev?.map(update)
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
+    (prev) => prev?.map(update)
   )
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
     { queryKey: ["agent-threads", "lists", "infinite-pages"] },
@@ -115,6 +124,22 @@ function patchAgentThread(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
+}
+
+/** A thread's cached summaries, refetched when its transcript settles a turn. */
+export class ThreadSummaryCache {
+  constructor(
+    private readonly queryClient: QueryClient,
+    private readonly threadId: string
+  ) {}
+
+  reconcile(): void {
+    void this.queryClient.invalidateQueries({
+      queryKey: agentThreadKeys.detail(this.threadId),
+      exact: true,
+    })
+    invalidateAgentThreadLists(this.queryClient)
+  }
 }
 
 export function setAgentThreadStatus(
@@ -144,8 +169,9 @@ function findCachedAgentThread(
       agentThreadKeys.sidebarActive(threadId)
     ) ??
     queryClient
-      .getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)
-      ?.flatMap(threadFamily)
+      .getQueriesData<Array<AgentThread>>({ queryKey: agentThreadKeys.pinned })
+      .flatMap(([, threads]) => threads ?? [])
+      .flatMap(threadFamily)
       .find(matches) ??
     queryClient
       .getQueriesData<InfiniteData<ThreadsPage>>({
@@ -170,17 +196,18 @@ function setAgentThreadPinned(
   pinned: boolean
 ): void {
   const thread = findCachedAgentThread(queryClient, threadId)
-  queryClient.setQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned,
-    (prev) => {
+  for (const [key] of queryClient.getQueriesData<Array<AgentThread>>({
+    queryKey: agentThreadKeys.pinned,
+  })) {
+    queryClient.setQueryData<Array<AgentThread>>(key, (prev) => {
       if (!prev) return prev
       const isPinned = prev.some((candidate) => candidate.id === threadId)
-      if (pinned) return isPinned || !thread ? prev : [thread, ...prev]
+      if (pinned) return isPinned || !thread ? prev : [...prev, thread]
       return isPinned
         ? prev.filter((candidate) => candidate.id !== threadId)
         : prev
-    }
-  )
+    })
+  }
 }
 
 function updateThreadPageResolved(
@@ -273,7 +300,6 @@ export async function beginAgentThreadUpdate(
     }),
     queryClient.cancelQueries({
       queryKey: agentThreadKeys.pinned,
-      exact: true,
     }),
     queryClient.cancelQueries({
       queryKey: ["agent-threads", "lists", "infinite-pages"],
@@ -306,58 +332,38 @@ export function restoreAgentThreadQueries(
   }
 }
 
-/**
- * Clear a thread's unread dot the instant its row is clicked. The detail GET
- * that navigation triggers is what actually marks the thread viewed
- * server-side; this only stops the dot from lingering for that round trip.
- */
 export function markAgentThreadViewed(
   queryClient: QueryClient,
   threadId: string
 ): void {
-  const view = (thread: AgentThread): AgentThread =>
-    thread.id === threadId && !thread.viewed
-      ? { ...thread, viewed: true, viewedAt: Date.now() }
-      : thread.taskWorkers
-        ? { ...thread, taskWorkers: thread.taskWorkers.map(view) }
-        : thread
-  const viewList = (threads: Array<AgentThread>) => threads.map(view)
-
-  // Patched as already-stale: the detail GET is what marks the thread viewed
-  // server-side, and a plain setQueryData would stamp this fresh under the
-  // detail query's staleTime — suppressing that fetch, so the next list refetch
-  // would serve `viewed: false` right back and the dot would return.
-  queryClient.setQueryData<AgentThread>(
-    agentThreadKeys.detail(threadId),
-    (prev) => (prev ? view(prev) : prev),
-    { updatedAt: 0 }
-  )
-  queryClient.setQueryData<AgentThread>(
-    agentThreadKeys.sidebarActive(threadId),
-    (prev) => (prev ? view(prev) : prev)
-  )
-  queryClient.setQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned,
-    (prev) => (prev ? viewList(prev) : prev)
-  )
-  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
-    { queryKey: ["agent-threads", "lists", "infinite-pages"] },
-    (prev) =>
-      prev && {
-        ...prev,
-        pages: prev.pages.map((page) => ({
-          ...page,
-          items: viewList(page.items),
-        })),
-      }
-  )
-  queryClient.setQueriesData<ThreadsPage>(
-    { queryKey: ["agent-threads", "lists", "page"] },
-    (prev) => prev && { ...prev, items: viewList(prev.items) }
-  )
+  patchAgentThread(queryClient, threadId, {
+    viewed: true,
+    viewedAt: Date.now(),
+  })
 }
 
-/** A review has no thread detail GET to mark it read, so it posts its own. */
+export function useSetAgentThreadViewed() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: ["agent-thread-read-state"],
+    mutationFn: (vars: { threadId: string; viewed: boolean }) =>
+      agentsApi.setThreadViewed(vars.threadId, vars.viewed),
+    meta: { errorTitle: "Couldn't update thread read state" },
+    onMutate: (vars) =>
+      beginAgentThreadUpdate(queryClient, vars.threadId, () =>
+        patchAgentThread(queryClient, vars.threadId, {
+          viewed: vars.viewed,
+          viewedAt: vars.viewed ? Date.now() : null,
+        })
+      ),
+    onError: (_error, _vars, context) => {
+      if (context) restoreAgentThreadQueries(queryClient, context)
+    },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
+/** Review pages record views through their own endpoint. */
 export function markReviewViewed(
   queryClient: QueryClient,
   review: ReviewPageRef,
@@ -395,8 +401,9 @@ export function setAgentThreadResolved(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
-    prev?.map(update)
+  queryClient.setQueriesData<Array<AgentThread>>(
+    { queryKey: agentThreadKeys.pinned },
+    (prev) => prev?.map(update)
   )
   for (const [key] of queryClient.getQueriesData<InfiniteData<ThreadsPage>>({
     queryKey: ["agent-threads", "lists", "infinite-pages"],
@@ -636,9 +643,14 @@ export const SIDEBAR_PAGE_SIZE = 10
 
 /** The sources the sidebar asks the server to leave out. */
 function excludedSources(
-  includeClaudeCode: boolean
+  includeClaudeCode: boolean,
+  includeSlack: boolean
 ): Pick<ThreadsPageParams, "excludeSources"> {
-  return includeClaudeCode ? {} : { excludeSources: [CLAUDE_CODE_SOURCE] }
+  const excludeSources = [
+    ...(!includeClaudeCode ? [CLAUDE_CODE_SOURCE] : []),
+    ...(!includeSlack ? ["slack" as const] : []),
+  ]
+  return excludeSources.length ? { excludeSources } : {}
 }
 
 function sidebarPageParams({
@@ -646,11 +658,13 @@ function sidebarPageParams({
   includeResolved,
   owned,
   includeClaudeCode,
+  includeSlack,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
   owned: boolean
   includeClaudeCode: boolean
+  includeSlack: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
@@ -658,18 +672,22 @@ function sidebarPageParams({
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
     ...(owned ? { owned } : {}),
-    ...excludedSources(includeClaudeCode),
+    ...excludedSources(includeClaudeCode, includeSlack),
   }
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
   return useQuery({
     queryKey: agentThreadKeys.pinned,
-    queryFn: agentsApi.listPinnedThreads,
+    queryFn: () => agentsApi.listPinnedThreads(),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (query) => sidebarRefreshInterval(query.state.data),
+    meta: {
+      invalidatedBy: (data) =>
+        taskWorkerTopics(data as Array<AgentThread> | undefined),
+    },
   })
 }
 
@@ -678,30 +696,79 @@ export function useSidebarRepos({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   enabled?: boolean
 }) {
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.repos({ ...params, includeClaudeCode }),
+    queryKey: agentThreadKeys.repos({
+      ...params,
+      includeClaudeCode,
+      includeSlack,
+    }),
     queryFn: () =>
       agentsApi.listThreadRepos({
         ...params,
-        ...excludedSources(includeClaudeCode),
+        ...excludedSources(includeClaudeCode, includeSlack),
       }),
     enabled: enabled && hydrated,
-    placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   })
 }
 
+function useCachedAgentThread(threadId?: string): AgentThread | undefined {
+  const queryClient = useQueryClient()
+  return useQuery({
+    ...agentThreadDetailOptions(threadId ?? "", queryClient),
+    enabled: false,
+  }).data
+}
+
+function useFetchedSidebarThread(
+  threadId: string | undefined,
+  enabled: boolean
+): AgentThread | undefined {
+  return useQuery({
+    queryKey: agentThreadKeys.sidebarActive(threadId ?? ""),
+    queryFn: () => agentsApi.getThread(threadId!),
+    enabled: enabled && Boolean(threadId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: (current) =>
+      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
+    meta: {
+      invalidatedBy: threadId
+        ? [invalidationTopic("task-workers", threadId)]
+        : [],
+    },
+    retry: false,
+  }).data
+}
+
+/** The open thread itself, for commands that act on it. */
+export function useActiveAgentThread(
+  threadId: string | undefined,
+  { enabled = true } = {}
+): AgentThread | undefined {
+  const detail = useCachedAgentThread(threadId)
+  const fetched = useFetchedSidebarThread(threadId, enabled && !detail)
+  return detail ?? fetched
+}
+
+/**
+ * The open thread's sidebar row. An open worker's row is its coordinator's:
+ * listed on its own it would show unnested, as it does whenever the sidebar
+ * page has not picked up a just-started worker yet.
+ */
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
@@ -711,30 +778,30 @@ export function useSidebarActiveThread({
   loadedThreads: Array<AgentThread>
   enabled?: boolean
 }): AgentThread | undefined {
-  const queryClient = useQueryClient()
-  const detail = useQuery({
-    ...agentThreadDetailOptions(activeThreadId ?? "", queryClient),
-    enabled: false,
-  }).data
-  const loaded = loadedThreads.find((thread) =>
-    threadFamily(thread).some((member) => member.id === activeThreadId)
+  const active = useCachedAgentThread(activeThreadId)
+  const rootId =
+    (active?.taskMembership?.role === "worker"
+      ? active.taskMembership.coordinatorThreadId
+      : null) ?? activeThreadId
+  const rootDetail = useCachedAgentThread(rootId)
+  const listed = loadedThreads.find(
+    (thread) =>
+      thread.id === rootId ||
+      threadFamily(thread).some((member) => member.id === activeThreadId)
   )
-  const query = useQuery({
-    queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
-    queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
-    enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-    refetchInterval: (current) =>
-      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
-    retry: false,
-  })
-  // An open worker is already listed under its coordinator; listing it again on its own duplicates it.
-  if (loaded && loaded.id !== activeThreadId) return loaded
-  if (detail && loaded?.taskWorkers) {
-    return { ...detail, taskWorkers: loaded.taskWorkers }
-  }
-  return detail ?? loaded ?? query.data
+  const fetched = useFetchedSidebarThread(
+    rootId,
+    enabled && !listed && !rootDetail
+  )
+  const row = listed ?? rootDetail ?? fetched ?? active
+  return row && !row.concierge
+    ? mergeTaskFamily(
+        row,
+        [rootDetail, fetched, active].flatMap((thread) =>
+          thread ? [thread] : []
+        )
+      )
+    : undefined
 }
 
 function useSidebarThreadPages(
@@ -765,6 +832,7 @@ export function sidebarRecentsParams({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
 }: {
   repoMode: boolean
@@ -772,6 +840,7 @@ export function sidebarRecentsParams({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
@@ -780,6 +849,7 @@ export function sidebarRecentsParams({
       includeResolved,
       owned,
       includeClaudeCode,
+      includeSlack,
     }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
@@ -792,6 +862,7 @@ export function useSidebarRecents({
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
   enabled = true,
 }: {
@@ -800,6 +871,7 @@ export function useSidebarRecents({
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -810,6 +882,7 @@ export function useSidebarRecents({
       includeResolved,
       owned,
       includeClaudeCode,
+      includeSlack,
       sort,
     }),
     enabled
@@ -818,18 +891,23 @@ export function useSidebarRecents({
 
 export function useSidebarRepoThreads({
   repoFullName,
+  projectId = null,
   includeAutomations = false,
   includeResolved = false,
   owned = false,
   includeClaudeCode = true,
+  includeSlack = true,
   sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
+  /** A project folder lists the project's threads instead of the repository's. */
+  projectId?: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -840,11 +918,16 @@ export function useSidebarRepoThreads({
         includeResolved,
         owned,
         includeClaudeCode,
+        includeSlack,
       }),
-      ...(repoFullName ? { repo: repoFullName } : {}),
+      ...(projectId
+        ? { project: projectId }
+        : repoFullName
+          ? { repo: repoFullName }
+          : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
-    enabled && Boolean(repoFullName)
+    enabled && Boolean(projectId || repoFullName)
   )
 }
 
@@ -865,7 +948,7 @@ function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
   })
 }
 
-export function useAgentThread(threadId: string) {
+export function useAgentThread(threadId: string, active = true) {
   const queryClient = useQueryClient()
   const query = useQuery({
     ...agentThreadDetailOptions(threadId, queryClient),
@@ -874,12 +957,55 @@ export function useAgentThread(threadId: string) {
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 3000 : false,
+      current.state.data?.status === "running" ||
+      current.state.data?.waitingForDelegatedWork
+        ? 3000
+        : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
+
+  const { mutate: setViewed } = useSetAgentThreadViewed()
+  const readVisit = useRef<{
+    threadId: string
+    status: string
+    runId?: string | null
+  } | null>(null)
+  useEffect(() => {
+    const readVisibleThread = () => {
+      const thread = query.data
+      if (!active) {
+        readVisit.current = null
+        return
+      }
+      if (!thread || document.visibilityState === "hidden") return
+      const previous = readVisit.current
+      readVisit.current = {
+        threadId,
+        status: thread.status,
+        runId: thread.latestRunId,
+      }
+      const opened = previous?.threadId !== threadId
+      const completed =
+        previous?.status === "running" && thread.status !== "running"
+      if (
+        (opened ||
+          completed ||
+          (Boolean(thread.latestRunId) &&
+            previous?.runId !== thread.latestRunId)) &&
+        thread.status !== "running" &&
+        !thread.viewed
+      ) {
+        setViewed({ threadId, viewed: true })
+      }
+    }
+    readVisibleThread()
+    document.addEventListener("visibilitychange", readVisibleThread)
+    return () =>
+      document.removeEventListener("visibilitychange", readVisibleThread)
+  }, [threadId, query.data, setViewed, active])
 
   const isRunning = query.data?.status === "running"
   const { refetch } = query
@@ -989,6 +1115,15 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
+  })
+}
+
+export function useAgentThreadGoal(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.goal(threadId),
+    queryFn: () => agentsApi.getThreadGoal(threadId),
+    enabled: Boolean(threadId),
+    meta: { invalidatedBy: [invalidationTopic("thread-goals", threadId)] },
   })
 }
 
@@ -1226,9 +1361,17 @@ export function optimisticThread(
      * page picks the SDK stream first and swaps sources on the next refetch.
      */
     recorded?: boolean
+    /** Who started it: the thread's owner, and the sender of its prompt. */
+    owner?: SessionUser | null
+    /** When the prompt was sent, so every placeholder built for it agrees. */
+    sentAt?: number
   } = {}
 ): AgentThread {
-  const now = Date.now()
+  const now = options.sentAt ?? Date.now()
+  const owner = options.owner
+  const senderName = owner
+    ? pendingSenderName([], owner.login, owner.display_name || undefined)
+    : undefined
   const text = vars.prompt.trim()
   const repoFullName = vars.repo ?? ""
   const chunks: Array<Chunk> = [
@@ -1239,10 +1382,12 @@ export function optimisticThread(
     id: vars.client_message_id ?? `optimistic-user-${threadId}`,
     author: "user",
     timestamp: new Date(now).toISOString(),
+    ...(senderName ? { structuredSenderName: senderName } : {}),
     chunks,
   }
   return {
     id: threadId,
+    ...(owner ? { ownerLogin: owner.login } : {}),
     visibility: vars.visibility ?? "public",
     ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",
@@ -1263,7 +1408,7 @@ export function optimisticThread(
     // The thread page reads the transcript from its own source, which starts
     // empty while it hydrates. Carrying the prompt as a pending message keeps
     // it on screen across the handoff; the source drops it again as soon as it
-    // has the message under the same id.
+    // has the message under the same id. Its run has already started.
     pendingMessages:
       chunks.length > 0
         ? [
@@ -1272,7 +1417,7 @@ export function optimisticThread(
               content: text,
               images: vars.images,
               createdAt: now,
-              status: "sending",
+              status: "sent",
             },
           ]
         : [],
@@ -1378,9 +1523,7 @@ export function useMoveThread(
       let destination: ThreadMoveDestination = { target: "cloud" }
       if (to === "local") {
         if (!window.openSweDesktop)
-          throw new Error(
-            "Open this thread in the Open SWE app to move it here"
-          )
+          throw new Error("Open this thread in the Robin app to move it here")
         destination = {
           sandbox_bridge_id: await window.openSweDesktop.takeOverThread({
             threadId: thread.id,
@@ -1448,6 +1591,96 @@ export function usePinAgentThread() {
   })
 }
 
+export function useReorderPinnedThreads() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadIds: Array<string>) =>
+      agentsApi.reorderPinnedThreads(threadIds),
+    meta: { errorTitle: "Couldn't reorder pinned threads" },
+    onMutate: async (threadIds) => ({
+      undo: await optimisticUpdate<Array<AgentThread>>(
+        queryClient,
+        agentThreadKeys.pinned,
+        (threads) => {
+          const positions = new Map(threadIds.map((id, index) => [id, index]))
+          return [...threads].sort(
+            (left, right) =>
+              (positions.get(left.id) ?? threadIds.length) -
+              (positions.get(right.id) ?? threadIds.length)
+          )
+        }
+      ),
+    }),
+    onError: (_error, _vars, context) => context?.undo(),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: agentThreadKeys.pinned }),
+  })
+}
+
+export function useReorderSidebarThreads(scope: {
+  project?: string
+  repo?: string
+  ownerless?: boolean
+}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (threadIds: Array<string>) =>
+      agentsApi.reorderSidebarThreads({ ...scope, thread_ids: threadIds }),
+    meta: { errorTitle: "Couldn't reorder chats" },
+    onMutate: async (threadIds) => {
+      const undo = await Promise.all(
+        queryClient
+          .getQueriesData<InfiniteData<ThreadsPage>>({
+            queryKey: ["agent-threads", "lists", "infinite-pages"],
+            predicate: (query) => {
+              const params = query.queryKey[3] as ThreadsPageParams | undefined
+              return Boolean(
+                params &&
+                params.project === scope.project &&
+                params.repo === scope.repo &&
+                Boolean(params.ownerless) === Boolean(scope.ownerless)
+              )
+            },
+          })
+          .map(([key]) =>
+            optimisticUpdate<InfiniteData<ThreadsPage>>(
+              queryClient,
+              key,
+              (data) => {
+                const positions = new Map(
+                  threadIds.map((id, index) => [id, index])
+                )
+                const items = data.pages
+                  .flatMap((page) => page.items)
+                  .sort(
+                    (a, b) =>
+                      (positions.get(a.id) ?? threadIds.length) -
+                      (positions.get(b.id) ?? threadIds.length)
+                  )
+                let offset = 0
+                return {
+                  ...data,
+                  pages: data.pages.map((page) => {
+                    const next = {
+                      ...page,
+                      items: items.slice(offset, offset + page.items.length),
+                    }
+                    offset += page.items.length
+                    return next
+                  }),
+                }
+              }
+            )
+          )
+      )
+      return { undo: () => undo.forEach((restore) => restore()) }
+    },
+    onError: (_error, _vars, context) => context?.undo(),
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
 export function useRenameAgentThread() {
   const queryClient = useQueryClient()
 
@@ -1501,6 +1734,14 @@ export function useInfiniteThreadsPages(
     queryKey,
     queryFn: ({ pageParam }) =>
       agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    meta: {
+      invalidatedBy: (data) =>
+        taskWorkerTopics(
+          (data as InfiniteData<ThreadsPage> | undefined)?.pages.flatMap(
+            (page) => page.items
+          )
+        ),
+    },
     initialPageParam: 0,
     getNextPageParam: (page) =>
       page.hasMore ? page.offset + page.items.length : undefined,
@@ -1607,7 +1848,12 @@ export function useThreadsPage(
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
-    placeholderData: (prev) => prev,
+    meta: {
+      invalidatedBy: (data) =>
+        options.pollWhileRunning
+          ? taskWorkerTopics((data as ThreadsPage | undefined)?.items)
+          : [],
+    },
     refetchInterval: (query) =>
       options.pollWhileRunning
         ? sidebarRefreshInterval(query.state.data?.items)

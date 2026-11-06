@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 
@@ -35,13 +36,17 @@ export function AgentNoteCard({
         <AgentMark />
         <span className="shrink-0 font-medium text-primary">Note</span>
         {onShow ? (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={location}
             type="button"
             onClick={onShow}
-            className="min-w-0 truncate font-mono text-secondary underline-offset-2 hover:underline"
+            className="h-auto min-w-0 truncate border-0 px-0 font-mono text-secondary underline-offset-2 hover:underline"
           >
-            {location}
-          </button>
+            <span className="min-w-0 truncate">{location}</span>
+          </Button>
         ) : (
           <span className="min-w-0 flex-1 truncate text-secondary">
             Only you see this
@@ -60,6 +65,7 @@ export function AgentNoteCard({
         )}
       </div>
       <div
+        data-reply-part={`Robin's note on ${location}`}
         className={
           closed
             ? "line-clamp-2 px-space-3 pt-space-1 pb-space-2 leading-[1.6] text-secondary"

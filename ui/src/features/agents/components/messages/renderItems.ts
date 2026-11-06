@@ -1,9 +1,14 @@
 import { parseSqlResult } from "../chat/SqlResultTable"
+import { routedMessageHref } from "./timeline/workEntry"
 import {
   parseManagedToolsCard,
   type ManagedToolsCardOffer,
 } from "@/features/agents/lib/managedToolsCard"
-import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type {
+  AnyImageChunk,
+  Chunk,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
 
 export type RenderItem =
   | { type: "text-chunk"; key: string; chunk: Chunk }
@@ -36,8 +41,16 @@ export type RenderItem =
       offer: ManagedToolsCardOffer
     }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
+  /** A tool call that returned images, shown outside the fold so they are seen. */
+  | {
+      type: "image-item"
+      key: string
+      chunk: ToolExecutionChunk
+      images: Array<AnyImageChunk>
+    }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "routed-message-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "worker-launch-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
@@ -46,6 +59,8 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "managed-tools-item",
   "iframe-item",
   "worker-launch-item",
+  "routed-message-item",
+  "image-item",
 ])
 
 /** A run of work that folds behind one row, or a reply shown between such runs. */
@@ -252,6 +267,15 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (routedMessageHref(chunk)) {
+        flushGroups()
+        items.push({
+          type: "routed-message-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
       if (chunk.toolName === "start_async_task") {
         flushGroups()
         items.push({
@@ -267,6 +291,17 @@ export function buildRenderItems(
           type: "iframe-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
+        })
+        continue
+      }
+
+      if (chunk.images?.length) {
+        flushGroups()
+        items.push({
+          type: "image-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+          images: chunk.images,
         })
         continue
       }

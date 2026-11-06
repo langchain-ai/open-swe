@@ -1,37 +1,59 @@
 """The run's tools and models, from its catalog: offered to each model call, run by name.
 
 MDA builds the graph once and shares it between every run of every thread, so the
-graph registers none of the operations a run's catalog names. ``RunToolsMiddleware``
-offers each model call the run's own tools and hands LangGraph's tool node the tool a
-call names; code mode reaches the same tools (``RunCodeInterpreter``). A subagent's
-prompt and model, and the run's limit on model calls, are the run's too.
+graph registers none of the operations a run's catalog names, nor the tools of the
+MCP servers it connects to itself (``rt.mcp``). ``RunToolsMiddleware`` offers each
+model call the run's own tools and hands LangGraph's tool node the tool a call names;
+code mode reaches the same tools (``RunCodeInterpreter``). A subagent's prompt and
+model, and the run's limit on model calls, are the run's too.
 """
 
+import asyncio
+import logging
+import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from functools import partial
 from typing import Final
-from weakref import finalize
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import (
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
+from langchain_quickjs._ptc import (  # noqa: PLC2701 - lists code mode tools in a message
+    filter_tools_for_ptc,
+    is_valid_ptc_tool_name,
+    render_ptc_prompt,
+)
 from langchain_quickjs.middleware import PersistenceMode, REPLState
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from runtime_api.catalog import Catalog, SubagentSpec
+from managed_deepagents.run_resources import on_run_exit
+from runtime_api.catalog import Catalog, SubagentSpec, ToolSpec
 from runtime_api.loop import ModelCall
+from runtime_api.provenance import Provenance
 
-from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
+from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run, harness_message
 from rt.file_tools import FileToolsMiddleware
+from rt.loop import latest_with_id, visible_messages
+from rt.mcp import McpTools
 from rt.models import build_model
-from rt.search_tools import search_tools_tool
-from rt.tools import operation_tool
+from rt.search_tools import resolve_tool, search_tools_tool
+from rt.slack_move import MOVE_TOOL, SlackMoveMiddleware
+from rt.tools import backend_tool, operation_tool, run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
+logger = logging.getLogger(__name__)
 
 _TASK_TOOL: Final = "task"
 _EVAL_TOOL: Final = "eval"
+# Starts the id of the message listing the tools code mode calls.
+_CODE_TOOLS: Final = "code-tools:"
 
 ToolHandler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 ModelHandler = Callable[[ModelRequest], Awaitable[ModelResponse]]
@@ -48,35 +70,27 @@ def subagent_prompt(name: str) -> str:
 
 
 class RunTools:
-    """One run's tools and models, as its catalog names them."""
+    """One run's tools and models, as its catalog names them, and once the run connects to
+    its MCP servers (``connect``), their tools too."""
 
     def __init__(
         self, catalog: Catalog, backend: OpenSweBackend, files: FileToolsMiddleware
     ) -> None:
         self.catalog = catalog
-        operations = [
+        self._backend = backend
+        self._files = files
+        self._operations = [
             operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
             for spec in catalog.operations
         ]
-        searched = (
-            [search_tools_tool(catalog.operations, catalog.search_tools_description)]
-            if catalog.search_tools
-            else []
-        )
-        self.by_name = {tool.name: tool for tool in (*operations, *searched)}
+        # None until the run connects to the MCP servers its catalog names.
+        self._mcp: McpTools | None = None if catalog.mcp_servers else McpTools()
+        self._connecting = asyncio.Lock()
         self.excluded = frozenset(catalog.excluded)
-        # Every schema offered costs each call its context, and OpenAI answers some
-        # requests carrying hundreds with nothing; the tools the model seldom needs are
-        # called from code.
-        code_only = frozenset(catalog.code_only)
-        self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
-        in_code = [tool for tool in operations if tool.name in code_only]
-        self.from_code = [
-            *in_code,
-            *(t for t in operations if t.name in catalog.also_from_code and t not in in_code),
-            *files.code_tools(catalog.also_from_code),
-        ]
-        self.hidden = self.excluded | code_only
+        # Offered to every model call, so the list stays the same from run to run, but
+        # refused when called: this run may not use them.
+        self.disabled = frozenset(catalog.disabled)
+        self._offer(McpTools())
         self.subagents = {subagent.name: subagent for subagent in catalog.subagents}
         models = catalog.models
         self.subagent_model: BaseChatModel | None = (
@@ -84,6 +98,67 @@ class RunTools:
             if models is None
             else build_model(models.subagent_model, use_gateway=models.use_gateway)
         )
+
+    def _offer(self, mcp: McpTools) -> None:
+        """Offer the run's operations and ``mcp``'s tools: to each model call, or from code.
+
+        The backend's ``search_tools`` finds only the tools it serves, so the tools of the
+        MCP servers the run connects to itself are offered to each model call.
+        """
+        catalog = self.catalog
+        tools = [*self._operations, *mcp.tools]
+        searched = (
+            [search_tools_tool(self._backend, catalog.search_tools_description)]
+            if catalog.search_tools
+            else []
+        )
+        self.by_name = {tool.name: tool for tool in (*tools, *searched)}
+        # Every schema offered costs each call its context, and OpenAI answers some
+        # requests carrying hundreds with nothing; the tools the model seldom needs are
+        # called from code. A run with code mode calls its MCP servers' tools from code
+        # too, so the tools offered to the model are the same whoever's servers they are.
+        code_only = frozenset(catalog.code_only) | (
+            {tool.name for tool in mcp.tools if is_valid_ptc_tool_name(tool.name)}
+            if catalog.code_only
+            else frozenset()
+        )
+        self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
+        in_code = [tool for tool in tools if tool.name in code_only - self.disabled]
+        # A move from code goes through MDA too, as the model's own call of it does.
+        moves = SlackMoveMiddleware(self._backend)
+        self.from_code = [
+            moves.code_tool(tool) if tool.name == MOVE_TOOL else tool
+            for tool in [
+                *in_code,
+                *(
+                    t
+                    for t in tools
+                    if t.name in catalog.also_from_code
+                    and t.name not in self.disabled
+                    and t not in in_code
+                ),
+            ]
+        ] + self._files.code_tools(catalog.also_from_code)
+        self.hidden = self.excluded | code_only
+
+    async def connect(self) -> None:
+        """Load the tools of the MCP servers the run connects to itself, once for the run.
+
+        A person who has not granted a server's connection is asked to, and the call that
+        connects waits on them.
+        """
+        if self._mcp is not None:
+            return
+        async with self._connecting:
+            if self._mcp is not None:
+                return
+            self._mcp = await McpTools.load(
+                self.catalog.mcp_servers,
+                self._backend,
+                taken=self.by_name.keys(),
+                cites_evidence=self.catalog.incident_evidence,
+            )
+            self._offer(self._mcp)
 
     def subagent_tools(self, subagent: SubagentSpec) -> list[BaseTool]:
         """What ``subagent`` may call of the run's tools: all it is offered, or those it names."""
@@ -102,10 +177,54 @@ class RunToolsets:
 
     def get(self, run: Run | None = None) -> RunTools:
         run = run if run is not None else self._backend.run
+        if run.catalog.needs_tool_specs:
+            raise RuntimeError("The run has yet to read its tool specs")
         held = self._runs.get(run)
         if not held or held[0].catalog is not run.catalog:
             held[:] = [RunTools(run.catalog, self._backend, self._files)]
         return held[0]
+
+    async def ready(self) -> RunTools:
+        """The run's tools, once it has read their specs: a run picked up from its
+        checkpoint in another process reads them here, past the hook that reads them."""
+        run = self._backend.run
+        await run.load_tool_specs(run_id())
+        return self.get(run)
+
+    async def load(self) -> RunTools:
+        """The run's tools once it has read their specs, with the tools of the MCP servers
+        it connects to itself."""
+        tools = await self.ready()
+        await tools.connect()
+        return tools
+
+
+class BackendTools:
+    """The tools the run calls that its catalog leaves out, as the backend resolves them.
+
+    Code mode resolves a name it has no tool for from the REPL's own thread, outside
+    any run, so the tool it gets is the same for every run and finds its run when called;
+    a call by name the run's tools don't have gets the same tool.
+    """
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+        self._tools: dict[str, BaseTool] = {}
+
+    def tool(self, name: str) -> BaseTool:
+        """The tool called as ``name``, whichever run calls it."""
+        if name not in self._tools:
+            self._tools[name] = backend_tool(name, self._backend, self.resolve)
+        return self._tools[name]
+
+    async def resolve(self, name: str) -> ToolSpec | None:
+        """The tool the calling run calls as ``name``, resolved once per run."""
+        run = current_run()
+        if not run.catalog.search_tools:
+            return None
+        if name not in run.backend_tools:
+            run.backend_tools[name] = await resolve_tool(self._backend, name)
+        return run.backend_tools[name]
 
 
 class RunToolsMiddleware(AgentMiddleware):
@@ -114,18 +233,36 @@ class RunToolsMiddleware(AgentMiddleware):
     The backend's tools act on its sandbox, so they stay offered even where MDA's
     filesystem middleware drops one it cannot back itself, such as ``execute``. Hidden
     tools still run when called by name, as in-process; the backend names the ones its
-    middleware hides from each call. ``subagent`` names the subagent this middleware
-    serves; the agent itself otherwise.
+    middleware hides from each call. The run connects to its MCP servers before its
+    first model call, or at a call of one of their tools that a resumed run makes first.
+    ``subagent`` names the subagent this middleware serves; the agent itself otherwise.
+    A call by a name the run's tools don't have goes to ``backend_tools``, for a tool
+    the catalog leaves out.
     """
 
-    def __init__(self, toolsets: RunToolsets, *, subagent: str | None = None) -> None:
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
+    def __init__(
+        self,
+        toolsets: RunToolsets,
+        *,
+        subagent: str | None = None,
+        backend_tools: BackendTools | None = None,
+    ) -> None:
         self._toolsets = toolsets
         self._subagent = subagent
+        self._backend_tools = backend_tools
         # The ``task`` tool as each run describes its subagents, by the description.
         self._task_tools = RunLocal[dict[tuple[int, str], BaseTool]](dict)
 
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> None:  # noqa: ARG002
+        # In a node of its own: a person asked to grant a connection resumes this node
+        # alone, not the model call, whose outer wrappers, such as summarization, would
+        # do their work again.
+        await self._toolsets.load()
+
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = self._toolsets.get()
+        tools = await self._toolsets.load()
         if self._subagent is None:
             hidden = tools.hidden
             own = tools.offered
@@ -163,8 +300,29 @@ class RunToolsMiddleware(AgentMiddleware):
     async def awrap_tool_call(
         self, request: ToolCallRequest, handler: ToolHandler
     ) -> ToolMessage | Command:
+        name = request.tool_call["name"]
+        tools = await self._toolsets.ready()
+        if name in tools.disabled:
+            return ToolMessage(
+                content=f"Error: `{name}` is not available in this run.",
+                tool_call_id=request.tool_call["id"],
+                name=name,
+                status="error",
+            )
         if request.tool is None:
-            tool = self._toolsets.get().by_name.get(request.tool_call["name"])
+            tool = tools.by_name.get(name)
+            if tool is None and tools.catalog.mcp_servers:
+                # A resumed run's call of an MCP server's tool, before any model call.
+                tool = (await self._toolsets.load()).by_name.get(name)
+            # Only a name the backend knows: any other gets the tool node's own answer
+            # for a tool that is not there, which the run recovers from.
+            if (
+                tool is None
+                and self._backend_tools is not None
+                and tools.catalog.search_tools
+                and await self._backend_tools.resolve(name) is not None
+            ):
+                tool = self._backend_tools.tool(name)
             if tool is not None:
                 request = request.override(tool=tool)
         return await handler(request)
@@ -173,12 +331,14 @@ class RunToolsMiddleware(AgentMiddleware):
 class RunSubagentMiddleware(AgentMiddleware):
     """Give subagent ``name`` the system prompt and model the run's catalog gives it."""
 
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, toolsets: RunToolsets, name: str) -> None:
         self._toolsets = toolsets
         self._name = name
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = self._toolsets.get()
+        tools = await self._toolsets.ready()
         spec = tools.subagents.get(self._name)
         if spec is not None and request.system_message is not None:
             text = request.system_message.text.replace(
@@ -194,8 +354,13 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     """Code mode over the run's tools: the graph's own it names, and those the run offers from code.
 
     ``active`` says whether a run has code mode at all; one without it is offered no
-    ``eval`` and pays nothing for the interpreter.
+    ``eval`` and pays nothing for the interpreter. With ``listed_in_messages`` the tools
+    code mode calls are listed in a message added whenever they change, not in the system
+    prompt: they differ from person to person and from run to run, and a changed system
+    prompt misses the provider's cache for everything after it.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(
         self,
@@ -205,39 +370,44 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         active: Callable[[RunTools], bool] = lambda _tools: True,
         subagents: bool = True,
         mode: PersistenceMode | None = None,
+        backend_tools: BackendTools | None = None,
+        listed_in_messages: bool = False,
     ) -> None:
         self._toolsets = toolsets
         self._named = list(named)
         self._active = active
-        self._prompts = RunLocal[list[tuple[frozenset[str], str] | None]](lambda: [None])
-        self._slots = RunLocal[set[str]](set)
-        super().__init__(ptc=[], subagents=subagents, mode=mode)
+        self._listed_in_messages = listed_in_messages
+        self._slots: dict[str, asyncio.Lock] = {}
+        super().__init__(
+            ptc=[],
+            subagents=subagents,
+            mode=mode,
+            resolve_tool=None if backend_tools is None else backend_tools.tool,
+        )
 
-    @property
-    def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
-        return self._prompts.get(current_run())[0]
-
-    @_ptc_prompt_cache.setter
-    def _ptc_prompt_cache(self, value: tuple[frozenset[str], str] | None) -> None:
-        if value is not None:
-            self._prompts.get(current_run())[0] = value
+    def __del__(self) -> None:
+        """The invocation owns cleanup; transient middleware copies share the registry."""
 
     def _slot_id(self, state: Mapping[str, object]) -> str:
         slot_id = super()._slot_id(state)
-        run = current_run()
-        slots = self._slots.get(run)
-        if slot_id not in slots:
-            slots.add(slot_id)
-            finalize(run, self._evict, slot_id)
+        if slot_id not in self._slots:
+            on_run_exit(partial(self._close_slot, slot_id))
+            self._slots[slot_id] = asyncio.Lock()
         return slot_id
 
-    def _evict(self, slot_id: str) -> None:
-        self._ptc_tools_by_slot.pop(slot_id, None)
-        self._registry.evict(slot_id)
+    async def _close_slot(self, slot_id: str) -> None:
+        async with self._slots[slot_id]:
+            try:
+                await self._registry.aevict(slot_id)
+            finally:
+                self._ptc_tools_by_slot.pop(slot_id, None)
+                self._ptc_prompt_by_slot.pop(slot_id, None)
+                self._slots.pop(slot_id, None)
 
     @property
     def _ptc(self) -> list[str | BaseTool]:
         try:
+            # Read only once a hook made sure the run has its tool specs.
             tools = self._toolsets.get()
         except BackendCallError, RuntimeError:
             # Outside a run, such as at build: only the graph's own.
@@ -248,11 +418,11 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     def _ptc(self, _ptc: object) -> None:
         """The interpreter sets its tools once; these are each run's."""
 
-    def _runs_code(self) -> bool:
-        return self._active(self._toolsets.get())
+    async def _runs_code(self) -> bool:
+        return self._active(await self._toolsets.ready())
 
     async def abefore_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
-        if not self._runs_code():
+        if not await self._runs_code():
             return None
         update = self._slot_update_for_runtime()
         prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
@@ -260,20 +430,125 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         restored = await super().abefore_agent(prepared, runtime)
         return {**update, **(restored or {})} or None
 
+    async def abefore_model(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        if not self._listed_in_messages or not await self._runs_code():
+            return None
+        listing = self._listing()
+        if not listing or listing == latest_with_id(visible_messages(state), _CODE_TOOLS):
+            return None
+        message = harness_message(
+            listing,
+            message_id=f"{_CODE_TOOLS}{uuid.uuid4()}",
+            source="code_tools",
+            provenance=Provenance(kind="context", sender="run:code-tools"),
+        )
+        return {"messages": [message]}
+
+    def _listing(self) -> str:
+        """The tools code mode calls, as the message that lists them."""
+        exposed = filter_tools_for_ptc([], self._ptc, self_tool_name=self._tool_name)
+        reference = render_ptc_prompt(exposed, tool_name=self._tool_name).strip()
+        if not reference:
+            return ""
+        body = reference.replace("]]>", "]]]]><![CDATA[>")
+        return (
+            f'<dynamic-context kind="run" id="code-tools"><![CDATA[\n{body}\n]]></dynamic-context>'
+        )
+
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        if not self._runs_code():
+        if not await self._runs_code():
             tools = [tool for tool in request.tools if getattr(tool, "name", None) != _EVAL_TOOL]
             return await handler(request.override(tools=tools))
-        return await super().awrap_model_call(request, handler)
+        if not self._listed_in_messages:
+            return await super().awrap_model_call(request, handler)
+        prompt = self._prepare_for_call(request)
+        listed = self._ptc_prompt_by_slot.get(self._slot_id(request.state))
+        if listed is not None:
+            prompt = prompt.removesuffix(listed[1]).replace(
+                "documented in the API reference below.",
+                'listed in the latest `<dynamic-context kind="run" id="code-tools">` message.',
+            )
+        return await handler(
+            request.override(system_message=self._extend(request.system_message, prompt))
+        )
+
+    @staticmethod
+    def _cancelled(error: BaseException) -> bool:
+        pending = [error]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            if isinstance(current, asyncio.CancelledError):
+                return True
+            if isinstance(current, BaseExceptionGroup):
+                pending.extend(current.exceptions)
+            for cause in (current.__cause__, current.__context__):
+                if cause is not None:
+                    pending.append(cause)
+        return False
+
+    async def awrap_tool_call(
+        self, request: ToolCallRequest, handler: ToolHandler
+    ) -> ToolMessage | Command:
+        if not await self._runs_code():
+            return await handler(request)
+        if request.tool_call["name"] != _EVAL_TOOL:
+            return await handler(request)
+        slot_id = self._slot_id(request.state)
+        async with self._slots[slot_id]:
+            try:
+                return await handler(request)
+            except ValueError as exc:
+                task = asyncio.current_task()
+                if (task is not None and task.cancelling()) or self._cancelled(exc):
+                    raise asyncio.CancelledError() from exc
+                repl = self._registry.get_if_exists(slot_id)
+                if repl is None or not repl.is_closed:
+                    raise
+                logger.warning("QuickJS slot closed during eval", exc_info=True)
+            await self._registry.aevict(slot_id)
+            return ToolMessage(
+                content=self._closed_eval_message(request.state),
+                tool_call_id=request.tool_call["id"],
+                name=_EVAL_TOOL,
+                status="error",
+            )
+
+    def _closed_eval_message(self, state: Mapping[str, object]) -> str:
+        """Tell the model what its next eval starts from after the interpreter closed."""
+        if self._snapshot_for_eval(state) is None:
+            starts = (
+                "Your next eval starts a new interpreter with empty JavaScript state: "
+                "every variable from before the crash is lost."
+            )
+        else:
+            starts = (
+                "Your next eval starts a new interpreter that first tries to restore the "
+                "JavaScript state saved at the end of an earlier run, rolling back every "
+                "variable defined or changed since that save, including in this run. "
+                "If that restore fails, that eval says so and does not run its code."
+            )
+        return (
+            f"Error: the code interpreter closed during eval. {starts} The code may have "
+            "partially executed, and host-tool calls are not retried: external actions may "
+            "already have happened, so verify their effects before repeating any of them."
+        )
 
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
-        if not self._runs_code():
+        if not await self._runs_code():
             return None
-        return await super().aafter_agent(state, runtime)
+        slot_id = self._slot_id(state)
+        async with self._slots[slot_id]:
+            return await super().aafter_agent(state, runtime)
 
 
 class RunModelCallLimit(ModelCallLimitMiddleware):
     """End a run at its catalog's limit on model calls, or at ``default`` for a catalog without one."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend, default: int) -> None:
         self._run_backend = backend

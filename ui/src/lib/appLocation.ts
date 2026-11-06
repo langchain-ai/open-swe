@@ -5,6 +5,7 @@ const SECTION_STORAGE_PREFIX = "open-swe:last-section-location:"
 const FALLBACK_LOCATION = "/agents"
 
 export const SECTION_ROOTS = [
+  "/agents/chat",
   "/agents/skills",
   "/agents/automations",
   "/agents/bots",
@@ -12,7 +13,12 @@ export const SECTION_ROOTS = [
   "/incidents",
 ] as const
 
-export type SectionRoot = (typeof SECTION_ROOTS)[number]
+/** A built-in section, or one installed plugin's page. */
+export type SectionRoot =
+  | (typeof SECTION_ROOTS)[number]
+  | `/agents/plugins/${string}`
+
+const PLUGIN_SECTION = /^\/agents\/plugins\/[^/]+/
 
 function isUnder(root: string, pathname: string | undefined): boolean {
   return pathname === root || Boolean(pathname?.startsWith(`${root}/`))
@@ -30,6 +36,8 @@ function isAppLocation(value: string): boolean {
 }
 
 export function sectionOf(pathname: string): SectionRoot | undefined {
+  const plugin = PLUGIN_SECTION.exec(pathname)?.[0]
+  if (plugin) return plugin as SectionRoot
   return SECTION_ROOTS.find((root) => isUnder(root, pathname))
 }
 

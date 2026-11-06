@@ -56,13 +56,18 @@ export function RightPanelShell(props: {
   widthStorageKey?: string
   /** Overrides the initial width (px) before the user has resized the panel. */
   defaultWidth?: number
+  /** Kept mounted out of sight, such as a collapsed panel whose app still runs. */
+  hidden?: boolean
   children: ReactNode
 }) {
   const isInline = props.mode === "inline"
   const hostRef = useRef<HTMLDivElement | null>(null)
-  // Only inline non-maximized mode applies `width`/`maxWidth`; skip the
-  // container measurement (and its re-renders) everywhere else.
-  const maxWidth = useClampedMaxWidth(hostRef, isInline && !props.maximized)
+  // Only a shown inline non-maximized panel applies `width`/`maxWidth`; skip
+  // the container measurement (and its re-renders) everywhere else.
+  const maxWidth = useClampedMaxWidth(
+    hostRef,
+    isInline && !props.maximized && !props.hidden
+  )
   const { width, handlers } = useResizableWidth({
     storageKey: props.widthStorageKey ?? RIGHT_PANEL_WIDTH_STORAGE_KEY,
     defaultWidth: props.defaultWidth ?? RIGHT_PANEL_DEFAULT_WIDTH,
@@ -80,7 +85,8 @@ export function RightPanelShell(props: {
           ? props.maximized
             ? "flex-1 border-l border-default"
             : "shrink-0 border-l border-default"
-          : "w-full"
+          : "w-full",
+        props.hidden && "hidden"
       )}
       style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
       data-right-panel-mode={props.mode}

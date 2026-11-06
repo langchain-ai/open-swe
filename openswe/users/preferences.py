@@ -1,6 +1,37 @@
 """Per-person preferences stored on the ``users`` row."""
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from openswe.users.models import User
+
+
+class KitchenChannelPreference(BaseModel):
+    personal_kitchen_channel_id: str | None = None
+
+    @field_validator("personal_kitchen_channel_id")
+    @classmethod
+    def normalize_channel(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return value.strip() if value is not None else None
+        channel_id = value.strip().upper()
+        if re.fullmatch(r"[CG][A-Z0-9]{8,}", channel_id) is None:
+            raise ValueError("Choose a Slack channel ID")
+        return channel_id
+
+    async def validate_channel(self, user: User) -> None:
+        from openswe.slack.channels import SlackChannel
+
+        if not self.personal_kitchen_channel_id:
+            return
+        if not user.slack_user_id:
+            raise ValueError("Link your Slack account before choosing a personal kitchen channel")
+        channel = await SlackChannel.load(self.personal_kitchen_channel_id, use_cache=False)
+        if channel is None or not channel.can_be_kitchen:
+            raise ValueError("Choose an internal Slack channel that Open SWE has joined")
 
 
 class UserPreferences(BaseModel):
@@ -8,22 +39,31 @@ class UserPreferences(BaseModel):
 
     # The person's Slack DM with the bot is one conversation instead of a thread per message.
     concierge_mode: bool = False
-    pr_review_links: bool = False
+    personal_kitchen_channel_id: str = ""
     pr_failure_reactions: bool = False
-    # Ask this person before Open SWE opens a PR as them in a shared thread.
-    experimental_act_as_approval: bool = False
-    # Open SWE acts as this person in shared threads without asking first.
-    act_as_always_allowed: bool = False
+    # Stay silent until blocked on this person or a reviewed, green PR with a walkthrough is ready.
+    goal_mode: bool = False
+    experimental_conditional_approval: bool = False
+    # Threads this person starts carry what their workspace's curator learned, and the
+    # workspace memories they saved in their private threads reach their own runs there
+    # until the curator processes them.
+    experimental_memory: bool = False
+    # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
+    experimental_classify: bool = False
 
 
-class UserPreferencesPatch(BaseModel):
+class UserPreferencesPatch(KitchenChannelPreference):
     concierge_mode: bool | None = None
-    pr_review_links: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     pr_failure_reactions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    # A consent control, so never agent-manageable.
-    experimental_act_as_approval: bool | None = None
-    act_as_always_allowed: bool | None = None
+    goal_mode: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    experimental_conditional_approval: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_memory: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_classify: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )

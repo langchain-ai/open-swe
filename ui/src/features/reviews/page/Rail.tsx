@@ -15,6 +15,7 @@ import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
@@ -124,7 +125,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
       ? "Why are the checks failing, and what would fix them?"
       : null,
     bugs > 0
-      ? "Which of Open SWE's findings matter most, and are any false alarms?"
+      ? "Which of Robin's findings matter most, and are any false alarms?"
       : null,
     open > 0
       ? "Summarize the unresolved review comments and what each one asks for."
@@ -145,13 +146,17 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
       <ul className="mt-space-3 flex flex-col gap-space-2">
         {starters.slice(0, 4).map((text) => (
           <li key={text}>
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={text}
               type="button"
               onClick={() => askInChat(text)}
-              className="w-full rounded-lg border border-default px-space-3 py-space-2 text-left text-xs text-primary transition-colors hover:border-strong hover:bg-surface-level-1-hover"
+              className="h-auto w-full justify-start rounded-lg border border-default px-space-3 py-space-2 text-left whitespace-normal text-primary hover:border-strong hover:bg-surface-level-1-hover"
             >
               {text}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>
@@ -168,6 +173,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   const clearExcerpts = useReviewPage((state) => state.clearChatExcerpts)
   const question = useReviewPage((state) => state.chatQuestion)
   const clearQuestion = useReviewPage((state) => state.clearChatQuestion)
+  const reply = useReviewPage((state) => state.chatReplies[0])
+  const takeReply = useReviewPage((state) => state.takeChatReply)
   const actions = useMemo(
     () => ({
       owner: pr.owner,
@@ -180,12 +187,13 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
           line: range.endLine,
           side: range.side,
         }),
-      emptyState: <ChatStarters pr={pr} />,
       excerpts,
       removeExcerpt,
       clearExcerpts,
       question,
       clearQuestion,
+      reply,
+      takeReply,
     }),
     [
       pr,
@@ -195,8 +203,11 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       clearExcerpts,
       question,
       clearQuestion,
+      reply,
+      takeReply,
     ]
   )
+  const embedded = { emptyState: <ChatStarters pr={pr} /> }
   if (meta.isPending)
     return (
       <div className="flex h-full flex-col justify-end gap-space-3 p-space-4">
@@ -213,13 +224,15 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
     )
   return (
     <ReviewChatActionsContext.Provider value={actions}>
-      <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
-        <AgentThreadPage
-          threadId={meta.data.thread_id}
-          composerDraft={chatDraft}
-          ownsTitle={false}
-        />
-      </div>
+      <EmbeddedThreadContext.Provider value={embedded}>
+        <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
+          <AgentThreadPage
+            threadId={meta.data.thread_id}
+            composerDraft={chatDraft}
+            ownsTitle={false}
+          />
+        </div>
+      </EmbeddedThreadContext.Provider>
     </ReviewChatActionsContext.Provider>
   )
 }

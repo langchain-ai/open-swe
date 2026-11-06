@@ -329,6 +329,7 @@ runtime
     .provider       // Provider label, such as slack
     .event          // Typed MDA delivery; no internal routing
     .raw_event      // Optional original provider payload
+    .target         // The provider conversation, typed per provider
     .post(...)      // Present when sending is supported
   .backend          // Present when a sandbox is configured
   .schedules        // Create and manage schedules for this run's caller
@@ -380,8 +381,22 @@ when a message arrives. They hold routing and principal IDs only, never message
 content. Only managed ingress can write them.
 
 The channel facts are available even when the channel cannot send. `post` uses
-a private, verified reply target. The channel helper does not expose the target
-or let callers replace it.
+a private, verified reply target, which callers can't replace. `target` is
+where the channel posts: the conversation that `post` and the run's answers go
+to. It is on `origin.channel` because a channel thread answers where it came
+from, so `target` names the origin conversation, in every run of the thread,
+typed by `provider`:
+
+- `SlackChannelTarget`: `conversation_id` (Slack's `channel`) and `thread_ts`
+  (Slack's `thread_ts`).
+- `GitHubChannelTarget`: `repository` (`owner/name`) and the issue or pull
+  request `number`.
+- `LinearChannelTarget`: `organization_id`, `issue_id`, and `identifier`,
+  `comment_id` or `session_id` when the conversation has one.
+
+In a scheduled run that starts a new thread, `post` posts at top level, so
+`target` has no `thread_ts`, `comment_id` or `session_id`. `target` is `None` for
+a channel without a typed target, such as `channels.http()`.
 
 ```python
 origin = runtime.thread.origin
@@ -413,6 +428,30 @@ posted = await origin.channel.post(
     run={"messages": [*history, HumanMessage("Go on.")]},
 )
 ```
+
+To move the conversation instead, pass `hand_off=True`. The new Slack thread
+takes the current run's thread, with its history: replies, Stop and decision
+buttons there reach it, and `thread_id` is the current thread's. The rest of
+the run answers, and waits on decisions, in the new Slack thread too, and
+`origin` is the new Slack thread's conversation from then on. MDA posts "This
+conversation moved to a new thread", with a link to it, in the old Slack thread.
+A later message there starts no run: MDA answers that the conversation moved,
+unless the channel's handler replies first. Only a channel conversation's run
+can hand off its thread, and not together with `run=`:
+
+```python
+await origin.channel.post(
+    {"type": "content", "content": "Moved here from the old thread."},
+    new_thread=True,
+    hand_off=True,
+)
+```
+
+Pass `to=` to start the new thread in another conversation of the same
+channel, such as another Slack channel the app is in: a `ChannelTarget` of the
+origin's provider with no thread, for example
+`SlackChannelTarget(conversation_id="C0123456789")`. It works with `run=` and
+with `hand_off=True`.
 
 When a run with a thread origin ends, MDA posts the run's answers to that
 origin. A Studio resume of a channel thread answers in the channel, and the
@@ -469,6 +508,17 @@ exact issuer and fetches its public `/.well-known/jwks.json`; it does not trust
 an issuer supplied by an incoming token. LangSmith must have signing keys
 configured, and the agent must be able to reach that public-key endpoint.
 
+### Setting up channels on deploy
+
+`mda deploy` sets up the agent's Slack, GitHub and Linear channels. A channel
+already set up on the deployment is set up again before the new revision is
+uploaded, so a setup that fails stops the deploy before anything changes. A new
+channel, and every channel on a first deploy, is set up once the new revision
+is live. A deploy that sets up a new channel, such as the first one, can't use
+`--no-wait`; once the channels are set up, later deploys can. To check the
+channels, or finish setting them up, without deploying, run
+`mda channels setup`.
+
 ## Tool and middleware runtime types
 
 Python requires 3.11 or later and includes Deep Agents, LangChain, and LangGraph.
@@ -484,8 +534,21 @@ fields and your declared context type.
 ## Slack channels
 
 `channels.slack(...)` receives Slack messages through Trigger Server. Each
-Slack thread is one conversation, and the run's reply is posted in it. By
-default every message that reaches the app starts a run with the message.
+Slack thread is one conversation, and the run's reply is posted in it.
+`trigger_mode` decides which channel messages reach the app; direct messages
+always do:
+
+- `"mention"`: only messages that @-mention the agent. New Slack apps use this.
+- `"thread"`: one @-mention, then every later reply in that thread, so people
+  mention the agent once.
+- `"all"`: every message in the channels the agent is in.
+
+When `trigger_mode` is unset, a deployed agent keeps its current mode, except
+that an agent that drops `"all"` moves to `"mention"`. Redeploying with a new
+mode updates the existing Slack app. `trigger_on_all_messages` is deprecated;
+`True` is `trigger_mode="all"`.
+
+By default every message that reaches the app starts a run with the message.
 `on_event` decides what each kind of message starts instead:
 
 ```python
@@ -494,17 +557,17 @@ from managed_deepagents import SlackChannelThread, SlackMessageEvent, channels
 
 
 def on_mention(event: SlackMessageEvent, thread: SlackChannelThread):
-    return (
-        event.text,
+    return [
         {
+            "input": event.text,
             "context": {"ticket": thread.id},
             "metadata": {"slack_channel": event.channel_id},
-        },
-    )
+        }
+    ]
 
 
 channel = channels.slack(
-    name="Support Bot",
+    app={"name": "Support Bot"},
     trigger_mode="thread",
     on_event={
         "mention": on_mention,
@@ -515,6 +578,15 @@ channel = channels.slack(
     multitask_strategy="enqueue",
 )
 ```
+
+`app` is the Slack app deploy sets up, as `channels.github` and
+`channels.linear` take theirs: its `name`, `description`, `icon` (a path
+relative to `channels/`) and `background_color`. Passing them to
+`channels.slack(...)` directly still works but is deprecated and will be
+removed in 0.12, and can't be combined with `app`. `ignore_bots` (default
+`True`, as on `channels.linear`) ignores other bots' messages; with `False`, a
+bot must still @-mention the agent. `allow_bot_triggers` is its deprecated
+opposite, also removed in 0.12.
 
 The keys are `"mention"`, a channel message that @-mentions the app;
 `"directMessage"`; and `"message"`, any other channel message, which only
@@ -532,14 +604,22 @@ thread's mention, the thread's later replies start nothing until someone
 mentions the agent there again.
 
 A handler gets the `SlackMessageEvent` (`text`, `user_id`, `channel_id`,
-`message_ts`, `thread_ts`, `files`, Slack's own event as `payload`, and
-`actor`) and its `SlackChannelThread` (`id`, `source_thread_key`,
-`channel.name`). It
-returns the run's input, as `agent.invoke` takes it, optionally with
-`context`, `metadata` and `webhook` as `(input, options)`, as the GitHub and
-Linear handlers do. `None` starts no run, and the app neither reacts nor
-replies. A handler that raises, or returns input the channel can't start,
-starts no run either; the error is logged without its message. The message's
+`message_ts`, `thread_ts`, `files`, Slack's own event as `payload`, `actor`,
+and `team_id`, the workspace your app is installed in) and its
+`SlackChannelThread` (`id`, `source_thread_key`, `channel.name`). `await
+thread.get_state()` reads the thread's state as Agent Server's
+`threads.get_state` does (its `values`, such as `messages`, as its last run left
+them, `next`, `tasks` and `interrupts`), or `None` before any run. It
+returns the run's input, as `agent.invoke` takes it, or, to also set run
+options such as `context`, `metadata` or `webhook`, a list of runs, as
+`[{"input": ..., "context": ...}]`, as the GitHub and Linear handlers do.
+`None` starts no run, and the app neither reacts nor replies. Trigger Server
+gets its answer before MDA asks the handler, so a slow handler never times out
+the delivery. A handler that raises, or returns input the channel can't start,
+starts no run either; the error is logged without its message. To try a failing
+call again, retry it inside the handler with the backoff you choose; a delivery
+whose handler is still running or waiting when the deployment restarts is lost.
+The message's
 blocks and attachments are added to the handler's messages, and its files
 still reach `/workspace/attachments/`. Interrupt resumes don't go through
 `on_event`; a click on a button the agent posted does, as `"interaction"`: see
@@ -564,17 +644,88 @@ after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
 
+A handler may also choose each run's thread, strategy and `auto_post`, as on
+GitHub, Linear and HTTP channels: its list may hold several runs, at most one
+on the Slack thread's own conversation:
+
+```python
+def on_message(event: SlackMessageEvent, thread: SlackChannelThread):
+    if event.text.startswith("<@"):
+        return event.text  # a mention interrupts, as the channel says
+    if channel_session_id is not None:
+        # One session for the whole channel: every Slack thread's message waits its turn.
+        return [
+            {
+                "input": event.text,
+                "thread": {"mode": "persistent", "id": channel_session_id},
+                "multitask_strategy": "enqueue",
+                "auto_post": True,
+            }
+        ]
+    return [{"input": event.text, "multitask_strategy": "enqueue"}]  # waits behind the running run
+```
+
+A run on a thread of the handler's choosing shows its status, reaction and
+decisions in the Slack thread its message came from, and posts its answer
+there only with `"auto_post": True`, or a `SlackChannelTarget` naming that
+Slack thread, such as a run's `channel.target` passed back. A run on the Slack
+thread's own conversation (without `thread`, or on a persistent thread with
+`thread.id`) posts as the channel's `auto_post` says, unless its own
+`auto_post` says otherwise. Stop in that Slack thread cancels the runs its
+messages started, on the conversation and on the handler's threads; another
+Slack thread's run on a shared thread goes on. A decision a run there waits on
+is answered from the Slack thread that started the run. Every thread a
+channel's handlers choose is owned by the channel, not by one Slack thread.
+An ephemeral thread is deleted once its run ends, unless it waits on a decision.
+
+An `edit`, `delete` or `reaction` handler takes what happened to a message: a
+`SlackActivityEvent` with `message_ts`, `thread_ts`, the message's `text` (as
+edited, as it was before it was deleted, or as reacted to), `user_id` (the
+author for an edit or deletion, the person who reacted for a reaction),
+`reaction` and `removed`, and Slack's event as `payload`. It starts only the
+run it returns:
+
+```python
+def on_reaction(event: SlackActivityEvent, thread: SlackChannelThread):
+    if event.reaction == "thumbsup" and not event.removed:
+        return [{"input": f"<@{event.user_id}> liked: {event.text}", "multitask_strategy": "enqueue"}]
+    return None
+
+
+channel = channels.slack(on_event={"mention": on_mention, "reaction": on_reaction})
+```
+
+The channel asks Trigger Server for these events only when it has a handler for
+their key, which needs an `mda` CLI that sends `forwardedEvents`. Trigger Server
+forwards one only for a thread the channel already took a message from, unless
+the channel takes every message (`trigger_mode="all"`) or it is in a direct
+message, and never your agent's own edits or reactions. Reactions need the Slack
+app's `reactions:read` scope: a LangSmith-managed app gets it at the next
+deploy, after a reinstall the workspace may have to approve; a customer-owned
+app's manifest has to add it.
+
+A `shortcut` handler takes one of your Slack app's message shortcuts, used on a
+message: `action_id` is the shortcut's `callback_id`, `user_id` the person who used it,
+and `payload` Slack's interaction payload, with its `response_url` to answer
+them. Trigger Server forwards it wherever a person used it, as a mention. Your
+app defines its shortcuts in its own settings; it needs the `commands` scope.
+
+A `channel` handler takes a change to a channel itself: created, renamed,
+archived, unarchived or deleted (`type` is Slack's event, `group_*` for a private
+channel), with `channel_id` and `team_id`. It names no message or thread.
+
 `event.actor` is the Slack user who sent the message, as Trigger Server read
 it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
 `team_id` is their own workspace: in a Slack Connect channel, someone from
 another organization keeps theirs. It is `None` rather than guessed when
 Trigger Server names no one, such as an older Trigger Server or a bot's
-message.
+message, or when the check below fails.
 
-> **Not yet an identity check.** Trigger Server sends `actor` as a plain
-> field of the delivery, and MDA doesn't yet verify the key that delivery
-> comes with, only that it has one. Use `actor` to address or describe the
-> sender, not to decide what they may do or which of your accounts they are.
+> **Checked against the signed principal.** Trigger Server sends `actor` as
+> a plain field of the delivery. MDA asks Agent Auth for this user's principal
+> in the app's workspace and keeps `actor` only when it matches the principal
+> Agent Auth signed for the delivery. `id` is checked this way. A Slack Connect
+> guest's own team is not.
 
 Every channel's events carry `actor` in this shape, a `ChannelActor`
 (`SlackActor`, `GitHubActor` or `LinearActor`): `provider` and `id`, plus the
@@ -672,16 +823,17 @@ step not yet done, as the thread's status. Without `status`, nothing changes.
 ### Replying from the agent
 
 The channel posts the agent's last reply in the thread once a run succeeds.
-`reply="none"` leaves replying to the agent instead, for an agent that posts
+`auto_post=False` leaves replying to the agent instead, for an agent that posts
 its own messages, with `runtime.channel.post` or its own Slack client, or
 that answers somewhere else:
 
 ```python
-channels.slack(reply="none")
+channels.slack(auto_post=False)
 ```
 
-Reactions, the status, Stop and `onFinish` work as before. `channels.linear`
-and `channels.http` take the same option. Deploying `reply="none"` needs an
+Reactions, the status, Stop and `on_finish` work as before. `channels.linear`
+and `channels.http` take the same option. `reply="none"` still works, with a
+deprecation warning; setting both raises. Deploying `auto_post=False` needs an
 `mda` CLI from this release; an older one refuses it.
 
 ### Buttons your agent posts
@@ -690,9 +842,7 @@ and `channels.http` take the same option. Deploying `reply="none"` needs an
 Slack-specific, such as buttons, feedback buttons or a message the agent
 updates later, the agent posts with its own Slack client. The app's bot token
 is the agent connection `mda/slack-bot-token` (reading it as a user connection
-raises), and `runtime.channel.raw_event`, the Slack event the run came from,
-names the thread: a message's own event, or a click's interaction payload,
-whose `container` says where the button was.
+raises), and the channel's `target` names the conversation and its thread.
 
 ```python
 from langchain.tools import tool
@@ -703,16 +853,14 @@ from slack_sdk.web.async_client import AsyncWebClient
 @tool
 async def offer_choices(question: str, choices: list[str], runtime: ManagedToolRuntime) -> str:
     """Ask the user to pick one of a few answers in Slack."""
-    if runtime.channel is None or runtime.channel.provider != "slack":
+    origin = runtime.thread.origin
+    target = origin.channel.target if origin else None
+    if target is None or target.provider != "slack":
         return "Not in Slack."
-    raw = runtime.channel.raw_event or {}
-    where = raw.get("container") or raw
-    channel = where.get("channel_id") or where.get("channel")
-    thread_ts = where.get("thread_ts") or where.get("message_ts") or where.get("ts")
     token = await connections.get("mda/slack-bot-token", {"type": "agent"})
     await AsyncWebClient(token=token).chat_postMessage(
-        channel=channel,
-        thread_ts=thread_ts,
+        channel=target.conversation_id,
+        thread_ts=target.thread_ts,
         text=question,
         blocks=[
             {"type": "section", "text": {"type": "mrkdwn", "text": question}},
@@ -795,17 +943,17 @@ LangSmith creates a managed app in the workspace you already authorized it in,
 and says so. When you haven't authorized it yet, or on self-hosted LangSmith,
 deploy stops before uploading and says what to set.
 
-When Slack still needs you once the deployment is live, to authorize LangSmith
+When Slack still needs you during setup, to authorize LangSmith
 or to install the new app (some workspaces have an admin approve it first),
 deploy prints the link and waits, continuing as soon as Slack reports it done.
 In a terminal the link also opens in your browser, and Ctrl-C skips the
 channel. Without one, deploy waits up to an hour, so a coding agent running it
 can hand you the link; Ctrl-C stops it.
 
-If a setup step fails once the deployment is live, deploy offers to try again
-or to continue without the Slack channel. Without a terminal the failure ends
-the deploy, once the other channels are set up. An agent with a Slack channel
-can't be deployed with `--no-wait`, because setup needs the live deployment.
+If a setup step fails, deploy offers to try again or to continue without the
+Slack channel. Without a terminal the failure ends the deploy, once the other
+channels are set up. See [Setting up channels on deploy](#setting-up-channels-on-deploy)
+for when deploy sets the channel up.
 
 ## GitHub channels
 
@@ -841,13 +989,15 @@ Acting on GitHub as the person running the agent is not supported yet:
 `connections.get("mda/github-token", {"type": "user"})` throws, and deploy refuses
 a project that declares it.
 
-A run acts for the GitHub user who sent the event, as `github:<id>`: GitHub
-signs each delivery, and the numeric ID outlives login renames. Events from
-bots and organizations run as the channel. A GitHub sender cannot be mapped to a
-user of the agent's identity, the principal `identity.py` resolves from LangSmith,
-Supabase or another provider. So MCP servers and tools that act on a user's
-behalf or need a user connection are left out of those runs, with a warning,
-and the run goes on without them. An issue or pull request is a shared
+A run acts for the GitHub user who sent the event, as their Agent Auth
+principal for `(github, github.com, <id>)`: GitHub signs each delivery, and the
+numeric ID outlives login renames. Events from bots and organizations run as
+the channel. Unless `resolve_user` maps it to one of
+your users (see [Mapping channel senders to your users](#mapping-channel-senders-to-your-users)),
+a GitHub sender is not a user of the agent's identity, the principal `identity.py`
+resolves from LangSmith, Supabase or another provider. So MCP servers and tools
+that act on a user's behalf or need a user connection are left out of those
+runs, with a warning, and the run goes on without them. An issue or pull request is a shared
 conversation, so the sender gets user memory only where the user memory
 layer's `allow` opts in. See [Setting up the GitHub App](#setting-up-the-github-app)
 for what the first deploy asks.
@@ -884,21 +1034,39 @@ from Agent Auth are cached for up to 5 minutes. A matched event fails closed if
 the bot ID is missing or invalid. Calling `channels.github()` without handlers preserves
 receipt-only behavior and needs only the webhook secret.
 
-Supported keys:
+Supported keys are `<event>.<action>`, for every action GitHub sends of these
+events:
 
-- Issues: `issues.opened`, `issues.edited`, `issues.reopened`, `issues.labeled`,
-  `issue_comment.created`, `issue_comment.edited`.
-- Pull requests: `pull_request.opened`, `pull_request.edited`,
-  `pull_request.reopened`, `pull_request.ready_for_review`,
-  `pull_request.converted_to_draft`, `pull_request.synchronize`,
-  `pull_request.labeled`, `pull_request.closed`.
-- Reviews: `pull_request_review.submitted`, `pull_request_review.edited`,
-  `pull_request_review.dismissed`, `pull_request_review_comment.created`,
-  `pull_request_review_comment.edited`.
-- Code and CI: `push`, `status`, `check_run.completed`, `check_suite.completed`,
-  `workflow_run.completed`. `push` and `status` have no action, so their key is
-  the event name. A CI event continues a pull request's conversation when it
-  ran for exactly one pull request.
+- `issues`: `opened`, `edited`, `reopened`, `closed`, `deleted`, `transferred`,
+  `labeled`, `unlabeled`, `assigned`, `unassigned`, `locked`, `unlocked`,
+  `milestoned`, `demilestoned`, `pinned`, `unpinned`, `typed`, `untyped`.
+- `issue_comment`: `created`, `edited`, `deleted`.
+- `pull_request`: `opened`, `edited`, `reopened`, `closed`, `ready_for_review`,
+  `converted_to_draft`, `synchronize`, `labeled`, `unlabeled`, `assigned`,
+  `unassigned`, `review_requested`, `review_request_removed`, `locked`,
+  `unlocked`, `milestoned`, `demilestoned`, `enqueued`, `dequeued`,
+  `auto_merge_enabled`, `auto_merge_disabled`.
+- `pull_request_review`: `submitted`, `edited`, `dismissed`.
+- `pull_request_review_comment`: `created`, `edited`, `deleted`.
+- `pull_request_review_thread`: `resolved`, `unresolved`. The payload's `thread`
+  has the thread's `node_id` and its review `comments`. These need only
+  `pull_requests: read`.
+- Code and CI: `push` and `status`, which have no action, so their key is the
+  event name; `check_run`: `created`, `completed`, `rerequested`,
+  `requested_action`; `check_suite`: `requested`, `rerequested`, `completed`;
+  `workflow_run`: `requested`, `in_progress`, `completed`. A CI event continues
+  a pull request's conversation when it ran for exactly one pull request.
+- Merge queue: `merge_group.checks_requested`, `merge_group.destroyed`. A
+  merge group belongs to no conversation, so each delivery gets its own thread.
+- Installation: `installation.created`, `installation.deleted`, `installation.suspend`,
+  `installation.unsuspend`, `installation.new_permissions_accepted`,
+  `installation_repositories.added`, `installation_repositories.removed`.
+  GitHub sends these to every App, so handling one needs no subscription or
+  permission. They are about the installation, not a repository: the handler
+  gets a `GitHubInstallationEvent`, with the `account` the App is installed on
+  instead of a `repository`. A channel limited to `app["repositories"]` gets
+  them too, each delivery gets its own thread, and `on_received` and
+  `on_finish` aren't called for them.
 
 GitHub sends no event for a mention, so each event lists the handles the
 text it wrote mentions in `event.mentions`: the body of a new or edited
@@ -938,13 +1106,24 @@ is application code; incoming webhook payloads are validated at runtime.
 
 Signatures are verified against the raw bytes. Ping returns 200; other valid
 receipts return 202. An unconfigured event or the App's own activity starts
-nothing. The request awaits the configured callback and run creation before
-acknowledgment (an endpoint's is asked after; see "Asking your service what to
-start"); synchronous and async callbacks are supported. A handler returns
+nothing. The App's own activity is what the agent does with the App's token,
+such as its comments, its pushes or a pull request it opened; set
+`include_own_events=True` to hand those to handlers too, with `event.from_app`
+set. A handler that answers comments or reviews then skips `event.from_app`,
+or the agent answers itself. `ignore_bots=True` also ignores issues, comments,
+pull requests and reviews from other bots, such as Dependabot, as Linear and
+Slack do; CI, `push` and `merge_group` events still reach their handlers. It's
+off by default. GitHub gets its answer first; then MDA asks the
+configured handler, a callback or an endpoint (see "Asking your service what to
+start"), and starts the run, so a slow handler never times out the delivery.
+Synchronous and async callbacks are supported. A handler returns
 what `agent.invoke` takes: a nonblank string (one user message), a message such
-as `HumanMessage(...)` with text or content blocks, state such as
-`{"messages": [...], "todos": []}`, or `(input, {"context": {...}, "metadata": {...}})`
-to also set the run's context (`context["channel"]` is reserved) or metadata,
+as `HumanMessage(...)` with text or content blocks, or state such as
+`{"messages": [...], "todos": []}`. To set run options, it returns a list of
+runs instead, such as `[{"input": ..., "context": {...}, "metadata": {...}}]`:
+each run's `input` is what a handler returns alone, and a run without `input`,
+or a tuple, is refused. A run may set the run's context (`context["channel"]`
+is reserved) or metadata,
 such as `{"issue": "ENG-123"}` to find the run by in LangSmith. Metadata keys are
 letters, digits, `_`, `.` or `-`. Keys the Agent Server and LangSmith set
 are reserved: `mda_`, `langgraph_` and `ls_` keys, and ids such as
@@ -954,9 +1133,19 @@ metadata, values and any error) to `url`, as `runs.create(webhook=...)` does;
 http(s), without credentials in the URL.
 The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
-backend signs for the thread.
-`None` skips without a thread or run.
-Other results and callback failures are safely logged and start nothing.
+backend signs for the thread. `await thread.get_state()` reads the thread's
+state as Agent Server's `threads.get_state` does, or `None` before any run, as
+on Slack and Linear; only a handler deciding an event can read it.
+`None` skips without a thread or run. `reply(message)` skips too, with a reply
+as `resolve_user`'s, which GitHub can't post.
+Other results are safely logged and start nothing. So does a handler that
+raises: GitHub already has its answer, so the delivery isn't failed; MDA logs
+the error's type only. Nor is a delivery whose run can't start, for example
+while the Agent Server is briefly unavailable: `on_finish` gets `failed` with
+reason `start`.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 Each issue or pull request has one thread, so the agent keeps the conversation:
 an issue, its comments, and a pull request with its reviews and review comments
@@ -964,7 +1153,47 @@ continue the same thread, as does a workflow run for exactly one pull request.
 Other events get a thread of their own. A redelivered webhook starts nothing,
 because each thread runs a delivery once. A comment that arrives while the agent
 is still working waits for that run to finish, so it never skips a decision the
-run stops for. There is no automatic retry.
+run stops for. GitHub never redelivers on its own.
+
+The list may hold several runs for one event, on threads the handler chooses
+(GitHub, Linear, HTTP and Slack channels):
+
+```python
+def on_comment(event, thread):
+    return [
+        # The issue's conversation.
+        {"input": prompt},
+        # A fresh thread, deleted once the run ends.
+        {"input": triage, "thread": {"mode": "ephemeral"}},
+        # A thread your service keeps across events, by its UUID.
+        {
+            "input": plan,
+            "thread": {"mode": "persistent", "id": plan_thread_id},
+            "multitask_strategy": "interrupt",
+        },
+    ]
+```
+
+`thread` is a `ThreadConfig`, as `define_schedule` takes it. A run without it
+starts on the event's conversation, as does a run on a persistent thread with
+the conversation's id (`thread.id`); at most one run may. `auto_post` is where
+a run posts its final answer: `True` on the event's conversation, `False`
+nowhere, or a channel target, for now only the conversation's own (such as
+`GitHubChannelTarget(repository="owner/repo", number=42)`, or a run's
+`channel.target` passed back), which is `True`. Omitted, the conversation's run
+posts as the channel's `auto_post` says, and a run on any other thread posts
+nothing. GitHub posts no run's answer, so there `auto_post` changes nothing:
+the agent's tools post on GitHub. `multitask_strategy` overrides the
+channel's for one run.
+A persistent id must be a UUID; which ids an event may reach is yours to
+check. A delivery starts at most one run on each thread, so a resent one
+starts nothing there again, even if the handler now starts a different set of
+runs. The handler is asked once per delivery, before any thread is read, and
+not at all once the conversation has seen the delivery. While the conversation
+waits on a decision, the handler is still asked (on GitHub with
+`thread.interrupted` set): its runs on other threads start, and a run on the
+conversation is skipped, with the usual waiting notice. An empty list starts
+nothing.
 
 Handlers can call GitHub with a client of your choice and the App's installation
 token from `await connections.get("mda/github-token", {"type": "agent"})`, which
@@ -1043,6 +1272,49 @@ message-list results and automatic GitHub replies are not supported. To act on
 GitHub from a run (comment, label, open pull requests), give the agent a GitHub
 MCP server in `tools/mcp.py`.
 
+### Forwarding deliveries to your backend
+
+A backend that needs GitHub's events, including ones that never start a run,
+gets them through `forward_to`: services, each a URL or an `httpx.Request` that
+also carries headers, such as an API key. No handler has to call it, and it
+gets events MDA has no type for too.
+
+```python
+backend = httpx.Request(
+    "POST",
+    f"{BACKEND_URL}/github/webhooks",
+    headers={"x-api-key": os.environ["BACKEND_KEY"]},
+)
+
+channel = channels.github(
+    on_event={"issues.opened": lambda e, _: f"Help with #{e.payload['issue']['number']}"},
+    forward_to=[backend],
+)
+```
+
+- Once GitHub's signature checks out, MDA POSTs every delivery but `ping` to
+  each service, before anything else reads it: whatever its event or action,
+  whether or not a handler takes it, from any repository and any sender.
+- The body is GitHub's raw body, byte for byte. The headers are GitHub's own,
+  unchanged: `Content-Type` and every `X-GitHub-*` and `X-Hub-*` header
+  (`X-GitHub-Event`, `X-GitHub-Delivery`, `X-Hub-Signature-256` and any GitHub
+  adds), but no other header the delivery arrived with. Then come the request's
+  headers and the Standard Webhooks signature described in
+  [Asking your service what to start](#asking-your-service-what-to-start), with
+  the webhook ID `msg_<deliveryId>_forward`.
+- GitHub is answered only once every service answered 2xx, all asked at once,
+  within 8 seconds. Then the delivery goes on as without `forward_to`.
+- Any other answer, a redirect, a timeout or a network error answers GitHub
+  HTTP 502 and starts no handler and no run, so GitHub marks the delivery
+  failed. GitHub doesn't send it again on its own: redelivering it from the
+  App's settings, or with GitHub's API, forwards and handles it again.
+- A channel can have `forward_to` and no `on_event`.
+- `forward_to` adds no App permission and no webhook event: a service gets the
+  events the App is subscribed to, which the channel's handlers decide.
+
+The URL must be https, or plain http to a loopback host, and carry no
+credentials; a bad one raises when the channel is declared.
+
 ### Setting up the GitHub App
 
 The first `mda deploy` of a GitHub channel asks which GitHub App it uses, as
@@ -1089,10 +1361,10 @@ person to open and waits up to an hour for them to finish. `GH_WEBHOOK_SECRET`
 and `GH_APP_BOT_ID` (the App bot account's numeric user ID) are different: the
 deployment reads them, and they override what Agent Auth stores.
 
-If a setup step fails once the deployment is live, deploy offers to try again
-or to continue without the GitHub channel. Without a terminal the failure ends
-the deploy, once the other channels are set up. An agent with a GitHub channel
-can't be deployed with `--no-wait`, because setup needs the live deployment.
+If a setup step fails, deploy offers to try again or to continue without the
+GitHub channel. Without a terminal the failure ends the deploy, once the other
+channels are set up. See [Setting up channels on deploy](#setting-up-channels-on-deploy)
+for when deploy sets the channel up.
 
 ## Linear channels
 
@@ -1131,6 +1403,9 @@ names them (`LinearEventKey`). Each key has its event class, such as
 and rejects deliveries older than a minute. It ignores events about teams
 outside `app["teams"]`, changes by other apps and integrations (pass
 `ignore_bots=False` to keep them), and the app's own comments and changes.
+`on_received(event, thread)` hears each handled delivery as it reaches its
+thread, after the channel acknowledges an agent session, as GitHub's does; a
+handler's `thread.get_state()` reads the thread's state, as on GitHub and Slack.
 
 > **Experimental.** Agent sessions use Linear's Agents API, which is a
 > Developer Preview, so they may change as Linear changes it. Issue and
@@ -1148,6 +1423,17 @@ LangSmith Studio, where the decision is made, also when Studio resumed it;
 replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
+
+Linear gets its answer before MDA asks the handler, so a slow handler never
+times out the delivery. A handler that raises starts nothing, and Linear doesn't
+send the delivery again; the error is logged by type only. The same holds for a
+run that can't start, for example while the Agent Server is briefly
+unavailable: `on_finish` gets `failed` with reason `start`. In an agent session,
+the session hears at once that something went wrong, since its author waits;
+an issue gets no comment, since its handler may have skipped the event.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 `app` also names the app deploy asks the admin to create: `name` (2-80
 characters, without "Linear"; defaults to the agent's name), `description`,
@@ -1168,7 +1454,7 @@ Agent Auth app, whose OAuth connection is `mda/linear-app/<deployment-id>`,
 installed with `actor=app`; read its token with
 `await connections.get("mda/linear-token", {"type": "agent"})` to call Linear's API from tools.
 
-`reply="none"` leaves the run's answer to the agent: the channel doesn't post
+`auto_post=False` leaves the run's answer to the agent: the channel doesn't post
 it as a comment or in the session. Session acknowledgements, Stop and error
 notices still post.
 
@@ -1215,13 +1501,105 @@ without one it prints them before the install link for an admin to open.
 Without the redirect URI, Linear answers the install with "Invalid
 redirect_uri".
 
-If a setup step fails once the deployment is live, deploy offers to try again
-or to continue without the Linear channel. Without a terminal the failure ends
-the deploy, once the other channels are set up. An agent with a Linear channel
-can't be deployed with `--no-wait`, because setup needs the live deployment.
+If a setup step fails, deploy offers to try again or to continue without the
+Linear channel. Without a terminal the failure ends the deploy, once the other
+channels are set up. See [Setting up channels on deploy](#setting-up-channels-on-deploy)
+for when deploy sets the channel up.
 `mda delete` removes the credentials; delete the app itself in Linear.
 Deployments set up by an earlier `mda` keep the app as workspace connections,
 which only a LangSmith workspace admin can delete.
+
+## Mapping channel senders to your users
+
+Each channel gives a person its own principal: a Slack user, a GitHub sender
+and a Linear user are three different callers. When your app already keeps one
+users table, `resolve_user` maps every verified sender to one of your users:
+
+```python
+# identity.py
+async def resolve_user(request: ResolveUserRequest) -> ResolveUserResult:
+    actor = request["actor"]
+    if actor is None:
+        return {"type": "ignore"}
+    user = await db.user_for_identity(actor.provider, actor.id)
+    if user is None:
+        return {
+            "type": "reply",
+            "message": {
+                "type": "content",
+                "content": "Link your account at https://app.example.com/link first.",
+            },
+        }
+    return {"type": "user", "id": user.id}
+
+
+identity = define_identity(auth="backend", resolve_user=resolve_user)
+```
+
+MDA calls it before every run or resume a channel starts, with the verified
+`actor` and the channel's name. `actor` is `None` when the channel could not
+verify who sent the delivery, such as a Slack actor that failed its check or a
+Linear event that names no one. It returns:
+
+- `{"type": "user", "id": ...}`: run as one of your users, with the principal
+  a backend call with `auth="backend"` gets for that `id`. Channels and your
+  backend then share connections and memory.
+- `{"type": "identity", "provider": ..., "issuer": ..., "subject": ...}`: run
+  as an exact Agent Auth identity, such as the IdP `sub` your web users sign in
+  with.
+- `{"type": "reply", "message": ...}`, or `reply(message)`: start nothing, and
+  post `message` where the event came from, as `runtime.channel.post` does, but only when the event
+  would start or resume a run. `message` is a `ChannelMessage`. Slack and Linear send text only. A GitHub channel can't
+  post, so it only starts nothing.
+- `{"type": "ignore"}`: start nothing. This also stops a stranger from
+  answering an interrupt.
+- `None`: the channel default. The sender runs as their own Agent Auth
+  principal: a Slack user's for `(slack, <install team>, <user>)`, which
+  Trigger Server resolves; a GitHub user's for `(github, github.com, <id>)`; a
+  Linear user's for `(linear, linear.app, <id>)`. Bots, apps and a sender the
+  channel could not verify run as the channel. A GitHub or Linear sender gets
+  no user connections this way, since a sign-in link would be public; map them
+  to one of your users for that.
+
+A channel's own `resolve_user`, such as `channels.github(resolve_user=...)`,
+overrides the identity's. If `resolve_user` raises, MDA starts nothing. Key on
+`provider` and `id` (and `team_id` for Slack), never on `name` or `email`.
+
+Your app links accounts: a `reply` can point to a page where the person signs
+in and connects their Slack or GitHub account. The reply can be public, so its
+link must not carry anything that proves who the sender is.
+
+When your users table lives in another service, `resolve_user` can be that
+service's endpoint instead of a function: a URL, or an `httpx.Request` that
+also carries headers, as an `on_event` endpoint can be (see
+[Asking your service what to start](#asking-your-service-what-to-start)).
+
+```python
+identity = define_identity(
+    auth="backend",
+    resolve_user=httpx.Request(
+        "POST",
+        f"{BACKEND_URL}/mda/resolve-user",
+        headers={"x-api-key": os.environ["BACKEND_KEY"]},
+    ),
+)
+```
+
+MDA POSTs the request a function gets as JSON, signed with
+`MDA_SERVICE_SECRET` as an `on_event` endpoint's request is, with the
+`webhook-id` `msg_<deliveryId>_resolve_user`. `ResolveUserEndpointRequest`
+types the body: `{"actor"?, "channel": {"name"}}`, with the actor's fields in
+camelCase (`teamId`), as the TypeScript runtime sends them. The service answers
+with what a function returns, checked the same way; `null` or HTTP 204 keeps the
+channel's own principal. The delivery waits on the answer, so the service gets
+5 seconds in all, and one more attempt after a network error, HTTP 429 or a
+5xx. Any other failure starts nothing, as a function that raises does. A bad
+URL or secret raises when the identity or channel is declared.
+
+Answer every `_resolve_user` request, even one whose `webhook-id` you have
+seen. The attempt after a 5xx and a redelivery from Trigger Server both keep
+the same ID. A receiver that dedupes on the ID and answers 204 to a repeat runs
+that delivery as the channel's own principal instead of your user.
 
 ## HTTP channels
 
@@ -1276,8 +1654,8 @@ adapter without conversion. If `post` is omitted, the channel can receive events
 and exposes facts, but has no runtime `post` method. The webhook path is
 `/channels/<name>/events`, where `<name>` is the channel file name. An existing
 Photon webhook needs no URL change when the deployment host and channel name
-stay the same. `reply="none"` turns automatic replies off, so the agent replies
-itself; `post` still serves `runtime.channel.post` and error notices.
+stay the same. `auto_post=False` turns automatic replies off, so the agent
+replies itself; `post` still serves `runtime.channel.post` and error notices.
 
 If a run fails, MDA uses `post` to send “Something went wrong
 while processing your request.” A failed send is logged without another attempt.
@@ -1347,9 +1725,15 @@ service checks. When the event's thread takes a turn, MDA POSTs
 "interrupted"?}}` as JSON to it, with the request's headers (never logged), and
 starts the run the service answers with: `{"input", "context"?, "metadata"?,
 "webhook"?}`, checked as a handler's result. `null` or HTTP 204 starts nothing.
+`{"type": "reply", "message": ...}` starts nothing too, and posts `message`, a
+`ChannelMessage`, where the event came from, as `resolve_user`'s reply does: a
+Linear agent session hears it as its response, instead of "I'm not set up to
+work on this request." A function handler returns `reply(message)` for the
+same, with text or a `ChannelMessage`. For a sender `resolve_user` holds back,
+its own answer stands instead.
 A GitHub event also carries what a handler gets beside the payload: its
-`"action"`, `"repository"`, `"sender"` and `"mentions"`, so a service checks them
-as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
+`"action"`, `"repository"` (`"account"` for an installation event), `"sender"`
+and `"mentions"`, so a service checks them as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
 takes requests from older deployments: read `event.get("mentions", [])`. A
 Slack message carries its `"text"`, `"userId"`, `"channelId"`, `"messageTs"`,
 `"threadTs"` and `"files"` the same way, with Slack's own event as `"payload"`;
@@ -1385,8 +1769,11 @@ changed or replayed, set `MDA_SERVICE_SECRET` in the project's `.env`;
 request as [Standard Webhooks](https://www.standardwebhooks.com/) does:
 `webhook-id`, `webhook-timestamp` and `webhook-signature`, an HMAC-SHA256 of the
 id, the timestamp and the exact body. The id is `msg_<deliveryId>` for the call
-that starts the run, and `msg_<deliveryId>_interrupted` for a GitHub call that
-asks whether to tell the conversation its thread waits on a decision. The secret is `whsec_` and padded base64
+that starts the run, `msg_<deliveryId>_interrupted` for a GitHub call that
+asks whether to tell the conversation its thread waits on a decision,
+`msg_<deliveryId>_forward` for a GitHub delivery `forward_to` forwards, and
+`msg_<deliveryId>_resolve_user` for a `resolve_user` call
+(see [Mapping channel senders to your users](#mapping-channel-senders-to-your-users)). The secret is `whsec_` and padded base64
 of 24 to 64 random bytes (`echo "whsec_$(openssl rand -base64 32)"`; an
 `openssl rand -hex 32` value is valid too); several, separated by commas, each
 sign the request, for rotation. A malformed secret raises when the channel is declared.
@@ -1460,6 +1847,22 @@ schedule = define_schedule(
     cron="0 8 * * 1-5",
     timezone="America/Los_Angeles",
     prompt="Write the daily digest.",
+)
+```
+
+To post the run's answer in Slack, give `auto_post` a `SlackChannelTarget`: a
+conversation, or a thread in it with `thread_ts`. `channel` names the Slack
+channel file when it isn't `channels/slack.py`. `deliver_to` is its deprecated
+form.
+
+```python
+from managed_deepagents import define_schedule
+
+schedule = define_schedule(
+    cron="0 9 * * 1",
+    prompt="Post the weekly summary.",
+    # A literal, since deploy reads schedules statically.
+    auto_post={"provider": "slack", "conversation_id": "C0123456789"},
 )
 ```
 
@@ -1588,6 +1991,9 @@ Python also has async methods such as `aread`, `awrite`, and `adelete`.
 All paths refer to the current sandbox. Context Hub routes for skills and
 memory are not part of this backend.
 
+The sandbox opens on its first use. `open_sandbox(runtime.backend)` opens it
+now and returns its name.
+
 Private published images can declare registry credentials by environment
 variable name; MDA creates or updates the deployment-owned Host registry:
 
@@ -1654,6 +2060,15 @@ When a LangSmith-managed OAuth MCP server needs authorization, the runtime
 reports its connection URL; complete OAuth there, then retry the run. API-key
 MCP servers require the caller to connect the key in LangSmith Tools before
 invoking one of their tools.
+
+A LangSmith tool kit asks for every unconnected provider before the run starts.
+Pass `jit_auth=True` to `define_mcp` to ask on use instead: the kit's tools for
+unconnected providers are still offered to the model. When the model calls
+them, the run interrupts once per model step with the connect links for the
+providers those calls need, then runs the calls after it resumes. If the run
+resumes without a connection, or nobody can connect in this run (no signed-in
+caller, or a scheduled run), those calls return a tool error and the run
+continues.
 
 Deploy the project first, then provision its connections with
 `mda connections create`. Agent-owned opaque secrets are scoped to that
@@ -1775,10 +2190,13 @@ support for newer Python versions.
 This selects the deployment image's Python version. Local build processing,
 `mda dev`, Harbor task images, and execution sandboxes use separate interpreters.
 
+The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
+for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+
 Common deploy options:
 
 ```bash
-mda deploy ./my-agent --name my-agent-dev --deployment-type dev
+mda deploy ./my-agent --name my-agent-dev --deployment-type serverless
 mda deploy ./my-agent --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy ./my-agent --no-wait
 ```

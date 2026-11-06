@@ -1,0 +1,327 @@
+"""A Slack conversation of this deployment's channel moves through MDA, into any channel."""
+
+import asyncio
+import json
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
+import rt.slack_move as slack_move
+from langchain.tools import ToolRuntime
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langchain_core.tools import StructuredTool
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from managed_deepagents import SlackChannelTarget
+from pydantic import BaseModel
+from runtime_api.endpoint import Endpoint
+from runtime_api.slack import (
+    SLACK_MOVE,
+    SLACK_MOVE_MARKER,
+    SLACK_MOVED,
+    SlackMoved,
+    SlackMovePlan,
+    SlackMoveRequest,
+    SlackMoveResult,
+)
+
+_MOVED = {
+    "success": True,
+    "thread_id": "thread-1",
+    "channel_id": "C1",
+    "thread_ts": "200.1",
+    "dashboard_url": "https://dashboard/thread-1",
+}
+
+
+class _Channel:
+    provider = "slack"
+
+    def __init__(self) -> None:
+        self.posts: list[tuple[dict[str, object], dict[str, object]]] = []
+
+    async def post(self, message: dict[str, object], **options: object) -> dict[str, str]:
+        self.posts.append((message, options))
+        return {"id": "200.1", "thread_id": "thread-1"}
+
+
+class _Backend:
+    def __init__(self, plan: SlackMovePlan) -> None:
+        self.plan = plan
+        self.calls: list[tuple[str, BaseModel]] = []
+
+    async def call(self, _backend: object, endpoint: Endpoint, request: BaseModel) -> BaseModel:
+        self.calls.append((endpoint.name, request))
+        if endpoint is SLACK_MOVE:
+            return self.plan
+        assert endpoint is SLACK_MOVED
+        return SlackMoveResult(result=_MOVED)
+
+
+@pytest.fixture
+def channel(monkeypatch: pytest.MonkeyPatch) -> _Channel:
+    channel = _Channel()
+    monkeypatch.setattr(slack_move, "_slack_channel", lambda _runtime: channel)
+    monkeypatch.setattr(slack_move, "run_id", lambda: "run-1")
+    return channel
+
+
+def _backend(monkeypatch: pytest.MonkeyPatch, plan: SlackMovePlan) -> _Backend:
+    backend = _Backend(plan)
+    monkeypatch.setattr(slack_move, "call", backend.call)
+    return backend
+
+
+def _tool_call(**args: object) -> ToolCallRequest:
+    return cast(
+        ToolCallRequest,
+        SimpleNamespace(
+            tool_call={"name": "slack_move_thread", "args": args, "id": "call-1"},
+            runtime=object(),
+        ),
+    )
+
+
+async def _handled(_request: ToolCallRequest) -> ToolMessage:
+    return ToolMessage(content="backend", tool_call_id="call-1")
+
+
+def _middleware() -> slack_move.SlackMoveMiddleware:
+    return slack_move.SlackMoveMiddleware(cast(Any, object()))
+
+
+def test_a_move_in_its_own_channel_posts_through_mda_and_hands_the_thread_over(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
+
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved here", destination="C1"), _handled)
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == _MOVED
+    assert channel.posts == [
+        (
+            {"type": "content", "content": "Moved here"},
+            {"new_thread": True, "hand_off": True, "to": None},
+        )
+    ]
+    [(prepared, plan), (recorded, moved)] = backend.calls
+    assert (prepared, recorded) == ("slack_move", "slack_moved")
+    assert plan == SlackMoveRequest(run_id="run-1", message="Moved here", channel_id="C1")
+    # The backend records the root MDA posted, for the run its token names.
+    # The old thread hears where the conversation went, as after /breakout.
+    assert moved == SlackMoved(run_id="run-1", thread_ts="200.1", mark_source=True)
+
+
+def test_a_move_into_another_channel_posts_there_through_mda(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    plan = SlackMovePlan(root_text="Moved here", via_mda=True, channel_id="C2")
+    backend = _backend(monkeypatch, plan)
+
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved", destination="C2"), _handled)
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == _MOVED
+    [(_message, options)] = channel.posts
+    assert options == {
+        "new_thread": True,
+        "hand_off": True,
+        "to": SlackChannelTarget(conversation_id="C2"),
+    }
+    [(_prepared, request), (_recorded, moved)] = backend.calls
+    assert cast(SlackMoveRequest, request).channel_id == "C2"
+    assert moved == SlackMoved(run_id="run-1", thread_ts="200.1", channel_id="C2", mark_source=True)
+
+
+@pytest.mark.parametrize("args", [{}, {"destination": "web"}, {"destination": "#eng"}])
+def test_a_move_without_a_channel_to_go_to_is_refused(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel, args: dict[str, object]
+) -> None:
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
+
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved", **args), _handled)
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == {
+        "success": False,
+        "error": "destination must be a Slack channel ID",
+    }
+    assert backend.calls == []
+    assert channel.posts == []
+
+
+def test_a_thread_the_backend_holds_moves_with_the_backends_tool(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=False))
+
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved", destination="C2"), _handled)
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "backend"
+    assert channel.posts == []
+
+
+def test_a_move_the_checks_stop_posts_nothing(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    refused = {"success": False, "error": "Private threads cannot be moved"}
+    _backend(monkeypatch, SlackMovePlan(result=refused))
+
+    result = asyncio.run(
+        _middleware().awrap_tool_call(_tool_call(message="Moved", destination="C1"), _handled)
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == refused
+    assert channel.posts == []
+
+
+def test_a_thread_no_slack_conversation_holds_moves_on_the_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_move, "_slack_channel", lambda _runtime: None)
+
+    result = asyncio.run(_middleware().awrap_tool_call(_tool_call(message="Moved"), _handled))
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "backend"
+
+
+def test_a_bare_breakout_moves_the_thread_before_any_model_call(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="`/breakout`: Fix it", via_mda=True))
+    marked = HumanMessage(content="/breakout", additional_kwargs={SLACK_MOVE_MARKER: True})
+
+    update = asyncio.run(_middleware().abefore_model({"messages": [marked]}, cast(Any, object())))
+
+    assert update is not None
+    assert update["jump_to"] == "end"
+    [answer] = cast(list[AIMessage], update["messages"])
+    assert "Moved" in cast(str, answer.content)
+    [(_prepared, plan), (_recorded, moved)] = backend.calls
+    # No message: the backend writes the root, as its own move does.
+    assert cast(SlackMoveRequest, plan).message is None
+    assert cast(SlackMoved, moved).mark_source is True
+    assert len(channel.posts) == 1
+
+
+def test_a_bare_breakout_into_another_channel_moves_the_thread_there(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    plan = SlackMovePlan(root_text="`/breakout`: Fix it", via_mda=True, channel_id="C2")
+    backend = _backend(monkeypatch, plan)
+    marked = HumanMessage(content="/breakout #eng", additional_kwargs={SLACK_MOVE_MARKER: "C2"})
+
+    update = asyncio.run(_middleware().abefore_model({"messages": [marked]}, cast(Any, object())))
+
+    assert update is not None
+    assert update["jump_to"] == "end"
+    [(_prepared, request), (_recorded, moved)] = backend.calls
+    assert cast(SlackMoveRequest, request).channel_id == "C2"
+    assert cast(SlackMoved, moved).channel_id == "C2"
+    [(_message, options)] = channel.posts
+    assert options["to"] == SlackChannelTarget(conversation_id="C2")
+
+
+def test_any_other_turn_calls_the_model(monkeypatch: pytest.MonkeyPatch, channel: _Channel) -> None:
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="x", via_mda=True))
+
+    update = asyncio.run(
+        _middleware().abefore_model(
+            {"messages": [HumanMessage(content="/breakout")]}, cast(Any, object())
+        )
+    )
+
+    assert update is None
+    assert backend.calls == []
+    assert channel.posts == []
+
+
+def _backend_move_tool() -> StructuredTool:
+    async def move(runtime: ToolRuntime, message: str, destination: str) -> str:
+        return "backend moved it"
+
+    return StructuredTool.from_function(
+        coroutine=move, name="slack_move_thread", description="Move the conversation."
+    )
+
+
+def _from_code(tool: StructuredTool, **args: object) -> object:
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda _chunk: None,
+        tool_call_id="code-1",
+        store=None,
+    )
+    call_ = ToolCall(
+        name=tool.name, args={**args, "runtime": runtime}, id="code-1", type="tool_call"
+    )
+    return asyncio.run(tool.ainvoke(call_))
+
+
+def test_a_move_from_code_mode_goes_through_mda_as_the_models_own_call(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    # Code mode calls its tools past every awrap_tool_call; its move must still hand the
+    # thread to the new Slack thread, or that thread's messages can't run.
+    backend = _backend(monkeypatch, SlackMovePlan(root_text="Moved here", via_mda=True))
+    code_tool = _middleware().code_tool(_backend_move_tool())
+
+    result = _from_code(code_tool, message="Moved here", destination="C1")
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(cast(str, result.content)) == _MOVED
+    assert channel.posts == [
+        (
+            {"type": "content", "content": "Moved here"},
+            {"new_thread": True, "hand_off": True, "to": None},
+        )
+    ]
+    assert [name for name, _ in backend.calls] == ["slack_move", "slack_moved"]
+    assert cast(SlackMoved, backend.calls[1][1]).mark_source is True
+
+
+def test_a_move_from_code_mode_mda_doesnt_hold_is_the_backends(
+    monkeypatch: pytest.MonkeyPatch, channel: _Channel
+) -> None:
+    _backend(monkeypatch, SlackMovePlan(via_mda=False))
+    code_tool = _middleware().code_tool(_backend_move_tool())
+
+    result = _from_code(code_tool, message="Moved here", destination="C1")
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "backend moved it"
+    assert channel.posts == []
+
+
+def test_code_mode_offers_the_move_through_mda() -> None:
+    from rt.run_tools import RunTools  # noqa: PLC0415 - only this test builds a run's tools
+    from runtime_api.catalog import Catalog, ToolSpec  # noqa: PLC0415
+
+    move = ToolSpec(
+        name="slack_move_thread", description="Move.", parameters={}, grant="move:grant"
+    )
+    lookup = ToolSpec(name="lookup", description="Look.", parameters={}, grant="lookup:grant")
+    files = SimpleNamespace(code_tools=lambda _names: [])
+    tools = RunTools(
+        Catalog(operations=[move, lookup], code_only=["slack_move_thread", "lookup"]),
+        cast(Any, object()),
+        cast(Any, files),
+    )
+
+    by_name = {tool.name: tool for tool in tools.from_code}
+    # The move code mode calls isn't the backend's operation; the other tool is.
+    assert by_name["slack_move_thread"] is not tools.by_name["slack_move_thread"]
+    assert by_name["lookup"] is tools.by_name["lookup"]

@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
 
 import pytest
 
@@ -53,7 +54,7 @@ async def test_review_channel_accepts_dms_and_preserves_privacy(
 async def test_mcp_caller_opens_a_private_channel_only_for_their_own_linked_slack_account(
     monkeypatch: pytest.MonkeyPatch, slack_user_id: str
 ) -> None:
-    caller = SimpleNamespace(slack_user_id=slack_user_id, slack_team_id="T9")
+    caller = SimpleNamespace(id=uuid4(), slack_user_id=slack_user_id, slack_team_id="T9")
     for_login = AsyncMock(return_value=caller)
     monkeypatch.setattr(tool.User, "for_login", for_login)
     start = AsyncMock(return_value=SimpleNamespace(channel_id="C456"))
@@ -65,7 +66,7 @@ async def test_mcp_caller_opens_a_private_channel_only_for_their_own_linked_slac
 
     assert isinstance(result.content, str)
     content = json.loads(result.content)
-    for_login.assert_awaited_once_with("github", "alice")
+    for_login.assert_awaited_with("github", "alice")
     if not slack_user_id:
         assert content["success"] is False
         assert "Slack account is not linked" in content["error"]

@@ -121,6 +121,8 @@ export interface ToolExecutionChunk {
    */
   loadOutput?: () => Promise<string>
   display?: OutputIframeDisplay
+  /** Images the tool returned alongside its text, such as a browser screenshot. */
+  images?: Array<AnyImageChunk>
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
@@ -221,6 +223,7 @@ export interface Message {
   timestamp: string
   deliveryStatus?: "sending" | "failed"
   deliveryError?: string
+  deliveryTurnId?: string
   optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
@@ -230,9 +233,15 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  slackMessageUrl?: string
   /** Passages the sender selected and replied to, carried in the message's envelope. */
   replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
+  /**
+   * What the context a plugin sent with this message is called, such as the
+   * open page; the agent read the context itself, which the thread never shows.
+   */
+  contextLabel?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
@@ -343,6 +352,7 @@ export interface QueuedThreadMessage {
   id: string
   content: string
   images?: Array<AnyImageChunk>
+  replies?: Array<PassageReply>
   createdAt: number
   /** The server has not acknowledged it yet, so it cannot be sent now or cancelled. */
   pending?: boolean
@@ -359,6 +369,31 @@ export interface AgentBackgroundCommand {
   command: string | null
   status: string
   started_at: number | null
+}
+
+/** One thing a Goal mode thread waits on to wake it again. */
+export interface AgentGoalWait {
+  kind: "wakeup" | "command" | "monitor" | "event" | "review"
+  until: string | null
+  detail: string | null
+}
+
+/** Where a Goal mode thread's work stands (`openswe/threads/goal.py`). */
+export interface AgentThreadGoal {
+  state: "working" | "waiting" | "waiting_on_user" | "paused"
+  reason:
+    | "blocked"
+    | "ready"
+    | "stopped"
+    | "requested"
+    | "no_progress"
+    | "failing_commands"
+    | "error"
+    | null
+  objective: string | null
+  ask: string | null
+  waits: Array<AgentGoalWait>
+  updated_at_ms: number
 }
 
 export interface AgentThreadMonitor {
@@ -398,7 +433,8 @@ export interface PendingThreadMessage extends Omit<
 > {
   images?: Array<ImageChunk>
   replies?: Array<PassageReply>
-  status: "sending" | "failed"
+  /** `sent`: the server took it; the transcript just doesn't have it yet. */
+  status: "sending" | "sent" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean
   /** Why delivery failed, e.g. `503 Service Unavailable`. */
@@ -557,6 +593,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
@@ -575,12 +612,15 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  /** The Open SWE project the thread was started in or moved to. */
+  projectId?: string | null
   branch: string
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
@@ -592,6 +632,7 @@ export interface AgentThread {
   automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
+  latestRunId?: string | null
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null

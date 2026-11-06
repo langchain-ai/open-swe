@@ -26,6 +26,9 @@ dev-mda: mda-cli
 # The `mda` CLI, built from the vendored SDK (vendor/README.md) into the runtime
 # package mda/ installs, where its `mda` command runs it from. Rebuilt only when its
 # sources change: the vendored build script, missing its .git, always reruns.
+# The binary is replaced by renaming a fresh copy over it: overwriting it in place
+# leaves macOS its old cached code signature, and the kernel kills the new build
+# on launch (exit 137).
 MDA_SDK := vendor/managed-deepagents-sdk
 MDA_CLI := $(MDA_SDK)/packages/pypi/src/managed_deepagents/_binaries/mda
 mda-cli: $(MDA_CLI)
@@ -33,7 +36,8 @@ $(MDA_CLI): $(MDA_SDK)/Cargo.toml $(MDA_SDK)/Cargo.lock $(MDA_SDK)/UPSTREAM $(sh
 	MDA_GIT_SHA=$$(cut -d' ' -f1 $(MDA_SDK)/UPSTREAM) MDA_GIT_DATE=$$(cut -d' ' -f2 $(MDA_SDK)/UPSTREAM) \
 		cargo build --locked --release --manifest-path $(MDA_SDK)/Cargo.toml
 	mkdir -p $(@D)
-	cp $(MDA_SDK)/target/release/mda $@
+	cp $(MDA_SDK)/target/release/mda $@.tmp
+	mv -f $@.tmp $@
 
 postgres:
 	docker compose up -d --wait postgres
@@ -139,7 +143,7 @@ format-check:
 
 typecheck:
 	uv run ty check openswe packages tests
-	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
+	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py mda/rt/sandbox_scripts/*.py
 
 # mda/ is its own project: checked and tested against its own environment alone,
 # so an import reaching for the backend (`openswe`) or a database driver fails here.
@@ -166,10 +170,10 @@ help:
 	@echo 'run                          - run the FastAPI app alone on :8000'
 	@echo 'swagger                      - regenerate swagger.json from the backend routes'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
-	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
-	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
+	@echo 'install-desktop              - install or update Robin Desktop on macOS'
+	@echo 'install-checkout             - install the current checkout of Robin Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
-	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
+	@echo 'cli                          - build the Robin CLI (robin; oswe alias) into cli/dist/'
 	@echo 'hooks                        - install the prek pre-commit hook'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'

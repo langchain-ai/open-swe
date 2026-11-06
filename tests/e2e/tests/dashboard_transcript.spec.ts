@@ -151,9 +151,15 @@ test.describe("transcript rendering", () => {
       .locator('[data-message-surface="slack"]')
       .filter({ hasText: "Slack docs" })
       .first();
-    await expect(
-      slackMessage.getByRole("img", { name: "Slack" }),
-    ).toBeVisible();
+    const sourceLink = slackMessage.getByRole("link", {
+      name: "View message from Alice in Slack",
+    });
+    await expect(sourceLink).toBeVisible();
+    await expect(sourceLink).toHaveAttribute(
+      "href",
+      /^https:\/\/slack\.com\/archives\/CDEMO01\/p\d+$/,
+    );
+    await expect(sourceLink).toHaveAttribute("target", "_blank");
     await expect(slackMessage.locator("strong")).toHaveText("important");
     await expect(slackMessage).toContainText("R&D");
     await expect(slackMessage.locator("code")).toContainText("code docs");

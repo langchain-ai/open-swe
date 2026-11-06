@@ -1,9 +1,27 @@
 # Mirroring Claude Code sessions
 
 Claude Code can post its [hook events](https://code.claude.com/docs/en/hooks) to a URL.
-Open SWE uses that to mirror a person's Claude Code sessions into the dashboard: each session becomes a private, read-only thread that updates while the session runs.
+Robin uses that to mirror a person's Claude Code sessions into the dashboard: each session becomes a private, read-only thread that updates while the session runs.
 
 ## Connect a machine
+
+If you already installed `open-swe@open-swe`, disable or uninstall it, then remove the old marketplace with `claude plugin marketplace remove open-swe` before the steps below.
+This avoids duplicate hooks and tools.
+A cached legacy plugin can keep using the existing endpoint until you switch; there is no duplicate legacy entry in the new marketplace.
+
+Install the `robin` Claude Code plugin in `claude-code-plugin/` from the `robin` marketplace (the repository URL is unchanged):
+
+```bash
+claude plugin marketplace add langchain-ai/open-swe
+claude plugin install robin@robin
+```
+
+Then run `/robin:connect` in a session and start a new one.
+It calls the `connect_claude_code` MCP tool, which returns a one-time claim valid for five minutes rather than the token, and a bundled script redeems the claim at `POST /dashboard/api/claude-code/connections` and writes the hooks into `~/.claude/settings.json` itself.
+The token never passes through Claude, so it stays out of the transcript, its mirror and any trace; a claim mints one token, and a second redemption answers 409.
+The plugin also connects Claude Code to the Robin MCP server (configuration key `robin`, existing `/oswe/mcp` endpoint, signed in with GitHub) and adds `/robin:thread`, which prints the thread mirroring the current session.
+
+Without the plugin:
 
 1. In the dashboard, open **Settings → Claude Code**, name the machine, and choose **Connect Claude Code**.
 1. Merge the settings it shows into `~/.claude/settings.json`.
@@ -14,8 +32,14 @@ Open SWE uses that to mirror a person's Claude Code sessions into the dashboard:
 Revoking a machine under **Machines** on the same page stops that machine from mirroring.
 Threads it already mirrored stay.
 
-The settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http-hook-fields) per event below, all posting to `POST /dashboard/api/claude-code/hooks` with the token as a bearer token.
+Either way, the settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http-hook-fields) per event below, all posting to `POST /dashboard/api/claude-code/hooks` with the token as a bearer token.
+The plugin does not ship these hooks itself: Claude Code does not expand plugin options in HTTP hook headers, so a plugin hook could not carry the token.
 If your organization limits hook targets with `allowedHttpHookUrls`, allow that URL.
+
+## Find a session's thread
+
+`list_threads` and `get_thread`, on the MCP server or inside a thread, accept your own Claude Code session id in place of a thread id and resolve it to the thread mirroring that session.
+A mirror's id is derived from its owner and the session id, so this needs no lookup table and never reaches another person's session.
 
 ## What a thread shows
 
@@ -41,7 +65,7 @@ The PR is read as you, so a repository you cannot see is never linked.
 
 ## Uploaded sessions
 
-Uploading a session (the `upload_session` tool) still starts its own thread that Open SWE can continue.
+Uploading a session (the `upload_session` tool) still starts its own thread that Robin can continue.
 That thread records Claude Code's session id as `claude_code_session_id`, read from the uploaded transcript, and when the same session is already mirrored, the mirror's thread as `claude_code_mirror_thread_id`.
 A mirror's thread id is derived from its owner and that session id (`mirror_thread_id`), so either side can find the other without a lookup table.
 The tool call ids in hook events and in the transcript are Claude Code's own, so a later upload can tell which parts of a session its mirror already holds.
@@ -49,7 +73,7 @@ The tool call ids in hook events and in the transcript are Claude Code's own, so
 ## Guarantees
 
 - **Read-only.**
-  Nobody can prompt, steer or stop a mirrored thread from Open SWE, including you.
+  Nobody can prompt, steer or stop a mirrored thread from Robin, including you.
   Continue it in Claude Code.
 - **Private.**
   Only you and workspace admins can open it: a local session can contain anything on your machine.

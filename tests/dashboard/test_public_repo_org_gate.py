@@ -1,22 +1,14 @@
 """Tests for the public-repo org-membership gate on GitHub webhooks."""
 
-from typing import Any, cast
+from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
-from httpx2 import Response
 
 from openswe.github import webhook as github_webhooks
 from openswe.webhooks import common as webhook_common
-from tests.conftest import post_signed_github_webhook, register_github_logins
-
-_TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
-
-
-async def _post_github_webhook(event_type: str, payload: dict[str, Any]) -> Response:
-    return cast(
-        Response,
-        await post_signed_github_webhook(event_type, payload, secret=_TEST_WEBHOOK_SECRET),
-    )
+from tests.conftest import register_github_logins
+from tests.github_channel import deliver_github_event
 
 
 def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[str]]:
@@ -32,24 +24,31 @@ def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[s
 
 
 def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", gate)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
     register_github_logins(monkeypatch, "stranger", "insider")
+
+
+@pytest.mark.parametrize("sender", ["Configured[bot]", "CONFIGURED[BOT]"])
+async def test_gate_recognizes_internal_bots_case_insensitively(
+    monkeypatch: pytest.MonkeyPatch, sender: str
+) -> None:
+    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", "langchain-ai")
+    monkeypatch.setattr(webhook_common, "INTERNAL_BOT_LOGINS", frozenset({"configured[bot]"}))
+    assert await webhook_common._is_sender_allowed_for_public_repo(
+        {"repository": {"private": False}, "sender": {"login": sender}}
+    )
 
 
 async def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
-    async def fake_process_github_pr_comment(*_args, **_kwargs) -> None:
-        raise AssertionError("should not be called")
+    handled = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", handled)
 
-    monkeypatch.setattr(
-        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
-    )
-
-    response = await _post_github_webhook(
+    await deliver_github_event(
+        monkeypatch,
         "issue_comment",
         {
             "action": "created",
@@ -71,10 +70,7 @@ async def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch, registry
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ignored"
-    assert "not a member" in body["reason"]
+    handled.assert_not_awaited()
     assert seen["calls"] == ["stranger"]
 
 
@@ -84,14 +80,15 @@ async def test_gate_allows_org_member_on_public_pr_comment(monkeypatch, registry
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_pr_comment(payload, event_type) -> None:
+    async def fake_process_github_pr_comment(payload, event_type, **_kwargs) -> None:
         called["event"] = event_type
 
     monkeypatch.setattr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    response = await _post_github_webhook(
+    await deliver_github_event(
+        monkeypatch,
         "issue_comment",
         {
             "action": "created",
@@ -113,8 +110,6 @@ async def test_gate_allows_org_member_on_public_pr_comment(monkeypatch, registry
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
     assert called["event"] == "issue_comment"
 
 
@@ -124,14 +119,15 @@ async def test_gate_skipped_on_private_repo(monkeypatch, registry_db) -> None:
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_pr_comment(payload, event_type) -> None:
+    async def fake_process_github_pr_comment(payload, event_type, **_kwargs) -> None:
         called["event"] = event_type
 
     monkeypatch.setattr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    response = await _post_github_webhook(
+    await deliver_github_event(
+        monkeypatch,
         "issue_comment",
         {
             "action": "created",
@@ -153,8 +149,6 @@ async def test_gate_skipped_on_private_repo(monkeypatch, registry_db) -> None:
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
     assert called["event"] == "issue_comment"
     assert seen["calls"] == []
 
@@ -165,14 +159,15 @@ async def test_gate_disabled_when_env_unset(monkeypatch, registry_db) -> None:
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_pr_comment(payload, event_type) -> None:
+    async def fake_process_github_pr_comment(payload, event_type, **_kwargs) -> None:
         called["event"] = event_type
 
     monkeypatch.setattr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    response = await _post_github_webhook(
+    await deliver_github_event(
+        monkeypatch,
         "issue_comment",
         {
             "action": "created",
@@ -194,8 +189,6 @@ async def test_gate_disabled_when_env_unset(monkeypatch, registry_db) -> None:
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
     assert called["event"] == "issue_comment"
     assert seen["calls"] == []
 
@@ -204,12 +197,12 @@ async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) 
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
-    async def fake_process_github_issue(*_args, **_kwargs) -> None:
-        raise AssertionError("should not be called")
+    prepare = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "prepare_github_issue_run", prepare)
+    monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=False))
 
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
-
-    response = await _post_github_webhook(
+    delivered = await deliver_github_event(
+        monkeypatch,
         "issues",
         {
             "action": "opened",
@@ -228,19 +221,19 @@ async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) 
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ignored"
-    assert "not a member" in body["reason"]
+    assert delivered.issue_run is not None
+    assert delivered.issue_run.starts is False
+    prepare.assert_not_awaited()
 
 
-async def test_review_requested_is_unsupported_before_public_repo_gate(
+async def test_review_requested_starts_no_review_before_public_repo_gate(
     monkeypatch, registry_db
 ) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
-    response = await _post_github_webhook(
+    delivered = await deliver_github_event(
+        monkeypatch,
         "pull_request",
         {
             "action": "review_requested",
@@ -260,11 +253,7 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "ignored",
-        "reason": "Unsupported GitHub pull_request action: review_requested",
-    }
+    assert delivered.work == ("wake_merge_queue",)
     assert seen["calls"] == []
 
 
@@ -274,14 +263,15 @@ async def test_internal_bot_comment_never_prompts_the_agent(monkeypatch, registr
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_pr_comment(payload, event_type) -> None:
+    async def fake_process_github_pr_comment(payload, event_type, **_kwargs) -> None:
         called["event"] = event_type
 
     monkeypatch.setattr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    response = await _post_github_webhook(
+    await deliver_github_event(
+        monkeypatch,
         "issue_comment",
         {
             "action": "created",
@@ -303,8 +293,6 @@ async def test_internal_bot_comment_never_prompts_the_agent(monkeypatch, registr
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "ignored"
     assert called == {}
     assert seen["calls"] == []
 

@@ -73,19 +73,24 @@ def _content_as_text(content: object) -> str:
 #: A reply that means "nothing to tell the channel" (Content Studio's convention).
 QUIET_REPLY = "[quiet]"
 #: Message field (``additional_kwargs`` key) deepagents uses for a task notification.
+#: Deprecated: read ``lc_source`` and ``lc_data``.
 NOTIFICATION_KEY = "deepagents_notification"
-#: Message field MDA uses the same way, for a notification of its own such as a
-#: browser handoff ending.
-MDA_NOTIFICATION_KEY = "mda_notification"
+#: Notification metadata sources of task news: async subagent and browser handoff updates.
+NOTIFICATION_SOURCES = frozenset({"async_subagent", "browser_handoff"})
 
 
 def is_task_notification(message: object) -> bool:
-    """Whether a message is a deepagents or MDA notification rather than the user's."""
+    """Whether a message is a harness-added notification rather than the user's.
+
+    Recognizes notification metadata with a source in ``NOTIFICATION_SOURCES``
+    and the deprecated ``deepagents_notification`` key.
+    """
     extra = _field(message, "additional_kwargs")
-    return any(
-        (isinstance(message, Mapping) and key in message)
-        or (isinstance(extra, Mapping) and key in extra)
-        for key in (NOTIFICATION_KEY, MDA_NOTIFICATION_KEY)
+    source = extra.get("lc_source") if isinstance(extra, Mapping) else None
+    if isinstance(source, str) and source in NOTIFICATION_SOURCES:
+        return True
+    return (isinstance(message, Mapping) and NOTIFICATION_KEY in message) or (
+        isinstance(extra, Mapping) and NOTIFICATION_KEY in extra
     )
 
 
@@ -142,6 +147,8 @@ def _answers(run: object, after_id: str | None) -> list[object]:
 
 #: Content block types that make a reply on their own, without text.
 _MEDIA_BLOCKS = frozenset({"image", "image_url", "file", "audio", "video"})
+#: Content block types a channel can show; others, such as reasoning, stay in the thread.
+_SHOWN_BLOCKS = _MEDIA_BLOCKS | {"text"}
 
 
 def _has_media(message: object) -> bool:
@@ -180,7 +187,6 @@ def _field(message: object, name: str) -> object:
 
 
 __all__ = [
-    "MDA_NOTIFICATION_KEY",
     "NOTIFICATION_KEY",
     "QUIET_REPLY",
     "extract_assistant_text",
@@ -213,7 +219,8 @@ def _message_content(message: object) -> MessageContent | None:
         if isinstance(block, str):
             blocks.append({"type": "text", "text": block})
         elif isinstance(block, dict):
-            blocks.append(block)
+            if block.get("type") in _SHOWN_BLOCKS:
+                blocks.append(block)
         else:
             return None
-    return cast("MessageContent", blocks)
+    return cast("MessageContent", blocks) if blocks else None

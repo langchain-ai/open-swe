@@ -81,6 +81,7 @@ function toolCall(
     status: "completed",
     output_preview: null,
     has_output: false,
+    attachments: null,
     namespace: [],
     ...row,
   }
@@ -219,6 +220,39 @@ describe("transcript snapshot", () => {
     expect(messages[1]?.timestamp).toBe("2026-01-01T00:00:02Z")
   })
 
+  it("hides the context Claude Code adds to a mirrored prompt", () => {
+    const sender = { login: "octocat", kind: "claude_code" }
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("t1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "t1",
+              role: "human",
+              text: "<system-reminder>\nIn a worktree\n</system-reminder>\n\nFix it",
+              sender,
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+            messageRow({
+              message_id: "human-2",
+              turn_id: "t1",
+              role: "human",
+              text: "<task-notification>\n<status>done</status>\n</task-notification>",
+              sender,
+              created_at: "2026-01-01T00:00:01Z",
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages.map((entry) => [entry.id, entry.chunks])).toEqual([
+      ["human-1", [{ kind: "text", text: "Fix it" }]],
+    ])
+  })
+
   it("keeps a subagent's nested work out of the root transcript, on its task call", () => {
     const messages = toMessages(fromSnapshot(twoTurnSnapshot()))
     const chunks = messages[3]?.chunks ?? []
@@ -304,6 +338,28 @@ function completed(
 }
 
 describe("transcript events", () => {
+  it("preserves the original Slack message link in the transcript", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "slack-message",
+              turn_id: "turn-1",
+              role: "human",
+              text: '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1787165499.123456" slack_message_ts="1787165487.000034">Hello</input-message>',
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        })
+      )
+    )
+    expect(messages[0]?.slackMessageUrl).toBe(
+      "https://slack.com/archives/C123/p1787165487000034"
+    )
+  })
+
   it("projects task activity without exposing its model-only envelope", () => {
     const taskEvent = {
       version: 1,
@@ -389,6 +445,47 @@ describe("transcript events", () => {
     })
 
     expect(requested.status).toBe("running")
+  })
+
+  it("marks a persisted message failed when its turn never started", () => {
+    const row = {
+      ...turn("turn-1", "2026-01-01T00:00:00Z", "requested"),
+      error: "the message could not be started",
+    }
+    const data = snapshot({
+      turns: [row],
+      messages: [
+        messageRow({
+          message_id: "human-1",
+          turn_id: "turn-1",
+          role: "human",
+          text: "Please apply the patch",
+          created_at: row.requested_at,
+        }),
+      ],
+    })
+    const requested = fromSnapshot(data)
+    expect(toMessages(requested)[0]?.deliveryStatus).toBeUndefined()
+    const failed = applyEvent(requested, {
+      ...appended(11, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-1", error: row.error },
+    })
+    expect(toMessages(failed)[0]).toMatchObject({
+      id: "human-1",
+      deliveryStatus: "failed",
+      deliveryError: row.error,
+    })
+    const reloaded = fromSnapshot({
+      ...data,
+      turns: [{ ...row, state: "failed" }],
+    })
+    expect(toMessages(reloaded)).toEqual(toMessages(failed))
+    const started = fromSnapshot({
+      ...data,
+      turns: [{ ...row, state: "failed", started_at: row.requested_at }],
+    })
+    expect(toMessages(started)[0]?.deliveryStatus).toBeUndefined()
   })
 
   it("keeps a queued follow-up out of the record until its run starts", () => {
@@ -516,6 +613,30 @@ describe("transcript events", () => {
       payload: { turn_id: "turn-2" },
     })
     expect(ended.status).toBe("idle")
+
+    // A later turn runs: the orphan never will, so it is not shown as queued
+    // behind it.
+    const later = applyEvent(
+      applyEvent(ended, {
+        ...appended(13, {}),
+        occurred_at: "2026-01-01T00:05:00Z",
+        event_type: "turn.requested",
+        payload: {
+          turn_id: "turn-4",
+          message_id: "human-4",
+          text: "a later ask",
+          attachments: [],
+        },
+      }),
+      {
+        ...appended(14, {}),
+        occurred_at: "2026-01-01T00:05:01Z",
+        event_type: "turn.started",
+        payload: { turn_id: "turn-4" },
+      }
+    )
+    expect(later.status).toBe("running")
+    expect(queuedTurns(later)).toEqual([])
   })
 })
 
@@ -639,6 +760,36 @@ describe("message images", () => {
         mimeType: "image/png",
       },
     ])
+  })
+})
+
+describe("plugin context", () => {
+  it("names the context a message was sent with, and never shows it as an image", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "turn-1",
+              role: "human",
+              text: "shorten this",
+              created_at: "2026-01-01T00:00:00Z",
+              attachments: [
+                attachment({
+                  mime_type: "application/vnd.open-swe.plugin-context",
+                  file_name: "AGENTS.md · 4 words selected",
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages[0]?.contextLabel).toBe("AGENTS.md · 4 words selected")
+    expect(imagesOf(messages[0])).toEqual([])
   })
 })
 
@@ -824,6 +975,45 @@ describe("tool output", () => {
     expect(after).toBe(before)
     expect(await Promise.all([before?.(), after?.()])).toEqual(["full", "full"])
     expect(fetchToolOutput).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("tool images", () => {
+  it("puts a tool result's images on its chunk, reloaded or live", () => {
+    const shot = attachment({
+      file_name: null,
+      attachment_id: "11111111-2222-3333-4444-555555555555",
+    })
+    const reloaded = fromSnapshot(
+      twoTurnSnapshot({
+        tool_calls: [
+          toolCall({
+            tool_call_id: "read-1",
+            turn_id: "turn-1",
+            name: "screenshot",
+            started_at: "2026-01-01T00:00:02Z",
+            attachments: [shot],
+          }),
+        ],
+      })
+    )
+    const live = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { attachments: [shot] })
+    )
+
+    const expected = [
+      {
+        kind: "image",
+        url: expect.stringContaining(
+          "/threads/thread-1/transcript/attachments/11111111-2222-3333-4444-555555555555"
+        ) as unknown as string,
+        credentials: "session",
+        mimeType: "image/png",
+      },
+    ]
+    expect(readChunk(reloaded)?.images).toEqual(expected)
+    expect(readChunk(live)?.images).toEqual(expected)
   })
 })
 

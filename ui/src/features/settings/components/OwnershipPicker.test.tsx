@@ -36,7 +36,7 @@ const ITEMS: Array<PickerItem> = [
   {
     id: "C4",
     label: "#community-announce",
-    warning: "Open SWE is not in this channel",
+    warning: "Robin is not in this channel",
   },
 ]
 
@@ -155,56 +155,44 @@ describe("OwnershipPicker", () => {
     expect(await screen.findByText("Available · 3")).toBeTruthy()
     expect(screen.getByText("Public archive")).toBeTruthy()
     expect(
-      screen.queryByRole("checkbox", { name: "org/private-archive" })
+      screen.queryByRole("checkbox", { name: "private-archive" })
     ).toBeNull()
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "org/public-archive" })
-    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "public-archive" }))
     expect(
-      screen.queryByRole("checkbox", { name: "org/public-archive" })
+      screen.queryByRole("checkbox", { name: "public-archive" })
     ).toBeNull()
     fireEvent.click(screen.getByRole("switch", { name: "Exclude archived" }))
     expect(screen.getByText("Public archive")).toBeTruthy()
     expect(screen.getByText("Private archive")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Public" }))
     expect(
-      screen.getByRole("checkbox", { name: "org/public-archive" })
+      screen.getByRole("checkbox", { name: "public-archive" })
     ).toBeTruthy()
     expect(
-      screen.queryByRole("checkbox", { name: "org/private-archive" })
+      screen.queryByRole("checkbox", { name: "private-archive" })
     ).toBeNull()
-    expect(
-      screen.queryByRole("checkbox", { name: "org/internal-sdk" })
-    ).toBeNull()
-    fireEvent.click(screen.getByRole("checkbox", { name: "org/public-sdk" }))
+    expect(screen.queryByRole("checkbox", { name: "internal-sdk" })).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox", { name: "public-sdk" }))
     fireEvent.click(screen.getByRole("button", { name: "Internal" }))
     expect(
-      screen.getByRole("checkbox", { name: "org/private-archive" })
+      screen.getByRole("checkbox", { name: "private-archive" })
     ).toBeTruthy()
     expect(
-      screen.queryByRole("checkbox", { name: "org/public-archive" })
+      screen.queryByRole("checkbox", { name: "public-archive" })
     ).toBeNull()
     expect(
       screen
-        .getByRole("checkbox", { name: "org/public-sdk" })
+        .getByRole("checkbox", { name: "public-sdk" })
         .getAttribute("aria-checked")
     ).toBe("true")
-    expect(
-      screen.getByRole("checkbox", { name: "org/internal-sdk" })
-    ).toBeTruthy()
-    expect(
-      screen.queryByRole("checkbox", { name: "org/public-docs" })
-    ).toBeNull()
+    expect(screen.getByRole("checkbox", { name: "internal-sdk" })).toBeTruthy()
+    expect(screen.queryByRole("checkbox", { name: "public-docs" })).toBeNull()
     fireEvent.change(screen.getByLabelText("Search repositories"), {
-      target: { value: "docs" },
+      target: { value: "ORG Public_Docs" },
     })
-    expect(
-      screen.queryByRole("checkbox", { name: "org/internal-sdk" })
-    ).toBeNull()
+    expect(screen.queryByRole("checkbox", { name: "internal-sdk" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "All" }))
-    expect(
-      screen.getByRole("checkbox", { name: "org/public-docs" })
-    ).toBeTruthy()
+    expect(screen.getByRole("checkbox", { name: "public-docs" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Save 1 repository" }))
     expect(onChange).toHaveBeenCalledWith(["org/public-sdk"])
   })
@@ -234,7 +222,7 @@ describe("OwnershipPicker", () => {
     const revealed = screen.getByRole("checkbox", {
       name: "#community-announce",
     })
-    expect(screen.getByText("Open SWE is not in this channel")).toBeTruthy()
+    expect(screen.getByText("Robin is not in this channel")).toBeTruthy()
     fireEvent.click(revealed)
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-maintainers" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))

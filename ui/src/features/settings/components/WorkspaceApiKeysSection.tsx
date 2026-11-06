@@ -6,7 +6,7 @@ import { Textarea } from "@langchain/macaw-components/Textarea"
 
 import { SettingsSection } from "@/components/AppShell"
 import { api, type WorkspaceApiKey } from "@/lib/api"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
   const qc = useQueryClient()

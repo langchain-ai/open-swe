@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   CaretRightIcon,
   MagnifyingGlassRegularIcon,
@@ -85,10 +86,10 @@ export function AllowedSlackBotsSection({
 
   const pending = add.isPending
   const unavailable = pending || bots.isPending || bots.isError
-  const matches = directory.data?.filter((bot) =>
-    `${bot.name} ${bot.bot_id} ${bot.user_id}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase())
+  const matches = new FuzzySearch(search).rank(
+    directory.data ?? [],
+    (bot) => bot.name,
+    (bot) => `${bot.bot_id} ${bot.user_id}`
   )
   const allow = (id: string) => {
     if (!id || unavailable) return
@@ -106,7 +107,7 @@ export function AllowedSlackBotsSection({
             Enabled bots
           </h3>
           <p className="text-xs/relaxed text-secondary">
-            Let trusted Slack bots start a task by mentioning Open SWE.
+            Let trusted Slack bots start a task by mentioning Robin.
           </p>
         </div>
         <Popover
@@ -207,7 +208,10 @@ export function AllowedSlackBotsSection({
                         item.bot_id === bot.bot_id
                     )
                     return (
-                      <button
+                      <Button
+                        color="secondary"
+                        variant="plain"
+                        size="sm"
                         key={`${bot.team_id}:${bot.bot_id}`}
                         type="button"
                         disabled={allowed || unavailable}
@@ -217,7 +221,7 @@ export function AllowedSlackBotsSection({
                             : `Allow ${bot.name}`
                         }
                         onClick={() => allow(bot.user_id)}
-                        className="flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-2 text-left transition-colors focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-elevated-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        className="h-auto w-full justify-start gap-space-3 px-space-2 py-space-2 text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-elevated-hover disabled:cursor-not-allowed disabled:bg-transparent disabled:opacity-50"
                       >
                         <span aria-hidden="true">
                           <Avatar
@@ -245,7 +249,7 @@ export function AllowedSlackBotsSection({
                               ? "Verifying…"
                               : "Allow"}
                         </span>
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>
@@ -302,10 +306,14 @@ export function AllowedSlackBotsSection({
               key={`${bot.team_id}:${bot.bot_id}`}
               className="flex items-center gap-space-3 px-space-3 py-space-3"
             >
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`${bot.name} ${bot.bot_id} Enabled`}
                 type="button"
                 onClick={() => onBotChange?.(`${bot.team_id}:${bot.bot_id}`)}
-                className="flex min-w-0 flex-1 items-center gap-space-3 rounded-md py-space-1 text-left hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="h-auto min-w-0 flex-1 justify-start gap-space-3 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 disabled={!onBotChange}
               >
                 <span aria-hidden="true">
@@ -333,7 +341,7 @@ export function AllowedSlackBotsSection({
                     className="text-icon-secondary"
                   />
                 )}
-              </button>
+              </Button>
               <Button
                 color="secondary"
                 variant="plain"
@@ -357,11 +365,11 @@ export function AllowedSlackBotsSection({
             : ""}
         </span>
         <span className="flex items-center gap-space-2">
-          <RobotIcon size={13} weight="regular" /> Runs as Open SWE
+          <RobotIcon size={13} weight="regular" /> Runs as Robin
         </span>
       </div>
       <p className="mt-space-2 text-xs/relaxed text-secondary">
-        Uses the Open SWE GitHub App’s repository access. Bots can only continue
+        Uses the Robin GitHub App’s repository access. Bots can only continue
         tasks they started.
       </p>
     </div>

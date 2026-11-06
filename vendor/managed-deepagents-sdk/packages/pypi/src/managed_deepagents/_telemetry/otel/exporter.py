@@ -25,6 +25,10 @@ import httpx
 from managed_deepagents._agent_auth_http import agent_auth_headers
 from managed_deepagents._concurrency import BatchProcessor
 from managed_deepagents._http_status import HttpStatusError, is_retryable, requested_delay
+from managed_deepagents._langsmith_env import (
+    resolve_server_api_key,
+    resolve_tenant_workspace_id,
+)
 from managed_deepagents._loopback import sends_key_securely
 from managed_deepagents._resilience import RetryPolicy, with_retry
 from managed_deepagents._telemetry.gates import is_telemetry_disabled
@@ -81,6 +85,7 @@ def resolve_otel_log_config(env: Mapping[str, str] | None = None) -> OtelLogConf
     Nothing is sent when telemetry is off, the process is not a LangSmith
     deployment, there is no key, or the key would cross the network in cleartext.
     """
+    # ``_connections`` reaches the channel modules, which log through this one.
     from managed_deepagents._connections import resolve_agent_auth_base_url  # noqa: PLC0415
 
     resolved = os.environ if env is None else env
@@ -90,10 +95,8 @@ def resolve_otel_log_config(env: Mapping[str, str] | None = None) -> OtelLogConf
         resolved.get("LANGSMITH_HOST_PROJECT_ID")
     ):
         return None
-    api_key = _nonempty(resolved.get("LANGSMITH_API_KEY")) or _nonempty(
-        resolved.get("LANGCHAIN_API_KEY")
-    )
-    if api_key is None:
+    api_key = resolve_server_api_key(resolved)
+    if not api_key:
         return None
     try:
         origin = resolve_agent_auth_base_url(resolved)
@@ -106,8 +109,7 @@ def resolve_otel_log_config(env: Mapping[str, str] | None = None) -> OtelLogConf
         url=url,
         headers=agent_auth_headers(
             api_key=api_key,
-            workspace_id=_nonempty(resolved.get("LANGSMITH_TENANT_ID"))
-            or _nonempty(resolved.get("LANGSMITH_WORKSPACE_ID")),
+            workspace_id=resolve_tenant_workspace_id(resolved),
         ),
     )
 

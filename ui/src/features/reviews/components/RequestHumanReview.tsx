@@ -18,10 +18,15 @@ import { PullRequestActionButton } from "./PullRequestActionButton"
 /** Posts a review card in the repository's Slack review channel. */
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const queryClient = useQueryClient()
-  const queryKey = ["human-review-availability", pr]
+  const queryKey = ["human-review-availability", pr.repo, pr.number]
+  const needsReview =
+    pr.draft === false &&
+    (pr.reviewDecision !== "approved" || pr.reviewRequired)
   const availability = useQuery({
     queryKey,
-    queryFn: () => api.humanReviewAvailability(pr),
+    enabled: needsReview,
+    queryFn: () =>
+      api.humanReviewAvailability({ repo: pr.repo, number: pr.number }),
     staleTime: 60_000,
   })
   const [channel, setChannel] = useState<string | null>(null)
@@ -46,7 +51,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       }))
       if (result.reused) return
       toast.success(
-        `Asked Slack to review ${pullRequestKey(pr)}`,
+        `Asked ${result.channel_name ? `#${result.channel_name}` : "Slack"} to review ${pullRequestKey(pr)}`,
         result.permalink
           ? {
               action: {
@@ -64,7 +69,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (pr.draft !== false) return null
+  if (!needsReview) return null
   const channelHint =
     active || channel
       ? null
@@ -105,8 +110,15 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         disabled={Boolean(channelHint)}
         onClick={() => {
           if (requestReview.isPending) return
-          if (active && permalink) {
-            window.open(permalink, "_blank", "noopener,noreferrer")
+          if (active) {
+            if (permalink) {
+              window.open(permalink, "_blank", "noopener,noreferrer")
+            } else {
+              toast.error(
+                "The review card's Slack link is unavailable. Retry the review status."
+              )
+              void availability.refetch()
+            }
           } else if (channelHint) {
             toast.error(channelHint)
           } else {

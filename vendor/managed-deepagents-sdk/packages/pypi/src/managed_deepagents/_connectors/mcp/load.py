@@ -8,12 +8,14 @@ import json
 import os
 import threading
 import warnings
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping, Sequence
 from functools import partial
 from http import HTTPStatus
 from importlib.util import find_spec
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from urllib.parse import urlsplit
+
+from langchain_core.tools import StructuredTool
 
 from managed_deepagents._agent_auth import AgentAuth
 from managed_deepagents._agent_auth_http import (
@@ -22,7 +24,10 @@ from managed_deepagents._agent_auth_http import (
     request_agent_auth_json,
 )
 from managed_deepagents._connection_authorization import (
+    CONNECT_ON_USE_METADATA,
+    ConnectOnUse,
     PendingCredential,
+    ToolCredentialRequiredError,
     raise_credential_authorization_required,
     resolve_user_connection_grants,
 )
@@ -37,6 +42,7 @@ from managed_deepagents._connectors.mcp.langsmith_url import (
 )
 from managed_deepagents._connectors.tool_selection import select_tools
 from managed_deepagents._credential_gate import CredentialConsumer
+from managed_deepagents._graph_build_timing import build_step
 from managed_deepagents._log import logger
 from managed_deepagents._memory.async_util import await_if_needed
 from managed_deepagents._memory.deps import optional_runtime_symbols, require_runtime_dependency
@@ -66,6 +72,8 @@ if TYPE_CHECKING or MCPAdapter is not None:
     from fastmcp.client.transports import SSETransport, StreamableHttpTransport
     from key_value.aio.stores.memory import MemoryStore
     from mcp.client.caching import CacheConfig, CacheEntry, CacheKey
+    from mcp.types import Tool as McpTool
+    from pydantic import ValidationError
 
     _AuthBase = httpx2.Auth
     _CacheStoreBase = KeyValueResponseCacheStore
@@ -75,8 +83,15 @@ else:
 
 INIT_TIMEOUT_SECONDS = 10.0
 HTTP_TIMEOUT_SECONDS = 30.0
-CACHE_TTL_MS = 60_000
+CACHE_TTL_MS = 5 * 60_000
 CACHE_MAX_ENTRIES = 1024
+
+
+class _DeferredCredential(NamedTuple):
+    """A kit provider the caller connects on first use, with the tools LMT stored for it."""
+
+    credential: PendingCredential
+    tools: list[McpTool]
 
 
 def load_managed_mcp_tools(connectors: McpServersDefinition) -> list[BaseTool]:
@@ -105,6 +120,11 @@ def mcp_credential_consumers(connectors: Sequence[object] | None) -> list[Creden
                 collect_pending_credentials=(
                     partial(collect_pending_managed_tools_credentials, definition)
                     if langsmith
+                    else None
+                ),
+                connect_links=(
+                    partial(managed_tools_connect_links, definition)
+                    if langsmith and definition.config.get("jit_auth")
                     else None
                 ),
             )
@@ -153,7 +173,7 @@ async def load_caller_mcp_tools(
         for name, server in connectors.config["servers"].items()
         if _uses_user_connection(server)
     }
-    ready, pending = await asyncio.to_thread(
+    ready, pending, deferred = await asyncio.to_thread(
         _resolve_langsmith_servers, connectors, _langsmith_server_names(connectors), context
     )
     if pending:
@@ -161,6 +181,9 @@ async def load_caller_mcp_tools(
     servers.update(ready)
     auth = {}
     authorization: dict[str, object] = {}
+    stored: dict[str, list[_DeferredCredential]] = {}
+    jit_auth = connectors.config.get("jit_auth", False)
+    connect_on_use: set[str] = set()
     caller_scope = [context.base_url, context.workspace_id, context.agent_id, context.principal_id]
     for name, server in servers.items():
         reference = server.get("connection")
@@ -177,14 +200,27 @@ async def load_caller_mcp_tools(
         else:
             headers = agent_auth_headers(api_key=context.api_key, workspace_id=context.workspace_id)
             headers["x-langsmith-identity"] = context.principal_id
-            auth[name] = ManagedAuth(server["url"], headers=headers)
-            authorization[name] = [caller_scope, context.api_key]
+            auth[name] = ManagedAuth(
+                server["url"], headers=headers, managed_tools_server=name if jit_auth else None
+            )
+            if jit_auth:
+                connect_on_use.add(name)
+            scope: list[object] = [caller_scope, context.api_key]
+            if name in deferred:
+                # A new connection changes the live catalog; never serve the old one.
+                scope.append(sorted(entry.credential["slug"] for entry in deferred[name]))
+                stored[name] = deferred[name]
+            authorization[name] = scope
 
     return await load_tools(
         servers,
         auth=auth,
         authorization=authorization,
         throw_on_load_error=connectors.config.get("throw_on_load_error", True),
+        stored=stored,
+        # Declaring elicitation makes LangSmith answer with a bare URL elicitation
+        # instead of the 428 that names the credential to connect.
+        without_elicitation=connect_on_use,
     )
 
 
@@ -217,18 +253,24 @@ def _resolve_langsmith_servers(
     connectors: McpServersDefinition,
     server_names: Sequence[str],
     context: AgentAuthContext,
-) -> tuple[dict[str, RemoteMcpServerConfig], list[PendingCredential]]:
-    """Probe LangSmith MCP servers once: ready configs plus any pending credentials.
+) -> tuple[
+    dict[str, RemoteMcpServerConfig],
+    list[PendingCredential],
+    dict[str, list[_DeferredCredential]],
+]:
+    """Probe LangSmith MCP servers once: ready configs, pending and deferred credentials.
 
     Shared by load (interrupt if pending) and the credential-gate collector
-    (return pending only). Transport failures follow ``throw_on_load_error``;
-    authorization failures are never skipped.
+    (return pending only). With ``jit_auth``, a kit's missing credentials that
+    come with stored tools are deferred to first use instead of pending.
+    Transport failures follow ``throw_on_load_error``; authorization failures
+    are never skipped.
     """
     if not server_names:
-        return {}, []
+        return {}, [], {}
     matching = _matching_langsmith_servers(connectors, server_names, context.base_url.rstrip("/"))
     if not matching:
-        return {}, []
+        return {}, [], {}
     if not (context.api_key or "").strip():
         raise RuntimeError("LangSmith MCP servers require LANGSMITH_API_KEY at runtime")
     headers = agent_auth_headers(
@@ -236,11 +278,15 @@ def _resolve_langsmith_servers(
         workspace_id=context.workspace_id,
     )
     headers["x-langsmith-identity"] = context.principal_id
+    jit_auth = connectors.config.get("jit_auth", False)
     out: dict[str, RemoteMcpServerConfig] = {}
     pending: list[PendingCredential] = []
+    deferred: dict[str, list[_DeferredCredential]] = {}
     for server_name, declared, url in matching:
         try:
-            required = _probe_langsmith_server_access(server_name, url, headers)
+            required, on_use = _probe_langsmith_server_access(
+                server_name, url, headers, jit_auth=jit_auth
+            )
         except OSError as exc:
             if connectors.config.get("throw_on_load_error", True):
                 raise
@@ -254,7 +300,9 @@ def _resolve_langsmith_servers(
             pending.extend(required)
             continue
         out[server_name] = _langsmith_server_config(declared)
-    return out, pending
+        if on_use:
+            deferred[server_name] = on_use
+    return out, pending, deferred
 
 
 def collect_pending_managed_tools_credentials(
@@ -266,11 +314,38 @@ def collect_pending_managed_tools_credentials(
     Incomplete 428s still raise a clear RuntimeError. Used by the
     credential gate so Managed Tools misses combine with ordinary connection misses.
     """
-    return _resolve_langsmith_servers(
+    _, pending, _ = _resolve_langsmith_servers(
         connectors,
         _langsmith_server_names(connectors),
         context,
-    )[1]
+    )
+    return pending
+
+
+def managed_tools_connect_links(
+    connectors: McpServersDefinition,
+    context: AgentAuthContext,
+    wanted: Mapping[str, Collection[str]],
+) -> list[PendingCredential]:
+    """Current connect links for the ``wanted`` slugs, listing only their kits."""
+    servers = [name for name in _langsmith_server_names(connectors) if wanted.get(name)]
+    matching = _matching_langsmith_servers(connectors, servers, context.base_url.rstrip("/"))
+    headers = agent_auth_headers(api_key=context.api_key, workspace_id=context.workspace_id)
+    headers["x-langsmith-identity"] = context.principal_id
+    links: list[PendingCredential] = []
+    for server_name, _declared, url in matching:
+        try:
+            pending, _ = _probe_langsmith_server_access(server_name, url, headers, jit_auth=False)
+        except (OSError, RuntimeError) as error:
+            # Each refused call still asks on its own with the link from its 428.
+            logger.warning(
+                'could not list connect links for LangSmith MCP server "%s": %s',
+                logger.log_identifier(server_name),
+                logger.safe_error_label(error),
+            )
+            continue
+        links.extend(c for c in pending if c["slug"] in wanted[server_name])
+    return links
 
 
 def _langsmith_server_config(
@@ -286,10 +361,14 @@ def _probe_langsmith_server_access(
     server_name: str,
     url: str,
     headers: Mapping[str, str],
-) -> list[PendingCredential]:
+    *,
+    jit_auth: bool,
+) -> tuple[list[PendingCredential], list[_DeferredCredential]]:
     """Return pending credentials from a complete 428 or a partial kit's ``_meta``.
 
-    An incomplete 428 raises. An empty list means the server is fully accessible.
+    With ``jit_auth``, ``_meta`` entries that carry stored tools are returned as
+    deferred instead of pending. An incomplete 428 raises. No pending
+    credentials means the server's connected tools load.
     """
     status, payload = request_agent_auth_json(
         "POST",
@@ -299,15 +378,15 @@ def _probe_langsmith_server_access(
         timeout=AGENT_AUTH_TIMEOUT_SECONDS,
     )
     if status == HTTPStatus.OK:
-        return _pending_credentials_from_langsmith_meta(payload, server_name)
+        return _credentials_from_langsmith_meta(payload, server_name, jit_auth=jit_auth)
     if status != HTTPStatus.PRECONDITION_REQUIRED:
-        return []
+        return [], []
     credentials = payload.get("credentials")
     if isinstance(credentials, list):
-        return _pending_credentials_from_langsmith_gateway_428(credentials, server_name)
+        return _pending_credentials_from_langsmith_gateway_428(credentials, server_name), []
     pending = _pending_credential_from_langsmith_428(payload, provider=server_name)
     if pending is not None:
-        return [pending]
+        return [pending], []
     verification_url = payload.get("verification_url")
     if isinstance(verification_url, str) and verification_url:
         raise RuntimeError(
@@ -320,14 +399,17 @@ def _probe_langsmith_server_access(
     )
 
 
-def _pending_credentials_from_langsmith_meta(
+def _credentials_from_langsmith_meta(
     payload: Mapping[str, object],
     server_name: str,
-) -> list[PendingCredential]:
+    *,
+    jit_auth: bool,
+) -> tuple[list[PendingCredential], list[_DeferredCredential]]:
     """Map the missing credentials an ALLOW_PARTIAL tool kit lists in ``_meta``.
 
     The kit's connected tools work without these, so entries without a
     complete link are skipped with a warning instead of failing the run.
+    With ``jit_auth``, an entry's stored ``tools`` defer it to first use.
     """
     result = payload.get("result")
     meta = result.get("_meta") if isinstance(result, Mapping) else None
@@ -337,8 +419,9 @@ def _pending_credentials_from_langsmith_meta(
         else None
     )
     if not isinstance(entries, list):
-        return []
+        return [], []
     pending: list[PendingCredential] = []
+    deferred: list[_DeferredCredential] = []
     for entry in entries:
         credential = (
             _pending_credential_from_langsmith_428(entry, provider=server_name)
@@ -348,8 +431,32 @@ def _pending_credentials_from_langsmith_meta(
         if credential is None:
             _warn_skipped_meta_credential(server_name, entry)
             continue
+        tools = entry.get("tools") if jit_auth and isinstance(entry, Mapping) else None
+        stored = _stored_tool_definitions(server_name, tools) if isinstance(tools, list) else []
+        if stored:
+            deferred.append(_DeferredCredential(credential, stored))
+            continue
         pending.append(credential)
-    return pending
+    return pending, deferred
+
+
+def _stored_tool_definitions(server_name: str, tools: list[object]) -> list[McpTool]:
+    """Validate the tool definitions LMT stores for an unconnected provider."""
+    require_runtime_dependency(MCPAdapter, "langchain[mcp]", "load MCP tools")
+    valid: list[McpTool] = []
+    for definition in tools:
+        try:
+            tool = McpTool.model_validate(definition)
+        except ValidationError:
+            continue
+        if tool.name and tool.input_schema.get("type") == "object":
+            valid.append(tool)
+    if len(valid) < len(tools):
+        logger.warning(
+            'skipped invalid stored tools for LangSmith MCP server "%s"',
+            logger.log_identifier(server_name),
+        )
+    return valid
 
 
 def _warn_skipped_meta_credential(server_name: str, entry: object) -> None:
@@ -385,9 +492,24 @@ def _pending_credentials_from_langsmith_gateway_428(
     Entries without a complete link cannot be completed from an interrupt, so
     any of them raise with every missing name before an interrupt is shown.
     """
+    pending, unresolved = _partition_langsmith_428_entries(credentials, server_name)
+    if unresolved or not pending:
+        names = ", ".join(unresolved) if unresolved else server_name
+        raise RuntimeError(
+            f'LangSmith MCP server "{server_name}" requires credentials for {names}; '
+            "connect them in LangSmith Tools before running the agent"
+        )
+    return pending
+
+
+def _partition_langsmith_428_entries(
+    entries: list[object],
+    server_name: str,
+) -> tuple[list[PendingCredential], list[str]]:
+    """Linked credentials, and labels for entries without a complete link."""
     pending: list[PendingCredential] = []
     unresolved: list[str] = []
-    for entry in credentials:
+    for entry in entries:
         if not isinstance(entry, Mapping):
             unresolved.append(server_name)
             continue
@@ -397,13 +519,7 @@ def _pending_credentials_from_langsmith_gateway_428(
             continue
         label = entry.get("display_name") or entry.get("slug")
         unresolved.append(label if isinstance(label, str) and label else server_name)
-    if unresolved or not pending:
-        names = ", ".join(unresolved) if unresolved else server_name
-        raise RuntimeError(
-            f'LangSmith MCP server "{server_name}" requires credentials for {names}; '
-            "connect them in LangSmith Tools before running the agent"
-        )
-    return pending
+    return pending, unresolved
 
 
 def _pending_credential_from_langsmith_428(
@@ -538,11 +654,14 @@ class ManagedAuth(_AuthBase):
         token: Callable[[], Awaitable[str]] | None = None,
         headers: Mapping[str, str] | None = None,
         connection_slug: str | None = None,
+        managed_tools_server: str | None = None,
     ) -> None:
         require_runtime_dependency(MCPAdapter, "langchain[mcp]", "load MCP tools")
         self._origin = origin(url)
         self._token = token
         self._headers = dict(headers or {})
+        #: Set for a LangSmith tool kit whose calls may ask the caller to connect.
+        self._managed_tools_server = managed_tools_server
         connection = f'MCP connection "{connection_slug}"' if connection_slug else "MCP connection"
         self._rejected = f"{connection} was rejected by its server; reconnect it and retry"
 
@@ -560,6 +679,12 @@ class ManagedAuth(_AuthBase):
             request.headers["Authorization"] = f"Bearer {token}"
         request.headers.update(self._headers)
         response = yield request
+        if (
+            response.status_code == HTTPStatus.PRECONDITION_REQUIRED
+            and self._managed_tools_server is not None
+        ):
+            await response.aread()
+            raise _tool_credential_required(self._managed_tools_server, response)
         if response.status_code != HTTPStatus.UNAUTHORIZED or self._token is None:
             return
         await response.aread()
@@ -574,6 +699,30 @@ class ManagedAuth(_AuthBase):
         if response.status_code == HTTPStatus.UNAUTHORIZED:
             await response.aclose()
             raise RuntimeError(self._rejected)
+
+
+def _tool_credential_required(
+    server_name: str, response: httpx2.Response
+) -> ToolCredentialRequiredError:
+    """Map a kit's 428 for one tool call; credentials stay empty without a complete link."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    entries = body.get("credentials") if isinstance(body, Mapping) else None
+    pending, unresolved = _partition_langsmith_428_entries(
+        entries if isinstance(entries, list) else [body], server_name
+    )
+    if unresolved or not pending:
+        logger.warning(
+            'could not read the connect link from a LangSmith MCP server "%s" refusal',
+            logger.log_identifier(server_name),
+        )
+        return ToolCredentialRequiredError(", ".join(dict.fromkeys(unresolved)) or server_name, [])
+    provider = ", ".join(
+        dict.fromkeys(credential.get("provider") or server_name for credential in pending)
+    )
+    return ToolCredentialRequiredError(provider, pending)
 
 
 def _http_client_factory(
@@ -635,15 +784,83 @@ async def _client(
 
 
 async def _discover_tools(
-    name: str, client_factory: Callable[[], Awaitable[Client[Any]]]
+    name: str,
+    client_factory: Callable[[], Awaitable[Client[Any]]],
+    stored: Sequence[_DeferredCredential] = (),
+    *,
+    elicitation: bool = True,
 ) -> list[BaseTool]:
     # One-server native groups keep invocation independent of peers.
     adapter_cls = cast(
         "type[NativeMCPAdapter]",
         require_runtime_dependency(MCPAdapter, "langchain[mcp]", "load MCP tools"),
     )
-    adapter = adapter_cls(ClientGroup({name: await client_factory()}))
-    return await adapter.list_tools(cache_mode="use")
+    group = ClientGroup({name: await client_factory()})
+    if elicitation:
+        # The adapter arms its clients to answer elicitation with interrupts.
+        armed = adapter_cls(group).client
+        if isinstance(armed, ClientGroup):
+            group = armed
+    # Loaded with MCPAdapter above, which this path already required.
+    from langchain.mcp import as_langchain_tool as convert  # noqa: PLC0415
+
+    async with group:
+        member = group.clients[name]
+        tools: list[BaseTool] = []
+        for tool in await group.list_tools(cache_mode="use"):
+            native = await convert(tool, group)
+            if not elicitation:
+                upstream = tool.model_copy(update={"name": tool.name.removeprefix(f"{name}_")})
+                native = native.model_copy(update={"coroutine": _on_own_session(upstream, member)})
+            tools.append(native)
+        if stored:
+            tools += await _stored_tools(name, stored, member, {tool.name for tool in tools})
+        return tools
+
+
+async def _stored_tools(
+    name: str,
+    deferred: Sequence[_DeferredCredential],
+    client: Client[Any],
+    listed: set[str],
+) -> list[BaseTool]:
+    """Bind stored definitions under native names; calls go to the server by raw name.
+
+    Each carries the credential it needs, so the gate can ask once per model step.
+    """
+    # Loaded with MCPAdapter above, which this path already required.
+    from langchain.mcp import as_langchain_tool as convert  # noqa: PLC0415
+
+    tools: list[BaseTool] = []
+    for credential, definitions in deferred:
+        connect: ConnectOnUse = {"server": name, "credential": credential}
+        for tool in definitions:
+            qualified = f"{name}_{tool.name}"
+            if qualified in listed:
+                continue
+            listed.add(qualified)
+            native = await convert(tool, client)
+            metadata = {**(native.metadata or {}), CONNECT_ON_USE_METADATA: connect}
+            coroutine = _on_own_session(tool, client)
+            tools.append(
+                native.model_copy(
+                    update={"name": qualified, "metadata": metadata, "coroutine": coroutine}
+                )
+            )
+    return tools
+
+
+def _on_own_session(tool: McpTool, client: Client[Any]) -> Callable[..., Awaitable[object]]:
+    """Call ``tool`` on its own session; a kit's 428 ends the session, and any calls sharing it."""
+    from langchain.mcp import as_langchain_tool as convert  # noqa: PLC0415
+
+    async def call(**arguments: object) -> object:
+        isolated = await convert(tool, client.new())
+        if not isinstance(isolated, StructuredTool) or isolated.coroutine is None:
+            raise TypeError("langchain.mcp returned a tool without a coroutine")
+        return await isolated.coroutine(**arguments)
+
+    return call
 
 
 async def load_tools(
@@ -652,8 +869,15 @@ async def load_tools(
     auth: Mapping[str, httpx2.Auth],
     authorization: Mapping[str, object],
     throw_on_load_error: bool = True,
+    stored: Mapping[str, Sequence[_DeferredCredential]] | None = None,
+    without_elicitation: Collection[str] = (),
 ) -> list[BaseTool]:
-    """Discover detached native tools using one stable, authorization-scoped cache."""
+    """Discover detached native tools using one stable, authorization-scoped cache.
+
+    ``stored`` adds a server's tool definitions that its listing leaves out
+    (LangSmith tool kits' unconnected providers) through the same native path.
+    Servers in ``without_elicitation`` connect without declaring elicitation.
+    """
     require_runtime_dependency(MCPAdapter, "langchain[mcp]", "load MCP tools")
     tools: list[BaseTool] = []
     names: set[str] = set()
@@ -662,7 +886,13 @@ async def load_tools(
             _client, server, auth.get(name), opaque(authorization.get(name, "public"))
         )
         try:
-            server_tools = await _discover_tools(name, client_factory)
+            with build_step(name):
+                server_tools = await _discover_tools(
+                    name,
+                    client_factory,
+                    (stored or {}).get(name, ()),
+                    elicitation=name not in without_elicitation,
+                )
         except Exception as error:
             if throw_on_load_error:
                 raise

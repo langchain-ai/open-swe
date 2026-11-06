@@ -1,8 +1,6 @@
 """Sandbox capabilities for calling back to the associated thread."""
 
-import shlex
-from typing import TYPE_CHECKING
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 import jwt
 from fastapi import HTTPException
@@ -11,10 +9,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from openswe.config import ENV
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.utils.dashboard_links import dashboard_api_base_url
-
-if TYPE_CHECKING:
-    from deepagents.backends.protocol import SandboxBackendProtocol
+from openswe.utils.dashboard_links import public_dashboard_api_base_url
+from openswe.utils.thread_reads import read_thread
 
 # Under /dashboard/api so a dashboard deployment that fronts the backend forwards it.
 TOOLS_PATH = "/dashboard/api/sandbox-tools"
@@ -35,22 +31,13 @@ class ToolAccess(BaseModel):
 
 
 def tools_base_url() -> str | None:
-    base = dashboard_api_base_url()
-    parsed = urlsplit(base)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        return None
-    return base.rstrip("/") + TOOLS_PATH
+    base = public_dashboard_api_base_url()
+    return None if base is None else base + TOOLS_PATH
 
 
 async def sandbox_host_thread_id(thread_id: str) -> str:
     """The thread whose capability a shared sandbox carries: its creator, not a guest."""
-    thread = await get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id, get_client())
     host = (thread.get("metadata") or {}).get(SANDBOX_HOST_THREAD_KEY)
     return host if isinstance(host, str) and host else thread_id
 
@@ -96,7 +83,7 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     if access is None:
         return None
     url, token = access
-    host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
+    host = await read_thread(await sandbox_host_thread_id(thread_id), get_client())
     workspace = (host.get("metadata") or {}).get("workspace")
     settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
     env_vars = {TOOLS_URL_ENV: url}
@@ -111,20 +98,3 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
         "headers": [{"name": TOOLS_HEADER, "type": "opaque", "value": token}],
         "env_vars": env_vars,
     }
-
-
-async def provision_tool_url(thread_id: str, backend: SandboxBackendProtocol) -> None:
-    if ENV.SANDBOX_TYPE.get() == "langsmith":
-        return
-    access = await issue_tool_access(thread_id, backend.id)
-    if access is None:
-        return
-    url, token = access
-    tokenized = f"{url}?{urlencode({'token': token})}"
-    result = await backend.aexecute(
-        f"set -e; umask 077; tools_url_tmp=$(mktemp {TOOLS_URL_FILE}.XXXXXX); "
-        f'printf %s {shlex.quote(tokenized)} > "$tools_url_tmp"; '
-        f'mv -f "$tools_url_tmp" {TOOLS_URL_FILE}'
-    )
-    if result.exit_code != 0:
-        raise RuntimeError("Cannot provision sandbox tools URL")

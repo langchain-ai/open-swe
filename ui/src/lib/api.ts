@@ -15,6 +15,15 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AppNotification {
+  id: string
+  title: string
+  body: string
+  url: string
+  /** The in-app route for `url`, or null when it points outside the dashboard. */
+  path: string | null
+}
+
 export interface AuditLogFilters {
   start_time: string
   end_time: string
@@ -232,6 +241,9 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  auth_provider?: "github" | "langsmith"
+  github_login?: string | null
+  requires_github_link?: boolean
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -239,6 +251,8 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** The organizations this Open SWE serves (`ALLOWED_GITHUB_ORGS`), lowercase. */
+  base_orgs?: Array<string>
   /** Mirrors the user's preference: what Enter does while a run is live. */
   follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */
@@ -322,15 +336,17 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
+  github_review_request_comments?: boolean
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_monitor?: boolean | null
-  experimental_act_as_approval?: boolean
-  act_as_always_allowed?: boolean
+  goal_mode?: boolean
+  experimental_conditional_approval?: boolean
+  experimental_memory?: boolean
+  experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
   updated_at?: string
 }
 
@@ -342,14 +358,17 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
+  github_review_request_comments?: boolean
   concierge_mode?: boolean
-  pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_monitor?: boolean | null
-  experimental_act_as_approval?: boolean
+  goal_mode?: boolean
+  experimental_conditional_approval?: boolean
+  experimental_memory?: boolean
+  experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
 }
 
 export interface SlackBotOption {
@@ -410,6 +429,10 @@ export interface WorkspaceSettings {
   default_reviewer_subagent_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
+  /** Share (0–100) of newly reviewed pull requests that also get a shadow review. */
+  review_shadow_percent?: number | null
+  review_shadow_model?: string | null
+  review_shadow_reasoning_effort?: string | null
   updated_at?: string | null
 }
 
@@ -454,13 +477,6 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
-}
-
-export interface LangSmithConnectionStatus {
-  available: boolean
-  connected: boolean
-  email?: string | null
-  updated_at?: string | null
 }
 
 export interface ManagedToolsGateway {
@@ -838,6 +854,14 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
+/** A person in the Slack workspace, offered when mentioning someone in a composer. */
+export interface SlackUserOption {
+  id: string
+  name: string
+  display_name: string
+  real_name: string
+}
+
 /** A channel the Slack bot can see, offered when binding channels to a workspace. */
 export interface SlackChannelOption {
   id: string
@@ -1043,6 +1067,7 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  author?: string | null
   detailsLoading?: boolean
   detailsError?: boolean
   repo: string
@@ -1054,6 +1079,7 @@ export interface OpenPullRequest {
   deletions: number | null
   mergeable: boolean | null
   mergeState: string
+  autoMerge?: boolean
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
@@ -1065,6 +1091,7 @@ export interface OpenPullRequest {
   createdAt: string | null
   updatedAt: string | null
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  requiredChecksPassing: boolean | null
   failingChecks: string[]
   pendingChecks: string[]
   // Required by the base branch but never reported on the head, so GitHub
@@ -1073,6 +1100,17 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  conversationResolutionRequired: boolean | null
+  // Why it is on the To Review list: Open SWE assigned it, may assign it once
+  // its review goes unclaimed, or it was linked in a Slack thread naming you.
+  assignment?:
+    | "assigned"
+    | "requested"
+    | "tentative"
+    | "mentioned"
+    | "draft"
+    | "speculative"
+    | null
 }
 
 export interface PullRequestReviewer {
@@ -1091,7 +1129,12 @@ export type PullRequestActionName =
   | "update-branch"
 
 export type PullRequestActionRequest =
-  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | {
+      action: "merge"
+      sha: string | null
+      merge_method: MergeMethod
+      auto_merge?: boolean
+    }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
   | { action: "update-branch"; sha: string | null }
@@ -1167,6 +1210,7 @@ export interface ReviewPrDetails {
   state: string
   title: string
   body: string
+  description_pull_requests?: Array<number>
   additions: number
   deletions: number
   changed_files: number
@@ -1218,7 +1262,6 @@ export interface ReviewDetail extends Omit<
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
-  checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
@@ -1250,8 +1293,13 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision:
+    | "would_approve"
+    | "would_approve_conditionally"
+    | "needs_human_review"
   explanation: string
+  approval_condition?: string | null
+  auto_approved?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -1428,6 +1476,7 @@ export interface HumanReviewRequestResult {
   error: string
   request_id: string
   channel: string
+  channel_name: string
   permalink: string
   reused: boolean
 }
@@ -1459,11 +1508,6 @@ function pullRequestThread(
 }
 
 export const api = {
-  recordPageView: (page_name: string) =>
-    request<void>("/analytics/page", {
-      method: "POST",
-      body: JSON.stringify({ page_name }),
-    }),
   me: () => request<SessionUser>("/me"),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
@@ -1670,6 +1714,13 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  pendingNotifications: () => request<AppNotification[]>("/notifications"),
+  acknowledgeNotification: (id: string) =>
+    request<{ ok: boolean }>(
+      `/notifications/${encodeURIComponent(id)}/delivered`,
+      { method: "POST" }
+    ),
+  listSlackUsers: () => request<{ users: SlackUserOption[] }>("/slack/users"),
   slackUserName: (userId: string) =>
     request<{ name: string }>(
       `/slack/users/${encodeURIComponent(userId)}/name`
@@ -1763,12 +1814,6 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyLangSmithStatus: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
-  disconnectLangSmith: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
@@ -1888,12 +1933,17 @@ export const api = {
   ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
-    method: MergeMethod
+    method: MergeMethod,
+    resolveConversations = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
+      ...(pr.ci === "pending" && pr.mergeState === "blocked"
+        ? { auto_merge: true }
+        : {}),
+      ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -1911,7 +1961,7 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
-  humanReviewAvailability: (pr: OpenPullRequest) =>
+  humanReviewAvailability: (pr: Pick<OpenPullRequest, "repo" | "number">) =>
     request<{
       available: boolean
       active: boolean
@@ -1937,6 +1987,16 @@ export const api = {
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  updatePullRequestDescription: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: string
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/description`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getAssessmentFeedback: (
     owner: string,
@@ -1987,6 +2047,10 @@ export const api = {
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
+    ),
+  getReviewChecks: (owner: string, repo: string, number: number) =>
+    request<Array<ReviewCheckRun>>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/checks`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
@@ -2117,7 +2181,7 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "langsmith",
+  provider: "slack" | "github",
   redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)

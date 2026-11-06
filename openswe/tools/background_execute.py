@@ -3,6 +3,7 @@
 import logging
 import shlex
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -10,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from openswe.dashboard.profiles import get_profile
 from openswe.run_config import RunConfig
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
-from openswe.sandboxes.state import SANDBOX_BACKENDS
+from openswe.sandboxes.state import SandboxBackendProxy, get_or_create_sandbox_backend_proxy
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 from openswe.utils.background_task_state import update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
@@ -66,14 +67,11 @@ async def _launch(
     )
 
 
-def current_backend() -> tuple[str, Any]:
+def current_backend() -> tuple[str, SandboxBackendProxy]:
     thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
-    backend = SANDBOX_BACKENDS.get(thread_id)
-    if backend is None:
-        raise RuntimeError("No sandbox is bound to this thread")
-    return thread_id, backend
+    return thread_id, get_or_create_sandbox_backend_proxy(thread_id)
 
 
 async def background_execute(
@@ -87,7 +85,7 @@ async def background_execute(
     try:
         thread_id, backend = current_backend()
         if await uses_completion_callback():
-            return await _launch_with_callback(thread_id, backend, command, timeout)
+            return await CallbackLaunch.start(thread_id, backend, command, timeout)
         return await _launch_with_cron(thread_id, backend, command, timeout)
     except Exception as exc:
         logger.exception("Failed to start background command")
@@ -124,20 +122,57 @@ async def _track(thread_id: str, task_id: str, *, running: bool = True) -> None:
         )
 
 
-async def _launch_with_callback(
-    thread_id: str, backend: Any, command: str, timeout: int
-) -> dict[str, Any]:
-    task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-    # Tracked first: a fast command's completion callback can reconcile before launch returns.
-    await _track(thread_id, task_id)
-    try:
-        state = await _launch(
-            backend, task_id, command, timeout, callback=True, owner_thread_id=thread_id
-        )
-    except Exception:
-        await _track(thread_id, task_id, running=False)
-        raise
-    return {"success": True, **state}
+@dataclass(frozen=True)
+class CallbackLaunch:
+    """A command launched to call back on completion, tracked on its thread while it runs."""
+
+    thread_id: str
+    backend: SandboxBackendProxy
+    task_id: str = field(default_factory=lambda: f"{TASK_PREFIX}-{uuid.uuid4()}")
+
+    @classmethod
+    async def start(
+        cls, thread_id: str, backend: SandboxBackendProxy, command: str, timeout: int
+    ) -> dict[str, Any]:
+        """Launch ``command`` on ``thread_id``'s sandbox, calling back once it finishes."""
+        return await cls(thread_id, backend).run(command, timeout)
+
+    async def run(self, command: str, timeout: int) -> dict[str, Any]:
+        """Launch it, tracked before launch for a callback that reconciles first, and again
+        after for the reconcile that reconnecting runs before the task exists."""
+        await _track(self.thread_id, self.task_id)
+        try:
+            state = await _launch(
+                self.backend,
+                self.task_id,
+                command,
+                timeout,
+                callback=True,
+                owner_thread_id=self.thread_id,
+            )
+        except Exception:
+            await _track(self.thread_id, self.task_id, running=False)
+            raise
+        if state.get("status") == "running":
+            await _track(self.thread_id, self.task_id)
+        if not await self.still_running(state):
+            await _track(self.thread_id, self.task_id, running=False)
+        return {"success": True, **state}
+
+    async def still_running(self, launched: dict[str, JsonValue]) -> bool:
+        """Whether the task runs after it was last tracked; unknown counts as running."""
+        if launched.get("status") != "running":
+            return False
+        try:
+            current = await execute(self.backend, "status", task_id=self.task_id)
+        except Exception:
+            logger.warning(
+                "Could not confirm background command status",
+                extra={"task_id": self.task_id},
+                exc_info=True,
+            )
+            return True
+        return current.get("status") == "running"
 
 
 async def _launch_with_cron(

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROFILE_SETTING_KEYS = (
     "auto_fix_ci",
     "auto_human_review_enabled",
+    "github_review_request_comments",
     "draft_prs",
     "review_draft_prs",
 )
@@ -46,6 +47,7 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     if own_settings:
         preferences = await User.preferences_for_login(login)
         profile_settings["concierge_mode"] = preferences.concierge_mode
+        profile_settings["personal_kitchen_channel_id"] = preferences.personal_kitchen_channel_id
         profile_settings.update(
             {key: getattr(preferences, key) for key in feature_flag_names(UserPreferencesPatch)}
         )

@@ -5,7 +5,7 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import httpx2
@@ -14,30 +14,39 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from openswe.dispatch import channel_of
+from openswe.plugins.records import PluginChat
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.machine_reads import machine_thread
+from openswe.threads.mentions import ThreadMentions
 from openswe.threads.principals import Principal
 from openswe.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
+    _command_message_content,
+    _command_message_id,
+    _command_prompt_text,
     _enrich_run_start_command,
     _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
-    _notify_slack_web_handoff,
+    _SlackWebHandoff,
     offload_requested,
     queue_follow_up_run,
     steer_running_thread,
 )
-from openswe.threads.store import POSTING_COMMANDS, THREADS, CommandReply
+from openswe.threads.store import ACTING_COMMANDS, POSTING_COMMANDS, THREADS, CommandReply
 from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
     _now_ms,
+    chats_beside_plugin,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -218,6 +227,14 @@ async def proxy_dashboard_thread_commands(
     # The client's queue-or-steer choice rides the run's multitask strategy.
     # LangGraph's commands endpoint does not take it, so it is consumed here.
     enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
+    mentions = ThreadMentions(
+        thread_id,
+        login,
+        _command_message_id(start_params) or str(parsed.get("id") or uuid.uuid7()),
+        _command_prompt_text(_command_message_content(start_params))
+        if method == "run.start" and not principal.machine and not relayed_from
+        else "",
+    )
     offloading = offload_requested(start_params)
     transcribed = metadata.get("transcript") == TRANSCRIPT_VERSION
     if method == "run.start" and thread_busy:
@@ -240,6 +257,7 @@ async def proxy_dashboard_thread_commands(
             if not enqueue and (turn is not None or not transcribed)
             else queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
         )
+        mentions.dispatch()
         return 200, json.dumps(handled).encode(), "application/json"
     # Enrichment rewrites the command in place; a start that loses the thread
     # to another run is queued from the command as sent.
@@ -278,8 +296,13 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
+    sender = (
+        await _sender_user_id(principal, login, metadata)
+        if method in ACTING_COMMANDS and not relayed_from
+        else None
+    )
     try:
-        reply = await THREADS.command(thread_id, outgoing)
+        reply = await THREADS.command(thread_id, outgoing, user_id=sender)
     except Exception:
         # Answered like the runtime's own failure, so a refused start still closes its turn.
         logger.exception("Delivering a thread command failed", extra={"thread_id": thread_id})
@@ -301,19 +324,27 @@ async def proxy_dashboard_thread_commands(
         and response_payload.get("type") == "success"
         and run_id is not None
     )
+    # The store answers a start the runtime refused with a 200 carrying an error envelope.
+    run_start_refused = method == "run.start" and (
+        reply.status >= 400
+        or (isinstance(response_payload, dict) and response_payload.get("type") == "error")
+    )
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
+            mentions.dispatch()
             return 200, json.dumps(requeued).encode(), "application/json"
-        if reply.status >= 400:
-            await _fail_requested_turn(thread_id, enriched)
+    if run_start_refused:
+        await _fail_requested_turn(thread_id, enriched)
+    if run_start_succeeded and not principal.machine and chats_beside_plugin(metadata):
+        user = await User.for_person(ThreadIdentity(login).person)
+        if user:
+            await PluginChat.deliver_input(thread_id, user.id, enriched["params"].get("input"))
     if run_start_succeeded and not creating and not relayed_from:
-        try:
-            await _notify_slack_web_handoff(thread_id, metadata)
-        except Exception:
-            logger.exception(
-                "Failed to update Slack message for dashboard handoff on %s", thread_id
-            )
+        await _SlackWebHandoff(thread_id, metadata).notify()
+
+    if run_start_succeeded:
+        mentions.dispatch()
 
     if run_start_succeeded and run_id is not None:
         task = asyncio.create_task(
@@ -342,6 +373,22 @@ async def proxy_dashboard_thread_commands(
                 exc_info=True,
             )
     return reply.status, reply.content, reply.media_type
+
+
+async def _sender_user_id(
+    principal: Principal, login: str, metadata: Mapping[str, object]
+) -> str | None:
+    """The Open SWE user a person's own command on a channel's thread acts as there.
+
+    The one ``_run_user_metadata`` attributes the person's dashboard runs to, so a
+    follow-up has the principal their channel runs have. ``None`` for a machine,
+    which is no person, and on any other thread. An agent's relayed message is not the
+    person's own, so its caller asks for none.
+    """
+    if principal.machine or channel_of(metadata) is None:
+        return None
+    user = await ThreadIdentity(login).user()
+    return None if user is None else str(user.id)
 
 
 async def _queue_if_thread_turned_busy(
@@ -521,10 +568,17 @@ async def proxy_dashboard_thread_run_enqueue(
             "metadata": body_dict.get("metadata"),
         },
     }
+    mentions = ThreadMentions(
+        thread_id,
+        login,
+        _command_message_id(command["params"]) or str(uuid.uuid7()),
+        _command_prompt_text(_command_message_content(command["params"])),
+    )
     queued = await queue_follow_up_run(thread_id, login, command, metadata=metadata, email=email)
     run_id = queued.get("result", {}).get("run_id") if isinstance(queued, dict) else None
     if not isinstance(run_id, str) or not run_id:
         raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
+    mentions.dispatch()
     # The raw runs REST caller expects a `Run` object back, not the
     # `commands` protocol's `{id, type, result}` envelope `queue_follow_up_run`
     # returns — re-fetch the run it just created to answer in that shape.

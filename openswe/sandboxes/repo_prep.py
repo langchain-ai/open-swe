@@ -20,6 +20,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 logger = logging.getLogger(__name__)
 
 CLONE_TIMEOUT_SECONDS = 240
+PREP_LOCK_TIMEOUT_SECONDS = 120
 
 DEFAULT_SKILL_DIRS = (".agents/skills", ".claude/skills")
 
@@ -29,6 +30,25 @@ TRUSTED_SKILLS_DIRNAME = ".review-skills"
 # downloads commits and trees only and fetches blobs as checkout, diff or show
 # first touch them, which cuts a large repo's clone several-fold.
 BLOBLESS_CLONE_ARGS = "--filter=blob:none"
+
+
+def _fetch_missing(shas: Sequence[str]) -> list[str]:
+    """Shell lines fetching whichever of ``shas`` the clone lacks, and nothing else.
+
+    Workspace images preload a full clone, and refreshing all of its branches
+    (langchainplus has over 12,000) took minutes; a reused sandbox usually has
+    every commit already and fetches nothing.
+    """
+    return [
+        "missing=",
+        f"for sha in {' '.join(shlex.quote(sha) for sha in shas)}; do",
+        '  git cat-file -e "$sha^{commit}" 2>/dev/null || missing="$missing $sha"',
+        "done",
+        # One round trip for all of them, then one each if a commit is unreachable.
+        'if [ -n "$missing" ] && ! git fetch --quiet --no-tags origin $missing 2>/dev/null; then',
+        '  for sha in $missing; do git fetch --quiet --no-tags origin "$sha" 2>/dev/null || true; done',
+        "fi",
+    ]
 
 
 def _prep_command(
@@ -49,25 +69,32 @@ def _prep_command(
 
     lines = [
         "set -e",
+        f"mkdir -p {q_work_dir}",
+        f"exec 9>{shlex.quote(repo_dir + '.review-prep.lock')}",
+        f'flock -w {PREP_LOCK_TIMEOUT_SECONDS} 9 || {{ echo "Timed out waiting for review repository preparation lock" >&2; exit 1; }}',
         f"if [ -d {q_repo_dir}/.git ]; then",
-        # Tolerate fetch-all failures: the targeted head/base fetches below
-        # are what the checkout actually needs.
-        f"  cd {q_repo_dir} && {{ git fetch --all --quiet || true; }}",
+        f"  cd {q_repo_dir}",
+        "  git_process_status=0",
+        "  pgrep -x git >/dev/null || git_process_status=$?",
+        '  if [ "$git_process_status" -eq 1 ]; then',
+        "    rm -f .git/index.lock .git/shallow.lock",
+        "  fi",
         "else",
         # The head checkout below replaces the default branch's, so skip fetching its blobs.
         f"  cd {q_work_dir} && gh repo clone {q_full_name} -- {clone_args} && cd {q_repo_name}",
         "fi",
     ]
-    if base_sha:
-        q_base = shlex.quote(base_sha)
-        lines.append(f"git fetch origin {q_base} --quiet 2>/dev/null || true")
+    shas = [sha for sha in (base_sha, head_sha) if sha]
+    if shas:
+        lines.extend(_fetch_missing(shas))
     if q_head:
-        # Direct sha fetch covers same-repo PRs; the pull ref covers fork PRs
-        # whose head commit is not reachable from origin's branches.
-        lines.append(f"git fetch origin {q_head} --quiet 2>/dev/null || true")
         if pr_number is not None:
+            # The pull ref covers fork PRs whose head is not reachable from origin's branches.
             pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
-            lines.append(f"git fetch origin {pull_ref} --quiet 2>/dev/null || true")
+            lines.append(
+                f"git cat-file -e {q_head}^{{commit}} 2>/dev/null"
+                f" || git fetch --quiet --no-tags origin {pull_ref} 2>/dev/null || true"
+            )
         # --force: a reused sandbox can have a dirty worktree from a previous
         # run, which would otherwise block the checkout and silently leave the
         # tree at the old head. Strict on purpose: a failed checkout must fail
@@ -75,6 +102,13 @@ def _prep_command(
         lines.append(f"git checkout --force {q_head} --quiet")
         lines.append(f'[ "$(git rev-parse HEAD)" = {q_head} ]')
     return "\n".join(lines)
+
+
+class ReviewRepoPreparationError(RuntimeError):
+    """Repository preparation failed with bounded sandbox diagnostics."""
+
+    def __init__(self, output: str) -> None:
+        super().__init__(output.strip()[-2000:])
 
 
 async def prepare_review_repo(
@@ -87,40 +121,53 @@ async def prepare_review_repo(
     pr_number: int | None = None,
     base_sha: str = "",
 ) -> bool:
-    """Clone-or-fetch the repo and check out ``head_sha`` in the sandbox.
-
-    Returns ``True`` only when the repo is prepped at ``work_dir/repo_name``
-    and (when ``head_sha`` is given) actually checked out at the PR head.
-    """
-    if not repo_owner or not repo_name:
-        return False
-
-    command = _prep_command(work_dir, repo_owner, repo_name, head_sha, pr_number, base_sha)
+    """Best-effort preparation; return whether the repo is at the requested head."""
     try:
-        result = await sandbox_backend.aexecute(command, timeout=CLONE_TIMEOUT_SECONDS)
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to prep review repo %s/%s", repo_owner, repo_name, exc_info=True)
-        return False
-
-    exit_code = getattr(result, "exit_code", None)
-    if exit_code not in (0, None):
+        await prepare_review_repo_or_raise(
+            sandbox_backend,
+            work_dir=work_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            head_sha=head_sha,
+            pr_number=pr_number,
+            base_sha=base_sha,
+        )
+    except ReviewRepoPreparationError:
         logger.warning(
-            "Review repo prep for %s/%s exited %s: %s",
-            repo_owner,
-            repo_name,
-            exit_code,
-            getattr(result, "output", ""),
+            "Failed to prep review repo",
+            extra={"repo_owner": repo_owner, "repo_name": repo_name},
+            exc_info=True,
         )
         return False
-
-    logger.info(
-        "Prepped review repo %s/%s at %s (head=%s)",
-        repo_owner,
-        repo_name,
-        posixpath.join(work_dir, repo_name),
-        head_sha or "<none>",
-    )
     return True
+
+
+async def prepare_review_repo_or_raise(
+    sandbox_backend: SandboxBackendProtocol,
+    *,
+    work_dir: str,
+    repo_owner: str,
+    repo_name: str,
+    head_sha: str,
+    pr_number: int | None = None,
+    base_sha: str = "",
+) -> None:
+    """Prepare the repository or raise with the available failure output."""
+    if not repo_owner or not repo_name:
+        raise ReviewRepoPreparationError("Missing repository owner or name")
+    command = _prep_command(work_dir, repo_owner, repo_name, head_sha, pr_number, base_sha)
+    try:
+        result = await sandbox_backend.aexecute(
+            command, timeout=CLONE_TIMEOUT_SECONDS + PREP_LOCK_TIMEOUT_SECONDS
+        )
+    except Exception as exc:
+        raise ReviewRepoPreparationError(str(exc)) from exc
+    if result.exit_code not in (0, None):
+        raise ReviewRepoPreparationError(result.output or f"Preparation exited {result.exit_code}")
+    logger.info(
+        "Prepped review repo",
+        extra={"repo_owner": repo_owner, "repo_name": repo_name, "head_sha": head_sha},
+    )
 
 
 async def materialize_trusted_skills(
@@ -140,28 +187,25 @@ async def materialize_trusted_skills(
     if not trusted_ref:
         return []
     dest_root = posixpath.join(posixpath.dirname(repo_dir), TRUSTED_SKILLS_DIRNAME)
-    q_repo_dir = shlex.quote(repo_dir)
     q_ref = shlex.quote(trusted_ref)
-
-    sources: list[str] = []
-    for skill_dir in skill_dirs:
-        dest = posixpath.join(dest_root, skill_dir)
-        q_dest = shlex.quote(dest)
-        q_dir = shlex.quote(skill_dir)
-        depth = len(skill_dir.split("/"))
-        command = (
-            f"cd {q_repo_dir} && "
-            f"git cat-file -e {q_ref}:{q_dir} 2>/dev/null && "
-            f"rm -rf {q_dest} && mkdir -p {q_dest} && "
-            f"git archive {q_ref} {q_dir} | tar -x --strip-components={depth} -C {q_dest} && "
-            f"echo {q_dest}"
+    dests = {skill_dir: posixpath.join(dest_root, skill_dir) for skill_dir in skill_dirs}
+    # One round trip for every dir; each extraction stands alone, so one failing
+    # leaves the others.
+    extractions = [
+        f"( git cat-file -e {q_ref}:{shlex.quote(skill_dir)} 2>/dev/null && "
+        f"rm -rf {shlex.quote(dest)} && mkdir -p {shlex.quote(dest)} && "
+        f"git archive {q_ref} {shlex.quote(skill_dir)} | "
+        f"tar -x --strip-components={len(skill_dir.split('/'))} -C {shlex.quote(dest)} && "
+        f"echo {shlex.quote(dest)} )"
+        for skill_dir, dest in dests.items()
+    ]
+    command = f"cd {shlex.quote(repo_dir)} || exit 1\n" + "\n".join(extractions)
+    try:
+        result = await sandbox_backend.aexecute(command)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to extract trusted skills", extra={"repo_dir": repo_dir}, exc_info=True
         )
-        try:
-            result = await sandbox_backend.aexecute(command)
-        except Exception:  # noqa: BLE001
-            logger.warning("Failed to extract trusted skills %s", skill_dir, exc_info=True)
-            continue
-        output = getattr(result, "output", "") or ""
-        if dest in output.splitlines():
-            sources.append(f"{dest}/")
-    return sources
+        return []
+    extracted = set(result.output.splitlines())
+    return [f"{dest}/" for dest in dests.values() if dest in extracted]

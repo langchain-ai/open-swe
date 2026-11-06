@@ -4,52 +4,38 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from openswe.analytics import posthog, queries
+from openswe.analytics import queries
 from openswe.analytics import routes as analytics_routes
 from openswe.dashboard import oauth, routes
 from openswe.database import analytics as database
 
 
 @pytest.mark.asyncio
-async def test_page_tracking_requires_session_and_rejects_raw_paths(monkeypatch) -> None:
-    app = FastAPI()
-    app.include_router(routes.router)
-    delivery = AsyncMock()
-    monkeypatch.setattr(posthog, "record_usage", delivery)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.post("/dashboard/api/analytics/page", json={"page_name": "agents"})
-        assert response.status_code == 401
-        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "alice"}
-        response = await client.post(
-            "/dashboard/api/analytics/page", json={"page_name": "/agents/private-thread"}
-        )
-        assert response.status_code == 422
-        delivery.assert_not_awaited()
-        response = await client.post("/dashboard/api/analytics/page", json={"page_name": "agents"})
-        assert response.status_code == 204
-    delivery.assert_awaited_once_with(
-        login="alice",
-        email=None,
-        event_type="page",
-        name="agents",
-        properties={"page_name": "agents", "surface": "dashboard"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_telemetry_config_is_public_and_excludes_credentials(monkeypatch) -> None:
+async def test_telemetry_config_is_public_and_names_the_posthog_project(monkeypatch) -> None:
     app = FastAPI()
     app.include_router(routes.router)
     monkeypatch.setenv("DD_ENV", "staging")
-    monkeypatch.setenv("POSTHOG_API_KEY", "private-key")
+    monkeypatch.setenv("POSTHOG_API_KEY", "phc_project")
+    monkeypatch.setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
+    monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", "segment_browser_source")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.get("/dashboard/api/analytics/config")
-    assert response.status_code == 200
-    assert response.json() == {"environment": "staging"}
+        assert response.status_code == 200
+        assert response.json() == {
+            "environment": "staging",
+            "posthog": {"key": "phc_project", "host": "https://eu.i.posthog.com"},
+            "segment_write_key": "segment_browser_source",
+        }
+        monkeypatch.setenv("POSTHOG_API_KEY", "")
+        monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", " ")
+        response = await client.get("/dashboard/api/analytics/config")
+    assert response.json() == {
+        "environment": "staging",
+        "posthog": None,
+        "segment_write_key": None,
+    }
 
 
 @pytest.mark.asyncio

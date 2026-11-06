@@ -7,7 +7,7 @@ from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.tool_runtime import ToolSurface
-from openswe.server import plan_agent
+from openswe.server import agent_catalog
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -71,16 +71,14 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
                 "reasoning_effort": "high",
             },
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
-        await plan_agent(config, surface)
+        await agent_catalog(config, surface)
 
     assert surface.models is not None
     assert surface.models.subagent == surface.models.main
-    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
-    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
+    assert surface.models.main.model_id == "openai:gpt-6.1-sol"
+    assert surface.models.main.kwargs["reasoning"]["effort"] == "medium"
 
 
 @pytest.mark.asyncio
@@ -126,13 +124,11 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
                 "reasoning_effort": "high",
             },
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
-        await plan_agent(config, surface)
+        await agent_catalog(config, surface)
 
-    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
-    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
     assert surface.models is not None
+    assert surface.models.main.model_id == "openai:gpt-6.1-sol"
+    assert surface.models.main.kwargs["reasoning"]["effort"] == "medium"
     assert surface.models.subagent == surface.models.main

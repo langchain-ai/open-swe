@@ -2,85 +2,78 @@
 
 Code mode keeps most tools off the model's list, so the model finds them here, with
 the schemas it needs to call them and the name code mode calls them by. The run's
-catalog holds every operation, so the search runs here, over it.
+catalog leaves its integrations out; the backend keeps every tool, and a run whose
+catalog names the set (``Catalog.tool_set``) reads it once per process and searches
+it here, as the backend would (``runtime_api.tool_search``). A run without one
+searches on the backend.
 """
 
-import math
-import re
-from collections import Counter
-from collections.abc import Sequence
+import threading
+from collections import OrderedDict
 from typing import Final
 
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import JsonValue
-from runtime_api.catalog import SEARCH_TOOLS, OperationSpec
+from runtime_api.catalog import SEARCH_TOOLS, ToolSpec
+from runtime_api.endpoint import call
+from runtime_api.operations import RunRequest
+from runtime_api.tool_search import RESOLVE, SEARCH, TOOL_SET, ToolIndex, ToolLookup, ToolSearch
 
-_MAX_RESULTS: Final = 20
-_WORD: Final = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+from rt.backend import OpenSweBackend, current_run
+from rt.tools import run_id
 
-
-def _tokens(text: str) -> list[str]:
-    return [word.casefold() for word in _WORD.findall(text)]
-
-
-def _operation_tokens(operation: OperationSpec) -> list[str]:
-    properties = operation.parameters.get("properties")
-    parameters = " ".join(properties) if isinstance(properties, dict) else ""
-    # A match on the name says more than one buried in a long description.
-    return [
-        *_tokens(operation.name) * 3,
-        *_tokens(operation.description),
-        *_tokens(parameters),
-    ]
+# How many sets this process keeps read: a set never changes under its digest, and
+# one may come to a megabyte.
+_READ_LIMIT: Final = 16
+# The sets read, least recently used first; runs on other event loops share them.
+_read: OrderedDict[str, ToolIndex] = OrderedDict()
+_reading = threading.Lock()
 
 
-def bm25(
-    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
-) -> list[float]:
-    """Okapi BM25 score of each document for ``query``."""
-    if not documents:
-        return []
-    average = sum(map(len, documents)) / len(documents) or 1
-    counts = [Counter(document) for document in documents]
-    scores = [0.0] * len(documents)
-    for term in set(query):
-        having = sum(1 for count in counts if term in count)
-        if not having:
-            continue
-        idf = math.log(1 + (len(documents) - having + 0.5) / (having + 0.5))
-        for index, count in enumerate(counts):
-            frequency = count[term]
-            if frequency:
-                length = len(documents[index]) / average
-                scores[index] += (
-                    idf * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length))
-                )
-    return scores
+async def run_tool_index(backend: OpenSweBackend) -> ToolIndex | None:
+    """Every tool the calling run may call, to search and resolve here; None when its
+    catalog names no set, and the backend searches."""
+    digest = current_run().catalog.tool_set
+    if digest is None:
+        return None
+    with _reading:
+        index = _read.get(digest)
+        if index is not None:
+            _read.move_to_end(digest)
+            return index
+    # Two runs missing the same set at once both read it, which costs a read, no more.
+    kept = await call(backend, TOOL_SET, RunRequest(run_id=run_id()))
+    index = ToolIndex(kept.tools, kept.excluded)
+    if kept.digest == digest:
+        with _reading:
+            _read[digest] = index
+            while len(_read) > _READ_LIMIT:
+                _read.popitem(last=False)
+    return index
 
 
-def search_tools_tool(
-    operations: Sequence[OperationSpec], description: str | None = None
-) -> BaseTool:
-    """``search_tools`` over ``operations``, ranked by BM25 over name, description and parameters."""
-    ranked = sorted(operations, key=lambda operation: operation.name)
-    documents = [_operation_tokens(operation) for operation in ranked]
+async def resolve_tool(backend: OpenSweBackend, name: str) -> ToolSpec | None:
+    """The tool the calling run calls as ``name``, with its grant: a run that searches its
+    set here finds here that it has no such tool; only the grant of one it has comes
+    from the backend."""
+    index = await run_tool_index(backend)
+    if index is not None and index.resolve(name) is None:
+        return None
+    lookup = ToolLookup(run_id=run_id(), name=name)
+    return (await call(backend, RESOLVE, lookup)).tool
+
+
+def search_tools_tool(backend: OpenSweBackend, description: str | None = None) -> BaseTool:
+    """``search_tools`` over every tool the run may call."""
 
     async def search_tools(query: str, limit: int = 5) -> list[dict[str, JsonValue]]:
-        scores = bm25(_tokens(query), documents)
-        best = sorted(
-            (pair for pair in zip(ranked, scores, strict=True) if pair[1] > 0),
-            key=lambda pair: -pair[1],
-        )
-        return [
-            {
-                "name": operation.name,
-                "description": operation.description,
-                "parameters": operation.parameters,
-                "code_name": operation.code_name,
-            }
-            for operation, _ in best[: max(1, min(limit, _MAX_RESULTS))]
-            if operation.name != SEARCH_TOOLS
-        ]
+        index = await run_tool_index(backend)
+        if index is not None:
+            found = [ToolIndex.match(tool) for tool in index.search(query, limit)]
+        else:
+            request = ToolSearch(run_id=run_id(), query=query, limit=limit)
+            found = (await call(backend, SEARCH, request)).matches
+        return [match.model_dump(mode="json") for match in found]
 
     return StructuredTool.from_function(
         coroutine=search_tools,

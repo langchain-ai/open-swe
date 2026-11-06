@@ -65,12 +65,11 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
     await posthog.record_webhook(event.model_copy(update={"user_id": user_id}))
-    for event_type in ("page", "track"):
+    for name in ("usage", "MCP Tool Called"):
         await posthog.record_usage(
             login="alice",
             email="alice@example.com",
-            event_type=event_type,
-            name="usage",
+            name=name,
             properties={
                 "inputs": "private inputs",
                 "results": "private results",
@@ -84,15 +83,12 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         "github_login": "alice",
     }
     for email in (None, ""):
-        await posthog.record_usage(
-            login="alice", email=email, event_type="page", name="usage", properties={}
-        )
+        await posthog.record_usage(login="alice", email=email, name="usage", properties={})
         assert requests[-1]["properties"]["$set"] == {"github_login": "alice"}
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     await posthog.record_usage(
         login="unknown",
         email=None,
-        event_type="page",
         name="usage",
         properties={},
     )
@@ -100,9 +96,48 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert "private results" not in json.dumps(requests)
     assert requests[3]["properties"]["tool"] == "safe_tool"
     assert requests[3]["properties"]["is_error"] is False
+    author_id = uuid4()
+    monkeypatch.setattr(posthog.PullRequest, "author_user_id_of", AsyncMock(return_value=author_id))
+    bot_comment = event.model_copy(
+        update={
+            "pull_request_id": uuid4(),
+            "payload": {
+                **event.payload,
+                "sender": {"id": 41898282, "login": "github-actions[bot]", "type": "Bot"},
+            },
+        }
+    )
+    await posthog.record_webhook(bot_comment)
+    assert requests[-1]["properties"]["distinct_id"] == "github:41898282"
+    assert requests[-1]["properties"]["$process_person_profile"] is True
+    assert requests[-1]["properties"]["$set"] == {
+        "is_bot": True,
+        "github_login": "github-actions[bot]",
+    }
+    assert requests[-1]["properties"]["pull_request_author_id"] == str(author_id)
+    owner_id = uuid4()
+    await posthog.record_webhook(
+        bot_comment.model_copy(update={"visibility": "private", "visible_to_user_id": owner_id})
+    )
+    assert requests[-1]["properties"]["distinct_id"] == str(owner_id)
+    assert requests[-1]["properties"]["visibility"] == "private"
+    assert not {"repo", "repository_id", "pull_request_id", "pull_request_author_id"} & set(
+        requests[-1]["properties"]
+    )
+    await posthog.record_webhook(
+        event.model_copy(
+            update={
+                "source": "slack",
+                "event_type": "message",
+                "payload": {"event": {"message": {"bot_id": "B123"}}},
+            }
+        )
+    )
+    assert requests[-1]["properties"]["distinct_id"] == "slack:B123"
+    assert requests[-1]["properties"]["sender_type"] == "bot"
     monkeypatch.delenv("POSTHOG_API_KEY")
     await posthog.record_webhook(event)
-    assert len(requests) == 6
+    assert len(requests) == 9
 
 
 async def _partitions() -> set[str]:
@@ -121,7 +156,7 @@ async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> Non
         {
             "type": "http",
             "method": "POST",
-            "path": "/webhooks/github",
+            "path": "/mda/channel-api/record_github_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }
@@ -293,7 +328,7 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
         {
             "type": "http",
             "method": "POST",
-            "path": "/webhooks/github",
+            "path": "/mda/channel-api/record_github_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }
@@ -308,6 +343,41 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
             )
         ).one()
     assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
+
+
+async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.webhooks.event_subscriptions import EventSubscription
+
+    wake = AsyncMock()
+    monkeypatch.setattr(EventSubscription, "deliver", wake)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/mda/channel-api/record_linear_delivery",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    body = json.dumps({"type": "Comment", "action": "create"}).encode()
+
+    # A delivery that wasn't stored gives its claim back, so its retry records it.
+    with monkeypatch.context() as unstored:
+        unstored.setattr(EventLog, "record", AsyncMock(return_value=False))
+        assert not await EventLog.record_once(
+            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
+        )
+    for _ in range(2):
+        assert await EventLog.record_once(
+            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
+        )
+
+    async with transaction() as conn:
+        count = await conn.scalar(text("SELECT count(*) FROM event_log"))
+    assert count == 1
+    wake.assert_awaited_once()
 
 
 @pytest.mark.parametrize("kind", ["message", "me_message", "edit", "multiple", "unknown"])

@@ -11,9 +11,11 @@ from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, se
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe.audit_logs.context import current_audit_log
 from openswe.dashboard.oauth import session_user_id
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.run_config import RunConfig
 from openswe.slack.http import (
     SlackClient,
     slack_bot_members,
@@ -21,6 +23,9 @@ from openswe.slack.http import (
     slack_http_errors,
     slack_identity,
 )
+from openswe.source_context import SourceContext
+from openswe.threads.store import THREADS
+from openswe.threads.summary import SLACK_BOT_TRIGGER_KIND, TRIGGERING_BOT_KEY
 from openswe.users.records import github_login_of, user_id_for_login
 from openswe.utils import ttl_cache
 
@@ -104,6 +109,8 @@ class AllowedSlackBot(BaseModel):
 
     async def add(self, actor: UUID | ScalarSelect[UUID] | None) -> bool:
         """Allow the bot as the person ``actor`` names; ``False`` when it already is."""
+        if entry := current_audit_log.get():
+            entry.enrichments.resource_ids.append(f"slack:{self.team_id}:{self.bot_id}")
         async with postgres.session() as session:
             added = await session.scalar(
                 insert(AllowedSlackBotRow)
@@ -123,6 +130,8 @@ class AllowedSlackBot(BaseModel):
     @classmethod
     async def remove(cls, team_id: str, bot_id: str) -> None:
         """Revoke the bot."""
+        if entry := current_audit_log.get():
+            entry.enrichments.resource_ids.append(f"slack:{team_id}:{bot_id}")
         async with postgres.session() as session:
             await session.execute(delete(AllowedSlackBotRow).where(cls._is(team_id, bot_id)))
 
@@ -169,6 +178,46 @@ async def resolve_allowed_slack_bot(
     return bot
 
 
+async def authorized_slack_bot_run(cfg: RunConfig) -> AllowedSlackBot | None:
+    """The still-allowed bot whose own public Slack thread this run executes on, else ``None``.
+
+    Like an automation's run, it acts for no person, so it may only read what everyone can.
+    """
+    slack = cfg.slack_thread
+    if (
+        cfg.source != "slack"
+        or not cfg.thread_id
+        or cfg.github_login
+        or cfg.user_email
+        or slack is None
+        or slack.location is None
+        or not slack.team_id
+        or not slack.triggering_bot_id
+    ):
+        return None
+    thread = await THREADS.get(cfg.thread_id)
+    if thread is None:
+        return None
+    metadata = thread.metadata
+    opening = SourceContext.from_metadata(metadata).slack_thread
+    if (
+        metadata.get("owner_type") != "system"
+        or metadata.get("visibility") != "public"
+        or metadata.get("trigger_kind") != SLACK_BOT_TRIGGER_KIND
+        or metadata.get(TRIGGERING_BOT_KEY) != f"{slack.team_id}:{slack.triggering_bot_id}"
+        or opening is None
+        or (opening.location, opening.team_id, opening.triggering_bot_id)
+        != (slack.location, slack.team_id, slack.triggering_bot_id)
+    ):
+        return None
+    return await resolve_allowed_slack_bot(
+        slack.team_id,
+        slack.triggering_bot_id,
+        user_id=slack.triggering_user_id,
+        app_id=slack.triggering_bot_app_id,
+    )
+
+
 async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> AllowedSlackBot:
     login = admin["sub"]
     async with slack_http_errors(), SlackClient.bot() as client:
@@ -187,7 +236,7 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
             raise HTTPException(400, "That Slack bot is unavailable.")
         user_id = bot.get("user_id") or ""
         if bot_id == auth.get("bot_id") or (user_id and user_id == auth.get("user_id")):
-            raise HTTPException(400, "Open SWE cannot trigger itself.")
+            raise HTTPException(400, "Robin cannot trigger itself.")
         if user_id and user is None:
             user = (await client.users_info(user=user_id)).get("user")
         if (user_id or user is not None) and (

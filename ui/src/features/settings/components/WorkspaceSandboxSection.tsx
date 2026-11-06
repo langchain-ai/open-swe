@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
@@ -38,10 +38,12 @@ export function WorkspaceSandboxSection({
   record,
   onSaved,
   onRebuildStarted,
+  rebuildStatus,
 }: {
   record: WorkspaceRecord
   onSaved: (saved: WorkspaceRecord) => void
   onRebuildStarted: () => void
+  rebuildStatus: ReactNode
 }) {
   const [inheritDefault, setInheritDefault] = useState(
     record.inherit_default_sandbox ?? false
@@ -107,7 +109,7 @@ export function WorkspaceSandboxSection({
       {record.slug !== "default" && (
         <SettingsRow
           label="Inherit sandbox from default"
-          description="Use the default workspace’s latest image, sizing, creation settings, and update script. Workspace instructions and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
+          description="Use the default workspace’s latest image, sizing, and update script. Creation settings, cloud identity, instructions, and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
           control={
             <Checkbox
               aria-label="Inherit sandbox from default"
@@ -124,10 +126,15 @@ export function WorkspaceSandboxSection({
           <span className="text-xs text-secondary">
             {record.inherit_default_sandbox
               ? "Inherited from default"
-              : SNAPSHOT_LABEL[status]}
+              : refreshing
+                ? `${buildAction}ing…`
+                : SNAPSHOT_LABEL[status]}
           </span>
         }
       />
+      {rebuildStatus && (
+        <div className="px-space-4 py-space-3">{rebuildStatus}</div>
+      )}
       <SettingsRow
         label="Base snapshot"
         description="Set when the image is published from an admin thread."

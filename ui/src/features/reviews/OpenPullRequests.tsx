@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -11,9 +12,11 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
+import { RepositoryLabels } from "@/lib/repo"
 import { useRepos } from "@/lib/profile"
 import { expiresInBrowser } from "@/lib/query"
 import {
@@ -30,12 +33,20 @@ import {
   pullRequestStatusQuery,
   refreshPullRequest,
 } from "./lib/cache"
+import { awaitsViewer } from "./lib/reviewers"
 import { dateLabel } from "./lib/dateLabel"
+import { readPreference, writePreference } from "./lib/preferences"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
-import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
+import {
+  parsePullRequestSelection,
+  REVIEW_QUEUE_LIMIT,
+  reviewStatuses,
+  type ReviewsSearch,
+  type ReviewSort,
+} from "./search"
 
 const chunkSize = 10
 
@@ -70,20 +81,28 @@ export function OpenPullRequests({
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
 }) {
+  const preferenceKey = `open-swe.reviews.sort.${login}`
+  const savedSort = readPreference(preferenceKey)?.split(":")
+  const defaultSort = savedSort?.[0] === "updatedAt" ? "updatedAt" : "createdAt"
+  const defaultDirection = savedSort?.[1] === "asc" ? "asc" : "desc"
   const {
     repo = [],
     q: search = "",
     status: filter,
-    sort = "updatedAt",
-    direction = "desc",
+    sort = defaultSort,
+    direction = defaultDirection,
     pr: selected,
   } = filters
+  useEffect(() => {
+    writePreference(preferenceKey, `${sort}:${direction}`)
+  }, [preferenceKey, sort, direction])
   const toggleSort = (next: ReviewSort) =>
     onFiltersChange({
       sort: next,
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const query = useOpenPullRequests(login, repo, sort, direction, scope)
   const knownRepos = useRepos()
   const descriptionSearch = usePullRequestSearch(search)
@@ -124,11 +143,21 @@ export function OpenPullRequests({
   // have to pull the rest of the pages in before they can answer at all.
   const needsMorePages =
     query.hasNextPage &&
-    (Boolean(filter?.length) || Boolean(search) || requested >= rows.length)
+    (scope === "review-assigned" ||
+      Boolean(filter?.length) ||
+      Boolean(search) ||
+      requested >= rows.length)
   useEffect(() => {
     if (needsMorePages && !isFetching) void fetchNextPage()
   }, [needsMorePages, isFetching, fetchNextPage])
   const matchingRows = rows
+    .filter((pr) => {
+      if (scope !== "review-assigned") return true
+      const live = queryClient.getQueryData<OpenPullRequest | null>(
+        pullRequestStatusQuery(login, pr).queryKey
+      )
+      return awaitsViewer({ ...pr, ...live, assignment: pr.assignment }, login)
+    })
     .filter(
       (pr) =>
         !leftOpenList(
@@ -137,10 +166,10 @@ export function OpenPullRequests({
     )
     .filter(
       (pr) =>
-        `${pr.repo} #${pr.number} ${pr.title}`
-          .toLowerCase()
-          .includes(search.trim().toLowerCase()) ||
-        descriptionMatches.has(pullRequestKey(pr).toLowerCase())
+        new FuzzySearch(search).matches(
+          `${pr.repo} #${pr.number} ${pr.title}`,
+          pr.title
+        ) || descriptionMatches.has(pullRequestKey(pr).toLowerCase())
     )
   // A status filter can only be applied to rows whose details have arrived, so
   // it costs a detail read for every row rather than only the ones on screen.
@@ -207,22 +236,23 @@ export function OpenPullRequests({
       void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
   }, [queryClient, nextRow])
 
-  const githubLink =
-    scope === "review-assigned" &&
-    latest &&
-    !query.hasNextPage &&
-    !query.isFetching &&
-    !detailsLoading &&
-    visible.length === filtered.length ? (
-      <div className="py-space-4 text-center">
-        <Button
-          variant="underlined"
-          onClick={() => onFiltersChange({ github: true, pr: undefined })}
-        >
-          Show my GitHub review requests
-        </Button>
-      </div>
-    ) : null
+  // Everything the filters leave, in list order, not just the rows scrolled into view.
+  const queue = (filter?.length ? filtered : matchingRows)
+    .map(pullRequestKey)
+    .slice(0, REVIEW_QUEUE_LIMIT)
+  const repoLabels = new RepositoryLabels(repoNames)
+  const firstInQueue = parsePullRequestSelection(queue[0])
+  const reviewOneByOne = () =>
+    firstInQueue &&
+    void navigate({
+      to: "/agents/reviews/$owner/$repo/$number",
+      params: {
+        owner: firstInQueue.owner,
+        repo: firstInQueue.repo,
+        number: String(firstInQueue.number),
+      },
+      search: { queue },
+    })
 
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
@@ -274,7 +304,7 @@ export function OpenPullRequests({
             <div className="flex items-center gap-space-2 text-xs text-secondary">
               <span>
                 {scope === "review-assigned"
-                  ? "Assigned to you by Open SWE"
+                  ? "Requested reviews, your drafts, then speculative reviews"
                   : "GitHub review requests"}
               </span>
               {scope === "review-requested" && (
@@ -285,7 +315,12 @@ export function OpenPullRequests({
                     onFiltersChange({ github: undefined, pr: undefined })
                   }
                 >
-                  Back to Open SWE assignments
+                  Back to full review queue
+                </Button>
+              )}
+              {firstInQueue && (
+                <Button size="xs" className="ml-auto" onClick={reviewOneByOne}>
+                  Review one by one ({queue.length})
                 </Button>
               )}
             </div>
@@ -297,7 +332,9 @@ export function OpenPullRequests({
                 disableCloseOnSelect
                 size="sm"
                 className="h-6 flex-nowrap"
-                renderTags={selectionSummary}
+                renderTags={(values) =>
+                  selectionSummary(values.map((name) => repoLabels.label(name)))
+                }
                 aria-label="Filter by repository"
                 placeholder="All repositories"
                 emptyText={
@@ -308,6 +345,10 @@ export function OpenPullRequests({
                       : "No matches"
                 }
                 options={repoNames}
+                getOptionLabel={(name) => repoLabels.label(name)}
+                filterOptions={(options, { inputValue }) =>
+                  options.filter((name) => repoLabels.matches(name, inputValue))
+                }
                 value={repo}
                 onChange={(chosen) =>
                   onFiltersChange({ repo: chosen.length ? chosen : undefined })
@@ -381,7 +422,7 @@ export function OpenPullRequests({
                   : latest
                     ? `Refreshed ${dateLabel(latest.updatedAt)}`
                     : scope === "review-assigned"
-                      ? "Open SWE review assignments"
+                      ? "Robin review assignments"
                       : "Live open pull requests from GitHub"}
               </span>
             )}
@@ -474,10 +515,9 @@ export function OpenPullRequests({
                           : scope === "mine"
                             ? "No open PRs found"
                             : scope === "review-assigned"
-                              ? "No Open SWE assignments. You’re all caught up."
+                              ? "Nothing to review. You’re all caught up."
                               : "No pending GitHub review requests"
                       }
-                      action={githubLink || undefined}
                     />
                   )
                 ) : (
@@ -485,7 +525,6 @@ export function OpenPullRequests({
                     rows={visible}
                     available={matchingRows.length}
                     compact={railed}
-                    footer={githubLink}
                     // Unclamped: asking for more rows than are loaded is what
                     // makes the next GitHub page arrive, and reaching the end
                     // again is the only other thing that would grow it.

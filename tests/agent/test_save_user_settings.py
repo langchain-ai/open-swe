@@ -83,7 +83,12 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
     result = await save_user_settings(
-        {"auto_fix_ci": False, "auto_human_review_enabled": False, "default_workspace": "  NEW  "}
+        {
+            "auto_fix_ci": False,
+            "auto_human_review_enabled": False,
+            "github_review_request_comments": True,
+            "default_workspace": "  NEW  ",
+        }
     )
     assert result == {
         "ok": True,
@@ -91,6 +96,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "updated": {
             "auto_fix_ci": False,
             "auto_human_review_enabled": False,
+            "github_review_request_comments": True,
             "default_workspace": "new",
         },
     }
@@ -100,6 +106,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     assert saved["auto_fix_ci"] is False
     participant = (await read_user_settings())["participants"][0]
     assert participant["profile"]["auto_human_review_enabled"] is False
+    assert participant["profile"]["github_review_request_comments"] is True
     assert user_records.get("profile", "bob") == {"draft_prs": True}
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
     saved_prefs = user_records.get("dashboard_preferences", "Alice")
@@ -189,7 +196,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
-        {"pr_review_links": None, "auto_fix_ci": False},
+        {"pr_failure_reactions": None, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -235,7 +242,7 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        assert (await save_user_settings({"pr_review_links": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"pr_failure_reactions": True, "auto_fix_ci": False}))[
             "ok"
         ] is False
         save.assert_awaited_once()
@@ -244,13 +251,13 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
         User,
         "update_preferences",
         new_callable=AsyncMock,
-        return_value=UserPreferences(pr_review_links=True),
+        return_value=UserPreferences(pr_failure_reactions=True),
     ) as save:
-        assert (await save_user_settings({"pr_review_links": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"pr_failure_reactions": True, "auto_fix_ci": False}))[
             "updated"
-        ] == {"pr_review_links": True, "auto_fix_ci": False}
+        ] == {"pr_failure_reactions": True, "auto_fix_ci": False}
         assert save.await_args.args[0] == "Alice"
-        assert save.await_args.args[1].pr_review_links is True
+        assert save.await_args.args[1].pr_failure_reactions is True
     assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
 
 
@@ -307,9 +314,14 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "profile": {
                 **ordinary,
                 "auto_human_review_enabled": True,
+                "github_review_request_comments": False,
                 "concierge_mode": False,
-                "pr_review_links": False,
+                "personal_kitchen_channel_id": "",
                 "pr_failure_reactions": False,
+                "goal_mode": False,
+                "experimental_classify": False,
+                "experimental_memory": False,
+                "experimental_conditional_approval": False,
             },
             "preferences": {
                 "default_workspace": "mine",

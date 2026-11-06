@@ -19,11 +19,11 @@ REVIEW_BODY_PREFIX = "Approved in Slack via"
 
 def settings_hint(action: str, path: str = "/my-settings") -> str:
     base = dashboard_base_url()
-    return f"{action}: {base}{path}" if base else f"{action} in your Open SWE settings."
+    return f"{action}: {base}{path}" if base else f"{action} in your Robin settings."
 
 
 def github_token_hint() -> str:
-    return settings_hint("Sign in again with GitHub to refresh Open SWE's access")
+    return settings_hint("Sign in again with GitHub to refresh Robin's access")
 
 
 def github_error(response: httpx2.Response) -> str:
@@ -45,7 +45,7 @@ async def _review_body(approval: HumanReviewRequest) -> str:
     )
     permalink = await get_slack_permalink(approval.slack_channel_id, anchor)
     if permalink is None:
-        return f"{REVIEW_BODY_PREFIX} Open SWE expedited review."
+        return f"{REVIEW_BODY_PREFIX} Robin expedited review."
     return f"{REVIEW_BODY_PREFIX} [expedited review]({permalink})."
 
 
@@ -65,7 +65,7 @@ async def submit_approval(
                 await github.repo(pr.owner, pr.repo).pull_request(pr.number).create_review(payload)
             )
     except GitHubSignInRequired:
-        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
+        return f"Robin has no GitHub token for @{login}. {github_token_hint()}"
     except httpx2.HTTPStatusError as exc:
         return f"GitHub rejected @{login}'s review: {github_error(exc.response)}"
     except httpx2.HTTPError, ValueError:

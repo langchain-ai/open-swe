@@ -1,8 +1,10 @@
 import asyncio
+import logging
 import re
 import uuid
 from typing import Annotated, Any
 
+import httpx
 from fastapi import HTTPException
 from pydantic import Field
 
@@ -12,12 +14,13 @@ from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.run_config import Repo, RunConfig
-from openswe.slack import webhook
+from openswe.slack import mda_forwarding, webhook
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
 from openswe.slack.client import (
     append_slack_web_link_footer,
+    fetch_slack_thread_messages,
     get_active_slack_thread,
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
@@ -27,21 +30,28 @@ from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id, store_slack_run_mapping
 from openswe.slack.request import SlackRequest
 from openswe.slack.solo_threads import allow_solo_thread_followup
+from openswe.slack.staged_files import queue_slack_files, slack_file_entries, slack_files_section
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.threads.creation import create_thread
+from openswe.threads.runtimes import ChannelThreadError
 from openswe.users.models import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_metadata
-from openswe.webhooks.common import SlackRepoResolution, is_repo_allowed
+from openswe.webhooks.common import (
+    PROVISIONAL_VISIBILITY_KEY,
+    SlackRepoResolution,
+    is_repo_allowed,
+)
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
 _VISIBLE_INSTRUCTIONS_MAX_CHARS = 2800
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_CHANNEL_ID_PATTERN = r"^[CG][A-Z0-9]+$"
+_CHANNEL_ID_PATTERN = r"^[CGD][A-Z0-9]+$"
+logger = logging.getLogger(__name__)
 
 
 def _failure_hint(slack_error: str | None) -> str:
@@ -105,7 +115,7 @@ def _truncate_for_slack(text: str) -> str:
     if len(text) <= _VISIBLE_INSTRUCTIONS_MAX_CHARS:
         return text
     omitted = len(text) - _VISIBLE_INSTRUCTIONS_MAX_CHARS
-    return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Open SWE thread received the full instructions."
+    return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Robin thread received the full instructions."
 
 
 def _visible_message(title: str) -> str:
@@ -120,7 +130,7 @@ def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
 async def _run_links_section(thread_id: str) -> str:
     dashboard_url = dashboard_thread_url(thread_id)
     trace_url = await get_langsmith_trace_url(thread_id)
-    lines = ["## Open SWE Links"]
+    lines = ["## Robin Links"]
     if dashboard_url:
         lines.append(f"- Web: {dashboard_url}")
     if trace_url:
@@ -137,6 +147,7 @@ async def _run_prompt(
     repo: dict[str, str] | None,
     original_slack_thread: dict[str, Any],
     thread_id: str,
+    files_section: str = "",
 ) -> str:
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
@@ -149,6 +160,7 @@ async def _run_prompt(
         thread_ts=thread_ts,
         run_links=await _run_links_section(thread_id),
         instructions=instructions,
+        files_section=files_section,
     )
 
 
@@ -171,17 +183,16 @@ def _new_slack_thread_context(
 async def slack_breakout_thread(
     title: str,
     instructions: str,
+    destination: Annotated[str, Field(pattern=r"^(?:[CGD][A-Z0-9]+|web)$")],
     default_repo: str | None = None,
-    channel_id: Annotated[str, Field(pattern=_CHANNEL_ID_PATTERN)] | None = None,
-    web_only: bool = False,
     model: str | None = None,
     effort: str | None = None,
 ) -> dict[str, object]:
     """Implement the `slack_breakout_thread` tool."""
-    if channel_id is not None and not re.fullmatch(_CHANNEL_ID_PATTERN, channel_id):
+    if destination != "web" and not re.fullmatch(_CHANNEL_ID_PATTERN, destination):
         return {
             "success": False,
-            "error": "channel_id must be a Slack channel ID (for example, C0123456789); omit it or pass JSON null to use the current channel.",
+            "error": 'destination must be a Slack channel ID (for example, C0123456789) or "web".',
         }
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
@@ -215,7 +226,6 @@ async def slack_breakout_thread(
         model_choice = selected_model, selected_effort
     client = langgraph_client()
     current_slack_thread = await get_active_slack_thread(
-        client,
         cfg.thread_id,
         cfg.slack_thread.dump(),
     )
@@ -227,13 +237,6 @@ async def slack_breakout_thread(
     if not isinstance(source_channel, str) or not source_channel.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
     source_channel = source_channel.strip()
-    destination = await resolve_breakout_destination(
-        source_channel, channel_id, workspace=cfg.workspace_slug
-    )
-    if error := await destination.channel_error(
-        source_channel, check_audience=not channel_id and not web_only
-    ):
-        return {"success": False, "error": error}
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
     if isinstance(clean_title, dict):
@@ -290,6 +293,9 @@ async def slack_breakout_thread(
     if not cfg.thread_id:
         return {"success": False, "error": "Missing parent thread_id"}
     parent_metadata = thread_metadata(await client.threads.get(cfg.thread_id))
+    # A conversation MDA's Slack channel holds breaks out into one it holds too, so the
+    # new Slack thread's replies reach it once Slack sends its events to MDA alone.
+    via_mda = await mda_forwarding.holds(cfg.thread_id)
     visibility = parent_metadata.get("visibility", "public")
     owner_type = parent_metadata.get("owner_type", "user")
     if visibility not in ("public", "private") or owner_type not in ("user", "system"):
@@ -329,9 +335,7 @@ async def slack_breakout_thread(
             ),
         )
 
-    if web_only:
-        if channel_id:
-            return {"success": False, "error": "Web breakouts do not have a Slack destination"}
+    if destination == "web":
         if cfg.background_task_completion or not owner_login:
             return {"success": False, "error": "Web breakouts require an authenticated user run"}
         if not isinstance(current_thread_ts, str) or not current_thread_ts:
@@ -364,7 +368,12 @@ async def slack_breakout_thread(
             "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
         }
 
-    clean_channel_id = destination.channel_id
+    resolved = await resolve_breakout_destination(
+        source_channel, destination, workspace=cfg.workspace_slug
+    )
+    if error := await resolved.channel_error(source_channel):
+        return {"success": False, "error": error}
+    clean_channel_id = resolved.channel_id
     if clean_channel_id != source_channel and visibility == "private":
         return {
             "success": False,
@@ -424,9 +433,18 @@ async def slack_breakout_thread(
             await asyncio.sleep(delay)
 
     await bind_slack_thread_id(clean_channel_id, message_ts, thread_id)
+    if via_mda:
+        try:
+            await mda_forwarding.claim_breakout(thread_id, owner_login=owner_login or None)
+        except ChannelThreadError, httpx.HTTPError:
+            logger.warning(
+                "Could not open a breakout on MDA's Slack channel",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+            return {"success": False, "error": "Could not open the new thread; try again."}
     if requester:
         await allow_solo_thread_followup(
-            client,
             channel_id=clean_channel_id,
             thread_ts=message_ts,
             message_ts=message_ts,
@@ -447,10 +465,12 @@ async def slack_breakout_thread(
     thread_title = clean_title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
-        "workspace": destination.workspace,
+        "workspace": resolved.workspace,
         "title": thread_title,
         "visibility": visibility,
         "owner_type": owner_type,
+        # The visibility the channel's claim held back is settled here.
+        **({PROVISIONAL_VISIBILITY_KEY: None} if via_mda else {}),
         "source_context": SourceContext.parse(
             {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
         ).dump(),
@@ -476,8 +496,8 @@ async def slack_breakout_thread(
         "source": "slack",
         "slack_kickoff_eligible": False,
         "slack_breakout": True,
-        "workspace": destination.workspace,
-        "environment": destination.workspace,
+        "workspace": resolved.workspace,
+        "environment": resolved.workspace,
     }
     if repo:
         new_configurable["repo"] = repo
@@ -494,9 +514,24 @@ async def slack_breakout_thread(
     )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
+    files_section = ""
+    try:
+        if isinstance(current_thread_ts, str) and current_thread_ts:
+            source_messages = await fetch_slack_thread_messages(source_channel, current_thread_ts)
+            staged_files = await queue_slack_files(thread_id, slack_file_entries(source_messages))
+            files_section = slack_files_section(staged_files)
+    except Exception:
+        logger.warning(
+            "Could not stage breakout Slack attachments",
+            extra={"agent_thread_id": thread_id, "channel_id": source_channel},
+            exc_info=True,
+        )
+
     run = await dispatch_agent_run(
         thread_id,
-        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
+        await _run_prompt(
+            clean_title, clean_instructions, repo, current_slack_thread, thread_id, files_section
+        ),
         new_configurable,
         source="slack",
         thread_title=None,
@@ -521,11 +556,7 @@ async def slack_breakout_thread(
         or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
     }
     if isinstance(current_thread_ts, str) and current_thread_ts:
-        request_ts = breakout_from["message_ts"]
-        if request_ts:
-            await mark_broken_out(
-                source_channel, current_thread_ts, request_ts, clean_channel_id, message_ts
-            )
+        await mark_broken_out(source_channel, current_thread_ts, clean_channel_id, message_ts)
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."
         )

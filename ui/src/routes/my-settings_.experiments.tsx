@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
 import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
-import { useProfile } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/my-settings_/experiments")({
@@ -12,7 +11,6 @@ export const Route = createFileRoute("/my-settings_/experiments")({
 })
 
 function ExperimentsPage() {
-  const profile = useProfile()
   return (
     <SettingsPage
       title="Experiments"
@@ -25,12 +23,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="concierge_mode"
           label="Concierge mode"
-          description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
-        />
-        <ProfileSwitchRow
-          field="pr_review_links"
-          label="Open pull requests in Open SWE"
-          description="Pull request links Open SWE posts for you open its review page instead of GitHub."
+          description="Your whole DM with Robin becomes one private thread it always answers in, instead of a new thread per message."
         />
         <ProfileSwitchRow
           field="pr_failure_reactions"
@@ -40,23 +33,29 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
+          field="goal_mode"
+          label="Goal mode"
+          description="Robin keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Robin review with the obvious findings fixed, and a walkthrough of the latest version."
+        />
+        <ProfileSwitchRow
+          field="experimental_conditional_approval"
+          label="Conditional approval"
+          description="For pull requests you author, let Robin request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."
+        />
+        <ProfileSwitchRow
+          field="experimental_memory"
+          label="Memory"
+          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded, and remind the agent to save a lesson when you sound frustrated."
+        />
+        <ProfileSwitchRow
+          field="experimental_classify"
+          label="Classify tool"
+          description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
+        />
+        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
-        />
-        <ProfileSwitchRow
-          field="experimental_monitor"
-          label="Monitors"
-          description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
-        />
-        <ProfileSwitchRow
-          field="experimental_act_as_approval"
-          label="Approve PRs opened as you"
-          description={
-            profile.data?.act_as_always_allowed
-              ? "You chose Always allow, so Open SWE is not asking. Switch this off and on to be asked again."
-              : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
-          }
         />
       </SettingsSection>
     </SettingsPage>

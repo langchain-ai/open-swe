@@ -88,8 +88,8 @@ export function WorkflowApprovalCard({
                 </Text>
                 <p className="mt-space-1 text-sm text-secondary">
                   {inherited
-                    ? `This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Open SWE did not author these workflow changes.`
-                    : `Open SWE is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`}
+                    ? `This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Robin did not author these workflow changes.`
+                    : `Robin is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`}
                 </p>
               </div>
             </div>
@@ -124,7 +124,7 @@ export function WorkflowApprovalCard({
                 </p>
                 <p className="mt-0.5 text-xs text-secondary">
                   Workflow files control CI jobs and may access repository
-                  secrets. Open SWE pauses before pushing any workflow change.
+                  secrets. Robin pauses before pushing any workflow change.
                 </p>
               </div>
             </div>
@@ -148,8 +148,9 @@ export function WorkflowApprovalCard({
               </Button>
             </div>
             <p className="mt-space-2 text-xxs text-secondary">
-              Approval resumes this exact push only. If the workflow files
-              change, Open SWE will ask again.
+              Approval covers this workflow diff on branches in this thread and
+              repository. Different workflow diffs and lease-protected pushes
+              require separate approval.
             </p>
 
             <div className="mt-space-4 grid gap-space-2 sm:grid-cols-2">
@@ -158,7 +159,8 @@ export function WorkflowApprovalCard({
                   What happens next
                 </p>
                 <p className="mt-space-1 text-xs text-primary">
-                  The paused push resumes; no other changes are approved.
+                  The paused push resumes; only matching workflow diffs are
+                  approved.
                 </p>
               </div>
               <div className="rounded-md border border-default bg-surface-level-1 p-space-3">

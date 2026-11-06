@@ -1,30 +1,21 @@
 """Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, and Dismiss."""
 
 import logging
-from dataclasses import dataclass
-from typing import Literal
 from uuid import UUID
 
 from fastapi import BackgroundTasks
 from pydantic import BaseModel, ValidationError
 
-from openswe.human_review import card
+from openswe.human_review import card, readiness
 from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.pick_message import PickMessage
+from openswe.human_review.pick_modals import CHOICE, MODAL_FOR_BUTTON, PICK_MODALS, PickModal
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
+from openswe.human_review.standard import claim, decline, snooze
 from openswe.prompts import prompt
-from openswe.slack.blocks import (
-    InputBlock,
-    ModalView,
-    modal,
-    option,
-    plain_text,
-    static_select,
-    view_payload,
-)
+from openswe.slack.blocks import view_payload
 from openswe.slack.client import open_slack_modal
 from openswe.slack.dm import note_for_concierge
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction
@@ -35,52 +26,7 @@ from openswe.users import User
 logger = logging.getLogger(__name__)
 
 BUTTON_TYPE = card.BUTTON_TYPE
-DECLINE_REASONS = (
-    "Too many reviews / not enough time",
-    "Away or unavailable",
-    "Not familiar with this code",
-    "Someone else is a better reviewer",
-    "Conflict of interest",
-    "Other",
-)
-_CHOICE = "choice"
-
-
-@dataclass(frozen=True, slots=True)
-class PickModal:
-    """A pick's button that asks one required question in a modal before acting."""
-
-    action: Literal["decline", "snooze"]
-    callback_id: str
-    title: str
-    question: str
-    placeholder: str
-    submit: str
-    choices: tuple[str, ...]
-    initial: str | None = None
-
-    def view(self, context: PickModalContext) -> ModalView:
-        select = static_select(
-            action_id=_CHOICE,
-            options=[option(choice, choice) for choice in self.choices],
-            initial=option(self.initial, self.initial) if self.initial else None,
-            placeholder=self.placeholder,
-        )
-        question: InputBlock = {
-            "type": "input",
-            "block_id": _CHOICE,
-            "label": plain_text(self.question),
-            "element": select,
-        }
-        return modal(
-            callback_id=self.callback_id,
-            title=self.title,
-            blocks=[question],
-            submit=self.submit,
-            close="Cancel",
-            private_metadata=context.model_dump_json(),
-        )
-
+_CHOICE = CHOICE
 
 _PENDING = {
     "review": ":hourglass_flowing_sand: Accepting…",
@@ -90,38 +36,13 @@ _PENDING = {
 
 
 class PickModalContext(BaseModel):
+    """``private_metadata`` of a pick modal the backend opened itself, before Trigger Server did."""
+
     request_id: str
     channel_id: str
     thread_ts: str
     user_id: str
     message: PickMessage | None = None
-
-
-PICK_MODALS = {
-    pick_modal.callback_id: pick_modal
-    for pick_modal in (
-        PickModal(
-            action="decline",
-            callback_id="human_review_decline",
-            title="Decline review",
-            question="Why are you declining?",
-            placeholder="Select a reason",
-            submit="Decline",
-            choices=DECLINE_REASONS,
-        ),
-        PickModal(
-            action="snooze",
-            callback_id="human_review_snooze",
-            title="Snooze review",
-            question="Remind me in",
-            placeholder="Select how long",
-            submit="Snooze",
-            choices=tuple(SNOOZE_DURATIONS),
-            initial="1 hour",
-        ),
-    )
-}
-_MODAL_FOR_BUTTON = {pick_modal.action: pick_modal for pick_modal in PICK_MODALS.values()}
 
 
 async def handle_pick_modal_submission(
@@ -153,6 +74,51 @@ async def handle_pick_modal_submission(
     return {}
 
 
+def handle_pick_submission(
+    interaction: SlackInteraction,
+    pick_modal: PickModal,
+    request_id: str,
+    origin: tuple[str, str],
+    background_tasks: BackgroundTasks,
+) -> WebhookResponse:
+    """A pick modal Trigger Server opened: ``origin`` is the pick's DM message."""
+    selected = interaction.view.state.input(_CHOICE, _CHOICE).selected_option
+    if not interaction.user.id or selected is None or selected.value not in pick_modal.choices:
+        return ignored("Invalid pick modal submission")
+    channel_id, message_ts = origin
+    background_tasks.add_task(
+        _process_on_message,
+        request_id,
+        pick_modal.action,
+        channel_id=channel_id,
+        message_ts=message_ts,
+        slack_user_id=interaction.user.id,
+        choice=selected.value,
+    )
+    return accepted("Pick modal submission queued")
+
+
+async def _process_on_message(
+    request_id: str,
+    action: str,
+    *,
+    channel_id: str,
+    message_ts: str,
+    slack_user_id: str,
+    choice: str,
+) -> None:
+    """Act on a pick from its DM message, edited in place when Slack still has it."""
+    await _process(
+        request_id,
+        action,
+        channel_id=channel_id,
+        thread_ts=message_ts,
+        slack_user_id=slack_user_id,
+        choice=choice,
+        message=await PickMessage.fetch(channel_id, message_ts),
+    )
+
+
 async def _process(
     request_id: str,
     action: str,
@@ -162,6 +128,7 @@ async def _process(
     slack_user_id: str,
     choice: str = "",
     message: PickMessage | None = None,
+    response_url: str = "",
 ) -> None:
     if message is not None:
         await message.show(_PENDING[action])
@@ -199,6 +166,7 @@ async def _process(
         slack_user_id=slack_user_id,
         handle=handle,
         ephemeral=message is None,
+        response_url=response_url,
     )
     if message is None:
         return
@@ -218,6 +186,8 @@ async def _process(
 async def handle_button(
     interaction: SlackInteraction, button: SlackButtonValue, background_tasks: BackgroundTasks
 ) -> WebhookResponse:
+    if button.type == readiness.BUTTON_TYPE:
+        return await readiness.handle_button(interaction, button, background_tasks)
     channel_id = interaction.channel_id
     thread_ts = interaction.thread_ts
     user_id = interaction.user.id
@@ -232,12 +202,18 @@ async def handle_button(
         logger.warning("Ignored a human review click missing its context", extra=extra)
         return ignored("Missing human review context")
     message = (
-        PickMessage(channel_id=channel_id, ts=interaction.message.ts, text=interaction.message.text)
+        PickMessage(
+            channel_id=channel_id,
+            ts=interaction.message.ts,
+            text=interaction.message.text,
+            response_url=interaction.response_url,
+        )
         if interaction.message.ts
         and any(action.action_id in card.PICK_BUTTON_IDS for action in interaction.actions)
         else None
     )
-    if (pick_modal := _MODAL_FOR_BUTTON.get(button.action)) is not None:
+    if (pick_modal := MODAL_FOR_BUTTON.get(button.action)) is not None:
+        # A pick posted before its buttons opened their modals through Trigger Server.
         view = pick_modal.view(
             PickModalContext(
                 request_id=button.fingerprint,
@@ -245,14 +221,26 @@ async def handle_button(
                 thread_ts=thread_ts,
                 user_id=user_id,
                 message=message,
-            )
+            ).model_dump_json()
         )
-        if not interaction.trigger_id or not await open_slack_modal(
+        if interaction.trigger_id and await open_slack_modal(
             interaction.trigger_id, view_payload(view)
         ):
-            logger.warning("Could not open a reviewer pick modal", extra=extra)
-            return ignored("Could not open pick modal")
-        return accepted("Pick modal opened")
+            return accepted("Pick modal opened")
+        logger.warning("Could not open a reviewer pick modal", extra=extra)
+        if message is not None:
+            # Too late to open it: the pick's current buttons open it through Trigger Server.
+            request = await HumanReviewRequest.get(UUID(button.fingerprint))
+            if request is not None and request.state == "open":
+                await message.show(
+                    "Click again to answer.",
+                    (
+                        card.accept_button(request),
+                        card.decline_button(request),
+                        card.snooze_button(request),
+                    ),
+                )
+        return ignored("Could not open pick modal")
     if button.action not in {"review", "dismiss"}:
         logger.warning("Ignored an unknown human review click", extra=extra)
         return ignored("Unknown human review action")
@@ -265,5 +253,6 @@ async def handle_button(
         thread_ts=thread_ts,
         slack_user_id=user_id,
         message=message,
+        response_url=interaction.response_url,
     )
     return accepted("Human review click queued")

@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it } from "vitest"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
@@ -110,11 +112,13 @@ describe("the page's lifetimes", () => {
     page().setEntryOrder(entries)
   })
 
-  it("starts the visit over on coming back, keeping what was written", () => {
+  it("starts the visit over on coming back, keeping what was written and opened", () => {
     page().setActive(second, true)
     page().jumpTo({ kind: "entry", id: second.id })
     page().setComposerText("half a thought")
     page().setReplyDraft(42, "a reply")
+    page().setExpandedFinding("finding-1")
+    page().setThreadOpen(42, true)
     page().showFindings()
     useReviewPage.setState({ lastStop: "src/a.ts:RIGHT:7" })
 
@@ -132,6 +136,31 @@ describe("the page's lifetimes", () => {
     expect(state.takeEvent("showFindings")).toBe(false)
     expect(state.composerText).toBe("half a thought")
     expect(state.replyDrafts.get(42)).toBe("a reply")
+    expect(state.expandedFinding).toBe("finding-1")
+    expect(state.threadsOpen.get(42)).toBe(true)
+  })
+
+  it("hands passage replies to chat in order and only once", () => {
+    const firstReply = {
+      source: "pull_request" as const,
+      part: "description",
+      before: "",
+      selection: "Opening a PR.",
+      after: "",
+      comment: "Draft?",
+    }
+    const secondReply = { ...firstReply, comment: "Which repository?" }
+
+    page().setRailTab("discussion")
+    page().replyInChat(firstReply)
+    page().replyInChat(secondReply)
+
+    expect(page().railTab).toBe("chat")
+    expect(page().takeChatReply(secondReply)).toBe(false)
+    expect(page().takeChatReply(firstReply)).toBe(true)
+    expect(page().takeChatReply(firstReply)).toBe(false)
+    expect(page().takeChatReply(secondReply)).toBe(true)
+    expect(page().chatReplies).toEqual([])
   })
 
   it("drops drafts on another pull request, and folds on a new head", () => {
@@ -140,8 +169,10 @@ describe("the page's lifetimes", () => {
     expect(page().collapsed.size).toBe(0)
 
     page().setReplyDraft(42, "a reply")
+    page().setThreadOpen(42, true)
     page().open({ ...pr, number: 8 }, null)
     expect(page().replyDrafts.size).toBe(0)
+    expect(page().threadsOpen.size).toBe(0)
   })
 
   it("x folds the file being read and leaves it folded", () => {
@@ -179,6 +210,7 @@ describe("finding in the changes", () => {
     ])
     expect(findEntry(entries, findTarget(seven[0]!))).toBe(second)
     expect(findMatches(entries, "TWO")[0]).toMatchObject({ line: 2 })
+    expect(findMatches(entries, "sevn")).toEqual(seven)
     expect(
       findMatches(buildEntries([split], walkthrough, "files"), "src/a")
     ).toEqual([{ kind: "file", path: split.path }])

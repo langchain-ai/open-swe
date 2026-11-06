@@ -1,6 +1,26 @@
 from openswe.run_config import RunConfig
 
 
+def test_langsmith_login_cannot_enable_github_credentials():
+    cfg = RunConfig.parse(
+        {
+            "auth_provider": "langsmith",
+            "github_login": "admin",
+            "github_user_id": 123,
+            "repo": {"owner": "private", "name": "repo"},
+        }
+    )
+    assert cfg.github_login is None
+    assert cfg.github_user_id is None
+    assert cfg.repo is None
+    assert cfg.repo_explicitly_none is True
+
+
+def test_github_login_is_preserved():
+    cfg = RunConfig.parse({"github_login": "octocat"})
+    assert cfg.github_login == "octocat"
+
+
 def test_parse_drops_only_the_malformed_field():
     cfg = RunConfig.parse({"thread_id": "t1", "pr_number": {"not": "an int"}})
     assert cfg.thread_id == "t1"

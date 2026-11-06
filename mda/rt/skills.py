@@ -1,4 +1,5 @@
-"""The run's skills, as the backend lists them for it (``runtime_api.skills``).
+"""The run's skills, as the backend lists them for it (``runtime_api.skills``), and the
+skills Open SWE ships, which this deployment carries (``bundled_skills/``).
 
 This runtime keeps them as read-only files, lists them in each model call's system
 prompt with deepagents' own skills middleware, the agent's and its subagents', and
@@ -8,8 +9,10 @@ person a previous run acted for.
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from functools import cache
+from pathlib import Path
 from typing import Any, Final, cast
 
 from deepagents.backends.protocol import (
@@ -36,13 +39,28 @@ from langchain.agents.middleware.types import ExtendedModelResponse, ModelReques
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from runtime_api.endpoint import call
-from runtime_api.operations import RunRequest
-from runtime_api.skills import SKILLS
+from runtime_api.skills import BUNDLED_SKILLS, SKILLS, SkillsRequest
 
 from rt.backend import OpenSweBackend, RunLocal
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
+logger = logging.getLogger(__name__)
 
 _SYNC: Final = "The run's skills are read asynchronously"
 _READ_ONLY: Final = "Skills are read-only here"
+_BUNDLED_DIR: Final = Path(__file__).resolve().parent.parent / "bundled_skills"
+
+
+@cache
+def _bundled() -> dict[str, str]:
+    """The skills Open SWE ships, by the path a run reads each file at."""
+    return {
+        f"{BUNDLED_SKILLS}{path.relative_to(_BUNDLED_DIR).as_posix()}": path.read_text(
+            encoding="utf-8"
+        )
+        for path in sorted(_BUNDLED_DIR.rglob("*"))
+        if path.is_file()
+    }
 
 
 class _Listed(StateBackend):
@@ -62,6 +80,7 @@ class _Listing:
     def __init__(self) -> None:
         self.files: _Listed | None = None
         self.lock = asyncio.Lock()
+        self.ahead: asyncio.Task[_Listed] | None = None
 
 
 class SkillFiles(BackendProtocol):
@@ -80,11 +99,23 @@ class SkillFiles(BackendProtocol):
         listing = self._listings.get(self._backend.run)
         async with listing.lock:
             if listing.files is None:
-                listed = await call(self._backend, SKILLS, RunRequest(run_id=self._run_id()))
+                asked = SkillsRequest(run_id=self._run_id(), served=[BUNDLED_SKILLS])
+                listed = await call(self._backend, SKILLS, asked)
+                files = {skill.path: skill.content for skill in listed.files}
+                if BUNDLED_SKILLS in self._backend.run.catalog.skill_sources:
+                    files.update(_bundled())
                 listing.files = _Listed(
-                    {skill.path: create_file_data(skill.content) for skill in listed.files}
+                    {path: create_file_data(content) for path, content in files.items()}
                 )
         return listing.files
+
+    def list_ahead(self) -> None:
+        """Start listing the run's skills, so its first read finds them listed."""
+        listing = self._listings.get(self._backend.run)
+        if listing.ahead is not None or not self._backend.run.catalog.skill_sources:
+            return
+        listing.ahead = asyncio.create_task(self._listed())
+        listing.ahead.add_done_callback(_log_failure)
 
     async def als(self, path: str) -> LsResult:
         return (await self._listed()).ls(path)
@@ -133,6 +164,12 @@ class SkillFiles(BackendProtocol):
         raise NotImplementedError(_SYNC)
 
 
+def _log_failure(listed: asyncio.Task[_Listed]) -> None:
+    if not listed.cancelled() and (error := listed.exception()) is not None:
+        # The first read lists them again.
+        logger.warning("Could not list the run's skills ahead of its first read", exc_info=error)
+
+
 @cache
 def _labels(sources: tuple[str, ...]) -> tuple[str, ...]:
     """How deepagents labels ``sources`` in the prompt."""
@@ -145,6 +182,8 @@ class RunSkillsMiddleware(SkillsMiddleware):
     The graph serves every run, so the sources are read from the run in progress; a run
     whose catalog names none sees no skills, as if the middleware were absent.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend, files: SkillFiles) -> None:
         self._run_backend = backend

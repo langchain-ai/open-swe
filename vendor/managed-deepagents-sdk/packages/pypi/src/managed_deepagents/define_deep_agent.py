@@ -7,10 +7,9 @@ LangChain / deepagents types the underlying harness uses.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Never, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Never, NotRequired, TypedDict, cast
 
 from managed_deepagents._managed_composition import (
     OMITTED,
@@ -19,6 +18,7 @@ from managed_deepagents._managed_composition import (
     Omitted,
     SkillSelection,
     copy_managed_selections,
+    snapshot_subagent_mcp_selections,
 )
 
 if TYPE_CHECKING:
@@ -44,7 +44,18 @@ if TYPE_CHECKING:
     # `async` is a keyword, so the flag needs the functional TypedDict form.
     _AsyncFlag = TypedDict("_AsyncFlag", {"async": bool})
 
-    class ManagedAsyncSubAgent(SubAgent, _AsyncFlag):
+    class ManagedSubAgent(SubAgent):
+        """A declarative subagent that can narrow this agent's MCP servers."""
+
+        mcp: NotRequired[McpSelection | None]
+        """MCP servers whose tools this subagent gets, instead of this agent's.
+
+        Unset inherits this agent's MCP servers; `[]` or `None` gives it none.
+        A sync subagent may select only servers this agent loads; its own
+        `tools`, or this agent's non-MCP tools, are kept.
+        """
+
+    class ManagedAsyncSubAgent(ManagedSubAgent, _AsyncFlag):
         """A declarative subagent that MDA builds as its own graph."""
 
         update_strategy: NotRequired[Literal["interrupt", "enqueue"]]
@@ -68,7 +79,9 @@ if TYPE_CHECKING:
 
     #: Declarative, compiled, or async subagent specs from deepagents, plus
     #: declarative specs marked `"async": True`.
-    DeepAgentSubAgent = SubAgent | ManagedAsyncSubAgent | CompiledSubAgent | AsyncSubAgent
+    DeepAgentSubAgent = (
+        SubAgent | ManagedSubAgent | ManagedAsyncSubAgent | CompiledSubAgent | AsyncSubAgent
+    )
     DeepAgentMiddleware = AgentMiddleware
     DeepAgentInterruptOn = bool | InterruptOnConfig
     DeepAgentResponseFormat = ResponseFormat[Any] | type[Any] | dict[str, Any]
@@ -124,8 +137,6 @@ def define_deep_agent(
     browser: BrowserDefinition | Omitted | None = OMITTED,
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
-    replicate_traces: bool = True,
-    _openswe_graph_inputs: Mapping[str, object] | None = None,
     **kwargs: Never,
 ) -> DeepAgentDefinition:
     """Define a Managed Deep Agent.
@@ -159,17 +170,14 @@ def define_deep_agent(
     of this agent's conversation, not only the task. Served agents also get a
     background copy of the general-purpose subagent.
 
+    A declarative subagent's ``mcp`` narrows which MCP servers' tools it gets:
+    unset inherits this agent's, a list keeps only those servers, and ``[]`` or
+    ``None`` keeps none. A sync subagent may select only servers this agent
+    loads, and a sync ``"mode": "fork"`` subagent cannot set it.
+
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
     keys such as prompt provenance land on the **root** LangSmith run.
-
-    ``_openswe_graph_inputs`` is Open SWE's, not MDA's API (see Open SWE's
-    ``vendor/mda-changes``). From a factory entry, it is a JSON object naming
-    everything the factory built this definition from. The factory then promises
-    that the same inputs build the same agent for every run, thread and caller,
-    with nothing that belongs to one of them in the tools, middleware or sandbox it
-    returns: those read what they need from the run per call. MDA compiles the
-    definition once per process for those inputs and shares the graph.
     """
     if not isinstance(name, str) or not name.strip():
         raise TypeError(
@@ -192,6 +200,8 @@ def define_deep_agent(
     if metadata is not None and not isinstance(metadata, Mapping):
         raise TypeError("metadata must be a mapping")
     _validate_async_subagents(subagents or ())
+    if subagents is not None:
+        subagents = cast("Sequence[DeepAgentSubAgent]", snapshot_subagent_mcp_selections(subagents))
 
     config: dict[str, object] = {
         "name": name,
@@ -206,7 +216,6 @@ def define_deep_agent(
                 ("response_format", response_format),
                 ("context_schema", context_schema),
                 ("cache", cache),
-                ("_openswe_graph_inputs", _snapshot_graph_inputs(_openswe_graph_inputs)),
             )
             if value is not None
         },
@@ -217,24 +226,10 @@ def define_deep_agent(
         config["debug"] = debug
     if metadata is not None:
         config["metadata"] = dict(metadata)
-    if not replicate_traces:
-        config["replicate_traces"] = False
 
     config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory, browser))
 
     return DeepAgentDefinition(config)
-
-
-def _snapshot_graph_inputs(graph_inputs: Mapping[str, object] | None) -> dict[str, object] | None:
-    """A JSON copy of ``graph_inputs``, as MDA keeps and digests it."""
-    if graph_inputs is None:
-        return None
-    if not isinstance(graph_inputs, Mapping):
-        raise TypeError("_openswe_graph_inputs must be a mapping")
-    try:
-        return json.loads(json.dumps(graph_inputs))
-    except (TypeError, ValueError):
-        raise TypeError("_openswe_graph_inputs must be JSON") from None
 
 
 _ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers")

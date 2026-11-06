@@ -110,6 +110,27 @@ mda dev
 mda deploy
 ```
 
+## Pull remote context
+
+After editing a deployed agent's prompt or skills in Context Hub, bring those
+changes into the existing local project:
+
+```bash
+mda pull --dry-run
+mda pull
+```
+
+The command previews added, overwritten, and deleted files, then asks for
+confirmation (default: no). It replaces `instructions.md` and mirrors `skills/`,
+including deleting local skill files absent from the remote snapshot. Commit or
+save local edits first; this is a replacement, not a three-way merge. Agent code,
+credentials, and memories are not pulled or changed.
+
+Use `mda pull --yes` for non-interactive use. `--name`, `--agent-environment`,
+`--workspace-id`, and `--env-file` select the remote agent and credentials, as with
+`mda deploy`; `LANGSMITH_AGENT_ENVIRONMENT` in `.env` is honored too.
+The remote context is read-only; pulling does not deploy or modify Context Hub.
+
 ## Evaluate
 
 Managed Deep Agent evals run in Harbor. Install `uv` and Docker before running
@@ -459,7 +480,7 @@ Most commands below take the project path as an optional argument that defaults
 to the current directory, so the examples run from the project root. Pass a path
 explicitly — `mda deploy ./my-agent` — to work on a project without moving into
 it first, which is what you want from a monorepo root or in CI. Channel
-initialization always runs in the current project directory. `mda connections`
+commands always run in the current project directory. `mda connections`
 takes `--project <path>` instead, so the connection slug can be the argument.
 
 Initialize a Slack channel:
@@ -467,6 +488,20 @@ Initialize a Slack channel:
 ```bash
 mda channels init slack
 ```
+
+Set up the project's channels for its deployment, or check where they stand,
+without deploying (the agent has to be deployed once first):
+
+```bash
+mda channels setup
+mda channels setup slack --json
+```
+
+In a terminal it asks which channels to set up. Without one, or with `--json`,
+it only reports their status. It exits non-zero unless every channel is set up,
+so it works as a precheck before `mda deploy`. `mda deploy` sets channels that
+are already set up again before uploading a new revision, and new ones once the
+new revision is live.
 
 Build a deployable managed app locally:
 
@@ -506,10 +541,13 @@ Deploy it to LangSmith:
 mda deploy
 ```
 
+The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
+for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+
 Common deploy options:
 
 ```bash
-mda deploy --name my-agent-dev --deployment-type dev
+mda deploy --name my-agent-dev --deployment-type serverless
 mda deploy --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy --no-wait
 ```

@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import {
   GlobeRegularIcon,
   PlusIcon,
@@ -23,6 +24,7 @@ import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
+import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import type {
@@ -44,6 +46,8 @@ interface RightPanelTabsProps {
   widthStorageKey?: string
   /** Forwarded to RightPanelShell as the initial width before a user resize. */
   defaultWidth?: number
+  /** Forwarded to RightPanelShell: mounted, but out of sight. */
+  hidden?: boolean
   layoutControls?: ReactNode
   surfaces: ReadonlyArray<RightPanelSurface>
   activeSurfaceId: string | null
@@ -62,6 +66,8 @@ interface RightPanelTabsProps {
   onAddBrowser?: () => void
   /** Offered only where a thread can run commands and monitors in the background. */
   onAddBackgroundWork?: () => void
+  /** Offered once the thread's agent previews an app it builds. */
+  onAddApp?: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
   browserAvailable?: boolean
@@ -93,6 +99,7 @@ type SurfaceLauncherProps = Pick<
   | "onAddFiles"
   | "onAddBrowser"
   | "onAddBackgroundWork"
+  | "onAddApp"
   | "terminalAvailable"
   | "diffAvailable"
   | "browserAvailable"
@@ -171,6 +178,20 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
               "Nothing is running in the background for this thread.",
             unavailableHint: "Available while a command or monitor runs.",
             onClick: props.onAddBackgroundWork,
+          },
+        ]
+      : []),
+    ...(props.onAddApp
+      ? [
+          {
+            label: "App",
+            description: "Use the app the agent is building.",
+            icon: PuzzlePieceIcon,
+            shortcut: "A",
+            available: true,
+            disabledReason: "",
+            unavailableHint: "",
+            onClick: props.onAddApp,
           },
         ]
       : []),
@@ -363,7 +384,11 @@ function RightPanelEmptyState({
         <div className="grid grid-cols-2 gap-space-2">
           {actions.map((action) =>
             action.available ? (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={action.label}
                 key={action.label}
                 type="button"
                 onClick={action.onClick}
@@ -376,7 +401,8 @@ function RightPanelEmptyState({
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
+                  "h-auto justify-start whitespace-normal",
+                  "relative w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
@@ -393,7 +419,7 @@ function RightPanelEmptyState({
                 <span className="mt-space-1 text-xs leading-relaxed text-secondary">
                   {action.description}
                 </span>
-              </button>
+              </Button>
             ) : (
               <div
                 key={action.label}
@@ -444,6 +470,8 @@ export function surfaceTitle(
       return "Browser"
     case "background":
       return "Background work"
+    case "app":
+      return "App"
   }
 }
 
@@ -455,6 +483,7 @@ const SURFACE_ICONS = {
   terminal: TerminalWindowIcon,
   agents: RobotIcon,
   background: PulseIcon,
+  app: PuzzlePieceIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
@@ -513,12 +542,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       {...(props.defaultWidth !== undefined
         ? { defaultWidth: props.defaultWidth }
         : {})}
+      {...(props.hidden ? { hidden: true } : {})}
     >
       <div
-        className={cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-space-1 pl-space-2",
-          props.layoutControls ? "pr-space-3" : "pr-space-2"
-        )}
+        className="flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-space-1 px-space-2"
         data-right-panel-tabbar
       >
         <div
@@ -549,9 +576,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"
                       )}
                     >
-                      <button
+                      <Button
+                        color="secondary"
+                        variant="plain"
+                        size="sm"
                         type="button"
-                        className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-surface-level-2"
+                        className="group/close relative size-4 shrink-0 cursor-pointer justify-center p-0 text-inherit hover:bg-surface-level-2"
                         aria-label={`Close ${title}`}
                         onClick={() => props.onCloseSurface(surface)}
                       >
@@ -568,17 +598,21 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           className="hidden size-3 group-hover/tab:block group-focus-visible/close:block"
                           weight="bold"
                         />
-                      </button>
+                      </Button>
                       <Tooltip title={title}>
-                        <button
+                        <Button
+                          color="secondary"
+                          variant="plain"
+                          size="sm"
+                          aria-label={title}
                           type="button"
                           role="tab"
                           aria-selected={active}
-                          className="flex min-w-0 cursor-pointer items-center"
+                          className="h-auto min-w-0 shrink cursor-pointer px-0 text-inherit hover:bg-transparent dark:hover:bg-transparent"
                           onClick={() => props.onActivate(surface)}
                         >
                           <span className="truncate">{title}</span>
-                        </button>
+                        </Button>
                       </Tooltip>
                     </div>
                   </ContextMenuTrigger>

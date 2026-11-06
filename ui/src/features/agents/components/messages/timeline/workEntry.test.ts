@@ -36,6 +36,22 @@ function diff(overrides: Partial<DiffData> = {}): DiffData {
 }
 
 describe("describeWorkEntry", () => {
+  it("links only successful cross-thread messages to their authorized recipient", () => {
+    const recipient = "553f74de-534d-5377-815d-c14b58b21ea2"
+    const sent = chunk({
+      title: "message_task_thread",
+      toolKind: "other",
+      output: JSON.stringify({ success: true, recipient_thread_id: recipient }),
+    })
+    expect(describeWorkEntry(sent).destinationHref).toBe(`/agents/${recipient}`)
+    expect(
+      describeWorkEntry({ ...sent, output: "invalid" }).destinationHref
+    ).toBeUndefined()
+    expect(
+      describeWorkEntry({ ...sent, status: "error" }).destinationHref
+    ).toBeUndefined()
+  })
+
   it("splits a read into a verb, file name, and full-path tooltip", () => {
     const fullPath = `${repoPath}/ui/src/AGENTS.md`
     const entry = describeWorkEntry(
@@ -89,7 +105,7 @@ describe("describeWorkEntry", () => {
         title: "shell",
         toolKind: "execute",
         status: "error",
-        input: { command: "pnpm test" },
+        input: { command: "cd /workspace/open-swe && pnpm test" },
       }),
       repoPath
     )
@@ -114,21 +130,7 @@ describe("describeWorkEntry", () => {
     expect(entry.preview).toBe("a.ts +1 more")
   })
 
-  it("builds an expandable body from the command and its output", () => {
-    const entry = describeWorkEntry(
-      chunk({
-        title: "shell",
-        toolKind: "execute",
-        input: { command: "ls" },
-        output: "a.ts\nb.ts",
-      }),
-      repoPath
-    )
-
-    expect(entry.expandedText).toBe("ls\n\na.ts\nb.ts")
-  })
-
-  it("shows important tool text in the preview and keeps every argument expandable", () => {
+  it("shows important tool text in the preview", () => {
     const reason =
       "This is a conversation between people, not a request.".repeat(100)
     const entry = describeWorkEntry(
@@ -142,23 +144,6 @@ describe("describeWorkEntry", () => {
 
     expect(entry.preview).toBe(`${reason.slice(0, 80)}...`)
     expect(entry.previewTooltip).toBe(reason)
-    expect(entry.expandedText).toContain(`reason:\n${reason}`)
-    expect(entry.expandedText).not.toContain("Internal confirmation")
-
-    const report = describeWorkEntry(
-      chunk({
-        title: "report_platform_issue",
-        toolKind: "other",
-        input: {
-          problem_description: "Sandbox disconnected",
-          keywords: ["sandbox"],
-        },
-      })
-    )
-    expect(report.preview).toBe("Sandbox disconnected")
-    expect(report.expandedText).toBe(
-      "problem description:\nSandbox disconnected"
-    )
 
     const task = describeWorkEntry(
       chunk({
@@ -171,28 +156,6 @@ describe("describeWorkEntry", () => {
       })
     )
     expect(task.preview).toBe("Investigate the failure")
-    expect(task.expandedText).toBe(
-      "description:\nInvestigate the failure\n\ninstructions:\nKeep the report concise"
-    )
-  })
-
-  it("preserves arguments when lazy output replaces the preview", async () => {
-    const output = "Full output\n".repeat(500)
-    const entry = describeWorkEntry(
-      chunk({
-        title: "report_platform_issue",
-        toolKind: "other",
-        input: { problem_description: "Sandbox disconnected" },
-        output: "Partial output",
-        loadOutput: async () => output,
-      })
-    )
-
-    const loaded = await entry.loadExpandedText?.()
-    expect(loaded).toBe(
-      `problem description:\nSandbox disconnected\n\n${output.trim()}`
-    )
-    expect(loaded).not.toContain("Partial output")
   })
 
   it("keeps complete JSON tool output available for highlighted rendering", () => {
@@ -229,6 +192,25 @@ describe("liveActivityLabel", () => {
     expect(
       liveActivityLabel([{ ...running, status: "completed" }, chunk()])
     ).toBe("Thinking…")
+  })
+
+  it("names the thought by its latest finished heading", () => {
+    const reasoning = (text: string): Chunk => ({ kind: "reasoning", text })
+
+    expect(liveActivityLabel([reasoning("")])).toBe("Thinking…")
+    expect(liveActivityLabel([reasoning("Evaluating token budget")])).toBe(
+      "Evaluating token budget…"
+    )
+    expect(liveActivityLabel([reasoning("**Evaluating tok")])).toBe(
+      "Evaluating tok…"
+    )
+    expect(
+      liveActivityLabel([
+        reasoning(
+          "**Evaluating token budget**\n\nEnough left.\n\n**Running the e2e test**\n\nStarting"
+        ),
+      ])
+    ).toBe("Running the e2e test…")
   })
 
   it("switches to response status when final text starts streaming", () => {

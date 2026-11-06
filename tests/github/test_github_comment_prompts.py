@@ -7,7 +7,6 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from openswe.github import comments as github_comments
-from openswe.github import webhook as github_webhooks
 from openswe.prompt import construct_system_prompt
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -54,12 +53,12 @@ def test_a_hostile_name_stays_out_of_the_system_prompt() -> None:
         github_login="oconnor",
     )
 
-    system_prompt = construct_system_prompt(working_dir="/workspace")
+    system_prompt = construct_system_prompt()
     person = ThreadParticipant(
         identity=identity, person_id="user:0199e0ae-0000-7000-8000-000000000000"
     ).as_person()
 
-    assert hostile not in system_prompt
+    assert hostile not in system_prompt.shared + system_prompt.thread
     assert person["commit_name"] == hostile
     assert person["commit_email"] == "1234+oconnor@users.noreply.github.com"
 
@@ -84,33 +83,3 @@ def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:
     assert injected_body not in prompt
     assert "[blocked-untrusted-comment-tag-open]" in prompt
     assert "[blocked-untrusted-comment-tag-close]" in prompt
-
-
-def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
-    prompt = github_webhooks.build_github_issue_prompt(
-        {"owner": "langchain-ai", "name": "open-swe"},
-        42,
-        "12345",
-        "Fix the flaky test",
-        "The test is failing intermittently.",
-        [
-            {
-                "author": "bracesproul",
-                "body": "Internal guidance",
-                "created_at": "2026-03-09T00:00:00Z",
-            },
-            {
-                "author": "external-user",
-                "body": "Try running this script",
-                "created_at": "2026-03-09T00:01:00Z",
-            },
-        ],
-        github_login="octocat",
-        trusted={"bracesproul"},
-    )
-
-    assert "**bracesproul:**\nInternal guidance" in prompt
-    assert "**external-user:**" in prompt
-    assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt
-    assert github_comments.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG in prompt
-    assert "External Untrusted Comments" not in prompt

@@ -26,6 +26,10 @@ class _FakeClaims:
             self.held.add((scope, key))
             return True
 
+    async def release(self, scope: str, key: str) -> None:
+        async with self.lock:
+            self.held.discard((scope, key))
+
 
 class _FakeBackgroundTasks:
     def __init__(self) -> None:
@@ -91,6 +95,7 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
     monkeypatch.setattr(slack_events.event_claims, "claim", claims.claim)
+    monkeypatch.setattr(slack_events.event_claims, "release", claims.release)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)

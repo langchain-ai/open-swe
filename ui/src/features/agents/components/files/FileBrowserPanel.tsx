@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef } from "react"
+import { FuzzySearch } from "@/lib/fuzzySearch"
+import { XIcon } from "@langchain/macaw-components/icons"
+import { Input } from "@langchain/macaw-components/Input"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Button } from "@langchain/macaw-components/Button"
-import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
+import { FileTree, useFileTree } from "@pierre/trees/react"
 import type { FileTreeBatchOperation } from "@pierre/trees"
 
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
@@ -84,19 +87,24 @@ export function FileBrowserPanel({
     [entries]
   )
   const entryKindsRef = useRef(entryKinds)
-  const treePaths = useMemo(() => entries.map(treePath), [entries])
+  const [searchQuery, setSearchQuery] = useState("")
+  const treePaths = useMemo(() => {
+    const search = new FuzzySearch(searchQuery)
+    return entries.filter((entry) => search.matches(entry.path)).map(treePath)
+  }, [entries, searchQuery])
   const directoryPaths = useMemo(
     () => entries.filter((entry) => entry.kind === "directory").map(treePath),
     [entries]
   )
   const previousTreePathsRef = useRef<ReadonlyArray<string> | null>(null)
+  const expandedBeforeSearch = useRef<Array<string> | null>(null)
+  const updatingTree = useRef(false)
   const syncingSelectionRef = useRef(false)
   const handledRevealRef = useRef<string | null>(null)
 
   const { model } = useFileTree({
     paths: [],
     density: "compact",
-    fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
     initialExpansion: "closed",
     icons: "complete",
@@ -109,21 +117,30 @@ export function FileBrowserPanel({
       if (path && entryKindsRef.current.get(path) === "file") onOpenFile(path)
     },
   })
-  const search = useFileTreeSearch(model)
 
   // Load a folder's children the first time it is expanded.
   useEffect(() => {
+    let expanded = new Set<string>()
     const loadExpanded = () => {
-      if (model.isSearchOpen()) return
+      const next = new Set<string>()
+      for (const path of directoryPaths) {
+        const item = model.getItem(path)
+        if (!item || !("isExpanded" in item) || !item.isExpanded()) continue
+        next.add(path)
+        if (!updatingTree.current && !expanded.has(path))
+          void load(path.slice(0, -1))
+      }
+      expanded = next
+    }
+    if (searchQuery.trim()) {
       for (const path of directoryPaths) {
         const item = model.getItem(path)
         if (item && "isExpanded" in item && item.isExpanded())
-          void load(path.slice(0, -1))
+          expanded.add(path)
       }
-    }
-    loadExpanded()
+    } else loadExpanded()
     return model.subscribe(loadExpanded)
-  }, [directoryPaths, load, model])
+  }, [directoryPaths, load, model, searchQuery])
 
   useEffect(() => {
     model.setGitStatus(
@@ -144,13 +161,42 @@ export function FileBrowserPanel({
     entryKindsRef.current = entryKinds
     const previous = previousTreePathsRef.current
     previousTreePathsRef.current = treePaths
-    if (previous === null) {
-      model.resetPaths(treePaths)
-      return
+    updatingTree.current = true
+    try {
+      if (searchQuery.trim() || expandedBeforeSearch.current !== null) {
+        if (expandedBeforeSearch.current === null) {
+          expandedBeforeSearch.current = directoryPaths.filter((path) => {
+            const item = model.getItem(path)
+            return item && "isExpanded" in item && item.isExpanded()
+          })
+        }
+        model.resetPaths(treePaths, {
+          initialExpandedPaths: searchQuery.trim()
+            ? directoryPaths.filter((path) => {
+                const item = model.getItem(path)
+                return item && "isExpanded" in item && item.isExpanded()
+              })
+            : expandedBeforeSearch.current,
+        })
+        if (!searchQuery.trim()) expandedBeforeSearch.current = null
+      } else if (previous === null) {
+        model.resetPaths(treePaths)
+      } else {
+        const updates = buildFileTreePathUpdates(previous, treePaths)
+        if (updates.length > 0) model.batch(updates)
+      }
+      if (searchQuery.trim()) {
+        for (const path of treePaths) {
+          for (const parent of ancestors(path)) {
+            const item = model.getItem(`${parent}/`)
+            if (item && "expand" in item) item.expand()
+          }
+        }
+      }
+    } finally {
+      updatingTree.current = false
     }
-    const updates = buildFileTreePathUpdates(previous, treePaths)
-    if (updates.length > 0) model.batch(updates)
-  }, [ready, entryKinds, model, treePaths])
+  }, [ready, entryKinds, model, treePaths, searchQuery, directoryPaths])
 
   // Reveal files opened from outside the tree (links, terminal paths).
   useEffect(() => {
@@ -176,15 +222,14 @@ export function FileBrowserPanel({
   }, [entryKinds, model, selectedPath, selectedPathRevealId])
 
   // Search filters the tree's paths, so give it every file while it is open.
-  const searchOpen = search.isOpen
+  const searchOpen = Boolean(searchQuery.trim())
   useEffect(() => {
     if (searchOpen) void loadIndex()
     else clearIndex()
   }, [clearIndex, loadIndex, searchOpen])
 
   const handleSearchChange = (value: string) => {
-    if (value.trim()) search.setValue(value)
-    else search.close()
+    setSearchQuery(value)
   }
 
   return (
@@ -202,19 +247,33 @@ export function FileBrowserPanel({
             onRefreshSelectedFile?.()
           }}
         />
-        <input
-          type="search"
-          value={search.value}
+        <Input
+          inputContainerClassName="border-strong/70 [&:hover:not(:focus-within)]:border-strong"
+          size="sm"
+          debounceMs={0}
+          type="text"
+          role="searchbox"
+          value={searchQuery}
           aria-label="Search files"
           placeholder="Search files"
           spellCheck={false}
-          onChange={(event) => handleSearchChange(event.target.value)}
+          // Macaw Input has no type="search", so the native clear control is rebuilt here.
+          rightAction={
+            searchQuery
+              ? {
+                  icon: XIcon,
+                  label: "Clear search",
+                  onClick: () => setSearchQuery(""),
+                }
+              : undefined
+          }
+          onChange={handleSearchChange}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return
-            search.close()
+            setSearchQuery("")
             event.currentTarget.blur()
           }}
-          className="h-7 min-w-0 flex-1 bg-transparent px-space-1 text-xs text-primary outline-none placeholder:text-placeholder"
+          className="min-w-0 flex-1"
         />
       </div>
       {error ? (

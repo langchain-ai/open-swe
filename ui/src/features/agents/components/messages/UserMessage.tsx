@@ -1,6 +1,10 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Link } from "@langchain/macaw-components/Link"
+import { PaperclipIcon } from "@phosphor-icons/react/dist/ssr/Paperclip"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
@@ -16,7 +20,9 @@ import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-export function UserMessage({ message }: { message: Message }) {
+type UserMessageProps = { message: Message; threadId?: string }
+
+export function UserMessage({ message, threadId }: UserMessageProps) {
   if (message.taskEvent) {
     return (
       <TaskEventMessage
@@ -26,11 +32,11 @@ export function UserMessage({ message }: { message: Message }) {
       />
     )
   }
-  return <StandardUserMessage message={message} />
+  return <StandardUserMessage message={message} threadId={threadId} />
 }
 
 /** A passage the sender replied to, shown as they selected it, then their comment. */
-function SentReply({ reply }: { reply: PassageReply }) {
+export function SentReply({ reply }: { reply: PassageReply }) {
   return (
     <div className="mb-space-2 flex flex-col gap-space-1 text-sm leading-[1.6]">
       {reply.file ? (
@@ -41,6 +47,9 @@ function SentReply({ reply }: { reply: PassageReply }) {
         />
       ) : (
         <blockquote className="border-l-2 border-default pl-space-3 [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+          {reply.part && (
+            <span className="block text-xxs text-tertiary">{reply.part}</span>
+          )}
           {reply.selection}
         </blockquote>
       )}
@@ -53,7 +62,7 @@ function SentReply({ reply }: { reply: PassageReply }) {
   )
 }
 
-function StandardUserMessage({ message }: { message: Message }) {
+function StandardUserMessage({ message, threadId }: UserMessageProps) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const { excerpts, text } = parseExcerpts(
@@ -92,8 +101,8 @@ function StandardUserMessage({ message }: { message: Message }) {
           className={cn(
             "relative max-w-full overflow-hidden rounded-xl p-space-3",
             isSystem
-              ? "mt-space-1 border border-default bg-surface-level-2"
-              : "bg-surface-level-2"
+              ? "mt-space-1 border border-default bg-user-message"
+              : "bg-user-message"
           )}
         >
           {excerpts.map((excerpt, i) => (
@@ -143,17 +152,33 @@ function StandardUserMessage({ message }: { message: Message }) {
             </div>
           )}
           {!isSystem && isTruncated && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={expanded ? "Show less" : "Show more"}
               type="button"
               onClick={() => setExpanded((value) => !value)}
               aria-expanded={expanded}
               data-testid="user-message-show-more"
-              className="mt-space-1 rounded-sm text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+              className="mt-space-1 h-auto border-0 px-0 text-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               {expanded ? "Show less" : "Show more"}
-            </button>
+            </Button>
           )}
         </div>
+      )}
+      {message.contextLabel && (
+        <span
+          className={cn(
+            "flex max-w-full items-center gap-space-1 pr-space-1 text-xxs text-tertiary",
+            isSystem && "pl-space-1"
+          )}
+          title="Sent with what you had open, for the agent; not part of your message"
+        >
+          <PaperclipIcon size={11} className="shrink-0" />
+          <span className="truncate">{message.contextLabel}</span>
+        </span>
       )}
       {!message.timestampIsFallback && (
         <MessageTimestamp
@@ -188,14 +213,32 @@ function StandardUserMessage({ message }: { message: Message }) {
             isSlack ||
             message.structuredSenderIsBot) && (
             <div className="mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary">
-              {isSlack && (
-                <SlackLogoIcon
-                  size={12}
-                  weight="fill"
-                  role="img"
-                  aria-label="Slack"
-                />
-              )}
+              {isSlack &&
+                (message.slackMessageUrl ? (
+                  <Link
+                    href={message.slackMessageUrl}
+                    variant="xs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={
+                      message.structuredSenderName
+                        ? `View message from ${message.structuredSenderName} in Slack`
+                        : "View message in Slack"
+                    }
+                    leftDecorator={SlackLogoIcon}
+                    iconWeight="fill"
+                    className="gap-space-1"
+                  >
+                    {message.structuredSenderName || "Slack"}
+                  </Link>
+                ) : (
+                  <SlackLogoIcon
+                    size={12}
+                    weight="fill"
+                    role="img"
+                    aria-label="Slack"
+                  />
+                ))}
               {message.structuredSenderIsBot && (
                 <RobotIcon
                   size={12}
@@ -205,9 +248,10 @@ function StandardUserMessage({ message }: { message: Message }) {
                   data-testid="user-message-bot-icon"
                 />
               )}
-              {message.structuredSenderName && (
-                <span>{message.structuredSenderName}</span>
-              )}
+              {message.structuredSenderName &&
+                !(isSlack && message.slackMessageUrl) && (
+                  <span>{message.structuredSenderName}</span>
+                )}
               {message.structuredSenderNote && (
                 <span className="font-normal text-tertiary">
                   {" · "}
@@ -247,14 +291,47 @@ function StandardUserMessage({ message }: { message: Message }) {
             {message.deliveryStatus !== "failed" ? (
               "Sending"
             ) : (
-              <span
-                title={message.deliveryError}
+              <Button
+                color="error"
+                variant="plain"
+                size="xs"
+                type="button"
+                aria-label={`Failed to send${message.deliveryError ? ` · ${message.deliveryError}` : ""} · Copy debug details`}
+                title={`${message.deliveryError ?? "Failed to send"} · Click to copy debug details`}
                 data-testid="user-message-delivery-error"
+                className="h-auto max-w-full border-0 px-0 text-right whitespace-normal text-error-secondary"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      JSON.stringify(
+                        {
+                          url: threadId
+                            ? new URL(
+                                `${import.meta.env.BASE_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(threadId)}`,
+                                window.location.origin
+                              ).href
+                            : undefined,
+                          message_id: message.id,
+                          turn_id: message.deliveryTurnId,
+                          timestamp: message.timestamp,
+                          error: message.deliveryError,
+                        },
+                        null,
+                        2
+                      )
+                    )
+                    toast.success("Debug details copied")
+                  } catch {
+                    toast.error(
+                      "Unable to copy debug details. Check clipboard permissions."
+                    )
+                  }
+                }}
               >
                 {message.deliveryError
                   ? `Failed to send · ${message.deliveryError}`
                   : "Failed to send"}
-              </span>
+              </Button>
             )}
           </div>
         )}

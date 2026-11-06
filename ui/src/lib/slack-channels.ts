@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 import { toast } from "sonner"
@@ -143,19 +144,19 @@ export function slackChannelMatches(
 ): boolean {
   const needle = query.trim().replace(/^#/, "").toLowerCase()
   if (!needle) return true
-  return (
-    channel.name.toLowerCase().includes(needle) ||
-    channel.id.toLowerCase().includes(needle)
-  )
+  return new FuzzySearch(needle).matches(channel.name, channel.id)
 }
 
-/** `#name` for a channel the directory knows, else the id as stored. */
+/** A cached channel name, with a readable fallback while names are unavailable. */
 export function slackChannelLabel(
   directory: SlackChannelDirectory | undefined,
-  id: string
+  id: string,
+  channelIds: ReadonlyArray<string>
 ): string {
   const channel = directory?.channels.find((entry) => entry.id === id)
-  return channel ? `#${channel.name}` : id
+  return channel?.name
+    ? `#${channel.name}`
+    : `Slack channel ${channelIds.indexOf(id) + 1}`
 }
 
 /** The canonical id for a pasted channel id, or null when it cannot be one. */

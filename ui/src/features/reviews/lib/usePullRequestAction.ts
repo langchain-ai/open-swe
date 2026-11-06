@@ -6,7 +6,7 @@ import type {
   OpenPullRequest,
   PullRequestActionName,
 } from "@/lib/api"
-import { githubActions } from "./githubActions"
+import { type GithubActionInput, githubActions } from "./githubActions"
 import { pullRequestKey } from "./status"
 
 /**
@@ -28,12 +28,13 @@ export function usePullRequestAction({
 }) {
   const { run, succeeded, failed } = githubActions[action]
   return useMutation({
-    mutationFn: (reason: string | void) => run(pr, method, reason || undefined),
+    mutationFn: (input: Omit<GithubActionInput, "method"> | void) =>
+      run(pr, { ...input, method }),
     meta: { errorTitle: failed(pullRequestKey(pr)) },
     onMutate: () => ({ undo: apply?.() }),
-    onError: (_error, _reason, context) => context?.undo?.(),
+    onError: (_error, _input, context) => context?.undo?.(),
     onSuccess: () => {
-      toast.success(succeeded(pullRequestKey(pr)))
+      toast.success(succeeded(pullRequestKey(pr), pr))
       onDone?.()
     },
     retry: false,

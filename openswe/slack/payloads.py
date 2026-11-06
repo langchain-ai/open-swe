@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 NOISE_SUBTYPES = frozenset(
     {"channel_join", "channel_leave", "channel_topic", "channel_purpose", "channel_name"}
 )
+_POSTED_SUBTYPES = frozenset(
+    {"", "file_share", "thread_broadcast", "bot_message", "message_changed", "me_message"}
+)
 
 
 class SlackPayload(BaseModel):
@@ -49,6 +52,12 @@ class SlackItem(SlackPayload):
     key: str | None = None
     label: str | None = None
     value: JsonValue = None
+
+
+class SlackAssistantThread(SlackPayload):
+    """``event.assistant_thread``, where older payloads nest the search grant."""
+
+    action_token: str = ""
 
 
 class SlackMessage(SlackPayload):
@@ -107,6 +116,8 @@ class SlackEvent(SlackPayload):
     bot_id: str = ""
     app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
+    action_token: str = ""
+    assistant_thread: SlackAssistantThread | None = None
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
     reaction: str = ""
@@ -129,6 +140,13 @@ class SlackEvent(SlackPayload):
         if isinstance(self.user, SlackRef):
             return self.user.id
         return self.user or self.user_id
+
+    @property
+    def search_grant(self) -> str:
+        """The ``action_token`` Slack sent for search, at the top level or nested."""
+        if self.action_token:
+            return self.action_token
+        return self.assistant_thread.action_token if self.assistant_thread else ""
 
     @property
     def is_from_bot(self) -> bool:
@@ -155,6 +173,18 @@ class SlackEventEnvelope(SlackPayload):
     def kind(self) -> str:
         """The inner event's type for a callback, else the envelope's own type."""
         return self.event.type if self.event and self.event.type else self.type
+
+    def posted_message(self) -> SlackEvent | SlackMessage | None:
+        """The message a callback posted or edited, the edit's new version for an edit."""
+        event = self.event
+        if (
+            self.type != "event_callback"
+            or event is None
+            or event.type not in {"message", "app_mention"}
+            or event.subtype not in _POSTED_SUBTYPES
+        ):
+            return None
+        return event.message if event.subtype == "message_changed" else event
 
     def bot_user_id(self, configured: str) -> str:
         """The app's own user id: configured, else whichever the delivery names."""

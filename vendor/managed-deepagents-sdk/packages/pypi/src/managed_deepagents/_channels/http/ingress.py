@@ -31,7 +31,7 @@ from managed_deepagents._ingress_runs import (
 
 if TYPE_CHECKING:
     from langgraph_sdk.client import LangGraphClient
-    from langgraph_sdk.schema import Interrupt, MultitaskStrategy
+    from langgraph_sdk.schema import Interrupt, MultitaskStrategy, ThreadState
 
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http.types import HttpRunStatus
@@ -66,13 +66,19 @@ PrepareInput = Callable[[], Awaitable["NormalizedRunInput | None"]]
 
 
 async def wait_for_http_ingress_thread(
-    *, user_id: str, source_thread_key: str, source_provider: str, thread_id: str
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    principal_id: str | None = None,
 ) -> None:
     """Wait until the thread's queued and running runs have finished."""
     client = _create_ingress_loopback_client(
         user_id=user_id,
         source_thread_key=source_thread_key,
         source_provider=source_provider,
+        principal_id=principal_id,
     )
     await wait_for_idle_thread(client=client, thread_id=thread_id)
 
@@ -98,6 +104,93 @@ async def http_ingress_thread_waits_on(
     if "assistant_id" in read:
         waits_on["assistant_id"] = read["assistant_id"]
     return waits_on
+
+
+async def http_ingress_thread_state(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    delivery_key: str | None = None,
+    principal_id: str | None = None,
+) -> Literal["ready", "busy", "paused", "duplicate"]:
+    """Whether the thread takes a new run now, waits on a run or a decision, or
+    has seen the delivery already."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    read = await ingress_thread_state(client=client, thread_id=thread_id, delivery_key=delivery_key)
+    return read["state"]
+
+
+async def http_ingress_get_state(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    principal_id: str | None = None,
+) -> ThreadState | None:
+    """The thread's state as Agent Server's ``threads.get_state`` reads it, under
+    the conversation's own key, as its runs read it; ``None`` before any run."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    try:
+        return await client.threads.get_state(thread_id)
+    except Exception as error:
+        if lookup_status(error) == HTTPStatus.NOT_FOUND:
+            return None
+        raise
+
+
+async def record_http_ingress_delivery(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    delivery_key: str,
+    principal_id: str | None = None,
+) -> None:
+    """Record a delivery on a thread that took no run for it, so a redelivery
+    is a duplicate; a thread that doesn't exist yet records nothing."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    try:
+        await record_thread_delivery(client=client, thread_id=thread_id, delivery_key=delivery_key)
+    except Exception as error:
+        if lookup_status(error) != HTTPStatus.NOT_FOUND:
+            raise
+
+
+async def delete_http_ingress_thread(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    principal_id: str | None = None,
+) -> None:
+    """Delete a thread the channel started for one run, as an ephemeral schedule's is."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    await client.threads.delete(thread_id)
 
 
 _RUN_STATUSES: frozenset[str] = frozenset({"success", "error", "timeout", "interrupted"})
@@ -134,6 +227,7 @@ async def start_http_ingress_agent(
     prepare: PrepareInput | None = None,
     delivery_key: str | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    principal_id: str | None = None,
 ) -> StartedIngressRun | SkippedIngressRun:
     if not _has_loopback_credential():
         raise ChannelError(
@@ -143,6 +237,7 @@ async def start_http_ingress_agent(
         user_id=user_id,
         source_thread_key=source_thread_key,
         source_provider=source_provider,
+        principal_id=principal_id,
     )
     read = await ingress_thread_state(client=client, thread_id=thread_id, delivery_key=delivery_key)
     state = read["state"]
@@ -246,6 +341,7 @@ async def observe_http_ingress_agent(
     source_provider: str,
     thread_id: str,
     run_id: str,
+    principal_id: str | None = None,
 ) -> HttpIngressOutcome | None:
     """How the run ended, or ``None`` when it hasn't, as observing it stopped while
     it was still ``pending`` or ``running``: it may still answer."""
@@ -253,6 +349,7 @@ async def observe_http_ingress_agent(
         user_id=user_id,
         source_thread_key=source_thread_key,
         source_provider=source_provider,
+        principal_id=principal_id,
     )
     try:
         observed = await observe_ingress_run(client=client, thread_id=thread_id, run_id=run_id)

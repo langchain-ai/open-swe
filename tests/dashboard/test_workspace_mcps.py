@@ -5,12 +5,13 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from pydantic import ValidationError
+from runtime_api.connections import ConnectionRef
 from sqlalchemy import select
 
 from openswe.dashboard import deps, oauth, routes
 from openswe.database import postgres
 from openswe.encryption import decrypt_token
-from openswe.mcp import MCPConnectionUpdate
+from openswe.mcp import MCPConnectionUpdate, prepare_connection
 from openswe.mcp import workspace as mcps
 from openswe.mcp.records import MCPConnectionRow
 from openswe.utils.json_types import JsonObject
@@ -199,12 +200,178 @@ async def test_oauth_secret_cannot_be_reused_for_changed_destinations(registry_d
         },
         {"allowed_tools": [""]},
         {"allowed_tools": ["x" * 129]},
+        {"connection": {"slug": "Example MCP", "owner": "agent"}},
+        {"connection": {"slug": "open-swe-mcp-example", "owner": "anyone"}},
+        {
+            "connection": {"slug": "open-swe-mcp-example", "owner": "agent"},
+            "connection_header": "Host",
+        },
     ],
 )
 def test_invalid_connection_is_rejected(fields):
     values = {"name": "example", "url": "https://example.com/mcp", **fields}
     with pytest.raises(ValidationError):
         MCPConnectionUpdate(**values)
+
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        # The GitHub App's installation token, and the other channels' app tokens.
+        "mda/github-token",
+        "mda/slack-bot-token",
+        "mda/linear-token",
+        # Open SWE's own: web search's key and a person's GitHub App user token.
+        "open-swe-exa",
+        "open-swe-github-prod",
+    ],
+)
+@pytest.mark.parametrize("owner", ["agent", "user"])
+def test_a_server_never_sends_a_credential_open_swe_or_a_channel_reads_for_itself(slug, owner):
+    # Every tier saves through this model, so no admin or person can name one. A person's
+    # ``mda/`` connection is refused before the server's own rule is checked.
+    with pytest.raises(ValidationError, match="open-swe-mcp-<server>|MDA's own connection"):
+        MCPConnectionUpdate(
+            name="example",
+            url="https://attacker.example/mcp",
+            allowed_tools=["search"],
+            connection={"slug": slug, "owner": owner},
+        )
+
+
+_LINEAR_MCP_URLS = [
+    "https://mcp.linear.app/mcp",
+    "https://mcp.linear.app/mcp/readonly",
+    "https://mcp.linear.app/sse",
+]
+
+
+@pytest.mark.parametrize("url", _LINEAR_MCP_URLS)
+async def test_linears_mcp_server_may_send_the_linear_channels_app_token(url):
+    # Linear holds one app token per app: a server with its own would revoke the channel's.
+    connection = {"slug": "mda/linear-token", "owner": "agent"}
+    update = MCPConnectionUpdate(
+        name="linear", url=url, allowed_tools=["list_issues"], connection=connection
+    )
+    saved = await prepare_connection(update, scope="workspace")
+    assert saved.connection == ConnectionRef(**connection)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://linear.app/mcp",
+        "https://api.linear.app/mcp",
+        "https://attacker.example/mcp",
+        "http://mcp.linear.app/mcp",
+        "https://mcp.linear.app.evil.com/mcp",
+        "https://evil.com/mcp.linear.app",
+        "https://evil.com/?u=https://mcp.linear.app/mcp",
+        "https://user@mcp.linear.app/mcp",
+        "https://user:password@mcp.linear.app/mcp",
+        "https://mcp.linear.app:8443/mcp",
+        "https://mcp.linear.app:443/mcp",
+        "https://mcp.linear.app\\@evil.com/mcp",
+        "https://mcp.linear.app\n.evil.com/mcp",
+        "wss://mcp.linear.app/mcp",
+    ],
+)
+def test_the_linear_channels_app_token_goes_to_linears_mcp_server_alone(url):
+    assert not ConnectionRef(slug="mda/linear-token", owner="agent").for_mcp_server(url)
+    with pytest.raises(ValidationError):
+        MCPConnectionUpdate(
+            name="linear",
+            url=url,
+            allowed_tools=["list_issues"],
+            connection={"slug": "mda/linear-token", "owner": "agent"},
+        )
+
+
+@pytest.mark.parametrize("url", _LINEAR_MCP_URLS)
+@pytest.mark.parametrize(
+    ("slug", "owner"),
+    [
+        ("mda/linear-token", "user"),
+        ("mda/github-token", "agent"),
+        ("mda/slack-bot-token", "agent"),
+        ("mda/linear", "agent"),
+        ("mda/linear-token-2", "agent"),
+        ("open-swe-exa", "agent"),
+    ],
+)
+def test_linears_mcp_server_sends_no_other_credential_open_swe_or_a_channel_reads(url, slug, owner):
+    with pytest.raises(ValidationError, match="open-swe-mcp-<server>|MDA's own connection"):
+        MCPConnectionUpdate(
+            name="linear",
+            url=url,
+            allowed_tools=["list_issues"],
+            connection={"slug": slug, "owner": owner},
+        )
+
+
+async def test_a_personal_server_never_sends_the_linear_channels_app_token():
+    update = MCPConnectionUpdate(
+        name="linear",
+        url="https://mcp.linear.app/mcp",
+        connection={"slug": "mda/linear-token", "owner": "agent"},
+    )
+    with pytest.raises(ValueError, match="owner user"):
+        await prepare_connection(update, scope="user")
+
+
+@pytest.mark.parametrize(
+    ("scope", "fields"),
+    [
+        # A person's server must never send the deployment's own credential where they choose.
+        ("user", {"connection": {"slug": "open-swe-mcp-example", "owner": "agent"}}),
+        ("workspace", {"connection": {"slug": "open-swe-mcp-example", "owner": "user"}}),
+        (
+            "workspace",
+            {
+                "connection": {"slug": "open-swe-mcp-example", "owner": "agent"},
+                "headers": {"Authorization": "Bearer test-secret"},
+            },
+        ),
+        ("workspace", {"connection_header": "DD_API_KEY"}),
+    ],
+)
+async def test_a_server_reads_one_credential_its_tier_may_read(scope, fields):
+    update = MCPConnectionUpdate(name="example", url="https://example.com/mcp", **fields)
+    with pytest.raises(ValueError, match="MDA connection"):
+        await prepare_connection(update, scope=scope)
+
+
+async def test_an_mda_connection_replaces_saved_credentials_and_outlives_partial_updates():
+    url = "https://mcp.incident.io/mcp"
+    saved = await prepare_connection(
+        MCPConnectionUpdate(
+            name="incident", url=url, headers={"Authorization": "Bearer test-secret"}
+        ),
+        scope="workspace",
+    )
+    switched = await prepare_connection(
+        MCPConnectionUpdate(
+            name="incident",
+            url=url,
+            connection={"slug": "open-swe-mcp-incident-io", "owner": "agent"},
+        ),
+        saved,
+        scope="workspace",
+    )
+    assert (switched.encrypted_headers, switched.header_names) == ("", [])
+    # The dashboard's enable toggle and editor send no connection.
+    toggled = await prepare_connection(
+        MCPConnectionUpdate(name="incident", url=url, enabled=False, oauth=None),
+        switched,
+        scope="workspace",
+    )
+    assert toggled.connection == switched.connection
+    with pytest.raises(ValueError, match="changing the server URL"):
+        await prepare_connection(
+            MCPConnectionUpdate(name="incident", url="https://elsewhere.example/mcp"),
+            switched,
+            scope="workspace",
+        )
 
 
 async def test_workspace_mcp_routes_are_admin_only_and_same_origin(registry_db, monkeypatch):

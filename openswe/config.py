@@ -168,11 +168,6 @@ ENV.var(
     aliases=("LANGCHAIN_PROJECT",),
 )
 ENV.var(
-    "TYPESAFE_API_KEY",
-    "TypeSafe key for direct Jev model routing when available.",
-    secret=True,
-)
-ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
     secret=True,
@@ -214,6 +209,45 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "MDA_WORKSPACE_ID",
+    "LangSmith workspace of the deployment at MDA_RUNTIME_URL (its LANGSMITH_WORKSPACE_ID, or "
+    "else its LANGSMITH_TENANT_ID), which its channels resolve people's Agent Auth principals "
+    "in; defaults to this backend's own workspace.",
+)
+ENV.var(
+    "MDA_LANGSMITH_PROJECT",
+    "LangSmith project the deployment at MDA_RUNTIME_URL traces its runs into (its "
+    "LANGSMITH_PROJECT, which LangGraph Platform sets to the deployment name); trace links, "
+    "costs, feedback and reviewer evals read runs there. Defaults to LANGSMITH_PROJECT.",
+)
+ENV.var(
+    "MDA_SERVICE_SECRET",
+    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
+    "signs each call its channels make to /mda/channel-api/* with it "
+    "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
+    "and GitHub channels.",
+    secret=True,
+)
+ENV.var(
+    "MDA_GITHUB_PROXY_CONNECTION",
+    "MDA connection (mda/github-token, the GitHub channel's App token) whose token MDA puts "
+    "in the GitHub proxy of the sandboxes it owns whose thread reaches the whole App "
+    "installation; MDA then writes those sandboxes' proxy config, not the backend. Set it only "
+    "once the MDA deployment runs a build that writes it: an older one leaves those sandboxes "
+    "without one. Unset: the backend writes every sandbox's proxy config with a token it mints.",
+)
+ENV.var(
+    "MDA_EXA_CONNECTION",
+    "Slug of the MDA deployment's agent connection holding the Exa API key, e.g. "
+    "open-swe-exa: runs' web_search reads its key there. Unset: EXA_API_KEY.",
+)
+ENV.var(
+    "MDA_GITHUB_USER_CONNECTION",
+    "Slug of the MDA deployment's user GitHub OAuth connection, e.g. open-swe-github-prod: "
+    "open_pull_request opens the requester's own PR with their grant there, which MDA asks "
+    "them for when they have none. Unset: their dashboard GitHub sign-in.",
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens MDA runs present to the agent API (/agent-api); "
     "comma-separated, the first signs and every one verifies. Required.",
@@ -237,13 +271,13 @@ ENV.var(
 ENV.var(
     "LANGCHAIN_API_KEY",
     "Legacy SDK alias.",
-    deprecated="Open SWE reads LANGSMITH_API_KEY; this legacy alias is ignored.",
+    deprecated="Robin reads LANGSMITH_API_KEY; this legacy alias is ignored.",
     replaced_by="LANGSMITH_API_KEY",
 )
 ENV.var(
     "LANGCHAIN_TRACING_V2",
     "Legacy SDK alias.",
-    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
+    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Robin.",
     replaced_by="LANGSMITH_TRACING",
 )
 # --- GitHub ------------------------------------------------------------------------------
@@ -258,7 +292,6 @@ ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
-ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
@@ -287,6 +320,10 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
+ENV.var(
+    "SLACK_ALERTS_CHANNEL_ID",
+    "Slack channel for rate-limited operational alerts; unset disables Slack delivery, not local logging.",
+)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
@@ -299,7 +336,6 @@ ENV.var(
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
-ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(
@@ -376,9 +412,27 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
-    "POSTHOG_API_KEY", "Optional PostHog project API key for server-side usage capture.", default=""
+    "OPENSWE_SOURCE_REPO",
+    "GitHub repository (owner/name) the agent changes when asked to change Open SWE itself.",
+    default="langchain-ai/open-swe",
+)
+ENV.var(
+    "OPENSWE_SOURCE_PATH",
+    "Directory of OPENSWE_SOURCE_REPO that holds Open SWE, when it is not the repository root.",
+)
+ENV.var(
+    "POSTHOG_API_KEY",
+    "Optional PostHog project API key; public by design, it is also served to the dashboard "
+    "for browser capture.",
+    default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var(
+    "SEGMENT_BROWSER_WRITE_KEY",
+    "Optional public Segment browser source write key, served to the web and desktop UI. "
+    "Unset disables Segment; use a separate source for each deployment environment.",
+    default="",
+)
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
@@ -423,11 +477,6 @@ ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 
 # --- Sandboxes ---------------------------------------------------------------------------------
-ENV.var(
-    "SANDBOX_TYPE",
-    "Sandbox provider: langsmith, modal, daytona, runloop, e2b or local.",
-    default="langsmith",
-)
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_VCPUS", "vCPUs for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_MEM_BYTES", "Memory for new sandboxes.")
@@ -452,8 +501,8 @@ ENV.var(
 ENV.var(
     "OPENSWE_SCRIPT_ROOT",
     "Where a workspace's setup/update scripts and their logs live inside a sandbox. "
-    "The default assumes a sandbox where the agent is root; the local provider runs on a "
-    "developer's own machine, whose filesystem root is not writable.",
+    "The default assumes a sandbox where the agent is root; the E2E's stand-in sandboxes "
+    "run on a developer's own machine, whose filesystem root is not writable.",
     default="/open-swe/environment",
 )
 ENV.var(
@@ -471,21 +520,6 @@ ENV.var(
     "Deadline for capturing a builder sandbox as a workspace's snapshot.",
     aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
 )
-ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
-ENV.var(
-    "GIT_CONFIG_GLOBAL",
-    "Git's global config path; the local provider keeps it out of ~/.gitconfig.",
-)
-ENV.var("MODAL_APP_NAME", "Modal app name for the modal provider.", default="open-swe")
-ENV.var("DAYTONA_API_KEY", "Daytona API key.", secret=True)
-ENV.var(
-    "DAYTONA_SANDBOX_SNAPSHOT",
-    "Daytona snapshot new sandboxes boot from.",
-    default="daytonaio/sandbox:0.6.0",
-)
-ENV.var("E2B_API_KEY", "E2B API key.", secret=True)
-ENV.var("E2B_TEMPLATE", "E2B template new sandboxes boot from.")
-ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 
 # --- Debugging -------------------------------------------------------
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")

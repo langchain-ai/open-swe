@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
+import { api } from "@/lib/api"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
@@ -198,7 +199,122 @@ describe("ChatComposer stop button", () => {
   })
 })
 
+describe("ChatComposer drafts", () => {
+  it("restores independent mode drafts and attachments across remounts, but not after sending", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const image = {
+      kind: "image" as const,
+      base64: "aGVsbG8=",
+      mimeType: "image/png",
+      fileName: "draft.png",
+    }
+    renderComposer(false, {
+      draftKey: "draft-user:new:home",
+      restoreDraft: { key: 1, text: "Home draft", images: [image] },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toContain("Home draft")
+    )
+    cleanup()
+    renderComposer(false, {
+      draftKey: "draft-user:new:code",
+      restoreDraft: { key: 2, text: "Code draft", images: [] },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toContain("Code draft")
+    )
+    cleanup()
+    renderComposer(false, { draftKey: "other-user:new:home" })
+    expect(screen.getByRole("textbox").textContent).toBe("")
+    cleanup()
+    const onSubmit = vi.fn()
+    renderComposer(false, { draftKey: "draft-user:new:home", onSubmit })
+    expect(screen.getByRole("textbox").textContent).toContain("Home draft")
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        { text: "Home draft", images: [image], replies: [] },
+        expect.anything()
+      )
+    )
+    cleanup()
+    renderComposer(false, { draftKey: "draft-user:new:code" })
+    expect(screen.getByRole("textbox").textContent).toContain("Code draft")
+    cleanup()
+    renderComposer(false, { draftKey: "draft-user:new:home" })
+    expect(screen.getByRole("textbox").textContent).toBe("")
+  })
+})
+
 describe("ChatComposer options", () => {
+  it("offers a project picker locally and shows branch controls only for Git folders", async () => {
+    const local = {
+      runTarget: "local" as const,
+      onRunTargetChange: vi.fn(),
+      onSelectLocalRepo: vi.fn(),
+      onAddLocalRepo: vi.fn(),
+      onRemoveLocalRepo: vi.fn(),
+      onSelectLocalRepoBranch: vi.fn(),
+      onRefreshLocalRepoBranch: vi.fn(),
+      onLocalWorkspaceModeChange: vi.fn(),
+    }
+    renderComposer(false, local)
+    expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Choose project/ })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
+    cleanup()
+
+    renderComposer(false, {
+      ...local,
+      selectedLocalRepoPath: "/projects/demo",
+      selectedLocalRepoBranch: "main",
+      localRepoBranches: [
+        { name: "main", current: true, isDefault: true, worktreePath: null },
+      ],
+    })
+    expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
+  })
+
+  it("shows a started thread's project, or no project, without a picker", () => {
+    renderComposer(false, {
+      runTarget: "local",
+      selectedLocalRepoPath: "/projects/demo",
+    })
+    expect(screen.getByText("demo")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Choose project/ })).toBeNull()
+    cleanup()
+
+    renderComposer(false, { runTarget: "local", selectedLocalRepoPath: null })
+    expect(screen.getByText("No project")).toBeTruthy()
+  })
+
+  it("asks someone without GitHub to link it before choosing a repository", async () => {
+    const onRepoChange = vi.fn()
+    renderComposer(false, {
+      repos: [{ full_name: "acme/api" }],
+      onRepoChange,
+      gitHubLinkUser: {
+        login: "ada",
+        auth_provider: "langsmith",
+        github_login: null,
+        email: "ada@example.com",
+        avatar_url: null,
+        is_admin: false,
+      },
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
+
+    expect(
+      await screen.findByText("Link GitHub to work in a repository")
+    ).toBeTruthy()
+    expect(screen.queryByText("acme/api")).toBeNull()
+    expect(onRepoChange).not.toHaveBeenCalled()
+  })
+
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
 
@@ -214,7 +330,153 @@ describe("ChatComposer options", () => {
   })
 })
 
+describe("ChatComposer people autocomplete", () => {
+  it("dismisses an empty people menu with Escape without stopping a run", async () => {
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({ users: [] })
+    renderComposer(true, {
+      restoreDraft: { key: 1, text: "@nobody", images: [] },
+    })
+    await screen.findByText("No matching people or files.")
+    fireEvent.keyDown(screen.getByTestId("composer-editor"), {
+      key: "Escape",
+      code: "Escape",
+    })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(cancelThread).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it("inserts a canonical Slack mention by keyboard and submits it", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [],
+    })
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({
+      users: [
+        {
+          id: "U123BOB",
+          name: "bob",
+          display_name: "Bob",
+          real_name: "Bob Smith",
+        },
+      ],
+    })
+    vi.spyOn(api, "slackUserName").mockResolvedValue({ name: "Bob" })
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      restoreDraft: { key: 1, text: "Ask @bob", images: [] },
+    })
+    await screen.findByRole("option", { name: /@Bob .*@bob/ })
+    const editor = screen.getByTestId("composer-editor")
+    fireEvent.keyDown(editor, { key: "Tab", code: "Tab" })
+    await screen.findByText("@Bob")
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "Ask <@U123BOB>" }),
+        expect.anything()
+      )
+    )
+    vi.restoreAllMocks()
+  })
+})
+
 describe("ChatComposer skill autocomplete", () => {
+  it("sends a trailing shell variable unless its fuzzy suggestion was explicitly chosen", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [
+        {
+          name: "patch-notes",
+          description: "Write release notes",
+          instructions: "",
+        },
+      ],
+      restoreDraft: { key: 1, text: "check $PATH", images: [] },
+    })
+    await screen.findByRole("option", { name: /patch-notes/ })
+    fireEvent.keyDown(screen.getByRole("textbox"), {
+      key: "Enter",
+      code: "Enter",
+    })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "check $PATH" }),
+        expect.anything()
+      )
+    )
+  })
+
+  it("accepts a fuzzy suggestion with arrow navigation then Enter", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [
+        {
+          name: "patch-notes",
+          description: "Write release notes",
+          instructions: "",
+        },
+      ],
+      restoreDraft: { key: 1, text: "check $PATH", images: [] },
+    })
+    await screen.findByRole("option", { name: /patch-notes/ })
+    const editor = screen.getByRole("textbox")
+    fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" })
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+    await waitFor(() => expect(editor.textContent).toContain("/patch-notes"))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("ranks command names ahead of descriptions and tolerates typos", () => {
+    const skills = [
+      {
+        name: "review",
+        description: "Review a pull request",
+        instructions: "",
+      },
+      {
+        name: "model-audit",
+        description: "Inspect configuration",
+        instructions: "",
+      },
+      { name: "unrelated", description: "Pick a model", instructions: "" },
+    ]
+    const trigger = {
+      kind: "slash-command" as const,
+      query: "MODEL",
+      rangeStart: 0,
+      rangeEnd: 6,
+    }
+    expect(
+      buildCommandItems(trigger, [], skills)
+        .slice(0, 3)
+        .map((item) => item.label)
+    ).toEqual(["/model", "/model-audit", "/unrelated"])
+    expect(
+      buildCommandItems({ ...trigger, query: "reviw" }, [], skills)[0]?.label
+    ).toBe("/review")
+    expect(
+      buildCommandItems({ ...trigger, query: "audit" }, [], skills)[0]?.label
+    ).toBe("/model-audit")
+    expect(
+      buildCommandItems(
+        { ...trigger, query: "configuration", kind: "skill-command" },
+        [],
+        skills
+      )[0]?.label
+    ).toBe("/model-audit")
+    expect(
+      buildCommandItems({ ...trigger, query: "zzzzzz" }, [], skills)
+    ).toEqual([])
+  })
+
   it("omits the model command when no model picker is available", () => {
     const items = buildCommandItems(
       {

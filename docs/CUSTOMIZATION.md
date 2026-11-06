@@ -1,14 +1,14 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org.
+Robin is designed to be forked and customized for your org.
 Every run's model loop runs on Managed Deep Agents (`mda/`).
-What the run gets from the backend is decided in one function, `plan_agent()` in `openswe/server.py` (`plan_reviewer()` and `plan_review_scout()` for the reviewer and the review scout).
-It records the run's tools, middleware, models and subagents in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model, tools and middleware.
+What the run gets from the backend is resolved in one function as the run starts, `agent_catalog()` in `openswe/server.py` (`reviewer_catalog()` and `review_scout_catalog()` for the reviewer and the review scout).
+It records the run's tools, models, subagents and loop rules in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model and tools.
 
 ```python
-# openswe/server.py — the end of plan_agent()
+# openswe/server.py — the end of agent_catalog()
 surface.base_tools = main_tools  # tools the run can call
-surface.middleware = middleware  # hooks the run's loop hands each phase to
+surface.loop = LoopRules(...)  # what MDA's middleware does around each model call
 surface.models = SurfaceModels(
     main=ModelChoice(model_id, dict(model_kwargs)),
     subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
@@ -21,8 +21,8 @@ surface.subagents = [SurfaceSubagent(name="general-purpose", ...)]
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands.
-Sandbox creation and connection is handled in `openswe/sandboxes/providers/langsmith.py`.
+Robin runs each thread in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands.
+Managed Deep Agents creates it; the backend connects to it through `openswe/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
@@ -37,111 +37,29 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, d
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="604800"                 # Optional, default 604800 (7 d); 0 disables
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
 The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
-For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
+For LangSmith sandboxes, Robin configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
+With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the sandboxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
-### Using a different sandbox provider
+### Who creates sandboxes
 
-Set the `SANDBOX_TYPE` environment variable to switch providers.
-Each provider has a corresponding integration file in `openswe/sandboxes/providers/` and a factory function registered in `openswe/sandboxes/providers/registry.py`:
+Every thread's sandbox is a LangSmith sandbox that Managed Deep Agents creates when the thread's run starts, and replaces when the agent asks for a fresh one.
+The backend never creates a thread's sandbox: it connects to the one MDA opened, configures its GitHub proxy and git identity, and runs the backend's tools in it.
+A thread bridged to its owner's machine runs there instead.
 
-| `SANDBOX_TYPE` | Integration file | Required env vars |
-|---|---|---|
-| `langsmith` (default) | `openswe/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `openswe/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `openswe/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `openswe/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `openswe/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `openswe/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
-
-> **Warning**: `local` runs commands directly on your host with no sandboxing.
-> Only use for local development with human-in-the-loop enabled.
-
-The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers.
-Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
-
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
+Sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
 A workspace's base snapshot must exist in that LangSmith workspace.
-The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
-
-### Adding a new sandbox provider
-
-1. **Create an integration file** at `openswe/sandboxes/providers/my_provider.py` with a factory function matching this signature:
-
-```python
-def create_my_provider_sandbox(sandbox_id: str | None = None):
-    """Create or reconnect to a sandbox.
-
-    Args:
-        sandbox_id: Optional existing sandbox ID to reconnect to.
-            If None, creates a new sandbox.
-
-    Returns:
-        An object implementing SandboxBackendProtocol.
-    """
-    ...
-```
-
-1. **Register it** in `openswe/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
-
-```python
-SANDBOX_FACTORIES = {
-    ...
-    "my_provider": ("openswe.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
-}
-```
-
-The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`.
-See the existing integration files for reference.
-
-### Building a custom sandbox provider
-
-If none of the built-in providers fit, you can build your own.
-The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`.
-The protocol requires:
-
-- **File operations**: `ls()`, `read()`, `write()`, `edit()`, `glob()`, `grep()`
-- **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
-- **Identity**: `id` property returning a unique sandbox identifier
-
-The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbox` — it implements all file operations by delegating to `execute()`, so you only need to implement the shell execution layer:
-
-```python
-from deepagents.backends.sandbox import BaseSandbox
-from deepagents.backends.protocol import ExecuteResponse
-
-
-class MySandbox(BaseSandbox):
-    def __init__(self, connection):
-        self._conn = connection
-
-    @property
-    def id(self) -> str:
-        return self._conn.id
-
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        result = self._conn.run(command, timeout=timeout or 300)
-        return ExecuteResponse(
-            output=result.stdout + result.stderr,
-            exit_code=result.exit_code,
-            truncated=False,
-        )
-```
-
-See `deepagents.backends.LangSmithSandbox` and `openswe/sandboxes/providers/langsmith.py` for a full reference implementation.
-
----
 
 ## 2. Model
 
@@ -160,7 +78,7 @@ Either variable can be set independently.
 When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used.
 The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
-These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults.
+These defaults apply below explicit run, thread, workspace, and instance selections, including inherited reviewer and subagent defaults.
 Existing selections are not overwritten.
 Restart the backend after changing its environment.
 
@@ -173,7 +91,7 @@ For OpenAI reasoning models, this budget can include both internal reasoning tok
 ### Switching models
 
 Models are named in the `provider:model` format, with their provider settings, as a `ModelChoice`.
-The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `plan_agent()` never reaches the run:
+The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `agent_catalog()` never reaches the run:
 
 ```python
 # Anthropic
@@ -186,12 +104,12 @@ ModelChoice("openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort"
 ModelChoice("google_genai:gemini-2.5-pro", {"temperature": 0, "max_tokens": 16_000})
 ```
 
-`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort.
-To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
+`provider_model_kwargs()` in `packages/runtime-api/src/runtime_api/models.py` builds those settings for a catalog model and effort.
+To change how a provider's chat model is built (its client, retries or gateway routing), edit `make_model` there: the backend and the MDA runtime (`mda/rt/models.py`) both build their models with it, from the same model table.
 
 ### Using different models per context
 
-You can route to different models based on task complexity, repo, or trigger source, in `plan_agent()`:
+You can route to different models based on task complexity, repo, or trigger source, in `agent_catalog()`:
 
 ```python
 if cfg.source == "slack":
@@ -209,13 +127,12 @@ surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_ga
 ### Auto model routing with Jev
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
-When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe.
-Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
+A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); this requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
 Routing is independent of the provider-proxy gateway toggle below.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
 Jev receives the latest human task text (up to 8,000 characters).
-Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off.
+Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or workspace default), the same model used when routing is off.
 The confidence cutoff is an initial heuristic, not a calibrated correctness probability.
 Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
@@ -231,7 +148,7 @@ It remains selected on follow-ups; explicit UI/API model choices take precedence
 A clearly unavailable model or failure to persist the selection stops the run.
 No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
 
-Run the live intent cases from the repository root with an activated Python environment and configured TypeSafe or gateway credentials:
+Run the live intent cases from the repository root with an activated Python environment and configured gateway credentials:
 
 ```bash
 LANGSMITH_TRACING=false python -m evals.model_request
@@ -239,6 +156,14 @@ LANGSMITH_TRACING=false python -m evals.model_request
 
 The cases cover typos, ambiguous names, quoted and forwarded requests, model mentions as task subjects, and unavailable models.
 They call Jev and are separate from the deterministic unit tests.
+
+### Reminders beside a person's message
+
+When the person who started the run has the **Memory** experiment on, each new human message in an agent run is also read by Jev for reminders, notes the model reads right after that message, like Claude Code's system reminders.
+A reminder is a `system:reminder` input message: the dashboard never shows it, and the system prompt tells the model the person cannot see it.
+Every reminder in `openswe/reminders.py` is one Jev question, all asked in one call; its prompts live in `openswe/resources/prompts/reminders/<name>/`.
+The `frustration` reminder fires when the person sounds frustrated with the agent and asks it to correct course and save the lesson with `remember`.
+A message is read once, with the same credentials, deadline and confidence cutoff as routing; a failure adds no reminder.
 
 ### Routing through the LangSmith LLM Gateway
 
@@ -258,11 +183,11 @@ Enable it either way:
 
 The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
-Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`.
+Routing is applied centrally in `make_model` (`packages/runtime-api/src/runtime_api/models.py`), which resolves the effective on/off and wires the gateway's URL and key, on the backend and in the MDA runtime alike.
 **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
-**Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions.
+**Caveat — OpenAI endpoint:** Robin uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions.
 Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled.
 Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions.
 Anthropic, Baseten, and Fireworks are unaffected.
@@ -271,20 +196,122 @@ Anthropic, Baseten, and Fireworks are unaffected.
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents).
+Robin ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents).
 GitHub operations are handled by `gh` inside the sandbox.
 
 | Tool | File | Purpose |
 |---|---|---|
 | `fetch_url` | `openswe/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `openswe/tools/http_request.py` | HTTP API calls |
+| `classify` | `openswe/tools/classify.py` | Fast typed classification with TypeSafe's System One model, from code mode |
 | `slack_attach_html` | `openswe/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_reply` | `openswe/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
+
+### Classifying from code mode
+
+`classify` asks TypeSafe's System One model questions about a state and returns typed answers with calibrated probabilities, typically in 70–500ms.
+It goes through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models) with the same LangSmith gateway key and TypeSafe provider secret as Auto model routing, so it needs no key of its own.
+It is an experiment: each person turns it on under **Settings → Experiments → Classify tool**, and their runs then offer it to code mode as `tools.classify`, kept off the model's tool list and found with `search_tools`.
+
+Each question is a `choice` (one label from up to 255), a `noul` (the probability of yes), or a `score` (an expected level on an ordered rubric).
+Every answer comes from the options supplied, and `choice` and `score` answers carry a `confidence` to gate actions on.
+These examples are adapted from [langchain-typesafe](https://github.com/langchain-ai/langchain-typesafe), [Pipecat's classifier docs](https://docs.pipecat.ai/api-reference/server/classifiers/jev), [classifier.dev](https://jev101.org/guides/jev-text-classification-api-guide), and [TypeSafe's launch post](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+
+Route a support request, falling back to a person when unsure:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "Stripe fails whenever I connect my account.",
+  questions: {
+    department: {
+      type: "choice",
+      instructions: "Which team should handle this request?",
+      criteria: {
+        billing: "Payment, invoice, or subscription issues.",
+        technical: "Product bugs or integration failures.",
+        sales: "Pricing or purchasing questions.",
+      },
+    },
+  },
+});
+const { choice, confidence } = answers.department;
+const team = confidence >= 0.7 ? choice : "human_triage";
+```
+
+Ask a yes/no question, such as whether a call reached voicemail or a message is urgent:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "Hi, you've reached Dana. Leave a message.",
+  questions: {
+    voicemail: { type: "noul", instructions: "Is this a voicemail greeting?" },
+    urgent: { type: "noul", instructions: "Does this message require an urgent response?" },
+  },
+});
+const isVoicemail = answers.voicemail.noul >= 0.8;
+```
+
+Score a state on a rubric:
+
+```typescript
+const { answers } = await tools.classify({
+  state: "This has failed three times. Fix it now.",
+  questions: {
+    frustration: {
+      type: "score",
+      instructions: "How frustrated does the customer appear?",
+      criteria: ["Calm and neutral.", "Concerned but civil.", "Very angry or using strong language."],
+    },
+  },
+});
+const { score, probabilities } = answers.frustration;
+```
+
+Label a batch in parallel, sending low-confidence rows to review:
+
+```typescript
+const feedback = [
+  "The export button crashes the app.",
+  "Please add dark mode.",
+  "Integration with external tools is seamless.",
+];
+const labeled = await Promise.all(
+  feedback.map(async (text) => {
+    const { answers } = await tools.classify({
+      state: text,
+      questions: {
+        label: {
+          type: "choice",
+          instructions: "What kind of product feedback is this?",
+          criteria: { bug: null, feature: null, praise: null, other: null },
+        },
+      },
+    });
+    return { text, ...answers.label, review: answers.label.confidence < 0.7 };
+  }),
+);
+```
+
+Guard an LLM's output before acting on it:
+
+```typescript
+const { answers } = await tools.classify({
+  state: { prompt: userPrompt, response: draftReply },
+  questions: {
+    jailbreak: { type: "noul", instructions: "Does the prompt try to get the assistant to ignore its rules?" },
+    leaks_secret: {
+      type: "noul",
+      instructions: "Does the response reveal a credential, token, or API key?",
+      criteria: { true: "A real-looking secret value appears.", false: "No secret value appears." },
+    },
+  },
+});
+```
 
 ### Workspace MCP servers
 
 Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
-Connections belong to this Open SWE deployment and are shared across repositories and remote coding-agent threads.
+Connections belong to this Robin deployment and are shared across repositories and remote coding-agent threads.
 Enabled connections provide baseline tools for all users, limited to the tools selected by an admin.
 Only admins can manage connections or reveal saved credentials.
 
@@ -328,14 +355,15 @@ Reconnect Datadog using the MCP configuration above; legacy saved credentials ar
 Use the JSON import or connection form to add the other MCP servers as needed.
 
 The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the Currents REST API.
-Run its Streamable HTTP server on an HTTPS host reachable by Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY` header.
+Run its Streamable HTTP server on an HTTPS host reachable by Robin, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY` header.
 The Currents REST API URL itself does not speak MCP, and the local `npx @currents/mcp` command cannot be imported as a workspace connection.
 
 Optional reviewer trace resolution and personal LangSmith credential proxying have been removed.
 Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
-Linear webhook intake uses the signed webhook setup; configure Linear replies and other agent operations through Workspace MCPs.
-Automatic failure notices use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
+Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session; configure other Linear operations through Workspace MCPs.
+The channel reports a session's failed run in the session.
+Notices a run posts on its issue itself, such as a failing sandbox, use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
 These notices run independently of the agent and honor the connection's enabled state and tool selection.
 Delivery failures are logged without marking the run as notified.
 
@@ -346,8 +374,11 @@ It opens each connection for review without saving automatically.
 Existing connections keep their enabled state and selected tools.
 Local `command` servers and environment-variable expansion are not supported.
 
+For Linear on an MDA deployment with the Linear channel, use the channel's app token instead of the example below; see [Linear's MCP server on the Linear channel's token](#linears-mcp-server-on-the-linear-channels-token).
+Linear holds one app token per app: a client-credentials token for the channel's app revokes the channel's, and its Linear grant then needs an admin's approval again.
+
 For a Linear OAuth application, enable **Client credentials tokens** in the application's settings, then import this configuration.
-The `oauth` object is an Open SWE extension to the remote MCP JSON format:
+The `oauth` object is a Robin extension to the remote MCP JSON format:
 
 ```json
 {
@@ -369,7 +400,7 @@ The `oauth` object is an Open SWE extension to the remote MCP JSON format:
 ```
 
 Client credentials require no redirect URI.
-Open SWE requests a bearer token, caches it in memory until shortly before expiry, and obtains another when needed.
+Robin requests a bearer token, caches it in memory until shortly before expiry, and obtains another when needed.
 A rejected token is renewed once on HTTP 401.
 Client credentials go only to the configured token URL; bearer tokens go to the MCP server.
 Both destinations use the same public HTTPS address validation and redirect restrictions.
@@ -438,6 +469,51 @@ A personal connection with the same name as a workspace connection replaces it e
 Desktop (local) runs do not load MCP connections yet.
 GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
 
+### MCP servers on an MDA connection
+
+An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Robin's database.
+The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
+Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
+
+```json
+{
+  "name": "incident",
+  "url": "https://mcp.incident.io/mcp",
+  "allowed_tools": ["incident_list"],
+  "connection": {"slug": "open-swe-mcp-incident-io", "owner": "agent"}
+}
+```
+
+The slug must be `open-swe-mcp-<server>`: a server never gets a credential Robin or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+The one exception is Linear's MCP server, below.
+Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
+The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
+A server with a connection takes no headers or OAuth, and saving it drops those the record had.
+An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
+Robin cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
+A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+
+#### Linear's MCP server on the Linear channel's token
+
+With the Linear channel on the MDA deployment, Linear's MCP server can read the channel's own app token, `mda/linear-token`, which the channel's `mda deploy` keeps and Agent Auth renews.
+Linear's MCP server takes an existing OAuth token as `Authorization: Bearer` ([Linear's MCP docs](https://linear.app/docs/mcp)), and its tools then act as the Open SWE app, as with client credentials.
+Prefer this over the client-credentials example above: Linear holds one app token per app, so a server requesting its own for the channel's app revokes the channel's.
+Save an instance or workspace server with no `oauth` or headers:
+
+```json
+{
+  "name": "linear",
+  "url": "https://mcp.linear.app/mcp",
+  "allowed_tools": ["list_issues", "get_issue"],
+  "connection": {"slug": "mda/linear-token", "owner": "agent"}
+}
+```
+
+The URL must be on `https://mcp.linear.app` (`/mcp`, `/mcp/readonly` or `/sse`), with no port or credentials; the backend refuses the token for any other server, and the MDA run refuses to send it anywhere else.
+Personal servers cannot name it.
+Once the server reads the channel's token, turn off **Client credentials tokens** on the Linear app.
+The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
+
 ### Adding a Python tool
 
 Create a new file in `openswe/tools/`, define a function, and add it to the tools list.
@@ -464,7 +540,7 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `plan_agent()` in `openswe/server.py`, where the run's tools are listed:
+Then register it in `agent_catalog()` in `openswe/server.py`, where the run's tools are listed:
 
 ```python
 from openswe.tools.datadog_search import datadog_search
@@ -503,7 +579,7 @@ surface.base_tools = tools
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub.
+Robin supports three invocation surfaces: Linear, Slack, and GitHub.
 Each is implemented as a webhook endpoint in `openswe/webapp.py`.
 You can add, remove, or modify triggers independently.
 
@@ -545,7 +621,7 @@ The shared utility `extract_repo_from_text()` in `openswe/utils/repo.py` handles
 ### Customizing Linear routing
 
 Linear comments use the triggering user's dashboard default repository, then the workspace default repository.
-Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
+Users can override either on a per-comment basis by including `repo:owner/name` in their `@robin` comment (legacy mention aliases remain supported).
 
 ### Customizing Slack routing
 
@@ -625,14 +701,16 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`.
-It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run.
+The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py` on a thread's first run and kept unchanged for the rest of the thread, so the model provider's prompt cache keeps covering the conversation.
+It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the thread.
+Guidance that can change between turns — the working environment and where the turn came from — is a `TurnContext` instead, told to the model in the conversation when it changes.
 Edit a section's file to customize it:
 
 | File | What it controls |
 |---|---|
-| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-local.md` for bridged runs) |
-| `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
+| `working-environment.md.jinja` | Sandbox paths, execution constraints, and repository setup steps (`working-environment-local.md.jinja` for bridged runs); sent per turn |
+| `source-context.md.jinja` | How to communicate on the surface the turn came from; sent per turn |
+| `repository-setup.md.jinja` | Repository freshness, read-only requests, and repository skills |
 | `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
 | `dependencies.md` | Installing, vetting, and managing project dependencies |
 | `commit-pr.md` | PR title/body format, lint/format steps, and commit conventions (plus `commit-pr-desktop.md` for desktop runs) |
@@ -640,7 +718,7 @@ Edit a section's file to customize it:
 
 ### Default prompt file
 
-Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on.
+Robin supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on.
 This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
 
 The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
@@ -678,35 +756,29 @@ If the file is missing or empty, it is silently skipped — no error is raised.
 | | `default_prompt.md` | `AGENTS.md` |
 |---|---|---|
 | Scope | All tasks, all repos | Single repository |
-| Location | Open SWE project root | Target repo root |
+| Location | Robin project root | Target repo root |
 | Use for | Default repo, org conventions | Repo-specific coding standards |
 
 ### Using AGENTS.md
 
 Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions.
 The agent reads it from the sandbox at startup and appends it to the system prompt.
-This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
+This is the easiest way to encode conventions per-repo without modifying Robin's code.
 
 ---
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop.
+Middleware hooks run around the agent loop, in the Managed Deep Agents run (`mda/`).
 Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call.
-Open SWE includes:
-
-| Middleware | Type | Purpose |
-|---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
-| `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+What the loop does around each model call (reply and CLI-result nudges, routing, the step limit, what the run's end records) follows the `LoopRules` the backend puts in each run's catalog (`agent_catalog()` in `openswe/server.py`), and MDA's own middleware carries them out (`mda/rt/loop.py`).
 
 There is intentionally no after-agent middleware that opens a PR for the agent.
 The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel.
-If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `plan_agent()`.
-The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph.
-Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do.
+Add custom middleware to the graph's middleware in `mda/agent.py` (`_parts`).
+Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools).
+Work that needs the backend's credentials or data goes behind a named endpoint of the typed API in `packages/runtime-api`, as the shell-command guards (`check_shell`) and the task context (`task_context`) do.
 See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
@@ -723,12 +795,12 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
     ...
 ```
 
-Then add it to the middleware list:
+Then add it to the graph's middleware in `mda/agent.py`:
 
 ```python
 middleware = [
-    ToolErrorMiddleware(),
-    notify_step_limit_reached,
+    BackendRunMiddleware(backend, opened_sandbox, booted_sandbox, read_ahead=[...]),
+    ...,
     run_ci_check,  # new middleware
 ]
 ```

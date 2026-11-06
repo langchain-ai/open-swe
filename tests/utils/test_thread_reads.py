@@ -55,3 +55,15 @@ async def test_a_failed_read_is_not_shared(threads: _Threads) -> None:
         assert await read_thread("t") == {"thread_id": "t"}
 
     assert threads.reads == 2
+
+
+async def test_a_nested_scope_shares_the_outer_reads(threads: _Threads) -> None:
+    threads.outcomes = [{"thread_id": "t", "n": 1}]
+
+    async with shared_thread_reads():
+        planned = await read_thread("t")
+        async with shared_thread_reads():
+            prepared = await read_thread("t")
+
+    assert planned == prepared
+    assert threads.reads == 1

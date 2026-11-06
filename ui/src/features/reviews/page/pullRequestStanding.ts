@@ -20,7 +20,6 @@ export type StandingTone =
 
 export type NextStep =
   | { kind: "merge" }
-  | { kind: "review" }
   | { kind: "mark-ready" }
   | { kind: "request-review" }
   | { kind: "update-branch" }
@@ -36,6 +35,7 @@ export interface Standing {
   tone: StandingTone
   headline: string
   details: Array<StandingDetail>
+  /** Null when there's nothing to do but review, which the header's Approve button always offers. */
   next: NextStep | null
 }
 
@@ -64,12 +64,12 @@ export function pullRequestStanding(
   const { bugs, flags } = openFindingCounts(detail.findings)
   if (bugs > 0)
     details.push({
-      text: `Open SWE flagged ${plural(bugs, "bug")}`,
+      text: `Robin flagged ${plural(bugs, "bug")}`,
       opens: "findings",
     })
   else if (flags > 0)
     details.push({
-      text: `Open SWE flagged ${plural(flags, "thing")} to look into`,
+      text: `Robin flagged ${plural(flags, "thing")} to look into`,
       opens: "findings",
     })
   if (!status)
@@ -124,9 +124,8 @@ export function pullRequestStanding(
       tone: "blocked",
       headline: "Changes requested.",
       details,
-      next: !isAuthor
-        ? { kind: "review" }
-        : conversations.current > 0
+      next:
+        isAuthor && conversations.current > 0
           ? { kind: "agent", action: "address-comments" }
           : null,
     }
@@ -147,7 +146,7 @@ export function pullRequestStanding(
         ? "Waiting on your review."
         : "Waiting on a review.",
       details,
-      next: isAuthor ? { kind: "request-review" } : { kind: "review" },
+      next: isAuthor ? { kind: "request-review" } : null,
     }
   }
   if (status.ci === "pending")
@@ -155,7 +154,7 @@ export function pullRequestStanding(
       tone: "waiting",
       headline: "Checks are running.",
       details,
-      next: isAuthor ? null : { kind: "review" },
+      next: canAttemptMerge(status) ? { kind: "merge" } : null,
     }
   if (status.mergeState === "behind")
     return {

@@ -1,9 +1,11 @@
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
+from openswe.github import http as github_http
 from openswe.github import pull_request_actions as actions
 from openswe.github import squash_message
 from openswe.github.http import GitHubClient
@@ -118,23 +120,203 @@ async def test_merge_requires_github_confirmation(github, status, merged):
     }
 
 
-async def test_squash_merge_sends_the_description_and_commits(github):
+async def test_pending_merge_enables_github_auto_merge() -> None:
+    requests: list[dict[str, object]] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        requests.append(json.loads(request.content))
+        return response(
+            {
+                "data": {
+                    "enablePullRequestAutoMerge": {
+                        "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}
+                    }
+                }
+            }
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        result = await actions.act_on_pull_request(
+            pull,
+            actions.MergeAction(
+                action="merge", sha="a" * 40, merge_method="merge", auto_merge=True
+            ),
+        )
+    assert result.done
+    assert requests[0]["variables"] == {
+        "input": {
+            "pullRequestId": "PR_1",
+            "mergeMethod": "MERGE",
+            "expectedHeadOid": "a" * 40,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"errors": [{"message": "Auto-merge is not allowed"}]},
+        {"data": {"enablePullRequestAutoMerge": {"pullRequest": {"autoMergeRequest": None}}}},
+    ],
+)
+async def test_auto_merge_requires_github_confirmation(payload: dict[str, object]) -> None:
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        return response(payload)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException) as error:
+            await actions.act_on_pull_request(
+                pull,
+                actions.MergeAction(
+                    action="merge", sha="a" * 40, merge_method="merge", auto_merge=True
+                ),
+            )
+    assert error.value.status_code == (422 if "errors" in payload else 502)
+
+
+async def test_auto_merge_refuses_a_changed_head() -> None:
+    def github(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "GET"
+        return response({"node_id": "PR_1", "head": {"sha": "b" * 40}})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException, match="head changed") as error:
+            await actions.act_on_pull_request(
+                pull,
+                actions.MergeAction(
+                    action="merge", sha="a" * 40, merge_method="squash", auto_merge=True
+                ),
+            )
+    assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize("refused", [set(), {"T2"}])
+@pytest.mark.parametrize("auto_merge", [False, True])
+async def test_merging_resolves_every_open_conversation_first(
+    refused: set[str], auto_merge: bool
+) -> None:
+    resolved: list[str] = []
+    merged: list[str] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response(
+                {
+                    "node_id": "PR_1",
+                    "head": {"sha": "a" * 40},
+                    "state": "open",
+                    "draft": False,
+                    "mergeable": True,
+                }
+            )
+        if request.method == "PUT":
+            merged.append(request.url.path)
+            return response({"merged": True})
+        body = json.loads(request.content)
+        if "enablePullRequestAutoMerge" in body["query"]:
+            merged.append("auto-merge")
+            return response(
+                {
+                    "data": {
+                        "enablePullRequestAutoMerge": {
+                            "pullRequest": {
+                                "autoMergeRequest": {"enabledAt": "2026-11-05T00:00:00Z"}
+                            }
+                        }
+                    }
+                }
+            )
+        thread_id = body["variables"].get("threadId")
+        if thread_id is None:
+            threads = [{"id": "T1", "isResolved": False}, {"id": "T2", "isResolved": False}]
+            return response(
+                {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewThreads": {
+                                    "nodes": threads + [{"id": "T3", "isResolved": True}],
+                                    "pageInfo": {"hasNextPage": False},
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        resolved.append(thread_id)
+        if thread_id in refused:
+            return response({"errors": [{"message": "Resource not accessible"}]})
+        return response({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}})
+
+    action = actions.MergeAction(
+        action="merge",
+        sha="a" * 40,
+        merge_method="merge",
+        resolve_conversations=True,
+        auto_merge=auto_merge,
+    )
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        if refused:
+            with pytest.raises(HTTPException, match="Could not resolve 1 conversations;"):
+                await actions.act_on_pull_request(pull, action)
+        else:
+            await actions.act_on_pull_request(pull, action)
+
+    assert sorted(resolved) == ["T1", "T2"]
+    assert merged == (
+        [] if refused else ["auto-merge" if auto_merge else "/repos/acme/app/pulls/1/merge"]
+    )
+
+
+@pytest.mark.parametrize("auto_merge", [False, True])
+async def test_squash_merge_sends_the_description_and_commits(github, monkeypatch, auto_merge):
     commit = {
         "commit": {"message": "fix: spelling", "author": {"name": "Ada", "email": "ada@x.com"}},
         "author": {"login": "ada"},
         "parents": [{"sha": "b" * 40}],
     }
     payloads = {
-        "https://api.github.com/repos/acme/app/pulls/1": {"title": "fix: typo", "body": "Fix."},
+        "https://api.github.com/repos/acme/app/pulls/1": {
+            "title": "fix: typo",
+            "body": "Fix.",
+            "node_id": "PR_1",
+            "head": {"sha": "a" * 40},
+        },
+        "https://api.github.com/graphql": {
+            "data": {
+                "enablePullRequestAutoMerge": {
+                    "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}
+                }
+            }
+        },
         "https://api.github.com/repos/acme/app/pulls/1/commits": [commit],
         "https://api.github.com/user": {"login": "octocat"},
         "https://api.github.com/repos/acme/app/pulls/1/merge": {"merged": True},
     }
     request = github(AsyncMock(side_effect=lambda _, __, url, **___: response(payloads[url])))
-    action = actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash")
+    monkeypatch.setattr(github_http, "github_request", request)
+    action = actions.MergeAction(
+        action="merge", sha="a" * 40, merge_method="squash", auto_merge=auto_merge
+    )
 
     await actions.act_on_pull_request(_pull(1), action)
 
+    if auto_merge:
+        assert request.await_args.kwargs["json"]["variables"]["input"] == {
+            "pullRequestId": "PR_1",
+            "mergeMethod": "SQUASH",
+            "expectedHeadOid": "a" * 40,
+            "commitBody": "Fix.\n\n* fix: spelling\n\nCo-authored-by: Ada <ada@x.com>",
+        }
+        return
     assert request.await_args.kwargs["json"] == {
         "sha": "a" * 40,
         "merge_method": "squash",
@@ -243,6 +425,19 @@ async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutat
     assert request.await_args_list[1].kwargs["json"]["variables"] == {"pullRequestId": "PR_node_7"}
 
 
+@pytest.mark.parametrize("draft", [True, False])
+async def test_a_closed_pull_request_cannot_be_marked_ready(github, draft):
+    request = github(
+        AsyncMock(
+            return_value=response({"node_id": "PR_node_7", "state": "closed", "draft": draft})
+        )
+    )
+    with pytest.raises(HTTPException, match="closed and cannot be marked ready") as error:
+        await actions.act_on_pull_request(_pull(7), actions.MarkReadyAction(action="mark-ready"))
+    assert error.value.status_code == 409
+    assert request.await_count == 1
+
+
 async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):
     request = github(AsyncMock(return_value=response({"message": "Not Found"}, 404)))
     with pytest.raises(HTTPException, match="Not Found") as error:
@@ -272,3 +467,52 @@ async def test_updating_the_branch_pins_the_head_the_viewer_saw(github, status):
         "json": {"expected_head_sha": "b" * 40},
         "max_retries": 0,
     }
+
+
+@pytest.mark.parametrize("head", ["a", "b"])
+async def test_resolve_and_merge_checks_head_and_reports_persistent_resolution(head):
+    resolved = []
+
+    def github(request):
+        if request.method == "GET":
+            return response(
+                {"head": {"sha": head * 40}, "state": "open", "draft": False, "mergeable": True}
+            )
+        if request.method == "PUT":
+            return response({"merged": False, "message": "Merge refused"}, 409)
+        body = json.loads(request.content)
+        thread_id = body["variables"].get("threadId")
+        if thread_id:
+            resolved.append(thread_id)
+            return response({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}})
+        return response(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [{"id": "T1", "isResolved": False}],
+                                "pageInfo": {"hasNextPage": False},
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException) as error:
+            await actions.act_on_pull_request(
+                pull,
+                actions.MergeAction(
+                    action="merge", sha="a" * 40, merge_method="merge", resolve_conversations=True
+                ),
+            )
+    assert error.value.status_code == 409
+    if head == "a":
+        assert resolved == ["T1"]
+        assert "1 conversations were already resolved" in error.value.detail
+    else:
+        assert resolved == []
+        assert "head changed" in error.value.detail

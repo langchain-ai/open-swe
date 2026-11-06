@@ -12,7 +12,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
-from openswe.act_as.gate import require_consent
+from openswe.agent_api.connections import GITHUB_USER
 from openswe.agent_api.git_metadata import record_pr_target
 from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
@@ -23,6 +23,7 @@ from openswe.credential_scope import (
 )
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import derive_pr_state
+from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
 from openswe.run_config import RunConfig
@@ -42,7 +43,7 @@ from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.threads.summary import upsert_pull_request_record
 from openswe.transcript.mirror import mirror_thread_metadata
-from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
+from openswe.utils.authorship import PR_ATTRIBUTION_TEXTS, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import create_langsmith_thread_feedback
@@ -70,16 +71,52 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | None, str]:
-    """Use the requested or requesting person's OAuth, and the bot for system threads."""
+    """Use the requested or requesting person's OAuth, and the bot for system threads.
+
+    The requester's own GitHub grant, which an MDA run reads from the deployment's
+    connection, comes before their dashboard sign-in.
+    """
     login = await pr_author_login(author)
     if login is None:
         return await get_github_app_installation_token(), "bot"
+    if granted := await _requester_grant(login):
+        return granted, "user"
     from openswe.dashboard.profiles import get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
         raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "private", login)
     return token, "user"
+
+
+async def _requester_grant(login: str) -> str | None:
+    """The run's GitHub grant, when ``login``, whom the PR opens as, is the run's
+    requester and the grant is that account's.
+
+    The run carries only its requester's grant, so another participant the PR opens
+    as keeps their own sign-in. A grant of another account is never used.
+    """
+    token = GITHUB_USER.credential()
+    requester = (RunConfig.from_runtime().github_login or "").strip()
+    if token is None or requester.lower() != login.lower():
+        return None
+    try:
+        async with GitHubClient.connect(token=token) as github:
+            granted = await github.viewer_login()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Could not read whose GitHub grant the run carries; using the requester's sign-in",
+            extra={"github_login": login},
+            exc_info=True,
+        )
+        return None
+    if granted.lower() != login.lower():
+        logger.warning(
+            "The run's GitHub grant is not the requester's account; using their sign-in",
+            extra={"github_login": login, "granted_login": granted},
+        )
+        return None
+    return token
 
 
 async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
@@ -274,7 +311,7 @@ def _access_failure_payload(
         http_status=http_status,
         reason=reason,
         likely_cause=(
-            "the Open SWE GitHub App or PR author token is not installed on, granted access "
+            "the Robin GitHub App or PR author token is not installed on, granted access "
             "to, or able to see this repository or one of the PR branches"
         ),
         branch_pushed=branch_pushed,
@@ -839,7 +876,6 @@ async def _record_pr_telemetry(
                     exc_info=True,
                 )
             active = await get_active_slack_thread(
-                get_client(),
                 thread_id,
                 cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
@@ -909,7 +945,6 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
 
     if cfg.source == "slack":
         active = await get_active_slack_thread(
-            get_client(),
             cfg.thread_id,
             cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
@@ -1007,7 +1042,10 @@ async def _maybe_append_references(
         if not lines:
             return body
         references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
-        footer_start = body.find(PR_ATTRIBUTION_TEXT)
+        footer_start = min(
+            (start for text in PR_ATTRIBUTION_TEXTS if (start := body.find(text)) >= 0),
+            default=-1,
+        )
         if footer_start < 0:
             return f"{body.rstrip()}\n\n{references}"
         before_footer = body[:footer_start].rstrip()
@@ -1080,17 +1118,6 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
-        if refusal := await require_consent(
-            thread_id=_configurable().thread_id,
-            token_kind=kind,
-            author=author,
-            owner=owner,
-            repo=repo,
-            head=head,
-            base=base,
-            title=title,
-        ):
-            return dict(refusal)
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,
@@ -1115,6 +1142,21 @@ async def _open_pull_request(
             "body": body,
             "draft": draft,
         }
+        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+        from openswe.threads.store import THREADS
+
+        cfg = _configurable()
+        if (
+            cfg.thread_id
+            and (await cached_workspace_settings(cfg.workspace_slug)).get(
+                "implementation_walkthrough_enabled"
+            )
+            is True
+        ):
+            await THREADS.update(
+                cfg.thread_id,
+                {"implementation_pr_target": {"repository": f"{owner}/{repo}", "head": head}},
+            )
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
             headers=_auth_headers(token),

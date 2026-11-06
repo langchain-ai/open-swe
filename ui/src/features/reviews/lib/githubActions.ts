@@ -16,13 +16,16 @@ export interface ActionLabels {
 export interface GithubAction {
   labels: ActionLabels
   /** Past tense, applied to one PR reference or to a counted phrase. */
-  succeeded: (subject: string) => string
+  succeeded: (subject: string, pr: OpenPullRequest) => string
   failed: (subject: string) => string
-  run: (
-    pr: OpenPullRequest,
-    method?: MergeMethod,
-    reason?: string
-  ) => Promise<void>
+  run: (pr: OpenPullRequest, input: GithubActionInput) => Promise<void>
+}
+
+export interface GithubActionInput {
+  method?: MergeMethod
+  reason?: string
+  /** Resolve every open conversation before merging. */
+  resolveConversations?: boolean
 }
 
 export const githubActions: Record<PullRequestActionName, GithubAction> = {
@@ -33,11 +36,14 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       done: null,
       retry: "Retry merge",
     },
-    succeeded: (subject) => `Merged ${subject}`,
+    succeeded: (subject, pr) =>
+      pr.ci === "pending" && pr.mergeState === "blocked"
+        ? `Auto-merge enabled for ${subject}`
+        : `Merged ${subject}`,
     failed: (subject) => `Could not merge ${subject}`,
-    run: async (pr, method) => {
+    run: async (pr, { method, resolveConversations = false }) => {
       if (!method) throw new Error("Choose a merge method.")
-      await api.mergePullRequest(pr, method)
+      await api.mergePullRequest(pr, method, resolveConversations)
     },
   },
   close: {
@@ -49,7 +55,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     },
     succeeded: (subject) => `Closed ${subject}`,
     failed: (subject) => `Could not close ${subject}`,
-    run: async (pr, _method, reason) => {
+    run: async (pr, { reason }) => {
       await api.closePullRequest(pr, reason)
     },
   },

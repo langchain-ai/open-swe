@@ -35,12 +35,16 @@ async function recordedSidebarUrl({
   includeAutomations = false,
   includeResolved = false,
   includeClaudeCode = true,
-  repoMode = true,
+  includeSlack = true,
+  owned = true,
+  repoMode = false,
   sort = "created",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   includeClaudeCode?: boolean
+  includeSlack?: boolean
+  owned?: boolean
   repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
@@ -48,10 +52,12 @@ async function recordedSidebarUrl({
   await agentsApi
     .listThreadsPage({
       ...sidebarRecentsParams({
+        owned,
         repoMode,
         includeAutomations,
         includeResolved,
         includeClaudeCode,
+        includeSlack,
         sort,
       }),
       limit: SIDEBAR_PAGE_SIZE,
@@ -145,6 +151,16 @@ describe("apiWarmupScript", () => {
   it.each([
     { name: "defaults", expected: {}, prefs: undefined },
     {
+      name: "date mode pages by creation",
+      expected: { sort: "created" as ChatSort },
+      prefs: { organize: "date" },
+    },
+    {
+      name: "all owners explicitly selected",
+      expected: { owned: false },
+      prefs: { filters: { ownedOnly: false } },
+    },
+    {
       name: "automations included",
       expected: { includeAutomations: true },
       prefs: { filters: { includeAutomations: true } },
@@ -155,9 +171,9 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { sources: ["schedule"] } },
     },
     {
-      name: "list mode",
-      expected: { repoMode: false },
-      prefs: { organize: "list" },
+      name: "repo mode",
+      expected: { repoMode: true },
+      prefs: { organize: "repo" },
     },
     {
       name: "resolved included",
@@ -170,9 +186,19 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { includeClaudeCode: false } },
     },
     {
-      name: "sorted by last update",
-      expected: { sort: "updated" as ChatSort },
-      prefs: { sortChats: "updated" },
+      name: "repo mode ignores the legacy last-update sort preference",
+      expected: { repoMode: true, sort: "created" as ChatSort },
+      prefs: { organize: "repo", sortChats: "updated" },
+    },
+    {
+      name: "Slack threads hidden",
+      expected: { includeSlack: false },
+      prefs: { filters: { includeSlack: false } },
+    },
+    {
+      name: "Slack and Claude Code hidden",
+      expected: { includeSlack: false, includeClaudeCode: false },
+      prefs: { filters: { includeSlack: false, includeClaudeCode: false } },
     },
   ])(
     "warms the exact sidebar URL the app requests ($name)",

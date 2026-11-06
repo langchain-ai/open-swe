@@ -1,13 +1,13 @@
 # Local Development
 
-Run Open SWE on your machine: the backend and the dashboard on `http://localhost:2024`, with GitHub and Slack webhooks arriving through a tunnel.
+Run Robin on your machine: the backend and the dashboard on `http://localhost:2024`, with GitHub and Slack webhooks arriving through a tunnel.
 Deploying it for a team is the [installation guide](INSTALLATION.md).
 
 ## Prerequisites
 
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
-- Node 22.22.2+ and [pnpm](https://pnpm.io/) for the dashboard
+- Node 26+ and [pnpm](https://pnpm.io/) for the dashboard
 - Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
 - A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
@@ -28,14 +28,14 @@ Follow [Create a GitHub App](INSTALLATION.md#3-create-a-github-app) in the insta
 
 - **Callback URL**: `http://localhost:2024/dashboard/api/auth/callback`.
   This is where GitHub sends the browser after "Sign in with GitHub" on your local dashboard.
-- **Webhook URL**: `https://<name>.ngrok-free.dev/webhooks/github` with your ngrok domain from step 3, or leave the webhook off (untick **Active**) if you only start runs from the dashboard.
-  GitHub cannot deliver to `localhost`.
+- **Webhook URL**: your MDA deployment's `<deployment-url>/channels/github/events`, which `mda deploy` sets, or leave the webhook off (untick **Active**) if you only start runs from the dashboard.
+  The deployment's GitHub channel routes each delivery and calls your backend through the tunnel from step 3 (`OPEN_SWE_BACKEND_URL`); GitHub cannot deliver to `localhost`.
 
-Use a name of your own (GitHub App names are unique), and give it a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) if a shared deployment already answers to `@openswe` in the same repositories.
+Use a name of your own (GitHub App names are unique), and give it a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) if a shared deployment already answers to `@robin-agent` (or a legacy alias) in the same repositories.
 
 ## 3. Tunnel for webhooks
 
-Always run an ngrok tunnel when starting Open SWE locally.
+Always run an ngrok tunnel when starting Robin locally.
 GitHub and Slack need a public HTTPS hostname that stays the same across restarts.
 Reuse an existing tunnel and its exact configured domain, forwarding to the active backend (normally localhost:2024).
 If no tunnel is running, recover the domain from configuration or prior local runtime notes in the primary checkout before starting one; an automatically assigned hostname will not match existing webhook settings.
@@ -67,7 +67,7 @@ The callback is a redirect to localhost; dashboard pages and API routes must rem
 ## 4. Create a Slack app for your machine
 
 Slack delivers events to one URL per app, so a local backend needs its own Slack app rather than the one a shared deployment uses.
-Follow [Create the Slack app](INSTALLATION.md#5-create-the-slack-app) in the installation guide with your ngrok domain from step 3, `<name>.ngrok-free.dev`, as `<your-url>` (the manifest supplies the `https://`), and give it a name that says it is yours, for example `open-swe-<you>`; the bot's handle follows from it.
+Follow [Create the Slack app](INSTALLATION.md#5-create-the-slack-app) in the installation guide with your ngrok domain from step 3, `<name>.ngrok-free.dev`, as `<your-url>` (the manifest supplies the `https://`), and give it a name that says it is yours, for example `robin-<you>`; the bot's handle follows from it.
 Copy the four values it lists into `.env` in the next step.
 
 Slack checks the events Request URL against a running backend.
@@ -89,14 +89,13 @@ GITHUB_APP_ID=""                # step 2
 GITHUB_APP_CLIENT_ID=""
 GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one double-quoted line, \n between the PEM lines
-GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
 ALLOWED_GITHUB_USERS=""         # your GitHub login; required unless ALLOWED_GITHUB_ORGS is set
 
 SLACK_BOT_TOKEN=""              # step 4: OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""         # Basic Information → App Credentials
 SLACK_BOT_USER_ID=""            # the bot's member id (bot profile → ⋮ → Copy member ID)
-SLACK_BOT_USERNAME=""           # the bot's handle, e.g. open_swe_you
+SLACK_BOT_USERNAME=""           # the bot's handle, e.g. robin_you
 SLACK_PUBLIC_BASE_URL="https://<name>.ngrok-free.dev"  # your existing domain from step 3; used by Slack OAuth and the admin manifest
 
 TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
@@ -109,7 +108,7 @@ MDA_RUNTIME_URL="http://localhost:2025"   # `make dev-mda`; the backend refuses 
 REMOTE_RUNTIME_TOKEN_SECRET=""  # openssl rand -hex 32     (signs the run tokens Managed Deep Agents calls back with)
 ```
 
-Every Open SWE thread runs its model loop on Managed Deep Agents, from the project in `mda/`.
+Every Robin thread runs its model loop on Managed Deep Agents, from the project in `mda/`.
 Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set `OPEN_SWE_BACKEND_URL=http://localhost:2024` there, plus `LANGSMITH_API_KEY` and the same model key as above ([mda/README.md](../mda/README.md#run-locally)).
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally.
@@ -118,8 +117,8 @@ You only need one model credential: either a provider key or a gateway key if yo
 How the running model is chosen is covered in the same section.
 Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
-Open SWE needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally.
-In LangGraph's `local_dev` runtime, Open SWE defaults `POSTGRES_URI` to `postgresql://postgres:postgres@127.0.0.1:5433/postgres`; `make dev` and `make dev-ui` run the matching `postgres:16` container named `open-swe-postgres` when no explicit value is set.
+Robin needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally.
+In LangGraph's `local_dev` runtime, Robin defaults `POSTGRES_URI` to `postgresql://postgres:postgres@127.0.0.1:5433/postgres`; `make dev` and `make dev-ui` run the matching `postgres:16` container named `open-swe-postgres` when no explicit value is set.
 Docker Compose binds the container to loopback only and keeps its data in the `open-swe-postgres` volume, so stopping or removing the container preserves your local users, workspaces, and settings.
 `make postgres` starts it on its own; use `docker compose down` to stop it.
 Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
@@ -142,7 +141,7 @@ Prepare the [worktree state](#langgraph-state-across-worktrees) before startup.
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
 make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard (starts the Postgres container first)
-make dev-mda           # in a second terminal: Managed Deep Agents on http://localhost:2025, where every Open SWE thread runs
+make dev-mda           # in a second terminal: Managed Deep Agents on http://localhost:2025, where every Robin thread runs
 ```
 
 `langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024.
@@ -164,10 +163,9 @@ The HMR WebSocket connects straight to Vite's port; the UI's Vite config points 
 | Endpoint | Purpose |
 |---|---|
 | `/` | Dashboard |
-| `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
-| `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /webhooks/linear` | Linear comment webhooks |
+| `POST /webhooks/slack/commands` | The `/robin` slash command (`/oswe` remains an alias) |
+| `POST /mda/channel-api/{endpoint}` | The MDA deployment's channels asking for what needs Robin's data (`runtime_api.linear`, `runtime_api.github`) |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -186,11 +184,11 @@ With your login in `CONFIGURED_ADMINS`, the **Administration** pages appear.
 Set **Admin → Defaults → Default repository**, then start a task from the composer.
 
 **Slack.**
-With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`.
+With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@robin_you what's in the repo?`.
 It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
 **GitHub.**
-With the tunnel running and the App's webhook pointed at it, comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed.
+With the tunnel running and the App's webhook pointed at it, comment `@robin-agent what files are in this repo?` on an issue in a repository where the App is installed.
 Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment.
 GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once.
 The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
@@ -200,7 +198,7 @@ Create additional workspaces from the **Workspaces** page to exercise routing lo
 
 **Incidents.**
 Follow [Incidents setup](INSTALLATION.md#incidents) to enroll Slack channels.
-Set `SLACK_APP_ID`; anyone in a channel can pause or complete its incident, and asking the agent requires a connected Open SWE account.
+Set `SLACK_APP_ID`; anyone in a channel can pause or complete its incident, and asking the agent requires a connected Robin account.
 Incident turns run on the main `agent` graph and are dispatched straight from the Slack webhook, so `make dev` or `make dev-ui` is all that is needed.
 
 Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
@@ -307,31 +305,9 @@ A task started from `http://localhost:3000` is a real run on that deployment, an
 
 ## Test a PR in preview (LangChain maintainers)
 
-The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
-
-1. Add the **`preview`** label to your PR.
-1. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour.
-   Labeling alone does not deploy.
-1. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**.
-   A successful run may still omit a PR.
-1. Wait for the run's **Deploy the preview tree** job.
-   It rolls the preview deployment to the published `preview` commit and fails, with the revision's build or server logs, unless the revision deploys.
-1. Open [preview](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) and test with non-production tasks and repositories.
-   For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
-
-When PRs conflict with the preview tree, the run makes one `oswe` call (an Open SWE agent on the backend in the `OPEN_SWE_BACKEND_URL` repository variable) that merges all of them; the summary marks those PRs `conflicts resolved by oswe`, and later runs replay the resolution from a git rerere cache.
-PRs the agent cannot resolve are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch.
-Resolve the conflict before reapplying the label.
-Use **force** only to rebuild an unchanged preview tree.
-
-Before publishing a changed tree, the run typechecks the dashboard.
-On failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged.
-If the typecheck still fails, nothing is published, the run fails, and `refs/preview-failed` records the tree so later runs fail fast until it changes.
-
-The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
-
-To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain.
-Every Sunday, the first scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) is built from LangChain's internal monorepo, where Robin is developed, so pull requests in this repository are not previewed.
+Staging follows `main` and is for post-merge testing.
+For local UI iteration against a deployed backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
 
 ## Desktop app (experimental)
 
@@ -384,7 +360,7 @@ Ask users to attach that file to a report.
 | Target | What it does |
 |---|---|
 | `make dev` | `langgraph dev` on port 2024: graphs, webhooks, dashboard API, and the bundled dashboard when a build exists |
-| `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Open SWE thread runs on |
+| `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Robin thread runs on |
 | `make mda-cli` | Build the `mda` CLI from the vendored SDK (`make dev-mda` does it first) |
 | `make dev-ui` | `make web` and `make dev` together, the backend fronting Vite so the UI hot-reloads on port 2024 |
 | `make web` | The Vite dev server alone on port 3000 |
@@ -405,9 +381,9 @@ Ask users to attach that file to a report.
   Do not swap in a tunnel that forwards the whole port; see step 3.
   GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived.
   With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
-- Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime.
+- Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime.
   Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Webhook secrets are required: without `SLACK_SIGNING_SECRET`, every request to `/webhooks/slack` is rejected with 401, and the GitHub and Linear channels' calls are verified with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s; the MDA deployment verifies GitHub's and Linear's own signatures.
 
 ### Dashboard login fails or won't stay logged in
 

@@ -1,4 +1,4 @@
-Post a standalone message to a public or private Slack channel the Open SWE bot belongs to.
+Post a standalone message to a public or private Slack channel the Robin bot belongs to.
 Avoid using this tool in general: prefer replying in the current conversation with `slack_reply`.
 Use it only when the user explicitly asks for a standalone post to that destination, not for unsolicited announcements or updates.
 Supply the channel ID from the user's Slack channel mention or `slack_list_channels`; do not guess it.
@@ -7,7 +7,10 @@ Every post must tag the user who triggered it with their <@USER_ID> mention.
 Use their trusted Slack identity from the conversation context; never guess it or substitute another user.
 If their Slack user ID is unavailable, ask for it before posting.
 
-This sends a new top-level message without moving the current Open SWE conversation or starting a new agent task.
+On an automation run, `channel_id` may instead be the automation creator's Slack member ID, which DMs them the run's result.
+No other member ID is accepted, and the post needs no mention.
+
+This sends a new top-level message without moving the current Robin conversation or starting a new agent task.
 For updates and answers in the current conversation, use `slack_reply`.
 
 Write `message` in standard Markdown: **bold**, _italic_, [link text](url), and <@USER_ID> mentions.

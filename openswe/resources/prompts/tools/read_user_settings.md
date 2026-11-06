@@ -1,8 +1,8 @@
 Read server-backed settings for the authenticated owner of a private thread, or redacted settings for verified participants in a collaborative thread.
 
-In a private thread this includes all ordinary profile and dashboard preferences, including repository/branch defaults, model routing, server-backed personal flags, visibility, workspace, and follow-up behavior.
+In a private thread this includes all ordinary profile and dashboard preferences, including repository/branch defaults, server-backed personal flags, visibility, workspace, and follow-up behavior.
 Only the authenticated owner is read; other participant identities cannot broaden private settings access.
-Use `save_user_settings` for requested personal setting changes and `save_user_instructions` for standing behavioral guidance.
+Use `save_user_settings` for requested personal setting changes and `remember` for standing behavioral guidance.
 
 This tool accepts no user, thread, or source identifiers.
 It derives the active thread from trusted runtime context and returns only mapped human participants.

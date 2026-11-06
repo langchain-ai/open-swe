@@ -1,3 +1,5 @@
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { Button } from "@langchain/macaw-components/Button"
 import { CheckIcon, XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { useState } from "react"
@@ -70,30 +72,19 @@ export function MarkStepRead({
 }) {
   const markStepRead = useReviewPage((state) => state.markStepRead)
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={read}
-      aria-label={`Mark step ${index} read`}
-      onClick={() => markStepRead(index)}
-      className={cn(
-        "flex shrink-0 items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-xxs transition-colors",
-        read
-          ? "border-transparent bg-brand-subtle text-brand-primary"
-          : "border-default text-secondary hover:text-primary",
-        className
-      )}
-    >
-      <span
-        className={cn(
-          "flex size-3 items-center justify-center rounded-full border",
-          read ? "border-brand bg-brand text-brand-on-fill" : "border-strong"
-        )}
-      >
-        {read && <CheckIcon weight="bold" className="size-2.5" />}
-      </span>
-      {read ? "Read" : "Mark step read"}
-    </button>
+    <Checkbox
+      checked={read}
+      onCheckedChange={() => markStepRead(index)}
+      label={
+        <>
+          {read ? "Read" : "Mark step read"}
+          <span className="sr-only">: step {index}</span>
+        </>
+      }
+      labelClassName="text-xxs text-secondary"
+      containerClassName={cn("shrink-0", className)}
+      size="sm"
+    />
   )
 }
 
@@ -143,7 +134,10 @@ export function StepIntro({ id }: { id: string }) {
   const { step } = group
   return (
     // Pulled down over the step item's hidden placeholder line, so the files follow closely.
-    <div className="-mb-5 pt-space-1 font-sans max-sm:px-space-4">
+    <div
+      data-reply-part={`walkthrough step ${step.index}: ${step.title}`}
+      className="-mb-5 pt-space-1 font-sans max-sm:px-space-4"
+    >
       <h3 className="text-sm leading-6 font-semibold text-primary">
         <InlineCode text={step.title} />
       </h3>
@@ -204,14 +198,18 @@ export function ReadNudge({ groups }: { groups: ReadonlyArray<StepGroup> }) {
   return (
     <div className="absolute right-6 bottom-6 z-floating-bar flex items-center gap-space-1 rounded-full border border-subtle bg-surface-level-1/80 py-0.5 pr-0.5 pl-space-3 font-sans text-xxs text-tertiary opacity-80 backdrop-blur-sm transition-opacity focus-within:opacity-100 hover:opacity-100">
       Done with step {candidate}?
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label="Mark read"
         type="button"
         onClick={() => markStepRead(candidate)}
-        className="flex items-center gap-space-1 rounded-full px-space-2 py-0.5 font-medium text-brand-primary hover:bg-brand-subtle"
+        className="gap-space-1 rounded-full px-space-2 py-0.5 font-medium text-brand-primary hover:bg-brand-subtle"
       >
         <CheckIcon weight="bold" className="size-3" />
         Mark read
-      </button>
+      </Button>
       <IconButton
         icon={XIcon}
         label={`Don't ask about step ${candidate}`}

@@ -1,4 +1,6 @@
-import { useEffect, useEffectEvent, useMemo, useRef } from "react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 
 import type { PlanComment, PlanTextAnchor } from "@/lib/plan"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
@@ -171,6 +173,20 @@ function frameScript(channel: string): string {
       };
     }
 
+    for (const type of ["click", "auxclick"]) {
+      document.addEventListener(type, event => {
+        if (event.button !== (type === "click" ? 0 : 1)) return;
+        const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+        const href = link?.getAttribute("href")?.trim();
+        if (!href || href.startsWith("#") || link.hasAttribute("download")) return;
+        let url;
+        try { url = new URL(href, document.baseURI); } catch { return; }
+        if (url.protocol !== "https:" && url.protocol !== "http:") return;
+        event.preventDefault();
+        if (event.isTrusted) post({ type: "open-external", url: url.href });
+      }, true);
+    }
+
     document.addEventListener("mouseup", () => {
       setTimeout(() => {
         post({ type: "text-selected", anchor: selectedAnchor() });
@@ -271,6 +287,7 @@ export function PlanArtifactFrame({
   className?: string
 }) {
   const theme = useResolvedTheme()
+  const [externalUrl, setExternalUrl] = useState<string | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const portRef = useRef<MessagePort | null>(null)
   const channel = useMemo(() => globalThis.crypto.randomUUID(), [])
@@ -299,6 +316,23 @@ export function PlanArtifactFrame({
   }, [anchoredComments])
 
   const receive = useEffectEvent((event: MessageEvent) => {
+    if (
+      event.data?.type === "open-external" &&
+      typeof event.data.url === "string" &&
+      event.data.url.length <= 8192
+    ) {
+      try {
+        const url = new URL(event.data.url)
+        if (
+          (url.protocol === "https:" || url.protocol === "http:") &&
+          !url.username &&
+          !url.password
+        )
+          setExternalUrl((pending) => pending ?? url.href)
+      } catch {
+        return
+      }
+    }
     if (event.data?.type === "ready")
       portRef.current?.postMessage({
         type: "set-comments",
@@ -350,15 +384,52 @@ export function PlanArtifactFrame({
   }, [focusCommentId, focusCommentKey])
 
   return (
-    <SandboxedHtmlFrame
-      ref={frameRef}
-      testId="plan-artifact-frame"
-      title={title}
-      html={srcDoc}
-      sandbox={ARTIFACT_SANDBOX}
-      allow={ARTIFACT_ALLOW}
-      onLoad={connect}
-      className={cn("bg-surface-level-1", className)}
-    />
+    <>
+      <SandboxedHtmlFrame
+        ref={frameRef}
+        testId="plan-artifact-frame"
+        title={title}
+        html={srcDoc}
+        sandbox={ARTIFACT_SANDBOX}
+        allow={ARTIFACT_ALLOW}
+        onLoad={connect}
+        className={cn("bg-surface-level-1", className)}
+      />
+      <Dialog
+        open={externalUrl !== null}
+        onOpenChange={(open) => {
+          if (!open) setExternalUrl(null)
+        }}
+      >
+        <DialogContent
+          title="Open external link?"
+          description="This destination comes from the report. Check the full address before opening it."
+          showClose={false}
+          className="w-[min(28rem,calc(100vw-2rem))]"
+        >
+          <p className="text-sm break-all text-secondary">{externalUrl}</p>
+          <div className="flex justify-end gap-space-2">
+            <Button
+              size="xs"
+              color="secondary"
+              variant="outlined"
+              onClick={() => setExternalUrl(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="xs"
+              onClick={() => {
+                if (externalUrl)
+                  window.open(externalUrl, "_blank", "noopener,noreferrer")
+                setExternalUrl(null)
+              }}
+            >
+              Open link
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

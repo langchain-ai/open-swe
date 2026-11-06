@@ -15,9 +15,14 @@ from pydantic import BaseModel, JsonValue, ValidationError
 API_PREFIX: Final = "/agent-api/"
 # The route the backend serves every endpoint under.
 API_PATH: Final = API_PREFIX + "{endpoint}"
-# Preparation waits on the review scout's walkthrough for up to ten minutes; a tool
-# call can run a long command.
+# Where the deployment's channels call the backend, with no run yet: each call is
+# signed with the secret both share (``MDA_SERVICE_SECRET``), not a run token.
+CHANNEL_API_PREFIX: Final = "/mda/channel-api/"
+CHANNEL_API_PATH: Final = CHANNEL_API_PREFIX + "{endpoint}"
+# A tool call can run a long command.
 LONG_CALL_SECONDS: Final = 1800.0
+# A tool call that only reads the backend's own records or Slack.
+QUICK_CALL_SECONDS: Final = 120.0
 # A call of the model loop, which only reads and writes the run's own records.
 LOOP_CALL_SECONDS: Final = 300.0
 
@@ -37,10 +42,11 @@ class Endpoint[Request: BaseModel, Response: BaseModel]:
     response: type[Response]
     seconds: float = LONG_CALL_SECONDS
     delivery: Delivery = "once"
+    prefix: str = API_PREFIX
 
     @property
     def path(self) -> str:
-        return API_PREFIX + self.name
+        return self.prefix + self.name
 
 
 class Transport(Protocol):

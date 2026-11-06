@@ -8,6 +8,7 @@ import pytest
 from openswe import event_claims
 from openswe.database import postgres
 from openswe.slack import client as slack_client
+from openswe.slack import records as slack_records
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
 from openswe.slack.records import (
@@ -25,20 +26,32 @@ from openswe.thread_ids import mda_successor_thread_id
 from openswe.threads import index
 
 
-class _Threads:
-    def __init__(self, matches: list[dict[str, Any]] | None = None) -> None:
-        self.matches = matches or []
+@pytest.mark.parametrize("root_field", ["ts", "thread_ts"])
+async def test_reply_permalink_without_thread_timestamp(monkeypatch, root_field: str) -> None:
+    lookup = AsyncMock(
+        side_effect=lambda channel, ts: "thread-1" if ts == "1788425314.774339" else None
+    )
+    monkeypatch.setattr(slack_records, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(slack_records, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    client = AsyncMock()
+    client.conversations_replies.return_value = {"messages": [{root_field: "1788425314.774339"}]}
+    context = AsyncMock()
+    context.__aenter__.return_value = client
+    monkeypatch.setattr(slack_records.SlackClient, "bot", lambda: context)
 
-    async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
-        return self.matches
+    assert (
+        await slack_records.lookup_slack_link_thread_id(
+            "https://example.slack.com/archives/C123/p1788431248678809"
+        )
+        == "thread-1"
+    )
 
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return next(match for match in self.matches if match.get("thread_id") == thread_id)
 
-
-class _Client:
-    def __init__(self, matches: list[dict[str, Any]] | None = None) -> None:
-        self.threads = _Threads(matches)
+async def _index_threads(*threads: dict[str, Any]) -> None:
+    """Index threads made before Slack locations had their own table, as the backend
+    keeps them: the resolver finds one by its metadata."""
+    for thread in threads:
+        await index.create(thread["thread_id"], runtime="mda", metadata=thread["metadata"])
 
 
 def _legacy_thread(
@@ -55,28 +68,27 @@ def _legacy_thread(
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_thread_mutation_lock_returns_active_thread() -> None:
-    client: Any = _Client(matches=[_legacy_thread("agent-thread")])
+    await _index_threads(_legacy_thread("agent-thread"))
 
-    async with slack_thread_mutation_lock(client, "C1", "1.0", thread_id="agent-thread") as active:
+    async with slack_thread_mutation_lock("C1", "1.0", thread_id="agent-thread") as active:
         assert active == {"channel_id": "C1", "thread_ts": "1.0"}
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_thread_mutation_lock_serializes_same_thread() -> None:
-    client: Any = _Client()
     first_entered = asyncio.Event()
     release_first = asyncio.Event()
     second_entered = asyncio.Event()
 
     async def first() -> None:
-        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+        async with slack_thread_mutation_lock("C1", "1.0"):
             first_entered.set()
             await release_first.wait()
 
     async def second() -> None:
         await first_entered.wait()
-        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+        async with slack_thread_mutation_lock("C1", "1.0"):
             second_entered.set()
 
     first_task = asyncio.create_task(first())
@@ -94,25 +106,23 @@ async def test_thread_mutation_lock_serializes_same_thread() -> None:
 async def test_thread_mutation_lock_lapses_when_its_holder_cannot_release(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client: Any = _Client()
     monkeypatch.setattr(slack_client, "_SLACK_THREAD_MUTATION_LOCK_TTL", timedelta(seconds=0.5))
     monkeypatch.setattr(event_claims, "release", AsyncMock(side_effect=RuntimeError("503")))
 
-    async with slack_thread_mutation_lock(client, "C1", "1.0"):
+    async with slack_thread_mutation_lock("C1", "1.0"):
         pass
 
     async with asyncio.timeout(3):
-        async with slack_thread_mutation_lock(client, "C1", "1.0"):
+        async with slack_thread_mutation_lock("C1", "1.0"):
             pass
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_resolver_creates_a_concurrency_safe_mapping() -> None:
-    client: Any = _Client()
 
-    first = await resolve_slack_thread_id(client, "C1", "1.0")
-    second = await resolve_slack_thread_id(client, "C1", "1.0")
+    first = await resolve_slack_thread_id("C1", "1.0")
+    second = await resolve_slack_thread_id("C1", "1.0")
 
     assert second == first
     assert await lookup_slack_thread_id("C1", "1.0") == first
@@ -121,9 +131,9 @@ async def test_resolver_creates_a_concurrency_safe_mapping() -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_resolver_backfills_existing_thread_from_metadata() -> None:
-    client: Any = _Client([_legacy_thread("legacy-thread")])
+    await _index_threads(_legacy_thread("legacy-thread"))
 
-    resolved = await resolve_slack_thread_id(client, "C1", "1.0")
+    resolved = await resolve_slack_thread_id("C1", "1.0")
 
     assert resolved == "legacy-thread"
     assert await lookup_slack_thread_id("C1", "1.0") == "legacy-thread"
@@ -135,10 +145,9 @@ async def test_a_location_on_a_local_thread_moves_to_its_mda_successor() -> None
     old = "00000000-0000-4000-8000-000000000001"
     await index.create(old, runtime="local")
     await bind_slack_thread_id("C1", "1.0", old)
-    client: Any = _Client()
 
-    first = await resolve_slack_thread_id(client, "C1", "1.0")
-    second = await resolve_slack_thread_id(client, "C1", "1.0")
+    first = await resolve_slack_thread_id("C1", "1.0")
+    second = await resolve_slack_thread_id("C1", "1.0")
 
     assert first == second == mda_successor_thread_id(old)
     assert await lookup_slack_thread_id("C1", "1.0") == first
@@ -147,10 +156,10 @@ async def test_a_location_on_a_local_thread_moves_to_its_mda_successor() -> None
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_resolver_rejects_ambiguous_legacy_metadata() -> None:
-    client: Any = _Client([_legacy_thread("one"), _legacy_thread("two")])
+    await _index_threads(_legacy_thread("one"), _legacy_thread("two"))
 
     with pytest.raises(SlackThreadMappingError, match="Multiple"):
-        await resolve_slack_thread_id(client, "C1", "1.0")
+        await resolve_slack_thread_id("C1", "1.0")
 
     assert await lookup_slack_thread_id("C1", "1.0") is None
 
@@ -214,7 +223,6 @@ async def test_delete_does_not_remove_a_location_reassigned_to_another_thread() 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_delete_removes_only_exact_slack_location_associations() -> None:
-    client: Any = _Client()
     await bind_slack_thread_id("C1", "1.0", "thread-one")
     await bind_slack_thread_id("C1", "2.0", "thread-two")
     await store_slack_run_mapping("C1", "1.0", "run-one", message_ts="1.1")
@@ -224,9 +232,9 @@ async def test_delete_removes_only_exact_slack_location_associations() -> None:
 
     assert await lookup_slack_thread_id("C1", "1.0") is None
     assert await lookup_slack_thread_id("C1", "2.0") == "thread-two"
-    replacement = await resolve_slack_thread_id(client, "C1", "1.0")
+    replacement = await resolve_slack_thread_id("C1", "1.0")
     assert replacement != "thread-one"
-    assert await resolve_slack_thread_id(client, "C1", "1.0") == replacement
+    assert await resolve_slack_thread_id("C1", "1.0") == replacement
     assert await lookup_slack_run_message_mapping("C1", "run-one") is None
     assert await lookup_slack_run_mapping("C1", "1.1") is None
     assert await lookup_slack_run_message_mapping("C1", "run-two") is not None

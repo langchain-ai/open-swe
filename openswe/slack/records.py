@@ -20,7 +20,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid4, uuid7
 
-from langgraph_sdk.client import LangGraphClient
 from sqlalchemy import (
     ColumnElement,
     ForeignKey,
@@ -40,7 +39,14 @@ from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import SlackThreadMappingError, normalize_slack_location
+from openswe.slack.client import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    SlackThreadMappingError,
+    normalize_slack_location,
+    parse_slack_thread_url,
+    slack_error,
+)
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
 from openswe.threads import index
@@ -453,6 +459,38 @@ async def lookup_slack_thread_id(channel_id: str, thread_ts: str) -> str | None:
         )
 
 
+async def lookup_slack_link_thread_id(url: str) -> str | None:
+    """Resolve a permalink to its bound Open SWE thread, including reply-only links."""
+    from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+
+    location = parse_slack_thread_url(url)
+    if location is None:
+        return None
+    channel, timestamp = location
+    if thread_id := await lookup_slack_thread_id(channel, timestamp):
+        return thread_id
+    mapping = await lookup_slack_run_mapping(channel, timestamp)
+    if mapping and mapping.thread_ts:
+        if thread_id := await lookup_slack_thread_id(channel, mapping.thread_ts):
+            return thread_id
+    if thread_id := await lookup_slack_thread_id(channel, CODE_CHANNEL_SESSION_TS):
+        return thread_id
+    try:
+        async with SlackClient.bot() as client:
+            data = await client.conversations_replies(channel=channel, ts=timestamp, limit=1)
+        messages = data.get("messages", [])
+        if messages and isinstance(messages[0], Mapping):
+            root = messages[0].get("thread_ts") or messages[0].get("ts")
+            if isinstance(root, str) and root != timestamp:
+                return await lookup_slack_thread_id(channel, root)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Slack permalink lookup failed",
+            extra={"slack_channel": channel, "slack_error": slack_error(exc)},
+        )
+    return None
+
+
 async def bind_slack_thread_id(
     channel_id: str, thread_ts: str, thread_id: str, *, replacing: str | None = None
 ) -> str:
@@ -463,7 +501,7 @@ async def bind_slack_thread_id(
     channel, timestamp = normalize_slack_location(channel_id, thread_ts)
     normalized_thread_id = thread_id.strip() if isinstance(thread_id, str) else ""
     if not normalized_thread_id:
-        raise SlackThreadMappingError("Open SWE thread ID is required")
+        raise SlackThreadMappingError("Robin thread ID is required")
     upsert = insert(SlackThread).values(
         id=uuid7(), channel_id=channel, thread_ts=timestamp, thread_id=normalized_thread_id
     )
@@ -501,9 +539,7 @@ def _thread_metadata_slack_location(thread: Mapping[str, object]) -> tuple[str, 
         return None
 
 
-async def resolve_slack_thread_id(
-    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
-) -> str:
+async def resolve_slack_thread_id(channel_id: str, thread_ts: str) -> str:
     """The Open SWE thread bound to a Slack location, binding one first if none is.
 
     A location bound to a thread that takes no new activity moves to its successor.
@@ -523,24 +559,25 @@ async def resolve_slack_thread_id(
             return live
         return await bind_slack_thread_id(channel, timestamp, live, replacing=mapping.thread_id)
 
-    matches = await langgraph_client.threads.search(
+    # The thread index, as the backend's own ``/threads/search`` reads it.
+    found = await index.ThreadSearch(
         metadata={
             "source_context": SourceContext(
                 slack_thread=SlackThreadRef(channel_id=channel, thread_ts=timestamp)
             ).dump()
         },
         limit=2,
-    )
+    ).run()
     matching_ids = {
         candidate
-        for thread in matches or []
+        for thread in (match.as_langgraph() for match in found)
         if isinstance(thread, Mapping)
         and _thread_metadata_slack_location(thread) == (channel, timestamp)
         and isinstance(candidate := thread.get("thread_id") or thread.get("id"), str)
         and candidate
     }
     if len(matching_ids) > 1:
-        raise SlackThreadMappingError("Multiple Open SWE threads match this Slack location")
+        raise SlackThreadMappingError("Multiple Robin threads match this Slack location")
 
     candidate = next(
         iter(matching_ids),

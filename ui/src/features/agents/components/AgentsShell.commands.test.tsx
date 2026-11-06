@@ -79,7 +79,13 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => stub.noop,
-  useRouterState: () => undefined,
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: {
+      location: { pathname: string; search: Record<string, unknown> }
+    }) => unknown
+  }) => select({ location: { pathname: "/agents/thread-1", search: {} } }),
   useSearch: () => undefined,
   useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
@@ -123,7 +129,10 @@ window.matchMedia = ((query: string) => ({
   removeEventListener: vi.fn(),
 })) as unknown as typeof window.matchMedia
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 // A registration loop never reaches quiescence, so waiting it out would hang
 // the run rather than fail it. The probe re-renders on every change to the
@@ -160,6 +169,57 @@ it("registers the active thread's commands once and then stops", async () => {
   )
 
   expect(probeRenders).toBeLessThanOrEqual(RENDER_BUDGET)
+})
+
+it("renames an unopened thread from its context menu and discards cancelled drafts", async () => {
+  const thread = {
+    ...stub.activeThread,
+    viewed: true,
+  } as unknown as AgentThread
+  const client = new QueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <SidebarThreadRow
+          item={cloudSidebarThread(thread)}
+          isActive={false}
+          pinned={false}
+          archived={false}
+          onTogglePin={stub.noop}
+          onToggleArchived={stub.noop}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  const row = screen.getByRole("link", { name: /Thread/ })
+  fireEvent.contextMenu(row)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
+  const input = (await screen.findByRole("textbox", {
+    name: "Thread title",
+  })) as HTMLInputElement
+  expect(document.activeElement).toBe(input)
+  expect(input.value).toBe(thread.title)
+  expect(input.selectionEnd).toBe(thread.title.length)
+  fireEvent.change(input, { target: { value: "Discard this" } })
+  fireEvent.keyDown(input, { key: "Escape" })
+  expect(stub.rename.mutate).not.toHaveBeenCalled()
+  fireEvent.contextMenu(row)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
+  const reopened = (await screen.findByRole("textbox", {
+    name: "Thread title",
+  })) as HTMLInputElement
+  expect(reopened.value).toBe(thread.title)
+  fireEvent.change(reopened, { target: { value: "   " } })
+  expect(
+    (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled
+  ).toBe(true)
+  fireEvent.change(reopened, { target: { value: "  New title  " } })
+  fireEvent.submit(reopened.closest("form")!)
+  expect(stub.rename.mutate).toHaveBeenCalledExactlyOnceWith({
+    threadId: thread.id,
+    title: "New title",
+  })
+  expect(screen.queryByRole("dialog")).toBeNull()
 })
 
 it("opens asynchronous workers as real conversations and expands the selected worker separately from synchronous subagents", () => {

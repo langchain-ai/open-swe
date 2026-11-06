@@ -3,7 +3,7 @@
 Provider collections use ``<primitive>.<provider>(...)`` namespaces, while
 resources use ``define_*`` factories::
 
-    channels.slack(name="Support Bot", description="Answers support questions")
+    channels.slack(app={"name": "Support Bot", "description": "Answers support questions"})
     define_mcp(servers={...})
     define_sandbox(default_timeout=600)
     auth.supabase(project_ref="abc")
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from managed_deepagents._channels.github import github_channel
@@ -45,7 +46,8 @@ class _Namespace:
 class _Channels(_Namespace):
     """Inbound messaging surfaces (Events ingress + outbound messaging).
 
-    Slack ingress through Trigger Server.
+    Slack ingress through Trigger Server. ``github`` and ``linear`` are
+    experimental and may change in a minor release.
     """
 
     github = staticmethod(github_channel)
@@ -78,7 +80,7 @@ class _LangSmithSandboxArgs(BaseModel):
     environment-variable name; MDA creates or updates the Host registry.
     Unmodeled keys pass through as LangSmith create options. MDA owns naming,
     lifecycle, ``setup.sh`` bake, and cleanup — the envelope rejects the keys
-    it owns. Reuse is one box per thread and selection.
+    it owns. Reuse is always one box per thread.
 
     The ``_openswe_*`` arguments of :func:`define_sandbox` exist only for Open
     SWE's vendored copy and are not MDA's API: see Open SWE's
@@ -99,10 +101,10 @@ class _LangSmithSandboxArgs(BaseModel):
 def define_sandbox(
     *,
     _openswe_per_thread: bool = False,
-    _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
     _openswe_select: Callable[[object], SandboxDefinition | None] | None = None,
+    _openswe_without_sandbox: SandboxBackendProtocol | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -133,10 +135,10 @@ def define_sandbox(
             key: value
             for key, value in {
                 "_openswe_per_thread": _openswe_per_thread or None,
-                "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
                 "_openswe_select": _openswe_select,
+                "_openswe_without_sandbox": _openswe_without_sandbox,
             }.items()
             if value is not None
         }

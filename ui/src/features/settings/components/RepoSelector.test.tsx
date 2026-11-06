@@ -25,11 +25,17 @@ it("distinguishes an unset selection from an explicit no-repository choice", asy
   })
   fireEvent.click(screen.getByRole("button", { name: props.placeholder }))
   expect(screen.queryByLabelText("Selected")).toBeNull()
-  fireEvent.click(await screen.findByRole("button", { name: "org/active" }))
+  expect(screen.queryByRole("button", { pressed: true })).toBeNull()
+  expect(await screen.findByText("active")).toBeTruthy()
+  expect(screen.queryByText("org/active")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "org/active" }))
   expect(onRepoChange).toHaveBeenLastCalledWith("org/active")
 
   rerender(<RepoSelector {...props} selectedRepo="org/active" />)
-  fireEvent.click(screen.getByRole("button", { name: "org/active" }))
+  fireEvent.click(screen.getByRole("button", { name: "active" }))
+  expect(
+    await screen.findByRole("button", { name: "org/active", pressed: true })
+  ).toBeTruthy()
   fireEvent.click(
     await screen.findByRole("button", { name: props.emptySelectionLabel })
   )
@@ -39,7 +45,12 @@ it("distinguishes an unset selection from an explicit no-repository choice", asy
   fireEvent.click(
     screen.getByRole("button", { name: props.emptySelectionLabel })
   )
-  expect(await screen.findByLabelText("Selected")).toBeTruthy()
+  expect(
+    await screen.findByRole("button", {
+      name: props.emptySelectionLabel,
+      pressed: true,
+    })
+  ).toBeTruthy()
 })
 
 it("never offers archived choices or an archive toggle by default", async () => {
@@ -54,8 +65,8 @@ it("never offers archived choices or an archive toggle by default", async () => 
     { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
-  expect(await screen.findByText("org/active")).toBeTruthy()
-  expect(screen.queryByText("org/legacy")).toBeNull()
+  expect(await screen.findByText("active")).toBeTruthy()
+  expect(screen.queryByText("legacy")).toBeNull()
   expect(screen.queryByRole("checkbox", { name: "Show archived" })).toBeNull()
 })
 
@@ -74,7 +85,7 @@ it("hides archives even in search until opted in, without clearing the selection
     />,
     { wrapper: TooltipProvider }
   )
-  fireEvent.click(screen.getByRole("button", { name: "org/legacy" }))
+  fireEvent.click(screen.getByRole("button", { name: "legacy" }))
   expect(
     await screen.findByRole("button", { name: /org\/active\s*Public/ })
   ).toBeTruthy()
@@ -100,4 +111,20 @@ it("hides archives even in search until opted in, without clearing the selection
     })
   )
   expect(onRepoChange).toHaveBeenCalledWith("org/internal-legacy")
+})
+
+it("keeps owners in mixed-org choices even when search narrows to one org", async () => {
+  render(
+    <RepoSelector
+      repos={[{ full_name: "org/open-swe" }, { full_name: "other/app" }]}
+      onRepoChange={vi.fn()}
+    />,
+    { wrapper: TooltipProvider }
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
+  fireEvent.change(screen.getByPlaceholderText("Search repositories…"), {
+    target: { value: "ORG Open_SWE" },
+  })
+  expect(await screen.findByText("org/open-swe")).toBeTruthy()
+  expect(screen.queryByText("other/app")).toBeNull()
 })

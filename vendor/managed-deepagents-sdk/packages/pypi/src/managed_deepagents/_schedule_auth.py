@@ -19,7 +19,11 @@ from typing_extensions import TypedDict
 from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
 from managed_deepagents._channels.source_providers import is_trusted_source_provider
 from managed_deepagents._identity_runtime import _auth_user_fields, _field, is_studio_auth_user
-from managed_deepagents._loopback import is_loopback_url, resolve_loopback_api_url
+from managed_deepagents._langsmith_env import resolve_server_api_key
+from managed_deepagents._loopback import (
+    is_loopback_url,
+    resolve_loopback_api_url,
+)
 from managed_deepagents._thread_record import (
     THREAD_CONVERSATION_METADATA,
     THREAD_PARTICIPANTS_METADATA,
@@ -146,7 +150,7 @@ def _handoff_request_config(header: str, value: object) -> tuple[str, dict[str, 
     hosted = os.environ.get("LANGSMITH_HOST_API_URL", "").strip().rstrip("/")
     base = hosted or resolve_loopback_api_url()
     secret = os.environ.get("MDA_HANDOFF_SECRET")
-    api_key = os.environ.get("LANGSMITH_API_KEY", "").strip()
+    api_key = resolve_server_api_key()
     if not secret or (
         not is_loopback_url(base) and not (hosted.startswith("https://") and api_key)
     ):
@@ -169,6 +173,30 @@ def validate_execution(value: object) -> ExecutionUser:
     if not result["identity"] or not result["mda_user_id"] or result["permissions"]:
         raise ValueError("Invalid schedule execution identity")
     return result
+
+
+def channel_run_execution(configurable: Mapping[str, object] | None) -> ExecutionUser | None:
+    """The principal a channel conversation's run runs as, from the run's configurable.
+
+    It is the caller ingress stamped with the conversation's provider and source
+    thread key, which own the run's thread.
+    """
+    user = _auth_user_fields(_field(configurable, "langgraph_auth_user"))
+    if user is None:
+        return None
+    try:
+        execution = validate_execution(
+            {key: value for key, value in user.items() if key in _EXECUTION_KEYS}
+        )
+    except ValueError:
+        return None
+    return execution if _is_channel_run_execution(execution) else None
+
+
+def _is_channel_run_execution(execution: ExecutionUser) -> bool:
+    return is_trusted_source_provider(execution.get("mda_source_provider", "")) and bool(
+        execution.get("mda_source_thread_id", "").strip()
+    )
 
 
 def schedule_execution(configurable: Mapping[str, object] | None) -> ExecutionUser | None:
@@ -205,7 +233,7 @@ _HANDOFF_RETRY_DELAYS_SECONDS = (0.5, 2.0)
 
 
 async def hand_off_scheduled_thread(handoff: ThreadHandoff, metadata: Mapping[str, object]) -> None:
-    """Move a scheduled run's thread to the conversation its post started.
+    """Move a scheduled or channel run's thread to the conversation its post started.
 
     ``metadata`` holds that conversation's record and key. The handoff can only
     follow the post, which names the conversation, so a failed request or an
@@ -259,7 +287,8 @@ def thread_handoff_user(
 ) -> ThreadHandoffUser | None:
     """The conversation a thread handoff names, as a channel caller.
 
-    It may only update the scheduled run's own thread, once, or read it to check.
+    It may only update the scheduled or channel run's own thread, once, or read it
+    to check.
     """
     raw = headers.get(THREAD_HANDOFF_HEADER)
     if raw is None:
@@ -272,7 +301,10 @@ def thread_handoff_user(
     if (
         method not in {"PATCH", "GET"}
         or path != f"/threads/{thread}"
-        or execution.get("mda_scheduled_run") is not True
+        or (
+            execution.get("mda_scheduled_run") is not True
+            and not _is_channel_run_execution(execution)
+        )
         or not conversation["source_thread_key"]
         or not is_trusted_source_provider(conversation["provider"])
     ):
@@ -286,7 +318,7 @@ def thread_handoff_user(
 
 
 def thread_handoff_grant(user: object) -> ThreadHandoffGrant | None:
-    """The thread and scheduled run a handoff caller may move, if it is one."""
+    """The thread and the run's principal a handoff caller may move, if it is one."""
     value = _field(user, "mda_thread_handoff")
     if value is None:
         return None

@@ -54,8 +54,10 @@ const pr: OpenPullRequest = {
   ci: "passing",
   failingChecks: ["lint"],
   pendingChecks: [],
+  requiredChecksPassing: true,
   missingChecks: [],
   unresolvedThreads: 1,
+  conversationResolutionRequired: false,
 }
 
 it.each([
@@ -122,6 +124,7 @@ it.each([
         error: "",
         request_id: "request",
         channel: "C0123456789",
+        channel_name: "reviews",
       })
     )
     const requested = await screen.findByRole("button", {
@@ -193,24 +196,23 @@ it.each([
     })
     const restored = screen.getByRole("button", { name: "Review requested" })
     expect(restored.hasAttribute("disabled")).toBe(false)
-    if (permalink) fireEvent.click(restored)
+    fireEvent.click(restored)
     expect(open.mock.calls).toEqual(
       permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
     )
     expect(request).not.toHaveBeenCalled()
     expect(successToast).not.toHaveBeenCalled()
-    expect(availability).toHaveBeenCalledTimes(1)
+    expect(availability).toHaveBeenCalledTimes(permalink ? 1 : 2)
   }
 )
 
-it.each(["loading", "error", "blocked", "approved"])(
+it.each(["loading", "error", "blocked", "additional approval required"])(
   "requires a known default or selected channel when availability is %s",
   async (state) => {
-    const current = {
-      ...pr,
-      reviewDecision:
-        state === "approved" ? ("approved" as const) : pr.reviewDecision,
-    }
+    const current: OpenPullRequest =
+      state === "additional approval required"
+        ? { ...pr, reviewDecision: "approved", reviewRequired: true }
+        : pr
     const availability = vi.spyOn(api, "humanReviewAvailability")
     if (state === "loading") availability.mockReturnValue(new Promise(() => {}))
     else if (state === "error")
@@ -252,7 +254,42 @@ it.each(["loading", "error", "blocked", "approved"])(
   }
 )
 
+it("keeps the channel picker mounted when live PR status changes", async () => {
+  const availability = vi
+    .spyOn(api, "humanReviewAvailability")
+    .mockResolvedValueOnce({
+      available: false,
+      active: false,
+      permalink: "",
+      blockers: [],
+    })
+    .mockReturnValue(new Promise(() => {}))
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  const picker = await screen.findByRole("button", { name: "Choose channel" })
+  picker.focus()
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview
+          pr={{ ...pr, ci: "pending", updatedAt: "2026-11-01T12:00:00Z" }}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole("button", { name: "Choose channel" })).toBe(picker)
+  expect(document.activeElement).toBe(picker)
+  expect(availability).toHaveBeenCalledTimes(1)
+})
+
 it("recovers channel selection after availability fails", async () => {
+  const successToast = vi.spyOn(toast, "success")
   const availability = vi
     .spyOn(api, "humanReviewAvailability")
     .mockRejectedValueOnce(new Error("Unavailable"))
@@ -269,6 +306,7 @@ it("recovers channel selection after availability fails", async () => {
     error: "",
     request_id: "request",
     channel: "C0123456789",
+    channel_name: "reviews",
   })
   render(
     <QueryClientProvider
@@ -297,6 +335,10 @@ it("recovers channel selection after availability fails", async () => {
   )
   await screen.findByRole("button", { name: "Review requested" })
   expect(request).toHaveBeenCalledWith(pr, "C0123456789")
+  expect(successToast).toHaveBeenCalledWith(
+    "Asked #reviews to review acme/app#7",
+    undefined
+  )
 })
 
 it("can request a selected channel without recovering availability", async () => {
@@ -324,13 +366,41 @@ it("can request a selected channel without recovering availability", async () =>
   await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
 })
 
-it("does not offer a review request for a draft", () => {
-  vi.spyOn(api, "humanReviewAvailability").mockReturnValue(
-    new Promise(() => {})
-  )
+it.each<Partial<OpenPullRequest>>([
+  { draft: true },
+  { reviewDecision: "approved" },
+])("does not offer a review request for %j", (status) => {
+  const availability = vi.spyOn(api, "humanReviewAvailability")
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <RequestHumanReview pr={{ ...pr, draft: true }} />
+      <RequestHumanReview pr={{ ...pr, ...status }} />
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole("button")).toBeNull()
+  expect(availability).not.toHaveBeenCalled()
+})
+
+it("removes the channel picker when the PR becomes approved", async () => {
+  vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
+    available: false,
+    active: false,
+    permalink: "",
+    blockers: [],
+  })
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  await screen.findByRole("button", { name: "Choose channel" })
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={{ ...pr, reviewDecision: "approved" }} />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   expect(screen.queryByRole("button")).toBeNull()

@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
@@ -8,10 +9,10 @@ import {
   useRef,
   useState,
 } from "react"
-import type { ReactNode } from "react"
 import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   chatDiffAction,
   isChatDiffActionTool,
@@ -31,8 +32,6 @@ interface ReviewChatActionsValue {
   repo: string
   number: number
   showInDiff: (range: DiffRange) => void
-  /** What an empty chat shows: ways in, specific to this pull request. */
-  emptyState?: ReactNode
   /** Code the reviewer attached to their next message. */
   excerpts?: ReadonlyArray<CodeExcerpt>
   removeExcerpt?: (index: number) => void
@@ -40,6 +39,9 @@ interface ReviewChatActionsValue {
   /** A question to send as soon as the chat can. */
   question?: string
   clearQuestion?: () => void
+  /** The next reply to a passage of the page, for the composer to take. */
+  reply?: PassageReply
+  takeReply?: (reply: PassageReply) => boolean
 }
 
 export const ReviewChatActionsContext =
@@ -150,13 +152,17 @@ function ReviewChatActionList({
         Added to{" "}
         {sameLogin(action.login, viewer) ? "your" : `@${action.login}'s`}{" "}
         pending review on{" "}
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={`${action.range.file}:${rangeLabel(action.range)}`}
           type="button"
           onClick={() => review.showInDiff(action.range)}
-          className="font-mono underline-offset-2 hover:underline"
+          className="h-auto border-0 px-0 font-mono underline-offset-2 hover:underline"
         >
           {action.range.file}:{rangeLabel(action.range)}
-        </button>
+        </Button>
       </p>
     ) : action.kind === "comment" ? (
       <ProposedCommentCard

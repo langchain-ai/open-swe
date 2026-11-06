@@ -2,11 +2,12 @@
 
 from openswe.slack.blocks import Block, context, section
 from openswe.slack.client import (
-    add_slack_reaction,
     format_slack_web_link_footer,
     get_slack_permalink,
     post_slack_thread_reply,
 )
+from openswe.slack.request import SlackRequest
+from openswe.utils.dashboard_links import dashboard_thread_url
 
 
 def breakout_root_blocks(text: str, dashboard_url: str | None) -> list[Block]:
@@ -15,9 +16,6 @@ def breakout_root_blocks(text: str, dashboard_url: str | None) -> list[Block]:
     if footer:
         blocks.append(context(footer))
     return blocks
-
-
-BREAKOUT_REACTION = "leftwards_arrow_with_hook"
 
 
 async def source_thread_line(channel_id: str, message_ts: str) -> str:
@@ -30,22 +28,30 @@ async def source_thread_line(channel_id: str, message_ts: str) -> str:
 async def mark_broken_out(
     channel_id: str,
     thread_ts: str,
-    request_ts: str,
     breakout_channel_id: str,
     breakout_ts: str,
 ) -> None:
-    """React to the request and link the breakout thread from the source thread."""
+    """Link the breakout thread from the source thread."""
     permalink = (
         await get_slack_permalink(breakout_channel_id, breakout_ts)
         or f"https://slack.com/archives/{breakout_channel_id}/p{breakout_ts.replace('.', '')}"
     )
     where = "" if breakout_channel_id == channel_id else f" in <#{breakout_channel_id}>"
     text = f"Continued in <{permalink}|the breakout thread>{where}."
-    await notify_breakout(channel_id, thread_ts, request_ts, text)
+    await notify_breakout(channel_id, thread_ts, text)
 
 
-async def notify_breakout(channel_id: str, thread_ts: str, request_ts: str, text: str) -> None:
-    await add_slack_reaction(channel_id, request_ts, BREAKOUT_REACTION)
+async def notify_web_breakout(request: SlackRequest) -> None:
+    """Tell the Slack thread a ``/breakout:web`` came from where it continues."""
+    await notify_breakout(
+        request.context_channel_id,
+        request.context_thread_ts,
+        f"<@{request.user_id}> continued in a "
+        f"<{dashboard_thread_url(request.thread_id or '')}|private web breakout>.",
+    )
+
+
+async def notify_breakout(channel_id: str, thread_ts: str, text: str) -> None:
     await post_slack_thread_reply(
         channel_id,
         thread_ts,

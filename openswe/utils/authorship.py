@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx2
+from runtime_api import sandbox_setup
 
 from openswe.analytics.identity import DisplayNameSource
 from openswe.input_messages import PersonIdentity
@@ -33,13 +34,11 @@ _TOKEN_IDENTITY_CACHE_TTL = timedelta(hours=1)
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
-OPEN_SWE_BOT_NAME = "open-swe[bot]"
-# Use the open-swe user noreply address: the bot's numeric noreply
-# (215916821+open-swe[bot]@...) doesn't resolve to a GitHub account Vercel
-# accepts, which broke preview deploys on commits carrying this co-author.
-OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+OPEN_SWE_BOT_NAME = sandbox_setup.GIT_NAME
+OPEN_SWE_BOT_EMAIL = sandbox_setup.GIT_EMAIL
 
-PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
+PR_ATTRIBUTION_TEXT = "Made by [Robin]"
+PR_ATTRIBUTION_TEXTS = (PR_ATTRIBUTION_TEXT, "Made by [Open SWE]")
 PR_ATTRIBUTION_DEFAULT_URL = "https://github.com/langchain-ai/open-swe"
 PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
 
@@ -103,6 +102,10 @@ class ThreadParticipant:
     workspace_admin: bool = False
     draft_prs: bool = True
     instructions: str = ""
+    # What the person asked their runs to remember (``remember``), newest first.
+    memories: tuple[str, ...] = ()
+    # When to ``recall`` the memories the curator's triggers hold back, in place of them.
+    memory_triggers: tuple[str, ...] = ()
     email: str = ""
     timezone: str = ""
     linked: bool = False
@@ -128,6 +131,10 @@ class ThreadParticipant:
         person["new_prs"] = "as drafts" if self.draft_prs else "ready for review"
         if self.instructions.strip():
             person["standing_instructions"] = self.instructions.strip()
+        if self.memories:
+            person["personal_memories"] = "\n".join(f"- {memory}" for memory in self.memories)
+        if self.memory_triggers:
+            person["memory_triggers"] = "\n".join(f"- {line}" for line in self.memory_triggers)
         return person
 
 
@@ -218,7 +225,10 @@ async def _fetch_identity_from_github_token(github_token: str) -> CollaboratorId
         )
         if not display_name or not commit_email:
             return None
-        if commit_email == OPEN_SWE_BOT_EMAIL and display_name == OPEN_SWE_BOT_NAME:
+        if commit_email == OPEN_SWE_BOT_EMAIL and display_name in {
+            OPEN_SWE_BOT_NAME,
+            "open-swe[bot]",
+        }:
             return None
         return CollaboratorIdentity(
             display_name=display_name,
@@ -415,7 +425,7 @@ def add_pr_collaboration_note(
     )
     for line in pr_body.rstrip().splitlines():
         stripped = line.strip()
-        if stripped.startswith(PR_ATTRIBUTION_TEXT):
+        if stripped.startswith(PR_ATTRIBUTION_TEXTS):
             continue
         if any(
             stripped == f"_Opened collaboratively by {name} and open-swe._" for name in legacy_names

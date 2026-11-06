@@ -7,15 +7,17 @@ rows it consumed, so no update can overwrite another.
 import logging
 from collections.abc import Collection
 from datetime import datetime
-from typing import Self
+from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field
+from runtime_api.provenance import Provenance
 from sqlalchemy import BigInteger, Identity, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.input_messages import RunMessage
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject
 
@@ -101,11 +103,33 @@ class QueuedMessage(Base):
             await session.execute(delete(cls).where(cls.thread_id == thread_id))
             await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
+    @property
+    def run_message(self) -> RunMessage | None:
+        content = self.content
+        if (
+            isinstance(content, dict)
+            and content.get("role") in ("user", "system")
+            and isinstance(content.get("content"), str | list)
+        ):
+            return cast(RunMessage, content)
+        return None
+
+    @property
+    def hidden(self) -> bool:
+        message = self.run_message
+        return (
+            message is not None
+            and (provenance := Provenance.of(message)) is not None
+            and provenance.kind == "system"
+            and provenance.sender == "system:slack-note"
+        )
+
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
         from openswe.incidents.report import context_message
 
-        content = self.content
+        message = self.run_message
+        content = message["content"] if message is not None else self.content
         if isinstance(content, str):
             payload = _QueuedPayload(text=content)
         elif isinstance(content, list):

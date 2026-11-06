@@ -26,7 +26,7 @@ async def requester_login() -> str:
         )
     user = await User.for_identity("slack", slack_user_id)
     if user is None or not user.github_login:
-        raise GuideUnavailableError("the person asking has no GitHub account linked to Open SWE")
+        raise GuideUnavailableError("the person asking has no GitHub account linked to Robin")
     return user.github_login
 
 

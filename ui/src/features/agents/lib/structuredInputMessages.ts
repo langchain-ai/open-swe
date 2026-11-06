@@ -13,6 +13,8 @@ export type StructuredSenderKind = "person" | "system"
 const SILENT_SENDERS = new Set([
   "system:sender-context",
   "system:dashboard-handoff",
+  "system:slack-note",
+  "system:reminder",
 ])
 
 export function isSilentSender(sender: string): boolean {
@@ -35,6 +37,7 @@ export type ParsedStructuredInput =
       sender: string
       senderKind: StructuredSenderKind
       surface?: string
+      slackMessageUrl?: string
       taskEvent?: TaskEventMetadata
       replies?: Array<PassageReply>
     }
@@ -184,7 +187,12 @@ function splitContent(
 }
 
 const REPLY_ELEMENT_PATTERN = /(?:^|\n)<reply>\n([\s\S]*?)\n<\/reply>/g
-const PASSAGE_SOURCES = new Set<string>(["conversation", "terminal", "file"])
+const PASSAGE_SOURCES = new Set<string>([
+  "conversation",
+  "terminal",
+  "file",
+  "pull_request",
+])
 
 function isPassageSource(value: string | undefined): value is PassageSource {
   return value !== undefined && PASSAGE_SOURCES.has(value)
@@ -197,11 +205,13 @@ function replyElements(data: string): Array<PassageReply> {
     const source = fields.get("source")
     const selection = fields.get("selection")
     if (!isPassageSource(source) || !selection) return []
+    const part = fields.get("part")
     const file = fields.get("file")
     const lines = fields.get("lines")
     return [
       {
         source,
+        ...(part ? { part } : {}),
         ...(file ? { file } : {}),
         ...(lines ? { lines } : {}),
         before: fields.get("before") ?? "",
@@ -287,6 +297,18 @@ export function parseStructuredInput(
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
       const taskEvent = taskEventMetadata(attributes)
       const replies = replyElements(split.remainder)
+      const slackChannel = /^slack:([A-Z0-9]+)$/.exec(
+        attributes.channel ?? ""
+      )?.[1]
+      const slackTimestamp = /^\d+\.\d{6}$/.test(
+        attributes.slack_message_ts ?? ""
+      )
+        ? attributes.slack_message_ts?.replace(".", "")
+        : undefined
+      const slackMessageUrl =
+        attributes.surface === "slack" && slackChannel && slackTimestamp
+          ? `https://slack.com/archives/${slackChannel}/p${slackTimestamp}`
+          : undefined
       return {
         type: "message",
         content: decodeXmlText(split.content),
@@ -294,6 +316,7 @@ export function parseStructuredInput(
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
+        ...(slackMessageUrl ? { slackMessageUrl } : {}),
         ...(taskEvent ? { taskEvent } : {}),
       }
     }

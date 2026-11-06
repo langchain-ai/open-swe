@@ -23,9 +23,9 @@ from openswe.dashboard.oauth import (
     redeem_connect_handoff,
     require_session,
     sanitize_redirect_to,
-    session_user_id,
     valid_handoff_challenge,
 )
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
     SlackIdentity,
@@ -36,7 +36,6 @@ from openswe.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
-from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +121,7 @@ async def slack_callback(
         _clear_slack_state_cookie(response)
         return response
 
-    session = require_session(request)
+    session = await require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (
@@ -160,14 +159,17 @@ async def _link_slack_identity(
     session: dict[str, Any], *, slack_user_id: str, email: str, team_id: str
 ) -> None:
     """Attach the Slack account to the person the session belongs to."""
-    github_login = session["sub"]
-    user = await User.for_session(session_user_id(session), github_login)
+    principal = DashboardPrincipal.from_session(session)
+    github_login = principal.github_login
+    if github_login is None:
+        raise HTTPException(403, "Link a GitHub account before linking Slack")
+    user = await principal.user()
     if user is None:
         logger.warning(
             "Slack identity not linked: no user for this GitHub login",
             extra={"github_login": github_login},
         )
-        raise HTTPException(409, "no Open SWE account for your GitHub login — sign in again")
+        raise HTTPException(409, "no Robin account for your GitHub login — sign in again")
     await user.link("slack", slack_user_id, email=email, team_id=team_id)
 
 

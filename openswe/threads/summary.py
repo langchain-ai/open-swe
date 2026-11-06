@@ -12,6 +12,7 @@ from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
+from openswe.memories.store import CURATOR_THREAD_KEY
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     REVIEWER_UNTITLED,
@@ -23,6 +24,8 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
+from openswe.threads.identity import ThreadIdentity
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -117,9 +120,28 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("visibility", "public") != "public"
 
 
+PLUGIN_CHAT_KEY = "plugin_chat"
+"""Thread metadata naming the plugin install whose dock a thread chats in."""
+
+APP_PREVIEW_KEY = "app_preview"
+"""Thread metadata set once its agent previews an app it builds beside the thread."""
+
+
+def chats_beside_plugin(metadata: Mapping[str, object]) -> bool:
+    """Whether a plugin may be open beside the thread to answer its tools."""
+    return bool(metadata.get(PLUGIN_CHAT_KEY) or metadata.get(APP_PREVIEW_KEY))
+
+
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     """Threads that remain accessible directly but stay out of thread lists."""
-    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
+    if (
+        metadata.get("unlisted") is True
+        or metadata.get("review_chat") is True
+        or bool(metadata.get(PLUGIN_CHAT_KEY))
+    ):
+        return True
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    return slack_thread is not None and slack_thread.is_concierge
 
 
 def thread_is_readable(
@@ -130,12 +152,18 @@ def thread_is_readable(
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
+    if login and ThreadIdentity(login).user_id is not None:
+        return thread_is_private(metadata) and thread_is_owner(metadata, login)
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
         return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
-        or is_admin(email, login=login)
+        or (
+            not login.startswith("user:") and is_admin(email, login=login)
+            if login
+            else is_admin(email)
+        )
     )
 
 
@@ -146,6 +174,8 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     shared before such threads were kept private. Nobody prompts a mirrored
     Claude Code session here: it runs in Claude Code.
     """
+    if login and ThreadIdentity(login).user_id is not None:
+        return thread_is_readable(metadata, login)
     source = thread_source(metadata)
     return (
         source in _SURFACED_SOURCES
@@ -181,6 +211,9 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata):
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
+    # Its wake run must take direction from nobody, and a message would join that run.
+    if metadata.get(CURATOR_THREAD_KEY):
+        raise HTTPException(403, "The memory curator's thread is read-only.")
 
 
 def _assert_thread_postable(
@@ -190,8 +223,8 @@ def _assert_thread_postable(
     # A run here would start without the history the upload is about to seed.
     if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
         raise HTTPException(409, "this thread is waiting for its session upload")
-    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
-        email, login=login
+    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not (
+        not login.startswith("user:") and is_admin(email, login=login)
     ):
         raise HTTPException(403, "only admins can send messages in this thread")
 
@@ -474,6 +507,8 @@ async def _thread_summary(
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
     bridge_status: bool = True,
+    viewer_login: str | None = None,
+    read_states: Mapping[str, JsonObject] | None = None,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
@@ -501,8 +536,23 @@ async def _thread_summary(
     pr_title = metadata.get("pr_title")
     pr_state = metadata.get("pr_state")
     thread_category, origin, trigger_kind = _thread_classification(metadata)
+    review = ReviewSessionMetadata.parse(metadata)
 
     thread_id = thread.get("thread_id") or thread.get("id")
+    read_metadata: Mapping[str, object] = {}
+    if viewer_login and isinstance(thread_id, str):
+        saved = (
+            read_states.get(thread_id)
+            if read_states is not None
+            else await THREAD_READ_STATES.saved(viewer_login, thread_id)
+        )
+        if saved is not None:
+            read_metadata = saved
+        elif thread_is_owner(metadata, viewer_login) or (
+            review is not None and review.owned_by(viewer_login)
+        ):
+            read_metadata = metadata
+    viewed_at = read_metadata.get("last_viewed_at_ms")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     browser = ThreadBrowser.of(metadata)
@@ -530,6 +580,10 @@ async def _thread_summary(
             else None
         ),
         "adminThread": metadata.get("admin_thread") is True,
+        "concierge": bool(
+            (slack_thread := SourceContext.from_metadata(metadata).slack_thread)
+            and slack_thread.is_concierge
+        ),
         "visibility": metadata.get("visibility", "public"),
         "transcript": (
             TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
@@ -538,6 +592,7 @@ async def _thread_summary(
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
         "workspace": metadata.get("workspace") or metadata.get("environment"),
+        "projectId": _metadata_string(metadata, "project_id"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),
         "origin": origin,
@@ -551,12 +606,10 @@ async def _thread_summary(
             and _metadata_string(metadata, "automation_action_posted_at") is not None
         ),
         "status": status,
-        "viewed": _is_thread_viewed(metadata, latest_run_id),
-        "viewedAt": (
-            int(metadata["last_viewed_at_ms"])
-            if isinstance(metadata.get("last_viewed_at_ms"), (int, float))
-            else None
-        ),
+        "latestRunId": _thread_run_id(metadata, latest_run_id),
+        "viewed": read_metadata.get("viewed") is not False
+        and _is_thread_viewed(read_metadata, _thread_run_id(metadata, latest_run_id)),
+        "viewedAt": int(viewed_at) if isinstance(viewed_at, (int, float)) else None,
         "resolved": _is_thread_resolved(metadata),
         "attentionReason": _metadata_string(metadata, "attention_reason"),
         "resolvedAt": (
@@ -622,7 +675,7 @@ async def _thread_summary(
             key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
         }
         summary["diffStats"] = latest_pr["diffStats"]
-    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+    if review is not None:
         summary["reviewPage"] = {
             "owner": review.repo_owner,
             "repo": review.repo_name,
@@ -634,6 +687,7 @@ async def _thread_summary(
             summary["status"] = "error"
         elif status == "idle" and review.walkthrough_state == "ready":
             summary["status"] = "finished"
+        review = review.model_copy(update={"last_viewed_at_ms": summary["viewedAt"]})
         summary["viewed"] = summary["viewed"] and not review.unseen_walkthrough
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.

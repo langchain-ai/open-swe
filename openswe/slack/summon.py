@@ -15,12 +15,12 @@ from openswe.slack.payloads import SlackChannelContext, SlackEvent
 from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import restore_slack_thinking_status
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
 
-SUMMON_REACTION = "openswe"
+SUMMON_REACTION = "robin"
+SUMMON_REACTIONS = frozenset({SUMMON_REACTION, "openswe"})
 _SUMMON_REACTION_SENDER: SystemIdentity = {
     "id": "system:slack-reaction",
     "display_name": "Slack reaction",
@@ -53,7 +53,7 @@ async def process_slack_summon_reaction(
         return
     message = await fetch_slack_thread_message_by_ts(item.channel, item.ts, item.ts)
     # Later reactors are +1s, and acting on each would interrupt the first one's run.
-    if message is None or _first_summoner(message) != user_id:
+    if message is None or _first_summoner(message, event.reaction) != user_id:
         logger.info(
             "Ignoring Slack summon reaction that is not the first on its message",
             extra={"slack_channel_id": item.channel, "slack_message_ts": item.ts},
@@ -66,12 +66,13 @@ async def process_slack_summon_reaction(
         thread_ts=thread_ts,
         event_ts=event.event_ts,
         original_message_ts=item.ts,
+        source_message_ts=item.ts,
         event_id=event_id,
         user_id=user_id,
         text=prompt(
             "slack/reaction-summon",
             reactor=user_id,
-            reaction=SUMMON_REACTION,
+            reaction=event.reaction,
             message_ts=item.ts,
         ),
         bot_user_id=bot_user_id,
@@ -83,12 +84,16 @@ async def process_slack_summon_reaction(
     await run_slack_task(request.target, _dispatch(request))
 
 
-def _first_summoner(message: dict[str, object]) -> str:
+def _first_summoner(message: dict[str, object], reaction_name: str) -> str:
     reactions = message.get("reactions")
     for reaction in reactions if isinstance(reactions, list) else []:
-        if isinstance(reaction, dict) and reaction.get("name") == SUMMON_REACTION:
+        if isinstance(reaction, dict) and reaction.get("name") in SUMMON_REACTIONS:
             users = reaction.get("users")
-            return str(users[0]) if isinstance(users, list) and users else ""
+            return (
+                str(users[0])
+                if reaction.get("name") == reaction_name and isinstance(users, list) and users
+                else ""
+            )
     return ""
 
 
@@ -97,12 +102,10 @@ async def _dispatch(request: SlackRequest) -> None:
         return
     await restore_slack_thinking_status(request.channel_id, request.thread_ts)
     try:
-        thread_id = await resolve_slack_thread_id(
-            langgraph_client(), request.channel_id, request.thread_ts
-        )
+        thread_id = await resolve_slack_thread_id(request.channel_id, request.thread_ts)
     except SlackThreadMappingError as exc:
         raise SlackRequestError(
-            "Open SWE found conflicting state for this Slack thread and will not guess "
+            "Robin found conflicting state for this Slack thread and will not guess "
             "which agent thread to use."
         ) from exc
     repo = await common.get_slack_repo_config(

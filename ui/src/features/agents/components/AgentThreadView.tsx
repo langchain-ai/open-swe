@@ -6,6 +6,7 @@ import {
 } from "@/features/reviews/components/ReviewChatActions"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import {
   Profiler,
   useCallback,
@@ -23,7 +24,6 @@ import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
-import { formatRelativeTime } from "@/lib/utils"
 
 import type {
   AgentPullRequest,
@@ -39,6 +39,7 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
+import { ThreadGoalBar } from "@/features/agents/components/ThreadGoalBar"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import {
   readStoredPanelCollapsed,
@@ -138,14 +139,10 @@ export function AgentThreadView({
   composerDraft,
 }: AgentThreadViewProps) {
   const reviewChat = useContext(ReviewChatActionsContext)
+  const embedded = useContext(EmbeddedThreadContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
-  const [dismissedWarning, setDismissedWarning] = useState("")
-  const workspaceWarningKey = JSON.stringify([
-    thread.id,
-    source.kind === "transcript" ? source.workspaceStale : null,
-  ])
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -194,7 +191,9 @@ export function AgentThreadView({
   }, [localThread, refetchLocalBridge])
   // A "This Mac" thread works in a checkout other threads on this machine may
   // share, so its branch and worktree are shown, and switched, from here.
-  const localRefsQuery = useLocalRepoRefs(localThread?.cwd)
+  const localRefsQuery = useLocalRepoRefs(
+    localThread?.managedTaskFolder ? undefined : localThread?.cwd
+  )
   const localRepoRefs = localRefsQuery.data
   const refetchLocalRepoRefs = localRefsQuery.refetch
   const localWorktreePath = localThread?.worktreePath ?? null
@@ -235,13 +234,12 @@ export function AgentThreadView({
   const canMove =
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
-    Boolean(thread.repoFullName) &&
     thread.visibility === "private" &&
     ownsThread
   // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
-    !reviewChat && (thread.pullRequests?.length ?? 0) > 0
+    !embedded && (thread.pullRequests?.length ?? 0) > 0
   )
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
@@ -275,15 +273,47 @@ export function AgentThreadView({
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
-  const baseMessages = source.messages
+  const login = session.data?.login
+  const displayName = session.data?.display_name || undefined
+  // A message sent from here keeps the label it showed while pending until the
+  // transcript names its sender, which waits on the run introducing them.
+  const [sentLabels, setSentLabels] = useState<ReadonlyMap<string, string>>(
+    () => new Map()
+  )
+  const senderName = pendingSenderName(source.messages, login, displayName)
+  const unlabeled = senderName
+    ? (thread.pendingMessages ?? []).filter(
+        (message) => !sentLabels.has(message.id)
+      )
+    : []
+  if (senderName && unlabeled.length > 0) {
+    setSentLabels(
+      new Map([
+        ...sentLabels,
+        ...unlabeled.map((message) => [message.id, senderName] as const),
+      ])
+    )
+  }
+  const baseMessages = useMemo(
+    () =>
+      source.messages.map((message) => {
+        const label =
+          message.author === "user" && !message.structuredSenderName
+            ? sentLabels.get(message.id)
+            : undefined
+        return label ? { ...message, structuredSenderName: label } : message
+      }),
+    [sentLabels, source.messages]
+  )
+  // Until the source has hydrated, only the thread record knows a run is live.
+  const sourceRunning =
+    source.isRunning || (source.isHydrating && thread.status === "running")
   const isStreaming =
     source.kind === "transcript"
-      ? source.isRunning
+      ? sourceRunning
       : thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
-  const login = session.data?.login
-  const displayName = session.data?.display_name || undefined
   // Only its sender may act on a queued follow-up; the server enforces it too.
   const isOwnQueued = useCallback(
     (entry: QueuedTurn) => login !== undefined && entry.senderLogin === login,
@@ -418,6 +448,16 @@ export function AgentThreadView({
   } | null>(null)
   const addReply = (reply: PassageReply) =>
     setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
+  const pageReply = reviewChat?.reply
+  const takePageReply = reviewChat?.takeReply
+  useEffect(() => {
+    if (!pageReply || !takePageReply?.(pageReply)) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setAddedReply((previous) => ({
+      key: (previous?.key ?? 0) + 1,
+      reply: pageReply,
+    }))
+  }, [pageReply, takePageReply])
   const restoreQueuedToComposer = useCallback(
     (
       texts: ReadonlyArray<string>,
@@ -601,9 +641,9 @@ export function AgentThreadView({
       visiblePendingMessages(
         thread.pendingMessages?.filter((message) => !message.queued),
         [...baseMessages, ...queued.map((entry) => entry.message)],
-        pendingSenderName(baseMessages, login, displayName)
+        senderName
       ),
-    [baseMessages, displayName, login, queued, thread.pendingMessages]
+    [baseMessages, queued, senderName, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -646,6 +686,7 @@ export function AgentThreadView({
         id: entry.message.id,
         content: queuedText(entry),
         images: queuedImages(entry),
+        replies: entry.message.replies,
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
         mine: isOwnQueued(entry),
@@ -656,6 +697,7 @@ export function AgentThreadView({
           id: message.id,
           content: message.content,
           images: message.images,
+          replies: message.replies,
           createdAt: message.createdAt,
           pending: true,
         })),
@@ -683,8 +725,8 @@ export function AgentThreadView({
         : null,
     [source.hasOlder, source.isLoadingOlder, source.loadOlder]
   )
-  const isThinking = source.isRunning
-  const settingUpSandbox = isThinking && baseMessages.length === 0
+  const isThinking = sourceRunning
+  const settingUpSandbox = source.isRunning && baseMessages.length === 0
   const reconnect = useConnectionStatus(source.connection)
   // The transcript hydrates once: the SDK's state fetch, or the event log's
   // snapshot. Show a loading state during it instead of the empty state.
@@ -735,8 +777,8 @@ export function AgentThreadView({
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        {/* The review page's rail is the header for its chat. */}
-        {!reviewChat && (
+        {/* The page around an embedded thread is its header. */}
+        {!embedded && (
           <AgentThreadHeader
             key={thread.id}
             title={thread.title}
@@ -770,7 +812,7 @@ export function AgentThreadView({
             >
               {bridgeError
                 ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
+                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Robin app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
             </Banner>
           </div>
         )}
@@ -802,25 +844,6 @@ export function AgentThreadView({
             </Banner>
           </div>
         )}
-        {source.kind === "transcript" && source.workspaceStale && (
-          <div
-            hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3"
-          >
-            <Banner
-              key={workspaceWarningKey}
-              intent="warning"
-              dismissible
-              onDismiss={() => setDismissedWarning(workspaceWarningKey)}
-            >
-              {`The ${source.workspaceStale.workspaceName} workspace image this sandbox started from ${
-                source.workspaceStale.capturedAt
-                  ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
-                  : "has never been refreshed"
-              }, so its repositories may be out of date. Open SWE continued anyway and is refreshing the image in the background.`}
-            </Banner>
-          </div>
-        )}
         {thread.attentionReason === "prs_closed" && !thread.resolved && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
@@ -833,8 +856,7 @@ export function AgentThreadView({
                 />
               }
             >
-              Every pull request from this thread is merged or closed. Resolve
-              the thread if the work is done, or send a follow-up to keep going.
+              Every pull request from this thread is merged or closed.
             </Banner>
           </div>
         )}
@@ -912,7 +934,7 @@ export function AgentThreadView({
                             Reload to try again.
                           </Banner>
                         ) : (
-                          (reviewChat?.emptyState ?? (
+                          (embedded?.emptyState ?? (
                             <p className="text-xs text-tertiary">
                               This thread has no messages yet.
                             </p>
@@ -931,6 +953,9 @@ export function AgentThreadView({
                     streamIsLoading={source.isRunning}
                     scrollControlRef={scrollControlRef}
                     isThinking={isThinking}
+                    isWaitingForDelegatedWork={
+                      thread.waitingForDelegatedWork && !source.isRunning
+                    }
                     isOffloading={source.isOffloading}
                     reconnectLabel={reconnect.label}
                     settingUpSandbox={settingUpSandbox}
@@ -944,7 +969,8 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              {!reviewChat && (
+              {!embedded && <ThreadGoalBar threadId={thread.id} />}
+              {!embedded && (
                 <ThreadPullRequests
                   pullRequests={
                     // A local branch's PR may come from `gh`, which the thread
@@ -963,6 +989,12 @@ export function AgentThreadView({
               )}
               {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
+                key={`${session.data?.user_id}:${thread.id}`}
+                draftKey={
+                  session.data?.user_id
+                    ? `${session.data.user_id}:thread:${thread.id}`
+                    : undefined
+                }
                 placeholder={
                   moving
                     ? `Moving this thread to ${moving === "local" ? "This Mac" : "Cloud"}…`
@@ -999,13 +1031,17 @@ export function AgentThreadView({
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
-                      selectedLocalRepoPath: localThread.cwd,
+                      // A task folder is the thread's own, not a project.
+                      selectedLocalRepoPath: localThread.managedTaskFolder
+                        ? null
+                        : localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
                       onRefreshLocalRepoBranch: () =>
                         void refetchLocalRepoRefs(),
-                      onSelectLocalRepoBranch: (branch: string) =>
-                        void selectLocalBranch(branch),
+                      onSelectLocalRepoBranch: localRepoRefs.length
+                        ? (branch: string) => void selectLocalBranch(branch)
+                        : undefined,
                       localWorkspaceMode: localWorktreePath
                         ? ("worktree" as const)
                         : ("local" as const),
@@ -1033,8 +1069,8 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      {/* The review page is already the diff; a second panel only squeezes the chat. */}
-      {!reviewChat && (
+      {/* The page around it has its own context; a second panel only squeezes the chat. */}
+      {!embedded && (
         <AgentGitPanel
           thread={thread}
           onComment={canPost ? submitText : undefined}

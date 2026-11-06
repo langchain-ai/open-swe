@@ -9,11 +9,15 @@ DASHBOARD_HANDOFF_SENDER_ID = "system:dashboard-handoff"
 DASHBOARD_HANDOFF_BODY = (
     "This follow-up was sent from Web. The conversation has moved to Web, so answer in "
     "the dashboard stream with a normal assistant message. Do not call slack_reply "
-    "unless a later Slack message explicitly moves the conversation back to Slack."
+    "unless a later Slack message explicitly moves the conversation back to Slack, or "
+    "an event-subscription turn explicitly directs rollout/deployment results to the "
+    "Slack thread where that check was requested. That exception applies only to those results."
 )
 # Stamped by the proxy, never trusted from a client: another agent thread sent
 # this on its person's behalf, so it must not move the conversation to Web.
 RELAYED_FROM_KEY = "relayed_from_thread_id"
+# The run whose inbox carried ``RELAYED_FROM_KEY`` into run state.
+RELAY_RUN_ID_KEY = "relay_run_id"
 # Where a dashboard message carries its replies: beside the content, so they
 # survive both the transcript and the SDK stream paths.
 REPLIES_KEY = "replies"
@@ -31,7 +35,8 @@ class PassageReply(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source: Literal["conversation", "terminal", "file"]
+    source: Literal["conversation", "terminal", "file", "pull_request"]
+    part: str | None = Field(default=None, max_length=1_000)
     file: str | None = Field(default=None, max_length=1_000)
     lines: str | None = Field(default=None, max_length=40, pattern=r"^\d+(-\d+)?$")
     before: str = Field(default="", max_length=_CONTEXT_LIMIT)
@@ -43,6 +48,7 @@ class PassageReply(BaseModel):
         """The reply as the model reads it, source first and the comment last."""
         return {
             "source": self.source,
+            "part": self.part,
             "file": self.file,
             "lines": self.lines,
             "before": self.before,

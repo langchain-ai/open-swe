@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -6,7 +6,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { SettingsSection } from "@/components/AppShell"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import {
@@ -21,6 +21,7 @@ import {
 } from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
+import { ShadowReviewSection } from "./ShadowReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
@@ -49,13 +50,11 @@ function GeneralSection({
   workspaces,
   channelLabel,
   onSaved,
-  rebuildStatus,
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
-  channelLabel: (id: string) => string
+  channelLabel: (id: string, channelIds: ReadonlyArray<string>) => string
   onSaved: (saved: WorkspaceRecord) => void
-  rebuildStatus: ReactNode
 }) {
   const [draft, setDraft] = useState<WorkspaceDraft>(() =>
     draftFromWorkspace(record)
@@ -96,10 +95,9 @@ function GeneralSection({
         promptHint="Instructions appended to every run in this workspace"
         workspaceSlug={record.slug}
         workspaces={workspaces}
-        channelLabel={channelLabel}
+        channelLabel={(id) => channelLabel(id, draft.slackChannelIds)}
       />
       <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-space-3">
-        {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-error-secondary">
             {error}
@@ -179,9 +177,9 @@ export function WorkspaceSettingsPanel({
   // them is one of its settings.
   const modelOptions = useOptions(slug)
   const scope: SettingsScope = { kind: "workspace", slug }
-  const channelDirectory = useSlackChannelDirectory(canEdit)
-  const channelLabel = (id: string) =>
-    slackChannelLabel(channelDirectory.data, id)
+  const channelDirectory = useSlackChannelDirectory(true)
+  const channelLabel = (id: string, channelIds: ReadonlyArray<string>) =>
+    slackChannelLabel(channelDirectory.data, id, channelIds)
 
   if (record.isLoading) return <Skeleton className="h-64 w-full" />
   if (record.isError || !record.data) {
@@ -236,6 +234,12 @@ export function WorkspaceSettingsPanel({
         workspaces={options.data?.workspaces ?? []}
         channelLabel={channelLabel}
         onSaved={onSaved}
+      />
+      <WorkspaceSandboxSection
+        key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
+        record={record.data}
+        onSaved={onSaved}
+        onRebuildStarted={onRebuildStarted}
         rebuildStatus={
           (!repositoryRebuildTimedOut &&
             awaitingRepositoryRebuild(record.data)) ||
@@ -273,12 +277,6 @@ export function WorkspaceSettingsPanel({
           ) : null
         }
       />
-      <WorkspaceSandboxSection
-        key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
-        record={record.data}
-        onSaved={onSaved}
-        onRebuildStarted={onRebuildStarted}
-      />
       <WorkspaceProxySection
         key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}
         record={record.data}
@@ -302,6 +300,12 @@ export function WorkspaceSettingsPanel({
       <LLMGatewaySection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
+      <ShadowReviewSection
+        scope={scope}
+        models={(modelOptions.data?.models ?? []).filter(
+          (model) => model.can_be_default !== false
+        )}
+      />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection

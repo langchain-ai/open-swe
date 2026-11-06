@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, Literal, TypedDict
 
+from deepagents.backends.protocol import SandboxBackendProtocol
+
 from managed_deepagents._connections import ConnectionReference, is_connection_reference
 
 
@@ -92,10 +94,11 @@ class SandboxDefinition:
     #: Options that shape how MDA resolves the box rather than the create request.
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
         "_openswe_per_thread",
-        "_openswe_thread_id",
+        "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
         "_openswe_select",
+        "_openswe_without_sandbox",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -125,7 +128,6 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
             "run-scoped name automatically."
         )
 
-    _validate_thread_id(normalized.get("_openswe_thread_id"))
     _validate_create_fields(normalized.get("_openswe_create_fields"))
     if normalized.get("_openswe_no_manage_proxy") and normalized.get("proxy_config") is not None:
         raise TypeError(
@@ -155,6 +157,10 @@ _RESERVED_CREATE_FIELDS = frozenset(
 )
 
 
+class BoundSandboxMissingError(RuntimeError):
+    """The provider confirmed that the thread's bound workspace no longer exists."""
+
+
 @dataclass(frozen=True)
 class SandboxReplacement:
     """A thread's box replaced by a fresh one under its name; the old box is kept, renamed."""
@@ -165,18 +171,20 @@ class SandboxReplacement:
     stop_error: str | None = None
 
 
-async def open_sandbox(backend: object) -> str:
+async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     """Adopt or create the run's managed sandbox now and return its name.
 
     ``backend`` is ``runtime.backend``. The box is otherwise opened on first use.
+    Without ``wait`` this returns as soon as the box is asked for, while it boots;
+    its first use waits for it to be ready and runs the connectors' hooks.
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).aopen()
+    return await _managed_sandbox_of(backend).aopen(wait=wait)
 
 
 async def replace_sandbox(
-    backend: object, sandbox: SandboxDefinition | None = None
+    backend: object, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
 ) -> SandboxReplacement:
     """Give the run's thread a fresh managed sandbox under the same name.
 
@@ -186,13 +194,12 @@ async def replace_sandbox(
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox)
+    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
 
 
-def owning_thread(options: Mapping[str, object]) -> str | None:
-    """The thread whose box a definition uses, when not the run's own."""
-    thread_id = options.get("_openswe_thread_id")
-    return thread_id if isinstance(thread_id, str) else None
+def is_per_thread(options: Mapping[str, object]) -> bool:
+    """Whether the box is a thread's own, whose work a failure must never abandon."""
+    return options.get("_openswe_per_thread") is True
 
 
 def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefinition | None:
@@ -209,9 +216,10 @@ def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefiniti
     return selected
 
 
-def is_per_thread(options: Mapping[str, object]) -> bool:
-    """Whether the thread keeps one box whatever a dynamic selection's options."""
-    return options.get("_openswe_per_thread") is True
+def without_sandbox(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
+    """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
+    backend = sandbox.options.get("_openswe_without_sandbox")
+    return backend if isinstance(backend, SandboxBackendProtocol) else None
 
 
 def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
@@ -223,11 +231,6 @@ def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
 def manages_proxy(options: Mapping[str, object]) -> bool:
     """Whether MDA sets the box's proxy config before each command."""
     return options.get("_openswe_no_manage_proxy") is not True
-
-
-def _validate_thread_id(thread_id: object) -> None:
-    if thread_id is not None and (not isinstance(thread_id, str) or not thread_id.strip()):
-        raise TypeError("sandbox _openswe_thread_id must be a non-empty string")
 
 
 def _validate_create_fields(fields: object) -> None:

@@ -1,16 +1,15 @@
-"""What a graph factory plans for a run: its tools, middleware, models and subagents.
+"""What starting a run works out for it: its tools, models, subagents and loop rules.
 
 The model loop runs on Managed Deep Agents, which builds a tool for each of the
-planned tools and calls the backend to run it (``openswe.agent_api``).
+run's tools and calls the backend to run it (``openswe.agent_api``).
 """
 
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
-from deepagents.backends.protocol import BackendProtocol
-from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -19,11 +18,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck, InboxSpec, LoopRules
+from runtime_api.catalog import FileCheck, InboxSpec, LoopRules, McpServerSpec
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
-from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
@@ -31,13 +29,32 @@ _json = TypeAdapter(JsonValue)
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 
 
-def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
+def _parameters(tool: BaseTool) -> dict[str, JsonValue]:
     schema = tool.tool_call_schema
     if isinstance(schema, dict):
         return schema
     if issubclass(schema, BaseModel):
         return schema.model_json_schema()
     return schema.schema()
+
+
+# Each tool's parameters by the tool's identity, while it lives: a tool's schema never
+# changes, and working it out again builds a model of it for every call. Read only.
+_parameters_of: dict[int, tuple[weakref.ref[BaseTool], dict[str, JsonValue]]] = {}
+
+
+def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
+    """The JSON schema of ``tool``'s arguments, worked out once per tool."""
+    key = id(tool)
+    kept = _parameters_of.get(key)
+    if kept is not None and kept[0]() is tool:
+        return kept[1]
+    parameters = _parameters(tool)
+    _parameters_of[key] = (
+        weakref.ref(tool, lambda _gone: _parameters_of.pop(key, None)),
+        parameters,
+    )
+    return parameters
 
 
 def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
@@ -48,9 +65,7 @@ def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
         )
     return ToolDescription(
         name=name,
-        description=tool.description
-        + "\n\n"
-        + prompt("tools/mcp-provenance", provenance=provenance.model_dump_json()),
+        description=f"{tool.description}\n\n{provenance.note()}",
         parameters=tool_parameters(tool),
         mcp_provenance=provenance,
     )
@@ -102,49 +117,55 @@ type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]
 
 @dataclass
 class ToolSurface:
-    """A run as its graph factory plans it."""
+    """A run as starting it works it out, for its catalog."""
 
-    # The factory's own tools; its middleware adds theirs.
     base_tools: Sequence[PlannedTool] = ()
     dynamic: DynamicToolMiddleware | None = None
     excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
     integration_names: list[str] = field(default_factory=list)
-    # What a model loop running elsewhere needs from the graph: its own middleware,
-    # in order, and the models and subagents the factory picked.
-    middleware: Sequence[AgentMiddleware] = ()
+    # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
+    mcp_servers: Sequence[McpServerSpec] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
-    # The thread's files: its sandbox, with the paths this deployment serves routed in.
-    files: BackendProtocol | None = None
-    # Paths under ``files`` this deployment serves rather than the sandbox.
+    # Paths in the thread's files this deployment serves rather than the sandbox.
     backend_paths: tuple[str, ...] = ()
-    # Where the run's skills are under ``files``, a later source's skill taking the
+    # Where the run's skills are in the thread's files, a later source's skill taking the
     # place of an earlier one's of the same name.
     skill_sources: tuple[str, ...] = ()
     # Where large tool results and binary reads are offloaded.
     artifacts_root: str = "/"
-    # The guards on the shell commands the run's tools run, as tool-call middleware.
-    shell_guards: Sequence[AgentMiddleware] = ()
     # The checks on what the run's ``read_file`` calls return.
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
     # How the run reads what is sent to its thread while it runs, before each model call.
     inbox: InboxSpec | None = None
-    # What the hooks around each model call are built from, without the rest of the plan.
-    loop: LoopRules | None = None
+    # What MDA's middleware does around each model call.
+    loop: LoopRules = field(default_factory=LoopRules)
+    # The most model calls the run makes; None leaves it to the runtime.
+    model_call_limit: int | None = None
+    # Whether the thread coordinates a task through workers rather than synchronous subagents.
+    delegates: bool = False
+    # Tools offered to the model in every run of its kind, so its tool list stays the same
+    # from run to run; a run that may not use one is offered it disabled.
+    always_offered: Mapping[str, BaseTool] = field(default_factory=dict)
+
+    def disabled(self) -> frozenset[str]:
+        """The tools offered to the model that this run may not use."""
+        return frozenset(self.always_offered.keys() - self.tools.keys())
+
+    def catalog(self) -> list[ToolDescription]:
+        """Every tool the run offers, the disabled ones too, by name."""
+        offered = {**{name: self.always_offered[name] for name in self.disabled()}, **self.tools}
+        return [describe_tool(name, tool) for name, tool in sorted(offered.items())]
 
     async def prepare(self) -> None:
-        planned = [
-            *self.base_tools,
-            *(tool for middleware in self.middleware for tool in getattr(middleware, "tools", ())),
-        ]
         tools = {
             tool.name: tool
             for tool in (
                 item if isinstance(item, BaseTool) else as_tool(item)
-                for item in planned
+                for item in self.base_tools
                 if not isinstance(item, dict)
             )
         }
@@ -154,9 +175,6 @@ class ToolSurface:
             tools.update({tool.name: tool for tool in integrations})
         excluded = self.excluded | EXCLUDED_TOOLS
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
-
-    def catalog(self) -> list[ToolDescription]:
-        return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
 
 
 @dataclass(frozen=True)

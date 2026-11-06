@@ -1,6 +1,6 @@
 """After-agent middleware that closes a still-open review check run.
 
-``publish_review`` normally completes the ``Open SWE Review`` check run and
+``publish_review`` normally completes the ``Robin Review`` check run and
 clears ``review_check_run_id`` from reviewer thread metadata. If the run ends
 without ever publishing (crash, model-call limit, sandbox failure), the check
 would hang "in progress" on the PR forever. This hook closes it as neutral —
@@ -8,29 +8,13 @@ the review not completing is reviewer infrastructure failing, not the PR.
 """
 
 import logging
-from typing import Any
-
-from langchain.agents.middleware import AgentState, after_agent
-from langgraph.runtime import Runtime
 
 from openswe.github.thread_token import resolve_thread_github_token
-from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.review.findings import get_thread_metadata
 from openswe.review.publish import settle_review_check_run
 from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
-
-
-@scrub_middleware_inputs
-@after_agent
-async def settle_review_check_on_exit(
-    state: AgentState,
-    runtime: Runtime,
-) -> dict[str, Any] | None:
-    """Fail the tracked review check run if the run ended without publishing."""
-    await settle_review_check()
-    return None
 
 
 async def settle_review_check() -> None:
@@ -67,7 +51,7 @@ async def settle_review_check() -> None:
             conclusion = "neutral"
             title = "Review did not complete"
             summary = (
-                "The Open SWE review run ended without publishing a review. "
+                "The Robin review run ended without publishing a review. "
                 "Re-trigger the review by pushing a commit or re-requesting it."
             )
         await settle_review_check_run(

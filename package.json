@@ -4,7 +4,7 @@
   "packageManager": "pnpm@11.22.0",
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
-    "dev:desktop": "pnpm --dir desktop run dev",
+    "dev:desktop": "pnpm --filter open-swe-dashboard run build && OPEN_SWE_DESKTOP_UI_ARCHIVE=\"$PWD/ui/.output/desktop/ui.json.gz\" pnpm --dir desktop run dev",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "dev:prod": "node scripts/dev-prod.mjs",
     "build": "turbo run build",

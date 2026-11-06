@@ -7,8 +7,10 @@ from xml.etree import ElementTree
 
 import pytest
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
+from tests.conftest import serve_runs_from
 
 dispatch = importlib.import_module("openswe.dispatch")
 
@@ -96,13 +98,13 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
             "slack_channel_id": "C123",
             "slack_channel_name": "team-openswe",
             "invocation_id": invocation_id,
-            "prepare_run_id": invocation_id,
             "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
         }.items()
     )
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
+    assert "prepare_run_id" not in created["config"]["configurable"]
+    assert "prepare_run_id" not in created["metadata"]
     assert isinstance(invocation_id, str)
 
 
@@ -146,6 +148,23 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         assert created["config"]["metadata"]["user_id"] == str(user_id)
         assert created["metadata"]["ls_repo_provider"] == "github"
         assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
+        # Attributed to the person, but a run the backend starts acts as no one.
+        assert ACTING_USER_KEY not in created["metadata"]
+
+    # A follow-up the person sent themselves acts as them.
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="dashboard",
+        thread_title=None,
+        config={"configurable": {"github_login": "mason-gh"}},
+        client=client,
+        as_sender=True,
+    )
+    sent = client.runs.created[-1]
+    assert sent["metadata"][ACTING_USER_KEY] == str(user_id)
+    assert sent["config"]["metadata"][ACTING_USER_KEY] == str(user_id)
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -156,6 +175,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         config={"configurable": {"slack_thread": {"triggering_user_id": "unknown"}}},
         metadata={
             "user_id": str(user_id),
+            ACTING_USER_KEY: str(user_id),
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
             "ls_git_branch": "main",
@@ -164,6 +184,8 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     )
     unknown = client.runs.created[-1]["metadata"]
     assert "user_id" not in unknown
+    # Only the backend says whom a run acts as, never its caller.
+    assert ACTING_USER_KEY not in unknown
     assert "ls_attribution_identifier" not in unknown
     assert "ls_git_repo" not in unknown
     assert "ls_git_branch" not in unknown
@@ -209,8 +231,25 @@ async def test_create_durable_run_preserves_existing_prepare_id(
     created = client.runs.created[0]
     assert "webhook" not in created
     assert created["config"]["configurable"]["invocation_id"] == "existing"
-    assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+    assert "prepare_run_id" not in created["config"]["configurable"]
+    assert "prepare_run_id" not in created["metadata"]
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
+
+
+def test_langsmith_system_followup_runs_without_github() -> None:
+    configurable = dispatch.follow_up_configurable(
+        {
+            "owner_login": "user:019abcde-0000-7000-8000-000000000001",
+            "github_login": "admin",
+            "repo": {"owner": "private", "name": "repo"},
+        },
+        "thread-1",
+    )
+    assert configurable["auth_provider"] == "langsmith"
+    assert configurable["user_id"] == "019abcde-0000-7000-8000-000000000001"
+    assert configurable["repo_explicitly_none"] is True
+    assert "github_login" not in configurable
+    assert "repo" not in configurable
 
 
 def test_prepare_run_config_rejects_conflicting_invocation_ids() -> None:
@@ -234,7 +273,7 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
     user = await User.sign_in("github", "2001", login="mason-gh")
     await user.link("slack", "U123", team_id="T1")
 
-    run_input = await dispatch._dispatch_input(
+    run_input = await dispatch.dispatch_input(
         "hello",
         "slack",
         {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
@@ -253,6 +292,7 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
     client.threads.get.return_value = {
         "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(
@@ -280,6 +320,7 @@ async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
             "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
         }
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(

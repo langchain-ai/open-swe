@@ -8,7 +8,8 @@ PostgreSQL last wrote the row.
 """
 
 import logging
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import AsyncIterator, Collection, Iterable, Mapping
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
@@ -20,6 +21,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.incidents.document_models import IncidentHistory
+from openswe.incidents.evidence_tools import EvidenceCollector
 from openswe.incidents.models import (
     CommandReceipt,
     Incident,
@@ -66,6 +68,23 @@ class IncidentRow(Base):
     report: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
     history: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
     postmortem: Mapped[str | None] = mapped_column(default=None)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
+class IncidentRunEvidenceRow(Base):
+    __tablename__ = "incident_run_evidence"
+
+    incident: Mapped[UUID] = mapped_column(ForeignKey("incident.id", ondelete="CASCADE"))
+    run_id: Mapped[str]
+    collected: Mapped[JsonObject] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -252,6 +271,54 @@ class IncidentReports:
     ) -> IncidentReportRecord:
         await _set_part(incident_id, {"report": record.model_dump(mode="json")})
         return record
+
+
+class IncidentRunEvidence:
+    """The evidence each incident run collects, one row per run."""
+
+    @asynccontextmanager
+    async def collecting(
+        self, incident_id: IncidentId, run_id: str
+    ) -> AsyncIterator[EvidenceCollector]:
+        """The run's evidence so far, kept with what the caller adds to it.
+
+        The run's other calls wait for it meanwhile: a run's tool calls run in parallel.
+        """
+        async with postgres.session() as session:
+            incident = await session.scalar(
+                select(IncidentRow.id).where(IncidentRow.external_id == incident_id)
+            )
+            if incident is None:
+                raise MissingIncident(incident_id)
+            run = (
+                IncidentRunEvidenceRow.incident == incident,
+                IncidentRunEvidenceRow.run_id == run_id,
+            )
+            await session.execute(
+                insert(IncidentRunEvidenceRow)
+                .values(
+                    id=uuid7(),
+                    incident=incident,
+                    run_id=run_id,
+                    collected=EvidenceCollector().model_dump(mode="json"),
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[IncidentRunEvidenceRow.incident, IncidentRunEvidenceRow.run_id]
+                )
+            )
+            collected = await session.scalar(
+                select(IncidentRunEvidenceRow.collected).where(*run).with_for_update()
+            )
+            collector = EvidenceCollector.model_validate(collected)
+            yield collector
+            await session.execute(
+                update(IncidentRunEvidenceRow)
+                .where(*run)
+                .values(
+                    collected=collector.model_dump(mode="json"),
+                    updated_at=func.clock_timestamp(),
+                )
+            )
 
 
 class IncidentHistories:

@@ -1,4 +1,4 @@
-Save feedback explicitly provided by the user about a published Open SWE review assessment.
+Save feedback explicitly provided by the user about a published Robin review assessment.
 
 Use the GitHub review ID of the assessment the user is rating.
 Submit `helpful` or `unhelpful` and their optional comment; never infer or invent a rating.

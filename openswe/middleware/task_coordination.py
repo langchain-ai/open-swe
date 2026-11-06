@@ -1,14 +1,19 @@
 import logging
-from collections.abc import Mapping
 from typing import Self
 from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
+from runtime_api.catalog import TaskContext as LoopTaskContext
+from runtime_api.provenance import Provenance
 
 from openswe.github.proxy import maybe_refresh_proxy_token
-from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
-from openswe.middleware.model_call_shape import CallShape
+from openswe.input_messages import (
+    RunMessage,
+    dynamic_context_hash,
+    run_context,
+    visible_dynamic_context_hashes,
+)
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.schemas import Thread
@@ -23,10 +28,14 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         self.thread_id = thread_id
         self.enabled = enabled
         self.context = context
-        self.instructions = prompt(
-            "tasks/role",
-            role=context.membership.role if context else "coordinator",
-            delegation_enabled=self.can_delegate,
+        # The thread's role, told in the conversation so the system prompt never changes.
+        self.instructions = run_context(
+            "task-role",
+            prompt(
+                "tasks/role",
+                role=context.membership.role if context else "coordinator",
+                delegation_enabled=self.can_delegate,
+            ),
         )
 
     @classmethod
@@ -34,7 +43,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         enabled = await Thread.model_validate(
             await read_thread(thread_id)
         ).metadata.delegation_supported()
-        context = await TaskMembership.context_for_thread(thread_id)
+        context = await TaskMembership.delegation_for_thread(thread_id)
         if context is not None and context.membership.role == "worker":
             delegation = await TaskDelegation.get(thread_id)
             if delegation is not None and delegation.cancelled:
@@ -51,21 +60,19 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     def can_delegate(self) -> bool:
         return self.enabled and not self.is_worker
 
-    async def context_message(self) -> str | None:
-        """The task's context, as the model is told it; a worker's coordinator's proxy kept fresh."""
-        if self.context is None:
-            self.context = await TaskMembership.context_for_thread(self.thread_id)
+    @property
+    def coordinator_thread_id(self) -> str | None:
+        """A worker's coordinator, whose sandbox the worker works in."""
+        return self.context.task.require_coordinator() if self.is_worker and self.context else None
+
+    def task_context(self) -> LoopTaskContext:
+        """The thread's role and task, as an MDA run's loop tells the model them."""
+        return LoopTaskContext(instructions=self.instructions, message=self.context_message())
+
+    def context_message(self) -> str | None:
+        """The task's context, as the model is told it."""
         if self.context is None:
             return None
-        if self.is_worker:
-            try:
-                await maybe_refresh_proxy_token(self.context.task.require_coordinator())
-            except Exception:
-                logger.warning(
-                    "Failed to refresh the task's GitHub proxy",
-                    exc_info=True,
-                    extra={"thread_id": self.thread_id},
-                )
         return prompt(
             "tasks/context",
             task_id=str(self.context.task.id),
@@ -76,14 +83,31 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     async def abefore_model(
         self, state: AgentState, runtime: Runtime
     ) -> dict[str, list[RunMessage]] | None:
-        content = await self.context_message()
-        if content is None or dynamic_context_hash(content) in visible_dynamic_context_hashes(
-            state
-        ):
-            return None
-        return {"messages": [{"role": "user", "id": f"task-context:{uuid4()}", "content": content}]}
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        return call.appending(self.instructions)
+        if self.context is None:
+            self.context = await TaskMembership.delegation_for_thread(self.thread_id)
+        if (coordinator := self.coordinator_thread_id) is not None:
+            # A worker keeps its coordinator's sandbox token fresh, as an MDA run's
+            # ``refresh_github_proxy`` does.
+            try:
+                await maybe_refresh_proxy_token(coordinator)
+            except Exception:
+                logger.warning(
+                    "Failed to refresh the task's GitHub proxy",
+                    exc_info=True,
+                    extra={"thread_id": self.thread_id},
+                )
+        visible = visible_dynamic_context_hashes(state)
+        added: list[RunMessage] = [
+            {
+                "role": "user",
+                "id": f"{prefix}{uuid4()}",
+                "content": content,
+                "additional_kwargs": Provenance.harness("task_context").stamp(),
+            }
+            for prefix, content in (
+                ("task-role:", self.instructions),
+                ("task-context:", self.context_message()),
+            )
+            if content is not None and dynamic_context_hash(content) not in visible
+        ]
+        return {"messages": added} if added else None

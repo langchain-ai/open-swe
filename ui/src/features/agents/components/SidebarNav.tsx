@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
@@ -7,6 +8,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
@@ -14,10 +16,16 @@ import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
+import { useRef } from "react"
+
+import type { IconComponent } from "@langchain/macaw-components/Icon"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import { pluginIcon, pluginRoot } from "@/features/plugins/lib/icons"
+import { usePlugins } from "@/features/plugins/lib/queries"
+import type { SectionRoot } from "@/lib/appLocation"
 import {
   getLastSectionLocation,
   sectionOf,
@@ -25,13 +33,19 @@ import {
 } from "@/lib/appLocation"
 import { cn } from "@/lib/utils"
 
-const NAV = [
+interface NavItem {
+  to: SectionRoot
+  label: string
+  icon: IconComponent
+}
+
+const NAV: ReadonlyArray<NavItem> = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: SirenIcon },
-] as const
+]
 
 const ROW =
   "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
@@ -45,46 +59,79 @@ export function SidebarNav({
   onNavigate: () => void
 }) {
   const { prefs, toggleNavItemHidden } = useSidebarPrefs()
+  const plugins = usePlugins()
   const activeSection = useRouterState({
     select: (state) => sectionOf(state.location.pathname),
   })
   const linkTarget = useHrefLinkOptions()
-  const hidden = NAV.filter((item) => prefs.hiddenNavItems.includes(item.to))
-  const target = (to: (typeof NAV)[number]["to"]) =>
+  // Keep focus on the page when navigation closes the menu.
+  const navigated = useRef(false)
+  const items: ReadonlyArray<NavItem> = [
+    ...NAV,
+    ...(plugins.data ?? []).map((plugin) => ({
+      to: pluginRoot(plugin.name),
+      label: plugin.manifest.sidebar.label,
+      icon: pluginIcon(plugin.manifest.sidebar.icon),
+    })),
+  ]
+  const hidden = items.filter((item) => prefs.hiddenNavItems.includes(item.to))
+  const target = (to: SectionRoot) =>
     linkTarget(activeSection === to ? to : getLastSectionLocation(to))
 
   return (
     <nav className={cn("flex flex-col gap-0.5", className)}>
-      {NAV.filter((item) => !hidden.includes(item)).map((item) => (
-        <Link
-          key={item.to}
-          {...target(item.to)}
-          onClick={onNavigate}
-          className={cn(ROW, activeSection === item.to && SELECTED_ROW)}
-        >
-          <item.icon size={16} weight="regular" className="shrink-0" />
-          {item.label}
-        </Link>
-      ))}
+      {items
+        .filter((item) => !hidden.includes(item))
+        .map((item) => (
+          <Link
+            key={item.to}
+            {...target(item.to)}
+            onClick={onNavigate}
+            className={cn(ROW, activeSection === item.to && SELECTED_ROW)}
+          >
+            <item.icon size={16} weight="regular" className="shrink-0" />
+            {item.label}
+          </Link>
+        ))}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label="More"
             type="button"
             className={cn(
               ROW,
-              "text-secondary data-[state=open]:bg-surface-level-2-hover",
+              // Match the Link rows' box and hover: Macaw's plain variant adds a
+              // 1px transparent border that shifts the label, and its own dark hover.
+              "h-auto justify-start border-0 text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
               hidden.some((item) => item.to === activeSection) &&
-                cn(SELECTED_ROW, "text-primary")
+                cn(SELECTED_ROW, "text-primary dark:hover:bg-selected-hover")
             )}
           >
-            <CaretRightIcon size={16} weight="regular" className="shrink-0" />
+            <DotsThreeIcon size={16} weight="bold" className="shrink-0" />
             More
-          </button>
+          </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" className="w-48">
+        <DropdownMenuContent
+          side="right"
+          align="start"
+          className="w-48"
+          onCloseAutoFocus={(event) => {
+            if (navigated.current) event.preventDefault()
+            navigated.current = false
+          }}
+        >
           {hidden.map((item) => (
             <DropdownMenuItem key={item.to} asChild>
-              <Link {...target(item.to)} onClick={onNavigate}>
+              <Link
+                {...target(item.to)}
+                onClick={() => {
+                  navigated.current = true
+                  onNavigate()
+                }}
+              >
                 <item.icon size={14} weight="regular" className="shrink-0" />
                 {item.label}
               </Link>
@@ -102,7 +149,7 @@ export function SidebarNav({
               />
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-48">
-              {NAV.map((item) => (
+              {items.map((item) => (
                 <MenuCheckItem
                   key={item.to}
                   checked={!hidden.includes(item)}

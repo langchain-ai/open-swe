@@ -11,7 +11,6 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import decode_terminal_ticket, issue_terminal_ticket
 from openswe.threads.handlers import get_dashboard_terminal_sandbox
@@ -71,9 +70,6 @@ async def api_thread_terminal_connection(
 
 
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
-    if ENV.SANDBOX_TYPE.get() != "langsmith":
-        await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
-        return
     try:
         sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
             thread_id, session["sub"], email=session.get("email")

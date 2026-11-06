@@ -6,24 +6,14 @@ recovers; an error the model can fix, such as a prompt too long, is its result.
 
 import json
 
-import httpx2
 from langchain.agents.middleware import ToolRetryMiddleware
+
+from rt.model_calls import RETRYABLE_STATUS_CODES, is_transient
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
 _RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
-_RETRY_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-_TRANSIENT_ERROR_NAMES = frozenset(
-    {
-        "APIConnectionError",
-        "APITimeoutError",
-        "ConnectTimeout",
-        # A subagent's wedged model call (rt.model_calls).
-        "ModelCallTimeoutError",
-        "ReadTimeout",
-        "TimeoutException",
-        "TransportError",
-    }
-)
+# Connection failures of providers whose SDKs ``is_transient`` doesn't know.
+_OTHER_SDK_TRANSIENT_NAMES = frozenset({"APIConnectionError", "APITimeoutError"})
 
 
 def _error_body(exc: Exception) -> dict[str, object]:
@@ -58,15 +48,15 @@ def _error_fields(exc: Exception) -> dict[str, object]:
     return out
 
 
-def _is_httpx_transport_error(exc: Exception) -> bool:
-    return isinstance(exc, httpx2.TransportError)
-
-
 def task_retry_on(exc: Exception) -> bool:
-    status = _status_code(exc)
-    if isinstance(status, int) and (status in _RETRY_HTTP_STATUS_CODES or status >= 500):
+    """Whether the delegated task may pass on another try: what a model call retries, and
+    any provider's passing HTTP failure."""
+    if is_transient(exc):
         return True
-    return exc.__class__.__name__ in _TRANSIENT_ERROR_NAMES or _is_httpx_transport_error(exc)
+    status = _status_code(exc)
+    if isinstance(status, int) and (status in RETRYABLE_STATUS_CODES or status >= 500):
+        return True
+    return exc.__class__.__name__ in _OTHER_SDK_TRANSIENT_NAMES
 
 
 def task_on_failure(exc: Exception) -> str:

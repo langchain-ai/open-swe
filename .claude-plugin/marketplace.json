@@ -1,0 +1,14 @@
+{
+  "name": "robin",
+  "description": "Robin's Claude Code plugin",
+  "owner": {
+    "name": "Robin"
+  },
+  "plugins": [
+    {
+      "name": "robin",
+      "source": "./claude-code-plugin",
+      "description": "Mirror Claude Code sessions into Robin threads, use Robin's MCP tools, and find a session's thread"
+    }
+  ]
+}

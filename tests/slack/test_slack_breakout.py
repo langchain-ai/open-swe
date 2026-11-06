@@ -19,7 +19,6 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
             "id": channel_id,
             "name": channel_id.lower(),
             "is_channel": True,
-            "num_members": 10,
             "is_private": private,
             "is_ext_shared": False,
             "is_pending_ext_shared": False,
@@ -54,12 +53,12 @@ def _request() -> SlackRequest:
 
 def _patch_slack(monkeypatch) -> SimpleNamespace:
     posted = SimpleNamespace(
-        reactions=AsyncMock(),
+        notifications=AsyncMock(),
         ephemeral=AsyncMock(),
         source_line=AsyncMock(return_value="<https://slack/p105|(source)>"),
     )
     monkeypatch.setattr(breakout, "source_thread_line", posted.source_line)
-    monkeypatch.setattr(breakout, "mark_broken_out", posted.reactions)
+    monkeypatch.setattr(breakout, "mark_broken_out", posted.notifications)
     monkeypatch.setattr(breakout, "post_slack_ephemeral_message", posted.ephemeral)
     return posted
 
@@ -68,6 +67,10 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     ("text", "expected"),
     [
         ("<@U0BOT> /breakout fix it", Command("fix it")),
+        ("<@U0BOT> /breakout in <#C2> fix it", Command("fix it", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in <#C2>", Command("", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in #target fix it", Command("fix it", "#target")),
+        ("<@U0BOT> /breakout in the parser", Command("in the parser")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),
@@ -190,7 +193,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         },
     ]
     posted.source_line.assert_awaited_once_with("C1", "105.0")
-    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", expected, "200.0")
+    posted.notifications.assert_awaited_once_with("C1", "100.0", expected, "200.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
@@ -200,30 +203,6 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     )
     assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("count", [50, None])
-async def test_default_breakout_waits_for_destination_in_large_or_unknown_channel(
-    monkeypatch, public_channels, count
-):
-    channel = _channel("C1", private=False)
-    assert channel is not None
-    channel.payload["num_members"] = count
-    public_channels.side_effect = None
-    public_channels.return_value = channel
-    posted = _patch_slack(monkeypatch)
-    start = AsyncMock()
-    monkeypatch.setattr(breakout, "_start", start)
-
-    await breakout.process_slack_breakout(_request(), Command("fix it"), None)
-
-    start.assert_not_awaited()
-    assert "destination" in posted.ephemeral.await_args.args[2]
-
-    await breakout.process_slack_breakout(_request(), Command("fix it", channel_id="C1"), None)
-
-    start.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -250,7 +229,7 @@ async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(
     assert sent.text == "fix it"
     assert sent.prior_message_text == "Context for this task.\nMore details"
     assert sent.context_thread_ts == "100.0"
-    posted.reactions.assert_awaited_once()
+    posted.notifications.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -260,11 +239,11 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
     monkeypatch.setattr(
         breakout.service, "process_slack_web_mention", AsyncMock(return_value=started)
     )
-    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _: "https://dashboard/agents/new")
+    monkeypatch.setattr(
+        breakout_links, "dashboard_thread_url", lambda _: "https://dashboard/agents/new"
+    )
     reply = AsyncMock()
-    react = AsyncMock()
     monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
-    monkeypatch.setattr(breakout_links, "add_slack_reaction", react)
 
     await breakout.process_slack_web(_request(), Command("fix it"), None)
 
@@ -278,10 +257,8 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
             unfurl_links=False,
             unfurl_media=False,
         )
-        react.assert_awaited_once_with("C1", "105.0", breakout_links.BREAKOUT_REACTION)
     else:
         reply.assert_not_awaited()
-        react.assert_not_awaited()
     posted.ephemeral.assert_not_awaited()
 
 
@@ -303,7 +280,7 @@ async def test_bare_breakout_refuses_private_threads(monkeypatch):
     await breakout.process_slack_breakout(_request(), Command(""), None)
 
     move.assert_not_awaited()
-    posted.reactions.assert_not_awaited()
+    posted.notifications.assert_not_awaited()
     posted.ephemeral.assert_awaited_once()
 
 
@@ -324,7 +301,7 @@ async def test_breakout_never_goes_to_a_private_channel(monkeypatch, public_chan
 
     root.assert_not_awaited()
     move.assert_not_awaited()
-    posted.reactions.assert_not_awaited()
+    posted.notifications.assert_not_awaited()
     assert posted.ephemeral.await_args.args[3] == "100.0"
 
 
@@ -355,5 +332,114 @@ async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_chann
     await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2>", "C2"), None)
 
     root.assert_not_awaited()
-    posted.reactions.assert_not_awaited()
+    posted.notifications.assert_not_awaited()
     assert "public source channel and destination" in posted.ephemeral.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_a_breakout_handed_to_mda_opens_its_thread_then_hands_over_the_first_turn(
+    monkeypatch,
+):
+    posted = _patch_slack(monkeypatch)
+    root = AsyncMock(return_value="200.0")
+    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
+    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _thread_id: "")
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    resolve = AsyncMock(return_value="new-thread")
+    monkeypatch.setattr(breakout.common, "resolve_slack_thread_id", resolve)
+    bind = AsyncMock()
+    monkeypatch.setattr(breakout, "bind_slack_thread_id", bind)
+    claim = AsyncMock()
+    monkeypatch.setattr(breakout.mda_forwarding, "claim_side", claim)
+    monkeypatch.setattr(breakout.service, "slack_login", AsyncMock(return_value="alice"))
+    mention = AsyncMock()
+    monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
+    hand_to_mda = AsyncMock()
+
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it"), None, hand_to_mda=hand_to_mda
+    )
+
+    side = breakout.mda_forwarding.side_thread_id("C1", "105.0")
+    # The new Slack thread joins the command's own thread, which MDA's channel runs.
+    bind.assert_awaited_once_with("C1", "200.0", side)
+    claim.assert_awaited_once_with(side, owner_login="alice")
+    resolve.assert_not_awaited()
+    mention.assert_not_awaited()
+    [opening, repo] = hand_to_mda.await_args.args
+    assert repo is None
+    assert (opening.channel_id, opening.thread_ts, opening.thread_id, opening.text) == (
+        "C1",
+        "200.0",
+        side,
+        "fix it",
+    )
+    assert (opening.context_channel_id, opening.context_thread_ts) == ("C1", "100.0")
+    assert opening.inherited_workspace == "engineering"
+    posted.notifications.assert_awaited_once_with("C1", "100.0", "C1", "200.0")
+
+
+@pytest.mark.asyncio
+async def test_moving_a_thread_stays_on_the_backend_even_with_mda(monkeypatch):
+    _patch_slack(monkeypatch)
+    move = AsyncMock()
+    monkeypatch.setattr(breakout, "_move", move)
+    hand_to_mda = AsyncMock()
+
+    await breakout.process_slack_breakout(_request(), Command(""), None, hand_to_mda=hand_to_mda)
+
+    move.assert_awaited_once()
+    hand_to_mda.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_breakout_handed_to_mda_branches_off_the_conversations_thread(
+    monkeypatch,
+):
+    _patch_slack(monkeypatch)
+    monkeypatch.setattr(
+        breakout, "post_slack_top_level_message_with_ts", AsyncMock(return_value="200.0")
+    )
+    monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _thread_id: "")
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    bind = AsyncMock()
+    monkeypatch.setattr(breakout, "bind_slack_thread_id", bind)
+    claim = AsyncMock()
+    monkeypatch.setattr(breakout.mda_forwarding, "claim_side", claim)
+    monkeypatch.setattr(breakout.service, "slack_login", AsyncMock(return_value="alice"))
+    hand_to_mda = AsyncMock()
+
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it"), None, hand_to_mda=hand_to_mda, branches=True
+    )
+
+    # A new thread of the channel's, as the requester's, which starts with what the
+    # conversation's thread holds: MDA's channel seeds it from there.
+    side = breakout.mda_forwarding.side_thread_id("C1", "105.0")
+    bind.assert_awaited_once_with("C1", "200.0", side)
+    claim.assert_awaited_once_with(side, owner_login="alice")
+    [opening, _repo] = hand_to_mda.await_args.args
+    assert (opening.thread_id, opening.held_thread_id) == (side, "old-thread")
+    # Its first turn still reads the Slack thread, for what the agent never got there.
+    assert (opening.context_channel_id, opening.context_thread_ts) == ("C1", "100.0")
+
+
+@pytest.mark.asyncio
+async def test_a_breakout_that_opens_nothing_tells_whoever_asked_for_the_reason(monkeypatch):
+    posted = _patch_slack(monkeypatch)
+    told: list[str] = []
+
+    async def tell(_request: SlackRequest, text: str) -> None:
+        told.append(text)
+
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it", "#nowhere"), None, hand_to_mda=AsyncMock(), tell=tell
+    )
+
+    # MDA's Slack channel replies in the thread with it, instead of a private notice.
+    assert told == [
+        "`#nowhere` is not a Slack channel. Pick one from Slack's autocomplete: "
+        "`/breakout #channel`."
+    ]
+    posted.ephemeral.assert_not_awaited()

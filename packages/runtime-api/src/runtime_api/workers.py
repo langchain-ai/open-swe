@@ -36,6 +36,9 @@ class Worker(BaseModel):
     """The worker registered under the coordinator's task, as its tool call answers it."""
 
     worker: dict[str, JsonValue]
+    # The context of the task the coordinator's thread belongs to, which its run tells
+    # the model from here on: its first worker made it the task's.
+    task_context: str | None = None
 
 
 class Adopt(BaseModel):
@@ -47,8 +50,8 @@ class Adopt(BaseModel):
 
 class Adopted(BaseModel):
     run_token: str
-    # The worker's own catalog; None when the backend could not plan it.
-    catalog: Catalog | None = None
+    # The worker's own catalog.
+    catalog: Catalog
     # The worker run's invocation, which its usage counts its replies by.
     invocation_id: str | None = None
 
