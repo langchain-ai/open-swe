@@ -1,5 +1,8 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
+from openswe.slack import command_intent
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 
 
@@ -61,3 +64,13 @@ def test_options_parse_and_strip_the_same_way(
 
     assert (parsed.performance_model, parsed.workspace) == (performance_model, workspace)
     assert parsed.without(performance_model=True, workspace=True) == without
+
+
+async def test_classifier_timeout_keeps_original_message_for_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(command_intent, "select_jev_choices", AsyncMock(side_effect=TimeoutError))
+    text = "<@U0BOT> /btw why?"
+    parsed = await command_intent.interpret_commands(text, "U0BOT")
+    assert parsed.action is None
+    assert parsed.argument == text

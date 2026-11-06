@@ -1,8 +1,6 @@
 """`@Open SWE /breakout`, handled without waking the current thread's agent."""
 
 import logging
-import re
-from dataclasses import dataclass, replace
 from uuid import uuid4
 
 from openswe.slack import webhook as service
@@ -23,7 +21,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.move import move_slack_thread
-from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
+from openswe.slack.parsed_message import BreakoutCommand
 from openswe.slack.request import SlackRequest
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
@@ -32,58 +30,7 @@ from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
 
-_CHANNEL_MENTION_RE = re.compile(r"<#(?P<channel_id>[CG][A-Z0-9]+)(?:\|[^>]*)?>")
-_TITLE_MAX_CHARS = 160
 _CHANNEL_REJECTED = {"channel_not_found", "not_in_channel", "is_archived"}
-
-
-@dataclass(frozen=True)
-class BreakoutCommand:
-    instruction: str
-    channel: str = ""
-    channel_id: str = ""
-    prior_text: str = ""
-    options: str = ""
-    workspace: str | None = None
-
-    @classmethod
-    def from_message(cls, message: ParsedSlackMessage) -> BreakoutCommand:
-        command = cls(
-            instruction=message.argument,
-            prior_text=message.prior_text,
-            options=message.options,
-            workspace=message.workspace,
-        )
-        parts = message.argument.split(maxsplit=1)
-        if parts and parts[0].lower() == "in" and len(parts) > 1:
-            destination = parts[1].split(maxsplit=1)
-            if destination[0].startswith(("#", "<#")):
-                parts = destination
-        if (
-            message.action is not SlackAction.BREAKOUT
-            or not parts
-            or not parts[0].startswith(("#", "<#"))
-        ):
-            return command
-        channel = _CHANNEL_MENTION_RE.fullmatch(parts[0])
-        return replace(
-            command,
-            instruction=parts[1] if len(parts) > 1 else "",
-            channel=parts[0],
-            channel_id=channel["channel_id"] if channel else "",
-        )
-
-    @property
-    def thread_text(self) -> str:
-        """The new thread's opening message, keeping options typed alongside the command."""
-        return f"{self.options} {self.instruction}".strip()
-
-    @classmethod
-    def heading(cls, title: str) -> str:
-        first_line = title.splitlines()[0].strip() if title.strip() else ""
-        if len(first_line) > _TITLE_MAX_CHARS:
-            first_line = f"{first_line[: _TITLE_MAX_CHARS - 1].rstrip()}…"
-        return f"`/breakout`: {first_line}"
 
 
 def _command_ts(request: SlackRequest) -> str:
@@ -225,6 +172,9 @@ async def _start(
                 "thread_ts": new_ts,
                 "thread_id": thread_id,
                 "text": command.thread_text,
+                "command_message": command.parsed_message(request.command_message)
+                if request.command_message is not None
+                else None,
                 "context_channel_id": request.channel_id,
                 "context_thread_ts": request.thread_ts,
                 "breakout_root_suffix": root_text[len(heading) :],
@@ -255,6 +205,9 @@ async def process_slack_web(
                 update={
                     "thread_id": thread_id,
                     "text": command.thread_text,
+                    "command_message": command.parsed_message(request.command_message)
+                    if request.command_message is not None
+                    else None,
                     "context_channel_id": request.channel_id,
                     "context_thread_ts": request.thread_ts,
                     "prior_message_text": command.prior_text,
