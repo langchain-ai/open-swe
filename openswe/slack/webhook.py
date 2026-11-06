@@ -896,7 +896,10 @@ async def _process_slack_mention_impl(
         return False
 
     langgraph_client = get_langgraph_client()
-    thread_id = request.thread_id or await common.resolve_slack_thread_id(channel_id, thread_ts)
+    # A concierge DM is one location, so its runs always resolve it: one from a
+    # button or wake that named a pre-MDA thread moves the DM to a fresh one too.
+    named_thread_id = None if concierge_mode else request.thread_id
+    thread_id = named_thread_id or await common.resolve_slack_thread_id(channel_id, thread_ts)
     allowed_bot = None
     if request.triggering_bot_id:
         allowed_bot = await resolve_allowed_slack_bot(
