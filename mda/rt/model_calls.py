@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Covers provider-owned retries and the primary/fallback pair, including reasoning.
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
+PRIMARY_FIRST_TOKEN_SECONDS: Final = 120.0
 # As the in-process graphs': a tool call can outlast the 5m default between model calls.
 PROMPT_CACHE_TTL: Final = "1h"
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
