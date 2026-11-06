@@ -883,22 +883,26 @@ async def _attributed_run_messages(
                 ),
             )
         )
+    systems = [system for system, _ in notices]
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
-    if pr_url and history.read and not history.message_ids:
-        notices.append(
-            (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
-        )
     if isinstance(review_chat_pr_url, str):
-        notices.append(
-            (
-                _PULL_REQUEST_THREAD_SYSTEM,
-                prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
-            )
+        systems.append(
+            {
+                **_PULL_REQUEST_THREAD_SYSTEM,
+                "content": prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
+            }
+        )
+    elif pr_url and history.read and not history.message_ids:
+        systems.append(
+            {
+                **_PULL_REQUEST_THREAD_SYSTEM,
+                "content": prompt("runs/pull-request-thread", url=pr_url),
+            }
         )
     structured = build_input_messages(
         content,
         dashboard_input_context(sender_id, relayed_from, replies),
-        systems=[system for system, _ in notices] or None,
+        systems=systems or None,
         injected_dynamic_context_hashes=injected,
     )
     for system, body in notices:
