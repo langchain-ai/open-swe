@@ -17,7 +17,11 @@ RUN pnpm install --frozen-lockfile --filter open-swe-dashboard...
 COPY ui ui
 COPY plugins/sdk plugins/sdk
 
-RUN pnpm --filter open-swe-dashboard run build
+# The build has no .git to read its commit from, so the bundle's build info takes it
+# from SOURCE_COMMIT, or from GIT_SHA where an image builder passes that instead.
+ARG SOURCE_COMMIT=
+ARG GIT_SHA=
+RUN SOURCE_COMMIT="${SOURCE_COMMIT:-$GIT_SHA}" pnpm --filter open-swe-dashboard run build
 
 FROM node:26-alpine
 
