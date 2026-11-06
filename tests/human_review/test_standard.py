@@ -692,7 +692,7 @@ async def test_approved_card_collapses_without_closing_the_request(
     assert "<@U_ada>" in str(block_payload(blocks))
     if collapsed:
         assert "\n" not in text
-        assert "authored by <@U_ada> — approved by @grace" in text
+        assert "authored by <@U_ada>, approved by @grace" in text
     if pending and not auto_merge:
         assert "linus" in str(block_payload(blocks))
         assert "awaiting manual merge" not in text

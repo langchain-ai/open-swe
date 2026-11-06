@@ -190,9 +190,9 @@ async def closed_card(
     if outcome in ("approved", "merged"):
         line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
         if approvers:
-            line += f" — approved by {approvers}"
+            line += f", approved by {approvers}"
         if outcome == "approved" and not request.auto_merge:
-            line += " — awaiting manual merge"
+            line += ", awaiting manual merge"
     else:
         line = f"Review request: {outcome} — {pull}"
     return line, [section(line)]

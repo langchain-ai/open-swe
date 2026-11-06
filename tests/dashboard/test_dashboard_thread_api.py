@@ -1265,7 +1265,9 @@ async def test_pr_link_search_finds_exact_associations_outside_participation(mon
     monkeypatch.setattr(
         thread_listing,
         "_summarize_threads",
-        AsyncMock(side_effect=lambda client, rows: [{"id": row["thread_id"]} for row in rows]),
+        AsyncMock(
+            side_effect=lambda client, rows, **kwargs: [{"id": row["thread_id"]} for row in rows]
+        ),
     )
 
     page = await thread_listing.list_dashboard_threads_page(
@@ -1725,7 +1727,7 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(
         order.append("dispatch")
         return {"run_id": "replacement-run"}
 
-    async def fake_summary(thread: dict[str, object]) -> dict[str, object]:
+    async def fake_summary(thread: dict[str, object], **kwargs: object) -> dict[str, object]:
         return {"thread_id": "thread-1"}
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
