@@ -19,14 +19,14 @@ from openswe.prompts import prompt
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     acknowledge_slack_command,
-    add_slack_reaction,
     clear_slack_command_message,
+    delete_slack_message,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
-    remove_slack_reaction,
+    post_slack_thread_reply_with_ts,
     replace_slack_command_message,
 )
 from openswe.slack.parsed_message import SlackAction
@@ -73,6 +73,7 @@ class SlackAskRequest(BaseModel):
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
+    working_message_ts: str = ""
 
     @property
     def by_the_way(self) -> bool:
@@ -160,9 +161,8 @@ async def _budgeted_transcript(messages: list[SlackMessage]) -> str:
 
 async def _settle_thinking_status(request: SlackAskRequest) -> None:
     if request.by_the_way:
-        await remove_slack_reaction(
-            request.channel_id, request.message_ts, "hourglass_flowing_sand"
-        )
+        if request.working_message_ts:
+            await delete_slack_message(request.channel_id, request.working_message_ts)
         await settle_slack_thread_status(request.channel_id, request.reply_thread_ts)
 
 
@@ -201,7 +201,9 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
             _SHORTCUT_ACKNOWLEDGEMENT if request.selected_message else _ACKNOWLEDGEMENT,
         )
     if request.by_the_way:
-        await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
+        request.working_message_ts = await post_slack_thread_reply_with_ts(
+            request.channel_id, request.reply_thread_ts, ":hourglass_flowing_sand: Working.."
+        )
         if not request.question:
             await _refuse(request, _BY_THE_WAY_USAGE)
             return
@@ -258,6 +260,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         slack_ask_response_url=request.response_url,
         slack_by_the_way_thread_ts=request.reply_thread_ts,
         slack_by_the_way_message_ts=request.message_ts,
+        slack_by_the_way_working_message_ts=request.working_message_ts,
     )
     # Private, always, even when `/btw` answers publicly: a private thread is what
     # scopes the run to the asker's own credentials, skills, and instructions.

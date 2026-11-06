@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -45,14 +47,21 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
 @pytest.mark.parametrize(
-    "reply_thread_ts,selected_message", [("", ""), ("123.456", ""), ("", "Ship the migration")]
+    "reply_thread_ts,selected_message,newer_reply",
+    [
+        ("", "", False),
+        ("123.456", "", False),
+        ("123.456", "", True),
+        ("", "Ship the migration", False),
+    ],
 )
 async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
-    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, selected_message: str
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, selected_message: str, newer_reply: bool
 ) -> None:
     status = AsyncMock()
     monkeypatch.setattr("openswe.slack.thinking.set_slack_thread_status", status)
-    monkeypatch.setattr(slack_ask, "add_slack_reaction", AsyncMock())
+    working = AsyncMock(return_value="123.800")
+    monkeypatch.setattr(slack_ask, "post_slack_thread_reply_with_ts", working)
     monkeypatch.setattr(slack_ask, "acknowledge_slack_command", AsyncMock())
     upsert = AsyncMock(return_value=True)
     dispatch = AsyncMock()
@@ -77,6 +86,8 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     )
     await slack_ask.process_slack_ask(request)
 
+    assert upsert.await_args is not None
+    assert dispatch.await_args is not None
     assert upsert.await_args.kwargs["unlisted"] is True
     assert upsert.await_args.kwargs["visibility"] == "private"
     assert upsert.await_args.kwargs["owner_login"] == "octocat"
@@ -115,17 +126,42 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     monkeypatch.setattr(slack_reply, "settle_slack_thread_status", AsyncMock())
     replace = AsyncMock(return_value=True)
     post = AsyncMock(return_value="123.999")
-    remove_reaction = AsyncMock()
+    update = AsyncMock()
+    slack = AsyncMock()
+    slack.conversations_replies.return_value = {
+        "messages": [{"ts": "123.900" if newer_reply else reply_thread_ts}]
+    }
+
+    @asynccontextmanager
+    async def bot() -> AsyncIterator[AsyncMock]:
+        yield slack
+
+    monkeypatch.setattr(slack_reply.SlackClient, "bot", bot)
     monkeypatch.setattr(slack_reply, "replace_slack_command_message", replace)
     monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
-    monkeypatch.setattr(slack_reply, "remove_slack_reaction", remove_reaction)
+    monkeypatch.setattr(slack_reply, "update_slack_message", update)
 
     assert await slack_reply.slack_reply("the worker's answer", "final") == {"success": True}
     if reply_thread_ts:
-        assert post.await_args.args == ("C1", reply_thread_ts, "the worker's answer")
-        remove_reaction.assert_awaited_once_with("C1", "123.789", "hourglass_flowing_sand")
+        working.assert_awaited_once_with(
+            "C1", reply_thread_ts, ":hourglass_flowing_sand: Working.."
+        )
+        if newer_reply:
+            assert update.await_args is not None
+            assert update.await_args.args == ("C1", "123.800", "the worker's answer")
+            assert update.await_args.kwargs["blocks"] == [
+                {"type": "markdown", "text": "the worker's answer"}
+            ]
+            slack.chat_delete.assert_not_awaited()
+            post.assert_not_awaited()
+        else:
+            assert post.await_args is not None
+            assert post.await_args.args == ("C1", reply_thread_ts, "the worker's answer")
+            slack.chat_delete.assert_awaited_once_with(channel="C1", ts="123.800")
+            update.assert_not_awaited()
         replace.assert_not_awaited()
     else:
+        assert replace.await_args is not None
         assert replace.await_args.args == (request.response_url, "the worker's answer")
         post.assert_not_awaited()
 
@@ -173,6 +209,7 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
     result = await slack_reply.slack_reply("the answer", "final")
 
     assert result == {"success": True}
+    assert post.await_args is not None
     assert post.await_args.args == ("C1", "U1", "the answer")
     assert post.await_args.kwargs["blocks"] == [{"type": "markdown", "text": "the answer"}]
     assert post.await_args.kwargs["agent_thread_id"] == "thread-1"
@@ -204,4 +241,5 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
 
     assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
+    assert post.await_args is not None
     assert post.await_args.args == ("C1", "U1", "the answer")
