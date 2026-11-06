@@ -115,12 +115,12 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
 
     async def by_identity(provider: str, external_id: str) -> SimpleNamespace | None:
         if (provider, external_id) in {("slack", "U123"), ("github", "2001")}:
-            return SimpleNamespace(id=user_id, github_login="mason-gh")
+            return SimpleNamespace(id=user_id, github_login="mason-gh", email="mason@example.com")
         return None
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
         return (
-            SimpleNamespace(id=user_id, github_login="mason-gh")
+            SimpleNamespace(id=user_id, github_login="mason-gh", email="mason@example.com")
             if (provider, login) == ("github", "mason-gh")
             else None
         )
@@ -146,6 +146,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         created = client.runs.created[-1]
         assert created["metadata"]["user_id"] == str(user_id)
         assert created["config"]["metadata"]["user_id"] == str(user_id)
+        assert created["metadata"]["user_email"] == "mason@example.com"
         assert created["metadata"]["ls_repo_provider"] == "github"
         assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
         # Attributed to the person, but a run the backend starts acts as no one.
@@ -175,6 +176,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         config={"configurable": {"slack_thread": {"triggering_user_id": "unknown"}}},
         metadata={
             "user_id": str(user_id),
+            "user_email": "previous@example.com",
             ACTING_USER_KEY: str(user_id),
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
@@ -184,6 +186,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     )
     unknown = client.runs.created[-1]["metadata"]
     assert "user_id" not in unknown
+    assert "user_email" not in unknown
     # Only the backend says whom a run acts as, never its caller.
     assert ACTING_USER_KEY not in unknown
     assert "ls_attribution_identifier" not in unknown

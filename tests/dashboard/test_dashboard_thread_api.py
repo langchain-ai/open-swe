@@ -581,7 +581,7 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
         return (
-            SimpleNamespace(id=second, github_login=login)
+            SimpleNamespace(id=second, github_login=login, email="second@example.com")
             if (provider, login) == ("github", "second-gh")
             else None
         )
@@ -598,9 +598,17 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "follow up"}]},
-            "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"},
+            "metadata": {
+                "user_id": str(first),
+                "user_email": "first@example.com",
+                "ls_attribution_identifier": "first-gh",
+            },
             "config": {
-                "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"}
+                "metadata": {
+                    "user_id": str(first),
+                    "user_email": "first@example.com",
+                    "ls_attribution_identifier": "first-gh",
+                }
             },
         },
     }
@@ -617,6 +625,8 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
     assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+    assert enriched["params"]["metadata"]["user_email"] == "second@example.com"
+    assert enriched["params"]["config"]["metadata"]["user_email"] == "second@example.com"
 
 
 @pytest.mark.parametrize("relayed", [False, True])

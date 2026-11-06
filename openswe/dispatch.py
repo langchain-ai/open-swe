@@ -67,6 +67,7 @@ _PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
 TURN_ATTRIBUTION_FIELDS = frozenset(
     {
         "user_id",
+        "user_email",
         ACTING_USER_KEY,
         "ls_repo_provider",
         "ls_attribution_identifier",
@@ -378,6 +379,8 @@ async def _run_user_metadata(
             return metadata
         if user is not None:
             metadata["user_id"] = str(user.id)
+            if user.email:
+                metadata["user_email"] = user.email
             if user.github_login:
                 metadata["ls_attribution_identifier"] = user.github_login
     except Exception:
