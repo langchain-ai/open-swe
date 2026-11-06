@@ -28,7 +28,9 @@ async def _login() -> str | None:
 @expose_mcp()
 @audit_tool()
 @access(_OWN)
-async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
+async def save_user_skill(
+    name: str, description: str, instructions: str = "", detach: bool = False
+) -> dict[str, Any]:
     """Implement the `save_user_skill` tool."""
     login = await _login()
     if not login:
@@ -37,7 +39,9 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
     existing = await get_skill(login, name)
     if existing:
         skill = await update_skill(
-            login, name, SkillUpdate(description=description, instructions=instructions)
+            login,
+            name,
+            SkillUpdate(description=description, instructions=instructions, detach=detach),
         )
     else:
         skill = await create_skill(

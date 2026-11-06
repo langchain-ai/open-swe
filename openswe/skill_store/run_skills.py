@@ -60,6 +60,13 @@ class RunSkillStores:
             listing = await files.als(source)
             folders += [entry["path"] for entry in listing.entries or [] if entry.get("is_dir")]
         paths = [str(PurePosixPath(folder) / _SKILL_FILE) for folder in folders]
+        if USER_SKILLS_ROUTE in self.sources:
+            resources = await files.aglob("**/*", USER_SKILLS_ROUTE)
+            paths += [
+                entry["path"]
+                for entry in resources.matches or []
+                if not entry.get("is_dir") and entry["path"] not in paths
+            ]
         downloaded = await files.adownload_files(paths) if paths else []
         return RunSkills(
             files=[

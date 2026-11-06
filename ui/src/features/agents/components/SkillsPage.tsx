@@ -39,7 +39,9 @@ export function SkillsPage() {
   const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [error, setError] = useState<string | null>(null)
   const selected = skills.data?.find((skill) => skill.name === selectedName)
-  const canEdit = !organization || session.data?.is_admin === true
+  const canManage = !organization || session.data?.is_admin === true
+  const desktopSynced = selected?.source === "desktop"
+  const canEdit = canManage && !desktopSynced
 
   useEffect(() => {
     if (selected) {
@@ -119,7 +121,39 @@ export function SkillsPage() {
           {dirty && (
             <span className="text-xs text-secondary">Unsaved changes</span>
           )}
-          {canEdit && !creating && (
+          {desktopSynced && canManage && (
+            <Button
+              size="xs"
+              color="secondary"
+              disabled={update.isPending}
+              onClick={() => {
+                if (
+                  !selected ||
+                  !window.confirm(
+                    "Detach this skill from desktop sync? Local changes and removals will no longer affect it."
+                  )
+                )
+                  return
+                void update
+                  .mutateAsync({
+                    name: selected.name,
+                    description: selected.description,
+                    instructions: selected.instructions,
+                    detach: true,
+                  })
+                  .catch((cause: unknown) =>
+                    setError(
+                      cause instanceof Error
+                        ? cause.message
+                        : "Could not detach skill"
+                    )
+                  )
+              }}
+            >
+              Detach to edit
+            </Button>
+          )}
+          {canManage && !creating && (
             <Button
               size="xs"
               color="error"
@@ -154,7 +188,7 @@ export function SkillsPage() {
             onChange={(scope) => selectScope(scope === "organization")}
             options={SCOPES}
           />
-          {canEdit && (
+          {canManage && (
             <Button
               size="xs"
               color={creating ? "secondary" : "primary"}
@@ -207,6 +241,12 @@ export function SkillsPage() {
         </p>
       ) : (
         <>
+          {desktopSynced && (
+            <p className="border-b border-default p-space-4 text-xs text-secondary">
+              Synced from desktop · Read-only. Edit or remove the local skill to
+              update it here. Detach to keep an independent editable copy.
+            </p>
+          )}
           <div className="grid gap-space-4 border-b border-default p-space-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <Input
               id="skill-name"
