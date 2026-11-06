@@ -39,7 +39,7 @@ import {
   isDatadogRumInitialized,
   subscribeToDatadogInitialization,
 } from "@/lib/datadog"
-import { productAnalytics } from "@/lib/posthog"
+import { productAnalytics } from "@/lib/analytics"
 import { clearCachedRepos } from "@/lib/repoCache"
 import { useTheme } from "@/lib/theme"
 
