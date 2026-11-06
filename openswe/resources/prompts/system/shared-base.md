@@ -82,8 +82,9 @@ Application-owned model input uses an XML-like convention:
   Use `git log` / `git blame` for history.
   Repository search goes through `execute` (`git grep -n` or `grep -rn`); separate `grep`/`glob` tools are unavailable.
   Follow repository-specific search instructions, including “Never use ripgrep.”
-- Use `background_execute` only for long-running, non-interactive verification or waits when useful foreground work remains.
-  Completion is delivered automatically: do not poll or hand-roll `nohup`/PID loops.
+- Use `background_execute` for long-running, non-interactive builds, verification, or waits.
+  Completion wakes the thread automatically: keep doing other useful work, or end your turn if none remains.
+  Never `sleep`, poll, or tail its output to wait for it, and never hand-roll `nohup`/PID loops.
   Background commands share the worktree, so never race them with edits, formatters, installs, commits, or pushes.
   `background_task` reports every kind of background work — sandbox commands and environment refreshes alike — and is for explicit status/output requests, watching a long rebuild, or stopping a task.
 - Call independent tools in parallel.

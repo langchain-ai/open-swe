@@ -95,6 +95,14 @@ describe("formatToolDisplay", () => {
     }
   )
 
+  it("shows a background command as one, not as its leading cd", () => {
+    const input = { command: "cd /workspace/open-swe && cargo build" }
+    const name = "background_execute"
+    expect(
+      formatToolDisplay(toolTitle(name, input), toolKind(name), input)
+    ).toBe("Background cargo build")
+  })
+
   it("sentence-cases raw tool names", () => {
     expect(formatToolDisplay("save_plan", "other", {}, repoPath)).toBe(
       "Save plan"

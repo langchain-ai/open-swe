@@ -50,6 +50,7 @@ function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
 
   switch (chunk.toolKind) {
     case "execute":
+    case "background":
       return "terminal"
     case "read":
       return "eye"
@@ -244,6 +245,8 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
       return active ? "Querying" : "Queried"
     case "execute":
       return active ? "Running" : "Ran"
+    case "background":
+      return active ? "Starting in background" : "Started in background"
     case "edit":
     case "delete":
     case "move":
