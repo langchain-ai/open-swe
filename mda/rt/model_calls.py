@@ -4,7 +4,7 @@ A thread's history is replayed to the provider on every call, and to whichever
 provider routing or the fallback picks, so a block one provider wrote can break
 every later call on another. A provider stall that never raises would park the
 run with nothing for the retry or the fallback to react to. Anthropic's prompt
-cache is marked here too, where the call's real model is known.
+cache and OpenAI's cache affinity are set where the call's real model is known.
 """
 
 import asyncio
@@ -20,6 +20,7 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from langgraph.config import get_config
 
 from rt.model_retries import ModelRetriesMiddleware
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
 # As the in-process graphs': a tool call can outlast the 5m default between model calls.
 PROMPT_CACHE_TTL: Final = "1h"
+_OPENAI_EXTENDED_CACHE_MODELS: Final = frozenset({"gpt-5.5", "gpt-5.5-pro"})
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
 _SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call timed out."
@@ -194,6 +196,31 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
             )
 
 
+class OpenAIPromptCachingMiddleware(_ModelCallGuard):
+    """Attach thread affinity and supported retention to each OpenAI request."""
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        model = _chat_model(request.model)
+        if not isinstance(model, ChatOpenAI):
+            return await handler(request)
+        settings = dict(request.model_settings)
+        try:
+            config = get_config()
+        except RuntimeError:
+            logger.debug("No runnable configuration for OpenAI prompt cache affinity")
+        else:
+            thread_id = config.get("configurable", {}).get("thread_id")
+            if isinstance(thread_id, str) and thread_id:
+                settings["prompt_cache_key"] = thread_id
+        if model.model_name in _OPENAI_EXTENDED_CACHE_MODELS:
+            settings["prompt_cache_retention"] = "24h"
+        return await handler(request.override(model_settings=settings))
+
+
 class _RunPromptCaching(AnthropicPromptCachingMiddleware):
     """Anthropic's prompt cache, less its breakpoint on the last tool.
 
@@ -232,6 +259,7 @@ def model_call_guards(
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         ModelRetriesMiddleware(),
+        OpenAIPromptCachingMiddleware(),
         (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
             ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
         ),
