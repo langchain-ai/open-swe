@@ -299,10 +299,12 @@ export function PullRequestHoverCard({
   pullRequest,
   health,
   healthUnavailable,
+  showHealth = true,
 }: {
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
+  showHealth?: boolean
 }) {
   const age = relativeAge(pullRequest.createdAt)
   const state = pullRequestState(pullRequest, health)
@@ -364,7 +366,9 @@ export function PullRequestHoverCard({
           </span>
         </span>
       </div>
-      <HealthDetails health={health} unavailable={healthUnavailable} />
+      {showHealth && (
+        <HealthDetails health={health} unavailable={healthUnavailable} />
+      )}
     </div>
   )
 }
