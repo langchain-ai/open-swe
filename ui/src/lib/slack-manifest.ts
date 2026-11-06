@@ -14,6 +14,7 @@ const BASE_BOT_SCOPES = [
   "im:write",
   "mpim:history",
   "mpim:read",
+  "search:read.public",
   "team:read",
   "users:read",
   "users:read.email",
