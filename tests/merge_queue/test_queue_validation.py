@@ -12,8 +12,16 @@ from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.git import Candidate, PullHead
 from openswe.merge_queue.models import Attempt, Batch, Lease
 from openswe.merge_queue.store import MergeQueue, ValidationWork
-from openswe.merge_queue.validation import CandidateValidation
-from openswe.merge_queue.validation_contract import ValidationPolicy, ValidationRequest
+from openswe.merge_queue.validation import (
+    CandidateValidation,
+    InvalidValidation,
+    ValidationEvidence,
+)
+from openswe.merge_queue.validation_contract import (
+    SERVICE_JOBS,
+    ValidationPolicy,
+    ValidationRequest,
+)
 
 
 @pytest.fixture
@@ -263,3 +271,58 @@ async def test_base_change_discards_successful_results(
     controller.queue.invalidate.assert_awaited_once_with(work.batch.id, lease)
     assert isinstance(controller.queue.finish_validation, AsyncMock)
     controller.queue.finish_validation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("fault", [None, "missing_gate", "failed_shard", "missing_evidence"])
+async def test_service_evidence_binds_nested_jobs_to_report(validation, fault):
+    controller, work, _ = validation
+    request = ValidationRequest.model_validate(
+        {
+            **work.request.model_dump(),
+            "version": 2,
+            "base_sha": work.request.workflow_sha,
+            "expected_jobs": SERVICE_JOBS,
+        }
+    )
+    repo = controller.repo
+    jobs = tuple(
+        ValidationJob(
+            id=i, run_id=42, run_attempt=1, name=name, status="completed", conclusion=conclusion
+        )
+        for i, (name, conclusion) in enumerate(
+            [
+                *((name, "success") for name in SERVICE_JOBS),
+                ("candidate-services / tests / selected", "success"),
+                ("candidate-services / tests / unselected", "skipped"),
+                ("candidate-result", "success"),
+            ],
+            1,
+        )
+    )
+    report = {
+        **request.model_dump(mode="json"),
+        "run_id": 42,
+        "run_attempt": 1,
+        "tested_sha": request.candidate_sha,
+        "jobs": [
+            {"id": job.id, "name": job.name, "conclusion": job.conclusion} for job in jobs[:-1]
+        ],
+    }
+    if fault == "missing_gate":
+        jobs = jobs[:1] + jobs[2:]
+    elif fault == "failed_shard":
+        jobs = jobs[:2] + (jobs[2].model_copy(update={"conclusion": "failure"}),) + jobs[3:]
+    elif fault == "missing_evidence":
+        report["jobs"].pop()
+    repo.validation_jobs = AsyncMock(return_value=jobs)
+    repo.artifact_json = AsyncMock(return_value=report)
+    evidence = ValidationEvidence(repo)
+    if fault:
+        with pytest.raises(InvalidValidation):
+            await evidence.result(request, 42)
+    else:
+        assert await evidence.result(request, 42) == {
+            **report,
+            "artifact_id": 7,
+            "job_ids": [job.id for job in jobs],
+        }

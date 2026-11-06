@@ -40,7 +40,11 @@ from openswe.merge_queue.models import (
     MergeRequest,
     Record,
 )
-from openswe.merge_queue.validation_contract import ValidationDispatch, ValidationRequest
+from openswe.merge_queue.validation_contract import (
+    SERVICE_JOBS,
+    ValidationDispatch,
+    ValidationRequest,
+)
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 
 
@@ -500,6 +504,11 @@ class MergeQueue(Record):
             await session.flush()
             request = ValidationRequest(
                 repository=snapshot.repository,
+                version=2 if validation.suite == "services" else 1,
+                expected_jobs=SERVICE_JOBS
+                if validation.suite == "services"
+                else ("candidate-smoke",),
+                base_sha=batch.base_sha if validation.suite == "services" else None,
                 batch_id=batch.id,
                 attempt_id=attempt.id,
                 candidate_sha=candidate.head_sha,

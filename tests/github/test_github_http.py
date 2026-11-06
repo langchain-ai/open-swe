@@ -36,6 +36,42 @@ async def test_validation_listings_reject_incomplete_responses(listing: str) -> 
                 await repo.validation_artifacts(42)
 
 
+@pytest.mark.parametrize("listing", ["jobs", "artifacts"])
+@pytest.mark.parametrize("fault", [None, "duplicate", "changed_total"])
+async def test_validation_lists_all_pages_without_accepting_partial_evidence(listing, fault):
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        ids = range(1, 101) if page == 1 else [100 if fault == "duplicate" else 101]
+        items = [
+            {
+                "id": i,
+                "name": f"item-{i}",
+                "expired": False,
+                "run_id": 42,
+                "run_attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+            }
+            for i in ids
+        ]
+        return httpx2.Response(
+            200,
+            json={
+                "total_count": 102 if page == 2 and fault == "changed_total" else 101,
+                listing: items,
+            },
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        repo = GitHubClient(http).repo("acme", "widgets")
+        fetch = repo.validation_jobs if listing == "jobs" else repo.validation_artifacts
+        if fault:
+            with pytest.raises(ValueError):
+                await fetch(42)
+        else:
+            assert [item.id for item in await fetch(42)] == list(range(1, 102))
+
+
 async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
     later_pages = asyncio.Barrier(2)
     requested: list[int] = []

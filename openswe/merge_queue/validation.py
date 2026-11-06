@@ -151,14 +151,21 @@ class ValidationEvidence:
         self, request: ValidationRequest, run_id: int
     ) -> dict[str, JsonValue]:
         jobs = await self.repo.validation_jobs(run_id)
+        required = (*request.expected_jobs, "candidate-result")
+        services = request.version == 2
         if (
-            sorted(job.name for job in jobs) != sorted([*request.expected_jobs, "candidate-result"])
+            any(sum(job.name == name for job in jobs) != 1 for name in required)
             or len({job.id for job in jobs}) != len(jobs)
             or any(
                 job.run_id != run_id
                 or job.run_attempt != 1
                 or job.status != "completed"
-                or job.conclusion != "success"
+                or job.conclusion
+                not in ({"success"} if job.name in required else {"success", "skipped"})
+                or (
+                    job.name not in required
+                    and (not services or not job.name.startswith("candidate-services / "))
+                )
                 for job in jobs
             )
         ):
@@ -177,6 +184,12 @@ class ValidationEvidence:
             "run_attempt": 1,
             "tested_sha": request.candidate_sha,
         }
+        if services:
+            expected["jobs"] = [
+                {"id": job.id, "name": job.name, "conclusion": job.conclusion}
+                for job in sorted(jobs, key=lambda job: job.id)
+                if job.name != "candidate-result"
+            ]
         if await self.repo.artifact_json(artifact.id, "result.json") != expected:
             raise InvalidValidation("Validation artifact does not match the candidate and attempt")
         return {**expected, "artifact_id": artifact.id, "job_ids": [job.id for job in jobs]}

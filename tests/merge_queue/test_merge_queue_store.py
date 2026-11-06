@@ -1762,6 +1762,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                     "repository_id": config.repository_id,
                     "workflow_digest": config.workflow_digest,
                     "workflow_policy_revision": policy_revision,
+                    "validation_suite": "services",
                     "dispatch_actor_id": 123,
                     "check_app_id": 456,
                 }
@@ -1869,6 +1870,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         assert json.loads(sent[0].content)["workflow_policy_revision"] == 2
         configured = await QueueConfiguration.load(queue.workspace_id)
         assert configured is not None and configured.workflow_policy_revision == 2
+        assert configured.policy.validation.suite == "services"
+        assert json.loads(sent[0].content)["contract"]["base_sha"] == "a" * 40
+        assert json.loads(sent[0].content)["contract"]["version"] == 2
         policy_revision = 1
         count = len(sent)
         await reconcile()
@@ -1903,7 +1907,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                 status="completed",
                 conclusion="success",
             )
-            for index, name in enumerate(("candidate-smoke", "candidate-result"), 1)
+            for index, name in enumerate((*request.expected_jobs, "candidate-result"), 1)
         )
     )
     repo.validation_artifacts = AsyncMock(
@@ -1923,6 +1927,12 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             "tested_sha": request.candidate_sha,
         }
     )
+    if request.version == 2:
+        repo.artifact_json.return_value["jobs"] = [
+            {"id": job.id, "name": job.name, "conclusion": job.conclusion}
+            for job in repo.validation_jobs.return_value
+            if job.name != "candidate-result"
+        ]
     if fault == "validation_failed":
         repo.validation_run.return_value = run.model_copy(update={"conclusion": "failure"})
         await reconcile()

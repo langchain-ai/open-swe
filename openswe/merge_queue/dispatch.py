@@ -32,6 +32,9 @@ class WorkflowPolicy(BaseModel):
     workflow_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     dispatch_actor_id: int = Field(gt=0, strict=True)
     check_app_id: int = Field(gt=0, strict=True)
+    validation_suite: Literal["smoke", "services"] = Field(
+        default="smoke", exclude_if=lambda value: value == "smoke"
+    )
 
 
 class WorkflowPolicyMismatch(ValueError):
