@@ -29,6 +29,9 @@ The reviewers are already in the Slack thread.
 
 - The agent calls `expedite_pr_approval` with the PR URL whenever it decides to; the backend decides eligibility and posts the card in that call.
   Nothing is posted in the background.
+- The author must be a Robin user, or Robin's GitHub App with an accountable Robin requester linked to GitHub and Slack.
+  For App-authored PRs, that requester receives the author DM, controls **Mark ready**, and cannot approve the card.
+  Without that requester, use `request_human_review`; nomination rejects before reading the diff.
 - Eligible: 1–20 changed lines, every file with a text diff.
   Binaries and anything GitHub cannot show a patch for are refused, because the card could not show the voters what they are approving.
   20 is what the agent is told; 25 is what is enforced, since bouncing a change that lands a few lines over costs more than the slack costs the voters.

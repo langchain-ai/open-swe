@@ -49,7 +49,9 @@ def github(monkeypatch):
         "own-review-missing",
     ],
 )
+@pytest.mark.parametrize("own_login", ["open-swe[bot]", "robin-agent[bot]"])
 async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
+    own_login: str,
     keep_review_id: int | None,
     keep_commit: str | None,
     scope_to_review_id: int | None,
@@ -64,13 +66,13 @@ async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
         }
 
     reviews = [
-        review(1, "open-swe[bot]", "APPROVED", "old"),
+        review(1, own_login, "APPROVED", "old"),
         review(2, "alice", "APPROVED", "old"),
-        review(3, "open-swe[bot]", "APPROVED", "new"),
-        review(4, "open-swe[bot]", "COMMENTED", "old"),
+        review(3, own_login, "APPROVED", "new"),
+        review(4, own_login, "COMMENTED", "old"),
         review(5, "Open-SWE-Preview[bot]", "APPROVED", "old"),
         review(6, "openswe-dev[bot]", "APPROVED", "old"),
-        review(7, "open-swe[bot]", "APPROVED", "new"),
+        review(7, own_login, "APPROVED", "new"),
     ]
     dismissals: list[int] = []
 

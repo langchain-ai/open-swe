@@ -213,11 +213,7 @@ class ReviewCard:
         if approval.slack_dm_channel_id and approval.slack_dm_message_ts:
             return None
         pr = approval.pull_request
-        author = (
-            await User.get(pr.author_user_id)
-            if pr.author_user_id
-            else await User.for_login("github", pr.author)
-        )
+        author = await approval.responsible_author()
         if author is None or not author.slack_user_id:
             return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
         files = await self._files()
@@ -429,12 +425,7 @@ class ReviewCard:
                     exc_info=True,
                 )
                 return False
-            pr = current.pull_request
-            author = (
-                await User.get(pr.author_user_id)
-                if pr.author_user_id
-                else await User.for_login("github", pr.author)
-            )
+            author = await current.responsible_author()
             if author is not None and author.slack_user_id:
                 await note_for_concierge(author.slack_user_id, current.slack_dm_channel_id, text)
             current.run_config = {**current.run_config, "author_dm_status": status_key}

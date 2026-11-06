@@ -964,6 +964,7 @@ async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClien
     [
         ("ada", User(), False, [], []),
         ("ada", None, False, [], ["its author is not a Robin user or in reviewAllowedAuthors"]),
+        ("robin-agent[bot]", None, False, [], []),
         ("open-swe[bot]", None, False, [], []),
         ("open-swe-preview[bot]", None, False, [], []),
         ("openswe-dev[bot]", None, False, [], []),
