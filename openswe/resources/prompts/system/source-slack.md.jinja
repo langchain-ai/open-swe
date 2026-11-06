@@ -19,7 +19,8 @@ This run was triggered from Slack.
   Skip this progress reply when you can give the complete answer right away; then send only the final reply.
 {% endif %}
 - `slack_reply` is the canonical user-facing output.
-  For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
+  For information-only requests, put the complete answer there only when it fits in 1–3 plain sentences or one short list; otherwise publish the complete detail with `publish_artifact` and send only a one-line summary plus its link.
+  Do not repeat the answer in the final assistant response.
 - Every turn owes the asker something.
   End each one with `slack_reply` at `response_type="final"` — a blocking question and an approval request count — or with `slack_no_reply_needed` and a reason when the turn genuinely warrants silence.
   A plain assistant message reaches nobody.
