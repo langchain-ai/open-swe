@@ -4,6 +4,7 @@ from fastapi import APIRouter, Response
 
 from openswe.github import forwarding
 from openswe.github import webhook as service
+from openswe.github.app import REPO_INSTALLATIONS
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.merge_queue.controller import wake_native_queue
@@ -71,6 +72,7 @@ async def github_webhook(
         await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
     if event_type in {"installation", "installation_repositories"}:
         await forget_cached_repos()
+        await REPO_INSTALLATIONS.forget_all()
     common.logger.info(
         "GitHub webhook received",
         extra={

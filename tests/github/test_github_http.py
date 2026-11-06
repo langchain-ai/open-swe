@@ -36,6 +36,26 @@ async def test_validation_listings_reject_incomplete_responses(listing: str) -> 
                 await repo.validation_artifacts(42)
 
 
+async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
+    later_pages = asyncio.Barrier(2)
+    requested: list[int] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        requested.append(page)
+        if page > 1:
+            await asyncio.wait_for(later_pages.wait(), timeout=1)
+        size = 50 if page == 3 else 100
+        runs = [{"id": page * 1000 + i} for i in range(size)]
+        return httpx2.Response(200, json={"total_count": 250, "check_runs": runs})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        runs = await GitHubClient(http).pages("check-runs", key="check_runs")
+
+    assert len(runs) == 250
+    assert sorted(requested) == [1, 2, 3]
+
+
 def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
     return httpx2.Response(status_code, headers=headers or {})
 
@@ -176,6 +196,28 @@ async def test_github_request_propagates_non_retryable_http_error() -> None:
         await github_request(client, "GET", "https://api.github.com/test")
 
     assert client.request.await_count == 1
+
+
+async def test_as_app_looks_up_a_reinstalled_repository_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.github import app as github_app
+
+    lookup = AsyncMock(side_effect=[123, 456])
+    forget = AsyncMock()
+
+    async def mint(*, installation_id: int, **kwargs: object) -> str:
+        if installation_id == 123:
+            raise github_http.GitHubAppUnavailable("installation removed")
+        return f"token-{installation_id}"
+
+    monkeypatch.setattr(github_app, "get_github_app_installation_id_for_repo", lookup)
+    monkeypatch.setattr(github_app, "get_github_app_installation_token", mint)
+    monkeypatch.setattr(github_app.REPO_INSTALLATIONS, "forget", forget)
+
+    async with GitHubClient.as_app("acme", "app") as github:
+        assert github.http.headers["authorization"].endswith("token-456")
+    forget.assert_awaited_once_with("acme", "app")
 
 
 async def test_as_user_refreshes_a_rejected_token_once(monkeypatch: pytest.MonkeyPatch) -> None:

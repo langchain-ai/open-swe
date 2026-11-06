@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from urllib.parse import quote
 
 import httpx2
@@ -18,6 +19,7 @@ from openswe.config import ENV
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 from openswe.run_config import RunConfig
+from openswe.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 
@@ -116,24 +118,64 @@ async def get_github_app_installation_id_for_org(org: str) -> int | None:
         return None
 
 
-async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int | None:
-    """Resolve the GitHub App installation that can access a repository."""
-    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
-        return None
-    try:
+class RepoInstallations:
+    """Which App installation covers each repository, kept for a while in this process.
+
+    Every ``GitHubClient.as_app(owner, repo)`` asks, so each lookup used to cost a GitHub
+    round trip. A reinstall moves a repository to a new installation: installation
+    webhooks forget every kept answer, and ``as_app`` forgets one whose token fails.
+    """
+
+    TTL_SECONDS = 600
+    CACHE_KEY = "github-app-installation:{}/{}"
+
+    def __init__(self) -> None:
+        self._keys: set[str] = set()
+
+    async def lookup(self, owner: str, repo: str) -> int | None:
+        if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
+            return None
+        owner, repo = owner.strip(), repo.strip()
+        key = self.CACHE_KEY.format(owner.lower(), repo.lower())
+        self._keys.add(key)
+        try:
+            return await ttl_cache.cached(
+                key, self.TTL_SECONDS, partial(self._ask_github, owner, repo), serve_stale=False
+            )
+        except Exception:
+            logger.warning(
+                "Failed to resolve GitHub App installation",
+                extra={"owner": owner, "repo": repo},
+                exc_info=True,
+            )
+            return None
+
+    async def forget(self, owner: str, repo: str) -> None:
+        ttl_cache.invalidate(self.CACHE_KEY.format(owner.strip().lower(), repo.strip().lower()))
+
+    async def forget_all(self) -> None:
+        for key in self._keys:
+            ttl_cache.invalidate(key)
+        self._keys.clear()
+
+    @staticmethod
+    async def _ask_github(owner: str, repo: str) -> int:
         async with github_sdk(_app_auth()) as client:
             response = await client.rest(GITHUB_API_VERSION).apps.async_get_repo_installation(
-                quote(owner.strip(), safe=""), quote(repo.strip(), safe="")
+                quote(owner, safe=""), quote(repo, safe="")
             )
         installation_id = response.json().get("id")
-        return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
-    except Exception:
-        logger.warning(
-            "Failed to resolve GitHub App installation",
-            extra={"owner": owner, "repo": repo},
-            exc_info=True,
-        )
-        return None
+        if not isinstance(installation_id, int) or installation_id <= 0:
+            raise ValueError("GitHub answered without an installation id")
+        return installation_id
+
+
+REPO_INSTALLATIONS = RepoInstallations()
+
+
+async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int | None:
+    """Resolve the GitHub App installation that can access a repository."""
+    return await REPO_INSTALLATIONS.lookup(owner, repo)
 
 
 async def get_github_app_installation_token(

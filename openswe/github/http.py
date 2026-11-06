@@ -333,22 +333,33 @@ class GitHubClient:
         ``permissions`` narrows the token to them, and to ``repo`` alone.
         Raises ``GitHubAppUnavailable`` when no installation token can be minted.
         """
+        explicit_installation = installation_id is not None
         # app imports this module.
         from openswe.github.app import (
+            REPO_INSTALLATIONS,
             get_github_app_installation_id_for_repo,
             get_github_app_installation_token,
         )
 
-        if installation_id is None and owner is not None and repo is not None:
-            installation_id = await get_github_app_installation_id_for_repo(owner, repo)
-            if installation_id is None:
-                raise GitHubAppUnavailable(f"no GitHub App installation on {owner}/{repo}")
-        token = await get_github_app_installation_token(
-            installation_id=installation_id,
-            repositories=[repo] if permissions is not None and repo is not None else None,
-            permissions=permissions,
-            raise_errors=True,
-        )
+        token: str | None = None
+        for retry in (False, True):
+            if owner is not None and repo is not None and (installation_id is None or retry):
+                installation_id = await get_github_app_installation_id_for_repo(owner, repo)
+                if installation_id is None:
+                    raise GitHubAppUnavailable(f"no GitHub App installation on {owner}/{repo}")
+            try:
+                token = await get_github_app_installation_token(
+                    installation_id=installation_id,
+                    repositories=[repo] if permissions is not None and repo is not None else None,
+                    permissions=permissions,
+                    raise_errors=True,
+                )
+                break
+            except GitHubAppUnavailable as exc:
+                # A kept installation may be gone after a reinstall; ask GitHub again once.
+                if retry or exc.retryable or explicit_installation or not owner or not repo:
+                    raise
+                await REPO_INSTALLATIONS.forget(owner, repo)
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
         async with github_client(token=token, timeout=timeout) as http:
@@ -403,9 +414,11 @@ class GitHubClient:
 
         ``total`` is how many items the list should hold: the pages that many fill
         are read concurrently, and reading goes on while the last one comes back full.
+        A list whose pages report a ``total_count`` reads the rest of its pages
+        concurrently once the first page says how many there are.
         """
 
-        async def read(page: int) -> list[object]:
+        async def read(page: int) -> tuple[list[object], int | None]:
             payload = await self.get(
                 path, {**(params or {}), "per_page": str(_PAGE_SIZE), "page": str(page)}
             )
@@ -414,22 +427,34 @@ class GitHubClient:
             )
             if not isinstance(batch, list):
                 raise ValueError(f"GitHub answered {path} without a list")
-            return batch
+            reported = payload.get("total_count") if isinstance(payload, dict) else None
+            return batch, reported if isinstance(reported, int) else None
 
         semaphore = asyncio.Semaphore(_PAGE_CONCURRENCY)
 
         async def bounded(page: int) -> list[object]:
             async with semaphore:
-                return await read(page)
+                return (await read(page))[0]
 
-        known = max(1, -(-(total or 0) // _PAGE_SIZE))
-        if max_pages is not None:
-            known = min(known, max_pages)
-        batches = await asyncio.gather(*(bounded(page) for page in range(1, known + 1)))
-        page = known
+        def page_count(items: int) -> int:
+            count = max(1, -(-items // _PAGE_SIZE))
+            return count if max_pages is None else min(count, max_pages)
+
+        if total:
+            batches = await asyncio.gather(
+                *(bounded(page) for page in range(1, page_count(total) + 1))
+            )
+        else:
+            first, reported = await read(1)
+            batches = [first]
+            if reported is not None and len(first) == _PAGE_SIZE:
+                batches += await asyncio.gather(
+                    *(bounded(page) for page in range(2, page_count(reported) + 1))
+                )
+        page = len(batches)
         while len(batches[-1]) == _PAGE_SIZE and page != max_pages:
             page += 1
-            batches.append(await read(page))
+            batches.append((await read(page))[0])
         return [item for batch in batches for item in batch if isinstance(item, dict)]
 
     async def graphql(

@@ -198,7 +198,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
       </div>
       {open && status && (
         <div className="divide-y border-t border-default">
-          <ChecksRow checks={detail.checks} status={status} login={login} />
+          <ChecksRow pr={pr} status={status} login={login} />
           <ReviewsRow pr={pr} detail={detail} status={status} login={login} />
           <BranchRow pr={pr} detail={detail} status={status} login={login} />
           <OpenSweRow pr={pr} detail={detail} />
@@ -389,14 +389,18 @@ function checkState(
 const checkRank = { fail: 0, pending: 1, pass: 2, skip: 3 } as const
 
 function ChecksRow({
-  checks,
+  pr,
   status,
   login,
 }: {
-  checks: Array<ReviewCheckRun>
+  pr: PullRequestRef
   status: OpenPullRequest
   login: string
 }) {
+  const checksQuery = useQuery(reviewQueries.checks(pr))
+  const checks = checksQuery.data ?? []
+  // Until the runs arrive, the status cache's CI state stands in for them.
+  const loading = checksQuery.isPending
   const [expanded, setExpanded] = useState(status.ci === "failing")
   const askInChat = useReviewPage((state) => state.askInChat)
   const states = checks.map(checkState)
@@ -426,7 +430,7 @@ function ChecksRow({
     <div>
       <Row
         icon={
-          failed
+          failed || (loading && status.ci === "failing")
             ? failIcon
             : pending || status.ci === "pending"
               ? pendingIcon
@@ -446,7 +450,7 @@ function ChecksRow({
           ) : null
         }
       >
-        {summary}
+        {loading ? <Skeleton className="h-3 w-40" /> : summary}
       </Row>
       {expanded && (
         <ul className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7">

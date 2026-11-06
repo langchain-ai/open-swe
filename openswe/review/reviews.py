@@ -388,16 +388,31 @@ def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _check_run_views(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "name": run.get("name") or "",
-            "status": run.get("status") or "",
-            "conclusion": run.get("conclusion"),
-            "url": run.get("html_url"),
-        }
-        for run in runs
-    ]
+class ReviewCheck(BaseModel):
+    """A check run on the pull request's head, as the review page lists it."""
+
+    name: str
+    status: str
+    conclusion: str | None
+    url: str | None
+
+    @classmethod
+    async def on_head(cls, pull: PullRequestClient) -> list[Self]:
+        """The checks on ``pull``'s head; none when GitHub cannot list them.
+
+        Read apart from the review page's detail: a busy branch's check runs take
+        several slow pages, which held the whole page back.
+        """
+        runs = await or_none(pull.repo.check_runs(await pull.head_sha()))
+        return [
+            cls(
+                name=run.get("name") or "",
+                status=run.get("status") or "",
+                conclusion=run.get("conclusion"),
+                url=run.get("html_url"),
+            )
+            for run in runs or []
+        ]
 
 
 async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
@@ -714,22 +729,11 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
             summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
 
         head_sha = details["head_sha"] or summary["head_sha"]
-        if thread and head_sha:
-            stored, runs = await asyncio.gather(
-                reconcile_linked_findings(
-                    thread["thread_id"], repository.pull_request(pr_number), findings=stored
-                ),
-                or_none(repository.check_runs(head_sha)),
-            )
-        else:
-            if thread:
-                stored = await reconcile_linked_findings(
-                    thread["thread_id"], repository.pull_request(pr_number), findings=stored
-                )
-            runs = await or_none(repository.check_runs(head_sha)) if head_sha else None
         if thread:
+            stored = await reconcile_linked_findings(
+                thread["thread_id"], repository.pull_request(pr_number), findings=stored
+            )
             summary = _thread_review_summary(thread, stored) or summary
-    checks = _check_run_views(runs or [])
 
     findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(
@@ -770,7 +774,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
             await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
         ),
         "pr": details,
-        "checks": checks,
         "findings": findings,
         "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
         "walkthrough_running": walkthrough_running,

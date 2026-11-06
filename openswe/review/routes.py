@@ -48,6 +48,7 @@ from openswe.review.reviews import (
     PostedReviewComment,
     PullRequestPreview,
     PullRequestReviewEvent,
+    ReviewCheck,
     ReviewScoutTrigger,
     ReviewSummary,
     SubmittedReview,
@@ -213,6 +214,18 @@ async def api_get_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/checks")
+async def api_get_review_checks(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> list[ReviewCheck]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    async with GitHubClient.as_app(owner, repo) as github:
+        return await ReviewCheck.on_head(github.repo(owner, repo).pull_request(pr_number))
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
