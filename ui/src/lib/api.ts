@@ -328,6 +328,7 @@ export interface OptionsPayload {
 
 export interface Profile {
   experimental_background_callbacks?: boolean | null
+  experimental_live_activity?: boolean | null
   login?: string
   email?: string
   default_repo?: string | null
@@ -352,6 +353,7 @@ export interface Profile {
 
 export interface ProfileUpdate {
   experimental_background_callbacks?: boolean | null
+  experimental_live_activity?: boolean | null
   default_repo?: string | null
   workspace_default_repos?: Record<string, string>
   base_branch?: string | null

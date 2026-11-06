@@ -100,6 +100,10 @@ class ProfileUpdate(KitchenChannelPreference):
     experimental_background_callbacks: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    # A live run shows its latest thoughts and tool calls in the dashboard fold and in Slack.
+    experimental_live_activity: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_onboarding_dismissed: bool = False
 
     @field_validator("workspace_default_repos")
@@ -175,6 +179,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
+        ),
+        "experimental_live_activity": (
+            update.experimental_live_activity
+            if update.experimental_live_activity is not None
+            else existing.get("experimental_live_activity")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed

@@ -32,9 +32,11 @@ from openswe.slack.client import (
     remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
+    update_slack_thread_reply,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.live_activity import SlackLiveMessage
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.orphan import (
     dashboard_handoff_message,
@@ -198,22 +200,44 @@ async def send_slack_reply(
             if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
                 message = markdown_to_mrkdwn(message)
         usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
+        agent_thread_id = (
+            None if is_code_channel_session(str(thread_ts)) else str(thread_id or "") or None
+        )
+        live_view = (
+            cfg.slack_live_activity is True and bool(run_id) and post_thread_ts == str(thread_ts)
+        )
         try:
-            message_ts = await _post_and_store_mapping(
-                channel_id,
-                thread_ts,
-                message,
-                blocks=slack_blocks,
-                usage=usage,
-                post_thread_ts=post_thread_ts,
-                agent_thread_id=(
-                    None
-                    if is_code_channel_session(str(thread_ts))
-                    else str(thread_id or "") or None
-                ),
-                run_id=run_id,
-                triggering_user_id=_triggering_user_id(cfg),
-            )
+            message_ts = None
+            if live_view and response_type == "final":
+                message_ts = await SlackLiveMessage.take_over(
+                    str(channel_id),
+                    str(thread_ts),
+                    str(run_id),
+                    reply=lambda live_ts: _edit_and_store_mapping(
+                        str(channel_id),
+                        str(thread_ts),
+                        live_ts,
+                        message,
+                        blocks=slack_blocks,
+                        usage=usage,
+                        agent_thread_id=agent_thread_id,
+                        run_id=run_id,
+                        triggering_user_id=_triggering_user_id(cfg),
+                    ),
+                )
+            if message_ts is None:
+                message_ts = await _post_and_store_mapping(
+                    channel_id,
+                    thread_ts,
+                    message,
+                    blocks=slack_blocks,
+                    usage=usage,
+                    post_thread_ts=post_thread_ts,
+                    agent_thread_id=agent_thread_id,
+                    run_id=run_id,
+                    triggering_user_id=_triggering_user_id(cfg),
+                )
+                live_view = live_view and response_type == "progress"
         except SlackRequestError as exc:
             if exc.code == "thread_not_found":
                 moved = bool(thread_id) and await move_thread_to_dashboard(
@@ -227,6 +251,18 @@ async def send_slack_reply(
                 "message_chars": len(message),
                 "hint": _slack_reply_failure_hint(exc.code),
             }
+        if live_view and response_type == "progress":
+            try:
+                live_view = await SlackLiveMessage.move_below(
+                    str(channel_id), str(thread_ts), str(run_id)
+                )
+            except Exception:
+                # The reply is posted; the live message stays where it was and keeps updating.
+                logger.warning(
+                    "Could not move the Slack live activity message below a reply",
+                    extra={"slack_channel": channel_id, "run_id": run_id},
+                    exc_info=True,
+                )
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(
@@ -243,8 +279,8 @@ async def send_slack_reply(
                 )
     if message_ts and response_type == "final" and thread_id and run_id:
         await RoutedWork(thread_id).answered(run_id)
-    if run_id and not is_code_channel_session(str(thread_ts)):
-        # Slack drops the status when the app posts.
+    if run_id and not live_view and not is_code_channel_session(str(thread_ts)):
+        # Slack drops the status when the app posts; a live message stands in for it.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {
         "success": True,
@@ -595,6 +631,36 @@ def _slack_reply_failure_hint(slack_error: str | None) -> str:
     if slack_error and slack_error.startswith("http_error:"):
         return "Slack posting hit an HTTP error; retry once, then surface the failure to the user via the trace output."
     return "Slack post failed; retry once with a concise message or surface the failure to the user via the trace output."
+
+
+async def _edit_and_store_mapping(
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+    message: str,
+    *,
+    blocks: list[dict[str, Any]] | None,
+    usage: RunUsageSummary | None,
+    agent_thread_id: str | None,
+    run_id: str | None,
+    triggering_user_id: str | None,
+) -> None:
+    await update_slack_thread_reply(
+        channel_id,
+        thread_ts,
+        message_ts,
+        message,
+        blocks=blocks,
+        usage=usage,
+        agent_thread_id=agent_thread_id,
+    )
+    await store_slack_message_run_mapping(
+        channel_id,
+        thread_ts,
+        message_ts,
+        run_id=run_id,
+        triggering_user_id=triggering_user_id,
+    )
 
 
 async def _post_and_store_mapping(

@@ -18,6 +18,11 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <StreamPreference />
+        <ProfileSwitchRow
+          field="experimental_live_activity"
+          label="Live activity"
+          description="While Robin works, its folded activity and its Slack thread show its latest thoughts and tool calls, up to ten lines, instead of a single status line."
+        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow

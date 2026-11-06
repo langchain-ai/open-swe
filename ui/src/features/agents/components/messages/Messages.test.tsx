@@ -217,7 +217,9 @@ describe("Messages", () => {
       history: createMemoryHistory({ initialEntries: ["/"] }),
     })
     await router.load()
-    const { container } = render(<RouterProvider router={router} />)
+    const { container } = render(<RouterProvider router={router} />, {
+      wrapper,
+    })
 
     const details = screen.getByRole("button", {
       name: "Investigate login · Message",
@@ -281,7 +283,9 @@ describe("Messages", () => {
       history: createMemoryHistory({ initialEntries: ["/"] }),
     })
     await router.load()
-    const { container } = render(<RouterProvider router={router} />)
+    const { container } = render(<RouterProvider router={router} />, {
+      wrapper,
+    })
     const chip = screen.getByRole("button", {
       name: "Worker 2cfc31d4 · Started",
     })
@@ -404,7 +408,8 @@ describe("Messages", () => {
               ],
             },
           ]}
-        />
+        />,
+        { wrapper }
       )
       expect(
         screen.getByRole("button", { name: `Worker · ${label}` })

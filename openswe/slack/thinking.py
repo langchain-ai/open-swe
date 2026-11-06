@@ -81,7 +81,7 @@ def _basename(value: str) -> str:
     return PurePath(value).name if value else "file"
 
 
-def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
+def tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     if name in {"read_file", "write_file", "edit_file", "delete"}:
         action = {
             "read_file": "Reading",
@@ -211,7 +211,7 @@ class SlackThinkingStream:
             if startup and startup.status == "in_progress":
                 startup.status = "complete"
                 self.pending[startup.task_id] = startup
-            title, details = _tool_step(name, data.get("input"))
+            title, details = tool_step(name, data.get("input"))
             step = Step(
                 _step_id(self.run_id, namespace, call_id),
                 title,

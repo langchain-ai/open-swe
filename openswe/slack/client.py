@@ -897,6 +897,26 @@ async def post_slack_thread_reply_with_ts(
     )
 
 
+async def update_slack_thread_reply(
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
+) -> None:
+    """Turn an existing thread message into a reply, dressed as a new one would be."""
+    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
+    await update_slack_message(
+        channel_id,
+        message_ts,
+        append_slack_web_link_footer(text, dashboard_url, usage),
+        blocks=_with_slack_web_link_context_block(text, blocks, dashboard_url, usage),
+    )
+
+
 async def post_slack_ephemeral_reply(
     channel_id: str,
     user_id: str,
@@ -915,6 +935,13 @@ async def post_slack_ephemeral_reply(
         append_slack_web_link_footer(text, dashboard_url, usage),
         blocks=blocks,
     )
+
+
+async def post_slack_thread_message_with_ts(
+    channel_id: str, thread_ts: str, text: str, *, blocks: list[dict[str, Any]] | None = None
+) -> str:
+    """Post a plain bot message in a Slack thread, without a reply's dashboard footer."""
+    return await _post_slack_message_with_ts(channel_id, text, thread_ts=thread_ts, blocks=blocks)
 
 
 async def post_slack_top_level_message_with_ts(
@@ -1649,6 +1676,49 @@ async def fetch_slack_thread_messages(
     return messages
 
 
+class SlackThreadLock:
+    """A Slack thread's mutation lock: an expiring PostgreSQL claim, so one its holder
+    fails to release lapses on its own, and holding it keeps no database connection open.
+    """
+
+    def __init__(self, channel_id: str, thread_ts: str, purpose: str | None = None) -> None:
+        self.channel, self.timestamp = normalize_slack_location(channel_id, thread_ts)
+        self.key = f"{self.channel}:{self.timestamp}"
+        if purpose:
+            self.key += f":{purpose}"
+
+    async def acquire(self) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
+        while not await event_claims.claim(
+            _SLACK_THREAD_MUTATION_LOCK_SCOPE, self.key, ttl=_SLACK_THREAD_MUTATION_LOCK_TTL
+        ):
+            if loop.time() >= deadline:
+                raise TimeoutError("Timed out waiting for the Slack thread mutation lock")
+            await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
+
+    async def release(self) -> None:
+        try:
+            await event_claims.release(_SLACK_THREAD_MUTATION_LOCK_SCOPE, self.key)
+        except Exception:
+            logger.warning(
+                "Failed to release Slack thread mutation lock",
+                extra={"slack_channel": self.channel, "slack_thread_ts": self.timestamp},
+                exc_info=True,
+            )
+
+    @classmethod
+    @asynccontextmanager
+    async def held(cls, channel_id: str, thread_ts: str) -> AsyncIterator[None]:
+        """Hold the lock for the block, without reading where the thread lives."""
+        lock = cls(channel_id, thread_ts)
+        await lock.acquire()
+        try:
+            yield
+        finally:
+            await lock.release()
+
+
 @asynccontextmanager
 async def slack_thread_mutation_lock(
     channel_id: str,
@@ -1662,29 +1732,12 @@ async def slack_thread_mutation_lock(
     The lock is an expiring PostgreSQL claim, so one its holder fails to release
     lapses on its own, and holding it keeps no database connection open.
     """
-    channel, timestamp = normalize_slack_location(channel_id, thread_ts)
-    lock_key = f"{channel}:{timestamp}"
-    if purpose:
-        lock_key += f":{purpose}"
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
-    while not await event_claims.claim(
-        _SLACK_THREAD_MUTATION_LOCK_SCOPE, lock_key, ttl=_SLACK_THREAD_MUTATION_LOCK_TTL
-    ):
-        if loop.time() >= deadline:
-            raise TimeoutError("Timed out waiting for the Slack thread mutation lock")
-        await asyncio.sleep(_SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS)
+    lock = SlackThreadLock(channel_id, thread_ts, purpose)
+    await lock.acquire()
     try:
         yield await get_active_slack_thread(thread_id) if thread_id else None
     finally:
-        try:
-            await event_claims.release(_SLACK_THREAD_MUTATION_LOCK_SCOPE, lock_key)
-        except Exception:
-            logger.warning(
-                "Failed to release Slack thread mutation lock",
-                extra={"slack_channel": channel, "slack_thread_ts": timestamp},
-                exc_info=True,
-            )
+        await lock.release()
 
 
 async def fetch_slack_thread_message_by_ts(

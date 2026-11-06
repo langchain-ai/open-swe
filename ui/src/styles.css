@@ -49,6 +49,14 @@ body.version-mismatch {
        compositor updates discrete frames instead of every vsync. */
     --animate-status-pulse: status-pulse 2s infinite;
     --animate-attention-flash: attention-flash 1.4s ease-out;
+    /* Grows a grid row in from nothing, so the entries above slide up. */
+    --animate-work-tail-enter: work-tail-enter 320ms ease-out;
+    @keyframes work-tail-enter {
+        from {
+            grid-template-rows: 0fr;
+            opacity: 0;
+        }
+    }
     @keyframes attention-flash {
         0% {
             background-color: var(--bg-brand-subtle);

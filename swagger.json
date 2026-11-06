@@ -5979,6 +5979,18 @@
             ],
             "title": "Experimental Conditional Approval"
           },
+          "experimental_live_activity": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Live Activity"
+          },
           "experimental_memory": {
             "anyOf": [
               {

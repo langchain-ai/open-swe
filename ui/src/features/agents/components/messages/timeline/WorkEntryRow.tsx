@@ -92,6 +92,102 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
   )
 }
 
+/**
+ * A work entry's single line: icon, heading, dimmed argument and status, with
+ * `accessory` controls just before the status.
+ */
+export function WorkEntryLine({
+  entry,
+  accessory,
+}: {
+  entry: WorkEntryView
+  accessory?: ReactNode
+}) {
+  const isError = entry.tone === "error"
+
+  return (
+    <div className="flex items-center gap-space-2 select-none">
+      <span
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center",
+          isError
+            ? "text-icon-error"
+            : entry.tone === "thinking"
+              ? "text-icon-primary"
+              : "text-icon-tertiary"
+        )}
+      >
+        <WorkEntryIcon name={entry.icon} />
+      </span>
+
+      <div className="flex min-w-0 flex-1 items-center gap-space-2">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <p className="flex w-full min-w-0 items-baseline gap-space-2 text-xs leading-5">
+            <span
+              className={cn(
+                "shrink-0 truncate font-medium",
+                isError
+                  ? "text-error-secondary"
+                  : entry.status === "pending" || entry.status === "in_progress"
+                    ? "shimmer-text"
+                    : "text-primary"
+              )}
+            >
+              {entry.heading}
+            </span>
+            {entry.preview &&
+              (entry.previewTooltip ? (
+                <Tooltip
+                  title={entry.previewTooltip}
+                  tooltipClassName="max-w-md break-all text-primary"
+                >
+                  <span className="min-w-0 flex-1 truncate text-secondary">
+                    {entry.preview}
+                  </span>
+                </Tooltip>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-secondary">
+                  {entry.preview}
+                </span>
+              ))}
+            {entry.destinationHref && (
+              <Tooltip title="Open destination thread">
+                <Link
+                  href={entry.destinationHref}
+                  aria-label="Open destination thread"
+                  className="shrink-0 text-icon-secondary"
+                  onClick={stopRowToggle}
+                  onKeyDown={stopRowToggle}
+                >
+                  <ArrowUpRightIcon size={14} weight="regular" aria-hidden />
+                </Link>
+              </Tooltip>
+            )}
+            {entry.diffStats && (
+              <span className="flex shrink-0 items-center gap-space-1 font-mono text-xxs text-secondary tabular-nums">
+                <span className="transition-colors group-focus-within/entry:text-success-secondary group-hover/entry:text-success-secondary">
+                  +{entry.diffStats.additions}
+                </span>
+                <span aria-hidden>/</span>
+                <span className="transition-colors group-focus-within/entry:text-error-secondary group-hover/entry:text-error-secondary">
+                  -{entry.diffStats.deletions}
+                </span>
+              </span>
+            )}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-space-1 text-secondary">
+          {accessory}
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <StatusIndicator status={entry.status} />
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** What the row learned by expanding, for a body that renders output itself. */
 export interface WorkEntryBodyDetail {
   /** The call's full output, once the lazy fetch returned it. */
@@ -164,7 +260,6 @@ export function WorkEntryRow({
     onActivate == null &&
     (body != null || detailText != null || loadExpandedText != null)
   const activate = onActivate ?? (canExpand ? toggle : null)
-  const isError = entry.tone === "error"
   const hoverTimestamp = formatHoverTimestamp(timestamp)
 
   const handleKeyDown = useCallback(
@@ -198,79 +293,10 @@ export function WorkEntryRow({
       )}
       {...rowToggleProps}
     >
-      <div className="flex items-center gap-space-2 select-none">
-        <span
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center",
-            isError
-              ? "text-icon-error"
-              : entry.tone === "thinking"
-                ? "text-icon-primary"
-                : "text-icon-tertiary"
-          )}
-        >
-          <WorkEntryIcon name={entry.icon} />
-        </span>
-
-        <div className="flex min-w-0 flex-1 items-center gap-space-2">
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-space-2 text-xs leading-5">
-              <span
-                className={cn(
-                  "shrink-0 truncate font-medium",
-                  isError
-                    ? "text-error-secondary"
-                    : entry.status === "pending" ||
-                        entry.status === "in_progress"
-                      ? "shimmer-text"
-                      : "text-primary"
-                )}
-              >
-                {entry.heading}
-              </span>
-              {entry.preview &&
-                (entry.previewTooltip ? (
-                  <Tooltip
-                    title={entry.previewTooltip}
-                    tooltipClassName="max-w-md break-all text-primary"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-secondary">
-                      {entry.preview}
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-secondary">
-                    {entry.preview}
-                  </span>
-                ))}
-              {entry.destinationHref && (
-                <Tooltip title="Open destination thread">
-                  <Link
-                    href={entry.destinationHref}
-                    aria-label="Open destination thread"
-                    className="shrink-0 text-icon-secondary"
-                    onClick={stopRowToggle}
-                    onKeyDown={stopRowToggle}
-                  >
-                    <ArrowUpRightIcon size={14} weight="regular" aria-hidden />
-                  </Link>
-                </Tooltip>
-              )}
-              {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-space-1 font-mono text-xxs text-secondary tabular-nums">
-                  <span className="transition-colors group-focus-within/entry:text-success-secondary group-hover/entry:text-success-secondary">
-                    +{entry.diffStats.additions}
-                  </span>
-                  <span aria-hidden>/</span>
-                  <span className="transition-colors group-focus-within/entry:text-error-secondary group-hover/entry:text-error-secondary">
-                    -{entry.diffStats.deletions}
-                  </span>
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-space-1 text-secondary">
+      <WorkEntryLine
+        entry={entry}
+        accessory={
+          <>
             {trailing}
             {hoverTimestamp && (
               <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
@@ -293,12 +319,9 @@ export function WorkEntryRow({
                 />
               ) : null}
             </span>
-            <span className="flex size-4 shrink-0 items-center justify-center">
-              <StatusIndicator status={entry.status} />
-            </span>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {expanded && canExpand && (
         <div

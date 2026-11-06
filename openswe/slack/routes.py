@@ -42,6 +42,7 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from openswe.slack.live_activity import STOP_ACTION, SlackLiveMessage
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.payloads import (
     SlackBlockAction,
@@ -1318,6 +1319,22 @@ async def act_on_interaction(
         )
         if feedback_action is not None:
             background_tasks.add_task(process_feedback, interaction, feedback_action)
+            return {}
+        stop_action = next(
+            (action for action in interaction.actions if action.action_id == STOP_ACTION), None
+        )
+        if stop_action is not None:
+            # Goes through Slack's own Stop checks: the thread bound to this location,
+            # the workspace, a linked person, and their access to the thread.
+            background_tasks.add_task(
+                SlackLiveMessage.stop_clicked,
+                channel_id=interaction.channel_id,
+                thread_ts=interaction.thread_ts,
+                message_ts=interaction.message_ts,
+                user_id=interaction.user.id,
+                team_id=interaction.team.id,
+                action_ts=stop_action.action_ts,
+            )
             return {}
 
     if interaction.type == "block_suggestion" and interaction.container.type == "code_channel_view":

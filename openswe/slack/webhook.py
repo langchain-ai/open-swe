@@ -44,6 +44,7 @@ from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
+from openswe.slack.live_activity import SlackLiveMessage
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
@@ -1364,6 +1365,13 @@ async def _process_slack_mention_impl(
         and not concierge_mode
         and not request.context_thread_ts
     )
+    live_activity = (
+        not code_channel
+        and not concierge_mode
+        and not request.web_only
+        and await SlackLiveMessage.enabled_for(mapped_login or "")
+    )
+    configurable["slack_live_activity"] = live_activity
     langgraph_client = get_langgraph_client()
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
@@ -1623,7 +1631,18 @@ async def _process_slack_mention_impl(
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    if not code_channel and not concierge_mode and isinstance(run_id, str) and run_id:
+    if live_activity and isinstance(run_id, str) and run_id:
+        # A live message Slack would not take leaves the usual status in its place.
+        live_activity = await SlackLiveMessage(
+            thread_id=thread_id, run_id=run_id, channel_id=channel_id, thread_ts=thread_ts
+        ).run()
+    if (
+        not live_activity
+        and not code_channel
+        and not concierge_mode
+        and isinstance(run_id, str)
+        and run_id
+    ):
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,
