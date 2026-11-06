@@ -196,13 +196,13 @@ it.each([
     })
     const restored = screen.getByRole("button", { name: "Review requested" })
     expect(restored.hasAttribute("disabled")).toBe(false)
-    if (permalink) fireEvent.click(restored)
+    fireEvent.click(restored)
     expect(open.mock.calls).toEqual(
       permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
     )
     expect(request).not.toHaveBeenCalled()
     expect(successToast).not.toHaveBeenCalled()
-    expect(availability).toHaveBeenCalledTimes(1)
+    expect(availability).toHaveBeenCalledTimes(permalink ? 1 : 2)
   }
 )
 

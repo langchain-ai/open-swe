@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal, Self, TypedDict
+from urllib.parse import quote
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
@@ -259,6 +260,18 @@ class HumanReviewRequest(Base):
             return False
         owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
+
+    async def card_url(self) -> str:
+        """Link to the card even when Slack's permalink lookup is unavailable."""
+        from openswe.slack.client import get_slack_permalink
+
+        channel, timestamp = self.slack_channel_id, self.slack_message_ts
+        if not channel or not timestamp:
+            return ""
+        permalink = await get_slack_permalink(channel, timestamp)
+        if permalink:
+            return permalink
+        return f"https://app.slack.com/archives/{quote(channel, safe='')}/p{quote(timestamp.replace('.', ''), safe='')}"
 
     @property
     def slack_location(self) -> tuple[str, str] | None:

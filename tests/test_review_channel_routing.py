@@ -5,8 +5,10 @@ from pytest import MonkeyPatch
 
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review import routes
+from openswe.human_review.requests import HumanReviewRequest
 
 
 def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
@@ -61,3 +63,26 @@ async def test_review_availability_uses_cached_settings(
         result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
     assert result.available is (not routed or filename.startswith("ui/"))
     assert result.active is False
+
+
+async def test_active_review_links_to_slack_when_permalink_lookup_fails(
+    github_app: AsyncMock,
+) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    active = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        slack_channel_id="C1",
+        slack_message_ts="123.456",
+    )
+    with (
+        patch.object(routes, "require_repo_access_for_user", AsyncMock()),
+        patch.object(RepoSettings, "cached", AsyncMock(return_value=RepoSettings())),
+        patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")),
+        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=active)),
+        patch("openswe.slack.client.get_slack_permalink", AsyncMock(return_value=None)),
+    ):
+        result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
+    assert result.active
+    assert result.permalink == "https://app.slack.com/archives/C1/p123456"

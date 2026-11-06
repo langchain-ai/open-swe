@@ -110,8 +110,15 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         disabled={Boolean(channelHint)}
         onClick={() => {
           if (requestReview.isPending) return
-          if (active && permalink) {
-            window.open(permalink, "_blank", "noopener,noreferrer")
+          if (active) {
+            if (permalink) {
+              window.open(permalink, "_blank", "noopener,noreferrer")
+            } else {
+              toast.error(
+                "The review card's Slack link is unavailable. Retry the review status."
+              )
+              void availability.refetch()
+            }
           } else if (channelHint) {
             toast.error(channelHint)
           } else {

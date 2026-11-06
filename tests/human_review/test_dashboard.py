@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
+from openswe.expedited_review.nomination import ExpeditedReviewNomination
 from openswe.github.codeowners import CodeOwners
 from openswe.github.http import GitHubClient, RepoFileUnreadableError
 from openswe.github.pull_request_status import PullRequestClient
@@ -17,6 +18,7 @@ from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
+from openswe.slack.http import SlackRequestError
 from openswe.users import User
 
 
@@ -30,20 +32,81 @@ from openswe.users import User
         "disabled",
         "draft",
         "active",
+        "active_ready",
+        "active_changed",
+        "active_post_failed",
+        "active_save_failed",
+        "active_timestamp_failed",
+        "active_cleanup_failed",
+        "active_other_user",
+        "active_unposted",
         "reviews_unavailable",
         "codeowners_unreadable",
         "already_reviewed",
     ],
 )
 async def test_dashboard_selects_review_workflow(
-    case: str, monkeypatch: pytest.MonkeyPatch
+    case: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     pr_ref = GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7")
     requester = User()
     pr = PullRequest(owner="lc", repo="repo", number=7)
     approval = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="expedited", slack_channel_id="C1"
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        slack_channel_id="C1",
+        slack_message_ts="1.0",
     )
+    approval.requested_by_user_id = User().id if case == "active_other_user" else requester.id
+    delete = AsyncMock(return_value=case != "active_cleanup_failed")
+    monkeypatch.setattr("openswe.expedited_review.nomination.delete_slack_message", delete)
+    discard = AsyncMock()
+    reopen = AsyncMock()
+    monkeypatch.setattr(ExpeditedReviewNomination, "discard", discard)
+    monkeypatch.setattr(ReviewCard, "reopen", reopen)
+    approval.pull_request = pr
+    approval.diff_fingerprint = diff_fingerprint(
+        [
+            ChangedFile(
+                filename="app.py",
+                additions=1,
+                patch="+old"
+                if case
+                in {
+                    "active_changed",
+                    "active_post_failed",
+                    "active_save_failed",
+                    "active_timestamp_failed",
+                    "active_cleanup_failed",
+                }
+                else "+x",
+            )
+        ]
+    )
+    approval.awaiting_ready = case in {"active_ready", "active_unposted"}
+    if approval.awaiting_ready:
+        approval.slack_message_ts = ""
+    monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
+    monkeypatch.setattr(ReviewCard, "retire", AsyncMock(return_value=approval))
+    ready_approval = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        id=approval.id,
+        slack_channel_id="C1",
+        slack_message_ts="1.0" if case == "active_ready" else "",
+    )
+    monkeypatch.setattr(HumanReviewRequest, "transition", AsyncMock(return_value=ready_approval))
+    monkeypatch.setattr(SlackChannel, "name_for", AsyncMock(return_value="reviews"))
+
+    async def save_request(row: HumanReviewRequest) -> HumanReviewRequest:
+        if case == "active_save_failed" or (
+            case in {"active_timestamp_failed", "active_cleanup_failed"} and row.slack_message_ts
+        ):
+            raise RuntimeError("save failed")
+        return row
+
     target = SlackChannel(id="C1", name="reviews")
     github = GitHubClient.connect(token="token")
     app_github = GitHubClient.connect(token="token")
@@ -67,7 +130,7 @@ async def test_dashboard_selects_review_workflow(
         patch.object(
             HumanReviewRequest,
             "active_for",
-            AsyncMock(return_value=approval if case == "active" else None),
+            AsyncMock(return_value=approval if case.startswith("active") else None),
         ),
         patch.object(GitHubClient, "connect", return_value=github),
         patch.object(GitHubClient, "as_app", return_value=app_github),
@@ -84,6 +147,9 @@ async def test_dashboard_selects_review_workflow(
             PullRequestClient,
             "pull",
             AsyncMock(
+                side_effect=AssertionError("Retrieval must not nominate or read GitHub")
+                if case == "active_other_user"
+                else None,
                 return_value={
                     "state": "open",
                     "head": {"sha": "abc"},
@@ -91,7 +157,7 @@ async def test_dashboard_selects_review_workflow(
                     "user": {"login": "alice"},
                     "title": "Manual PR",
                     "body": "<!-- hidden -->\nThe PR description.\nWith more context.",
-                }
+                },
             ),
         ),
         patch.object(
@@ -122,20 +188,63 @@ async def test_dashboard_selects_review_workflow(
         patch.object(PullRequest, "load", AsyncMock(return_value=pr)),
         patch.object(PullRequest, "save", AsyncMock(return_value=pr)),
         patch.object(
-            HumanReviewRequest, "save", autospec=True, side_effect=lambda row: row
+            HumanReviewRequest,
+            "save",
+            autospec=True,
+            side_effect=save_request,
         ) as save,
-        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=approval)),
-        patch.object(ReviewCard, "post_expedited", AsyncMock(return_value="1.0")) as post,
+        patch.object(
+            HumanReviewRequest,
+            "get",
+            AsyncMock(
+                return_value=ready_approval
+                if case in {"active_ready", "active_unposted"}
+                else approval
+            ),
+        ),
+        patch.object(
+            ReviewCard,
+            "post_expedited",
+            AsyncMock(
+                return_value="1.0",
+                side_effect=SlackRequestError("post_failed")
+                if case == "active_post_failed"
+                else None,
+            ),
+        ) as post,
         patch(
-            "openswe.human_review.dashboard.get_slack_permalink",
-            AsyncMock(return_value="https://slack/card"),
+            "openswe.slack.client.get_slack_permalink", AsyncMock(return_value="https://slack/card")
         ),
     ):
+        if case in {"active_save_failed", "active_timestamp_failed", "active_cleanup_failed"}:
+            with pytest.raises(RuntimeError, match="save failed"):
+                await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request()
+            discard.assert_awaited_once()
+            reopen.assert_awaited_once()
+            if case == "active_save_failed":
+                delete.assert_not_awaited()
+            else:
+                delete.assert_awaited_once_with("C1", "1.0")
+            if case == "active_cleanup_failed":
+                assert "Failed to remove orphaned expedited review card" in caplog.text
+            return
         result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request(
             channel="C1", inline_summary="Custom summary." if case == "custom_summary" else None
         )
+    if case == "active_post_failed":
+        assert not result.success
+        assert "post_failed" in result.error
+        discard.assert_awaited_once()
+        reopen.assert_awaited_once()
+        standard.assert_not_awaited()
+        return
+    if case == "active_unposted":
+        assert not result.success
+        assert "not posted yet" in result.error
+        standard.assert_not_awaited()
+        return
     assert result.success
-    if case in {"eligible", "custom_summary"}:
+    if case in {"eligible", "custom_summary", "active_changed"}:
         assert result.channel == "C1"
         assert result.permalink == "https://slack/card"
         post.assert_awaited_once()
@@ -150,6 +259,13 @@ async def test_dashboard_selects_review_workflow(
         assert saved.requested_by_user_id == requester.id
         assert saved.thread_id == ""
         assert saved.run_config == {"expedited_review_channel": ""}
+    elif case in {"active", "active_ready", "active_other_user"}:
+        assert result.request_id == str(approval.id)
+        assert result.reused
+        assert result.channel == "C1"
+        assert result.permalink == "https://slack/card"
+        post.assert_not_awaited()
+        standard.assert_not_awaited()
     else:
         assert result.request_id == "standard"
         post.assert_not_awaited()

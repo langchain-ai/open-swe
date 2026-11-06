@@ -82,7 +82,6 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
-    get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
 )
@@ -284,7 +283,7 @@ async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: Sl
 
 
 async def _permalink(request: HumanReviewRequest) -> str:
-    return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
+    return await request.card_url()
 
 
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
