@@ -43,7 +43,7 @@ from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.threads.summary import upsert_pull_request_record
 from openswe.transcript.mirror import mirror_thread_metadata
-from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
+from openswe.utils.authorship import PR_ATTRIBUTION_TEXTS, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import create_langsmith_thread_feedback
@@ -311,7 +311,7 @@ def _access_failure_payload(
         http_status=http_status,
         reason=reason,
         likely_cause=(
-            "the Open SWE GitHub App or PR author token is not installed on, granted access "
+            "the Robin GitHub App or PR author token is not installed on, granted access "
             "to, or able to see this repository or one of the PR branches"
         ),
         branch_pushed=branch_pushed,
@@ -876,7 +876,6 @@ async def _record_pr_telemetry(
                     exc_info=True,
                 )
             active = await get_active_slack_thread(
-                get_client(),
                 thread_id,
                 cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
@@ -946,7 +945,6 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
 
     if cfg.source == "slack":
         active = await get_active_slack_thread(
-            get_client(),
             cfg.thread_id,
             cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
@@ -1044,7 +1042,10 @@ async def _maybe_append_references(
         if not lines:
             return body
         references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
-        footer_start = body.find(PR_ATTRIBUTION_TEXT)
+        footer_start = min(
+            (start for text in PR_ATTRIBUTION_TEXTS if (start := body.find(text)) >= 0),
+            default=-1,
+        )
         if footer_start < 0:
             return f"{body.rstrip()}\n\n{references}"
         before_footer = body[:footer_start].rstrip()

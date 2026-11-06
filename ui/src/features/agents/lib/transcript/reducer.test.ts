@@ -338,6 +338,28 @@ function completed(
 }
 
 describe("transcript events", () => {
+  it("preserves the original Slack message link in the transcript", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "slack-message",
+              turn_id: "turn-1",
+              role: "human",
+              text: '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1787165499.123456" slack_message_ts="1787165487.000034">Hello</input-message>',
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        })
+      )
+    )
+    expect(messages[0]?.slackMessageUrl).toBe(
+      "https://slack.com/archives/C123/p1787165487000034"
+    )
+  })
+
   it("projects task activity without exposing its model-only envelope", () => {
     const taskEvent = {
       version: 1,
@@ -738,6 +760,36 @@ describe("message images", () => {
         mimeType: "image/png",
       },
     ])
+  })
+})
+
+describe("plugin context", () => {
+  it("names the context a message was sent with, and never shows it as an image", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "turn-1",
+              role: "human",
+              text: "shorten this",
+              created_at: "2026-01-01T00:00:00Z",
+              attachments: [
+                attachment({
+                  mime_type: "application/vnd.open-swe.plugin-context",
+                  file_name: "AGENTS.md · 4 words selected",
+                }),
+              ],
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(messages[0]?.contextLabel).toBe("AGENTS.md · 4 words selected")
+    expect(imagesOf(messages[0])).toEqual([])
   })
 })
 

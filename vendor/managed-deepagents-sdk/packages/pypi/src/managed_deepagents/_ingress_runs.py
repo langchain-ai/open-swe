@@ -258,14 +258,15 @@ async def cancel_ingress_runs(*, client: LangGraphClient, thread_id: str) -> lis
         and isinstance(run_id := run.get("run_id"), str)
     ]
     cancelled = await asyncio.gather(
-        *(_cancel_run(client, thread_id, run_id) for run_id in run_ids)
+        *(cancel_ingress_run(client, thread_id, run_id) for run_id in run_ids)
     )
     cancelled_ids = [run_id for run_id, done in zip(run_ids, cancelled, strict=True) if done]
     record_log("INFO", "channel runs cancelled", attributes={"runs_cancelled": len(cancelled_ids)})
     return cancelled_ids
 
 
-async def _cancel_run(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
+async def cancel_ingress_run(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
+    """Cancel one queued or running run, keeping its progress; whether it was still active."""
     try:
         await client.runs.cancel(thread_id, run_id, wait=False, action="interrupt")
     except Exception as error:
@@ -352,6 +353,7 @@ async def resume_ingress_run(
     context: Context | None = None,
     config: Config | None = None,
     thread_origin: IngressThreadOrigin | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> StartedIngressRun:
     """Enqueue a keyed interrupt response without creating a thread."""
     if thread_origin is not None:
@@ -362,7 +364,7 @@ async def resume_ingress_run(
         assistant_id,
         command=Command(resume=resume),
         multitask_strategy="enqueue",
-        **_run_options(context, config),
+        **_run_options(context, config, metadata),
     )
     return _started_run(thread_id, run)
 

@@ -22,8 +22,11 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, TypeAdapter
 
 CONFLICT_LIMIT = 10
-PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
-FIX_PROMPT_PATH = Path(".github/prompts/fix_preview_typecheck.md")
+# Where Open SWE sits in the repository this runs in: "" when it is the root, a
+# subdirectory when it lives in a monorepo. Git state stays at the repository root.
+PROJECT_DIR = os.environ.get("PREVIEW_PROJECT_DIR", "").strip("/")
+PROMPT_PATH = Path(PROJECT_DIR, ".github/prompts/resolve_preview_conflict.md")
+FIX_PROMPT_PATH = Path(PROJECT_DIR, ".github/prompts/fix_preview_typecheck.md")
 FIXUP_MESSAGE = "preview: fix typecheck errors (oswe)"
 FORCE_MESSAGE = "preview: force deployment"
 WORKFLOWS_MESSAGE = "preview: keep the published workflows"
@@ -384,7 +387,8 @@ async def typecheck() -> str | None:
         archive = Path(scratch) / "tree.tar"
         source = Path(scratch) / "src"
         source.mkdir()
-        await git("archive", "--format=tar", "-o", str(archive), "HEAD")
+        tree = f"HEAD:{PROJECT_DIR}" if PROJECT_DIR else "HEAD"
+        await git("archive", "--format=tar", "-o", str(archive), tree)
         await run("tar", "-xf", str(archive), "-C", str(source))
         result = await run(
             "docker",

@@ -22,7 +22,7 @@ class UnknownUser(ValueError):
     """No Open SWE user signed in with this GitHub login."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"No Open SWE user record for {login!r} yet; sign in first")
+        super().__init__(f"No Robin user record for {login!r} yet; sign in first")
 
 
 class UserRecord(Base):
@@ -79,6 +79,19 @@ class UserRecords:
     async def get(self, login: str, key: str = "") -> JsonObject | None:
         async with postgres.session() as session:
             return await session.scalar(select(UserRecord.value).where(self._where(login, key)))
+
+    async def for_keys(self, login: str, keys: list[str]) -> dict[str, JsonObject]:
+        if not keys:
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(UserRecord.key, UserRecord.value).where(
+                    UserRecord.user_id == user_id_for_login(login),
+                    UserRecord.kind == self.kind,
+                    UserRecord.key.in_(keys),
+                )
+            )
+            return dict(rows.tuples().all())
 
     async def put(self, login: str, value: JsonObject, key: str = "") -> None:
         async with postgres.session() as session:

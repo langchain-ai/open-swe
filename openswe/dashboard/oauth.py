@@ -229,9 +229,12 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
         return fallback
     trimmed = redirect_to.strip()
     parsed = urlparse(trimmed)
+    # Browsers read a backslash in a URL as a slash, so /\evil.example is a
+    # protocol-relative URL to them even though urlparse sees a path.
     if (
         trimmed.startswith("/")
         and not trimmed.startswith("//")
+        and "\\" not in trimmed
         and not parsed.scheme
         and not parsed.netloc
         and not _is_blocked_redirect_path(parsed.path)
@@ -542,7 +545,7 @@ async def require_session(
 
     principal = DashboardPrincipal.from_session(session)
     principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
-    await principal.authorize()
+    await principal.authorize(path=request.url.path)
     bind_audit_session(request, session)
     return session
 
@@ -781,7 +784,7 @@ def set_session_cookie(response: Response, jwt_token: str) -> None:
     )
 
 
-def set_state_cookie(response: Response, nonce: str) -> None:
+def set_state_cookie(response: Response, nonce: str, *, path: str = "/dashboard/api/auth") -> None:
     # SameSite=Lax so GitHub's top-level redirect back to /auth/callback
     # still presents this cookie; the cookie is single-purpose and lives
     # only for the duration of one OAuth round-trip.
@@ -793,15 +796,13 @@ def set_state_cookie(response: Response, nonce: str) -> None:
         httponly=True,
         secure=secure,
         samesite="lax",
-        path="/dashboard/api/auth",
+        path=path,
     )
 
 
-def clear_state_cookie(response: Response) -> None:
+def clear_state_cookie(response: Response, *, path: str = "/dashboard/api/auth") -> None:
     secure, _ = cookie_security()
-    response.delete_cookie(
-        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
-    )
+    response.delete_cookie(STATE_COOKIE_NAME, path=path, samesite="lax", secure=secure)
 
 
 class DesktopConnectExchange(BaseModel):

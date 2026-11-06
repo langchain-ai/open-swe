@@ -1,6 +1,8 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { Link } from "@langchain/macaw-components/Link"
 import { createContext, memo, useContext, useState } from "react"
 import { toast } from "sonner"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { SlackMrkdwn, useSlackMarkdown } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
@@ -11,35 +13,14 @@ interface ReplyCardProps {
   chunk: ToolExecutionChunk
 }
 
-function SlackIcon() {
-  return (
-    <svg viewBox="0 0 122.8 122.8" width={12} height={12} aria-hidden>
-      <path
-        fill="#e01e5a"
-        d="M25.8 77.6a12.9 12.9 0 1 1-12.9-12.9h12.9zm6.5 0a12.9 12.9 0 0 1 25.8 0v32.3a12.9 12.9 0 0 1-25.8 0z"
-      />
-      <path
-        fill="#36c5f0"
-        d="M45.2 25.8a12.9 12.9 0 1 1 12.9-12.9v12.9zm0 6.5a12.9 12.9 0 0 1 0 25.8H12.9a12.9 12.9 0 0 1 0-25.8z"
-      />
-      <path
-        fill="#2eb67d"
-        d="M97 45.2a12.9 12.9 0 1 1 12.9 12.9H97zm-6.5 0a12.9 12.9 0 0 1-25.8 0V12.9a12.9 12.9 0 0 1 25.8 0z"
-      />
-      <path
-        fill="#ecb22e"
-        d="M77.6 97a12.9 12.9 0 1 1-12.9 12.9V97zm0-6.5a12.9 12.9 0 0 1 0-25.8h32.3a12.9 12.9 0 0 1 0 25.8z"
-      />
-    </svg>
-  )
-}
-
 type Delivery = "pending" | "failed" | "delivered"
 
 // Reply tools report some failures as a `{"success": false}` result rather than raising.
 // A result that carries images arrives as content blocks, with that object as the first text.
-function reportsFailure(output: string | undefined): boolean {
-  if (!output) return false
+function replyResult(
+  output: string | undefined
+): Record<string, unknown> | undefined {
+  if (!output) return undefined
   try {
     const parsed: unknown = JSON.parse(output)
     if (Array.isArray(parsed)) {
@@ -48,15 +29,13 @@ function reportsFailure(output: string | undefined): boolean {
         !!first && typeof first === "object"
           ? (first as { text?: unknown }).text
           : undefined
-      return typeof text === "string" && reportsFailure(text)
+      return typeof text === "string" ? replyResult(text) : undefined
     }
-    return (
-      !!parsed &&
-      typeof parsed === "object" &&
-      (parsed as { success?: unknown }).success === false
-    )
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : undefined
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -64,7 +43,8 @@ function delivery(chunk: ToolExecutionChunk): Delivery {
   if (chunk.status === "in_progress" || chunk.status === "pending") {
     return "pending"
   }
-  if (chunk.status === "error" || reportsFailure(chunk.output)) return "failed"
+  if (chunk.status === "error" || replyResult(chunk.output)?.success === false)
+    return "failed"
   return "delivered"
 }
 
@@ -249,19 +229,49 @@ function SlackReply({ chunk }: ReplyCardProps) {
 export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
   const isLinear = chunk.toolKind === "linear"
   const state = delivery(chunk)
+  const messageUrl =
+    !isLinear && state === "delivered"
+      ? replyResult(chunk.output)?.message_url
+      : undefined
+  const destination =
+    typeof messageUrl === "string" && URL.canParse(messageUrl)
+      ? new URL(messageUrl)
+      : undefined
+  const slackUrl =
+    destination?.protocol === "https:" &&
+    (destination.hostname === "slack.com" ||
+      destination.hostname.endsWith(".slack.com")) &&
+    /^\/archives\/[A-Z0-9]+\/p\d+$/.test(destination.pathname)
+      ? destination.href
+      : undefined
+  const label = HEADER_LABELS[isLinear ? "linear" : "slack"][state]
   return (
     <div className="min-w-0 px-space-1 py-0.5">
       <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
         {isLinear ? (
           <ChatCircleIcon size={12} weight="regular" aria-hidden />
+        ) : !slackUrl ? (
+          <SlackLogoIcon size={12} weight="fill" aria-hidden />
+        ) : null}
+        {slackUrl ? (
+          <Link
+            href={slackUrl}
+            variant="xs"
+            target="_blank"
+            rel="noopener noreferrer"
+            leftDecorator={SlackLogoIcon}
+            iconWeight="fill"
+            className="gap-space-2"
+          >
+            {label}
+          </Link>
         ) : (
-          <SlackIcon />
+          <span
+            className={state === "failed" ? "text-error-secondary" : undefined}
+          >
+            {label}
+          </span>
         )}
-        <span
-          className={state === "failed" ? "text-error-secondary" : undefined}
-        >
-          {HEADER_LABELS[isLinear ? "linear" : "slack"][state]}
-        </span>
       </div>
       {isLinear ? (
         <Markdown content={replyBody(chunk)} />

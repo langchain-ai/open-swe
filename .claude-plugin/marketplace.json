@@ -1,14 +1,14 @@
 {
-  "name": "open-swe",
-  "description": "Open SWE's Claude Code plugin",
+  "name": "robin",
+  "description": "Robin's Claude Code plugin",
   "owner": {
-    "name": "Open SWE"
+    "name": "Robin"
   },
   "plugins": [
     {
-      "name": "open-swe",
+      "name": "robin",
       "source": "./claude-code-plugin",
-      "description": "Mirror Claude Code sessions into Open SWE threads, use Open SWE's MCP tools, and find a session's thread"
+      "description": "Mirror Claude Code sessions into Robin threads, use Robin's MCP tools, and find a session's thread"
     }
   ]
 }

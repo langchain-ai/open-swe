@@ -3,7 +3,7 @@
 Provider collections use ``<primitive>.<provider>(...)`` namespaces, while
 resources use ``define_*`` factories::
 
-    channels.slack(name="Support Bot", description="Answers support questions")
+    channels.slack(app={"name": "Support Bot", "description": "Answers support questions"})
     define_mcp(servers={...})
     define_sandbox(default_timeout=600)
     auth.supabase(project_ref="abc")
@@ -101,7 +101,6 @@ class _LangSmithSandboxArgs(BaseModel):
 def define_sandbox(
     *,
     _openswe_per_thread: bool = False,
-    _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
     _openswe_select: Callable[[object], SandboxDefinition | None] | None = None,
@@ -136,7 +135,6 @@ def define_sandbox(
             key: value
             for key, value in {
                 "_openswe_per_thread": _openswe_per_thread or None,
-                "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
                 "_openswe_select": _openswe_select,

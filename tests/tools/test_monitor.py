@@ -275,6 +275,7 @@ class FakeThreads:
 def _human(text: str) -> dict[str, object]:
     return {
         "id": text,
+        "type": "human",
         "content": f'<input-message sender="u" surface="web" kind="human">{text}</input-message>',
     }
 

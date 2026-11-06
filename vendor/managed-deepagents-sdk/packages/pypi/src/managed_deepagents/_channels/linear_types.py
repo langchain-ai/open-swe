@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, Literal
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Generic, Literal, TypeAlias
 
 from typing_extensions import TypedDict, TypeVar
 
@@ -18,9 +18,15 @@ from managed_deepagents._channels.linear_schema import (
     LinearSessionCreatedPayload,
     LinearSessionPromptedPayload,
 )
-from managed_deepagents._channels.run_input import ChannelRunResult
+from managed_deepagents._channels.types import (
+    ChannelEventCallback,
+    ChannelEventResult,
+    ReadsThreadState,
+)
 
 if TYPE_CHECKING:
+    from langgraph_sdk.schema import ThreadState
+
     from managed_deepagents._channels.http.types import ChannelName
 
 
@@ -143,7 +149,7 @@ so one receiver validates every key it is sent with
 
 
 @dataclass(frozen=True)
-class LinearChannelThread:
+class LinearChannelThread(ReadsThreadState):
     """The conversation's thread an event belongs to.
 
     A handler runs before any run exists, so this is not a run's runtime.
@@ -154,6 +160,9 @@ class LinearChannelThread:
     run the handler starts runs on. Useful for run context that names the
     thread, such as a token a backend signs for it."""
     channel: ChannelName
+    _get_state: Callable[[], Awaitable[ThreadState | None]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 class LinearAppOptions(TypedDict, total=False):
@@ -183,16 +192,15 @@ class LinearAppOptions(TypedDict, total=False):
     team access in Linear too."""
 
 
-LinearEventResult = ChannelRunResult | None
-"""What an event handler returns: a run's input, as ``agent.invoke`` takes it — a
-string, a message such as ``HumanMessage(...)``, state such as
-``{"messages": [...]}``, or ``(input, {"context": ..., "metadata": ...})``. ``None``
-starts nothing."""
+LinearEventResult: TypeAlias = ChannelEventResult
+"""What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
+string, a message such as ``HumanMessage(...)``, or state such as
+``{"messages": [...]}``), one run on the event's conversation; or a list of runs
+with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
+``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
+``message`` where the event came from."""
 
-LinearEventCallback = Callable[
-    [_Event, LinearChannelThread],
-    LinearEventResult | Awaitable[LinearEventResult],
-]
+LinearEventCallback = ChannelEventCallback[_Event, LinearChannelThread]
 
 LinearHandlers = TypedDict(
     "LinearHandlers",

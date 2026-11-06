@@ -17,7 +17,8 @@ from openswe.dashboard.user_preferences import (
 from openswe.users import User, UserPreferencesPatch
 from openswe.utils.time import now_iso
 
-SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
+SQL_FLAG_KEYS = feature_flag_names(UserPreferencesPatch)
+SQL_SETTING_KEYS = SQL_FLAG_KEYS | {"personal_kitchen_channel_id"}
 
 PROFILE_SETTING_KEYS = frozenset(
     {
@@ -27,6 +28,7 @@ PROFILE_SETTING_KEYS = frozenset(
         "branch_prefix",
         "auto_fix_ci",
         "auto_human_review_enabled",
+        "github_review_request_comments",
         "draft_prs",
         "review_draft_prs",
     }
@@ -58,7 +60,7 @@ async def patch_personal_settings(
     flag_patch = {
         key: value
         for key, value in settings.items()
-        if key in feature_flag_names(ProfileUpdate) | SQL_SETTING_KEYS
+        if key in feature_flag_names(ProfileUpdate) | SQL_FLAG_KEYS
     }
     if invalid := [key for key, value in flag_patch.items() if not isinstance(value, bool)]:
         raise ValueError(f"Feature flags must be true or false: {', '.join(sorted(invalid))}")
@@ -93,7 +95,7 @@ async def patch_personal_settings(
     if sql_update is not None:
         saved_sql = await User.update_preferences(login, sql_update)
         if saved_sql is None:
-            raise ValueError("No Open SWE user record for this login yet")
+            raise ValueError("No Robin user record for this login yet")
         result.update({key: getattr(saved_sql, key) for key in sql_patch})
     if profile is not None:
         await PROFILES.put(

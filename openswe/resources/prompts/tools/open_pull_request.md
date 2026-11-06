@@ -12,7 +12,7 @@ Missing requester authorization fails without falling back to the thread owner o
 Background-completion runs do not retain the requester's identity, so in a shared user-owned thread pass `author` naming the participant the PR belongs to; do not use another PR creation mechanism.
 
 Push your branch with `git push origin <branch>` BEFORE calling this.
-The `Made by [Open SWE]` footer is appended to the body here, naming the thread and the model that opened the PR; do not write one yourself.
+The `Made by [Robin]` footer is appended to the body here, naming the thread and the model that opened the PR; do not write one yourself.
 
 For everything else — updating an existing PR, marking it ready for review, commenting, reading status — keep using `gh`.
 If a PR already exists for the branch, this returns that PR's URL without creating a duplicate; switch to `gh pr edit` for updates.

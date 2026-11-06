@@ -1,4 +1,4 @@
-Run one PostgreSQL query against the Open SWE application database.
+Run one PostgreSQL query against the Robin application database.
 
 This tool is available only on a private admin surface: a private dashboard thread or authenticated Slack DM.
 The database transaction is enforced as read-only and times out after 60 seconds.

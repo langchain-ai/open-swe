@@ -62,7 +62,7 @@ async def write_database_rows(
     where: JsonObject | None = None,
     confirm: bool = False,
 ) -> dict[str, object]:
-    """Repair Open SWE rows, including alembic_version; update/delete need exact-match filters."""
+    """Repair Robin rows, including alembic_version; update/delete need exact-match filters."""
     _require_confirmation(confirm)
     if operation not in {"insert", "update", "delete"}:
         raise ValueError("Operation must be insert, update, or delete.")

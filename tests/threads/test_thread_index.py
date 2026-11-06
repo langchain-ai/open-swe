@@ -105,6 +105,10 @@ async def test_a_text_search_ranks_title_matches_and_recent_activity_first() -> 
     assert all(thread.rank is not None for thread in found)
     assert await ThreadSearch(text="acme/widgets").count() == 1
     assert "search_rank" not in (await ThreadSearch(limit=1).run())[0].as_langgraph()
+    fuzzy = await ThreadSearch(text="widgte", limit=1).run()
+    assert len(fuzzy) == 1
+    assert fuzzy[0].thread_id != "miss"
+    assert await ThreadSearch(text="widgte").count() == 5
 
 
 async def test_a_text_search_matches_derived_titles_and_unescaped_values() -> None:
@@ -174,3 +178,11 @@ async def test_a_sync_that_read_an_older_copy_never_lands_after_a_newer_one() ->
 
     synced = await index.get("t1")
     assert synced is not None and synced.metadata == {"title": "new"}
+
+
+async def test_numeric_search_does_not_match_nearby_pr_numbers() -> None:
+    await index.create("wanted", runtime="mda", metadata={"pr_number": 59163})
+    await index.create("neighbor", runtime="mda", metadata={"pr_number": 59136})
+    found = await ThreadSearch(text="59163").run()
+    assert [thread.thread_id for thread in found] == ["wanted"]
+    assert await ThreadSearch(text="59163").count() == 1

@@ -66,6 +66,9 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     const row = page.locator(`a[href$="/agents/${threadId}"]`).first();
     await expect(row).toBeVisible();
     await row.click({ button: "right" });
+    await page
+      .getByRole("menuitem", { name: "Diagnostics", exact: true })
+      .click();
 
     await expect(copyItem(page)).toBeEnabled();
     const sandboxId = await getSandboxId(page, threadId);
@@ -112,9 +115,14 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
       clientY: 20,
     };
     await rowA.dispatchEvent("pointerdown", touchPointer);
-    await expect(copyItem(page)).toBeVisible();
+    const diagnostics = page.getByRole("menuitem", {
+      name: "Diagnostics",
+      exact: true,
+    });
+    await expect(diagnostics).toBeVisible();
     await rowA.dispatchEvent("pointerup", touchPointer);
     await rowA.dispatchEvent("click");
+    await diagnostics.tap();
 
     await expect(copyItem(page)).toBeEnabled();
     const sandboxId = await getSandboxId(page, threadA);

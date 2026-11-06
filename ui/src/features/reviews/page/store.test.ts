@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it } from "vitest"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
@@ -138,6 +140,29 @@ describe("the page's lifetimes", () => {
     expect(state.threadsOpen.get(42)).toBe(true)
   })
 
+  it("hands passage replies to chat in order and only once", () => {
+    const firstReply = {
+      source: "pull_request" as const,
+      part: "description",
+      before: "",
+      selection: "Opening a PR.",
+      after: "",
+      comment: "Draft?",
+    }
+    const secondReply = { ...firstReply, comment: "Which repository?" }
+
+    page().setRailTab("discussion")
+    page().replyInChat(firstReply)
+    page().replyInChat(secondReply)
+
+    expect(page().railTab).toBe("chat")
+    expect(page().takeChatReply(secondReply)).toBe(false)
+    expect(page().takeChatReply(firstReply)).toBe(true)
+    expect(page().takeChatReply(firstReply)).toBe(false)
+    expect(page().takeChatReply(secondReply)).toBe(true)
+    expect(page().chatReplies).toEqual([])
+  })
+
   it("drops drafts on another pull request, and folds on a new head", () => {
     page().toggleCollapsed(first.readKey)
     page().open(pr, "c".repeat(40))
@@ -185,6 +210,7 @@ describe("finding in the changes", () => {
     ])
     expect(findEntry(entries, findTarget(seven[0]!))).toBe(second)
     expect(findMatches(entries, "TWO")[0]).toMatchObject({ line: 2 })
+    expect(findMatches(entries, "sevn")).toEqual(seven)
     expect(
       findMatches(buildEntries([split], walkthrough, "files"), "src/a")
     ).toEqual([{ kind: "file", path: split.path }])

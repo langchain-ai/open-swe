@@ -243,6 +243,7 @@ export interface SessionUser {
   login: string
   auth_provider?: "github" | "langsmith"
   github_login?: string | null
+  requires_github_link?: boolean
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -250,6 +251,8 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** The organizations this Open SWE serves (`ALLOWED_GITHUB_ORGS`), lowercase. */
+  base_orgs?: Array<string>
   /** Mirrors the user's preference: what Enter does while a run is live. */
   follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */
@@ -324,7 +327,6 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -334,14 +336,17 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
+  github_review_request_comments?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
   updated_at?: string
 }
 
@@ -353,14 +358,17 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
+  github_review_request_comments?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
+  experimental_conditional_approval?: boolean
   experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
 }
 
 export interface SlackBotOption {
@@ -469,13 +477,6 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
-}
-
-export interface LangSmithConnectionStatus {
-  available: boolean
-  connected: boolean
-  email?: string | null
-  updated_at?: string | null
 }
 
 export interface ManagedToolsGateway {
@@ -1066,6 +1067,7 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  author?: string | null
   detailsLoading?: boolean
   detailsError?: boolean
   repo: string
@@ -1089,6 +1091,7 @@ export interface OpenPullRequest {
   createdAt: string | null
   updatedAt: string | null
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  requiredChecksPassing: boolean | null
   failingChecks: string[]
   pendingChecks: string[]
   // Required by the base branch but never reported on the head, so GitHub
@@ -1097,9 +1100,17 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  conversationResolutionRequired: boolean | null
   // Why it is on the To Review list: Open SWE assigned it, may assign it once
   // its review goes unclaimed, or it was linked in a Slack thread naming you.
-  assignment?: "assigned" | "tentative" | "mentioned" | null
+  assignment?:
+    | "assigned"
+    | "requested"
+    | "tentative"
+    | "mentioned"
+    | "draft"
+    | "speculative"
+    | null
 }
 
 export interface PullRequestReviewer {
@@ -1251,7 +1262,6 @@ export interface ReviewDetail extends Omit<
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
-  checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
@@ -1283,8 +1293,13 @@ export interface PublishedReviewAssessment {
   review_id: number
   head_sha: string
   risk_score: number
-  decision: "would_approve" | "needs_human_review"
+  decision:
+    | "would_approve"
+    | "would_approve_conditionally"
+    | "needs_human_review"
   explanation: string
+  approval_condition?: string | null
+  auto_approved?: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -1799,12 +1814,6 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyLangSmithStatus: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
-  disconnectLangSmith: () =>
-    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
@@ -1924,7 +1933,8 @@ export const api = {
   ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
-    method: MergeMethod
+    method: MergeMethod,
+    resolveConversations = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
@@ -1933,6 +1943,7 @@ export const api = {
       ...(pr.ci === "pending" && pr.mergeState === "blocked"
         ? { auto_merge: true }
         : {}),
+      ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -1976,6 +1987,16 @@ export const api = {
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  updatePullRequestDescription: (
+    owner: string,
+    repo: string,
+    number: number,
+    body: string
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/description`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getAssessmentFeedback: (
     owner: string,
@@ -2026,6 +2047,10 @@ export const api = {
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
+    ),
+  getReviewChecks: (owner: string, repo: string, number: number) =>
+    request<Array<ReviewCheckRun>>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/checks`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
@@ -2137,19 +2162,14 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(
-  redirectTo?: string,
-  provider: "github" | "langsmith" = "github"
-): string {
+export function loginUrl(redirectTo?: string): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  const path =
-    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
-  return `${API_BASE}/dashboard/api${path}${qs}`
+  return `${API_BASE}/dashboard/api/auth/login${qs}`
 }
 
 /**
@@ -2161,7 +2181,7 @@ export function loginUrl(
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "langsmith",
+  provider: "slack" | "github",
   redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)

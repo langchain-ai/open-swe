@@ -8,6 +8,7 @@ from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github import pull_request_dashboard_routes as pr_routes
 from openswe.github import pull_request_status as prs
+from openswe.github.branch_config import BranchRules
 from openswe.github.ci import RequiredCheck
 from openswe.review import routes as review_routes
 
@@ -115,15 +116,15 @@ async def test_repository_filter_cannot_change_query_or_path(repo):
 
 
 @pytest.mark.parametrize(
-    ("merge_state", "runs", "missing", "reads_rules"),
+    ("merge_state", "runs", "missing", "required_passing"),
     [
-        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], True),
-        ("blocked", [{"name": "unit", "status": "in_progress"}], [], False),
-        ("clean", [{"name": "unit", "status": "completed"}], [], False),
+        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], False),
+        ("blocked", [{"name": "unit", "status": "in_progress"}], ["lint"], False),
+        ("clean", [{"name": "unit", "status": "completed"}], [], True),
     ],
 )
 async def test_blocked_merge_names_required_checks_the_head_never_reported(
-    monkeypatch, merge_state, runs, missing, reads_rules
+    monkeypatch, merge_state, runs, missing, required_passing
 ):
     pull = {
         "state": "open",
@@ -145,43 +146,67 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch.setattr(
         prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
-    rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
-    monkeypatch.setattr(RequiredCheck, "for_branch", rules)
+    rules = AsyncMock(
+        return_value=BranchRules({RequiredCheck("unit"), RequiredCheck("lint")}, True)
+    )
+    monkeypatch.setattr(prs.BranchConfig, "read", rules)
     result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
-    assert rules.await_count == int(reads_rules)
+    assert result.required_checks_passing is required_passing
 
 
 @pytest.mark.parametrize(
-    ("conclusion", "ci", "failures", "inconclusive"),
+    ("conclusion", "ci", "failures", "inconclusive", "required_passing"),
     [
-        ("cancelled", "unknown", [], 1),
-        ("stale", "unknown", [], 1),
-        ("failure", "failing", ["unit"], 0),
-        ("success", "passing", [], 0),
-        (None, "pending", [], 0),
+        ("cancelled", "unknown", [], 1, False),
+        ("stale", "unknown", [], 1, False),
+        ("failure", "failing", ["unit"], 0, False),
+        ("success", "passing", [], 0, True),
+        ("neutral", "passing", [], 1, True),
+        ("skipped", "passing", [], 1, True),
+        (None, "pending", [], 0, False),
     ],
 )
-async def test_review_and_thread_status_agree_on_check_outcomes(
-    monkeypatch, conclusion, ci, failures, inconclusive
+async def test_review_and_thread_status_agree_on_current_check_outcomes(
+    monkeypatch, conclusion, ci, failures, inconclusive, required_passing
 ):
     pull = {
         "state": "open",
         "draft": False,
         "mergeable": True,
-        "mergeable_state": "clean",
+        "mergeable_state": "blocked",
         "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
     }
+    monkeypatch.setattr(
+        prs.BranchConfig, "read", AsyncMock(return_value=BranchRules({RequiredCheck("unit")}, True))
+    )
     runs = [
         {
+            "id": suite * 10,
             "name": "unit",
-            "status": "completed" if conclusion else "queued",
-            "conclusion": conclusion,
+            "status": "completed" if result else "queued",
+            "conclusion": result,
+            "app": {"id": 15368, "slug": "github-actions"},
+            "check_suite": {"id": suite},
         }
+        for suite, result in [(10, "failure"), (20, "success"), (30, conclusion)]
+    ]
+    workflows = [
+        {
+            "id": run_id,
+            "check_suite_id": suite,
+            "workflow_id": 100,
+            "event": "pull_request",
+            "run_attempt": 2 if suite == 30 else 1,
+        }
+        for suite, run_id in [(10, 10), (20, 20), (30, 5)]
     ]
     monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(
+        github_http.RepoClient, "pages", AsyncMock(side_effect=[runs, workflows] * 2)
+    )
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
     monkeypatch.setattr(
@@ -192,10 +217,35 @@ async def test_review_and_thread_status_agree_on_check_outcomes(
     thread = await _client(1).thread_status()
     assert review is not None
     assert review.ci == ci
+    assert review.required_checks_passing is required_passing
     assert review.failing_checks == failures
     assert [check["name"] for check in thread["failingChecks"]] == failures
     assert thread["inconclusiveCheckCount"] == inconclusive
     assert len(review.pending_checks) == thread["pendingCheckCount"] == int(conclusion is None)
+
+
+async def test_clean_merge_confirms_required_checks_when_details_are_unavailable(monkeypatch):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": "clean",
+        "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
+    }
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    monkeypatch.setattr(
+        github_http.RepoClient,
+        "check_runs",
+        AsyncMock(side_effect=httpx2.HTTPError("Unavailable")),
+    )
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
+    )
+    result = await _client(1).load()
+    assert result is not None
+    assert result.required_checks_passing is True
 
 
 async def test_mergeability_is_not_awaited_forever(monkeypatch):

@@ -5,17 +5,14 @@ import logging
 from datetime import timedelta
 from html import escape
 
-from langgraph_sdk import get_client
-
 from openswe import event_claims
-from openswe.config import ENV
 from openswe.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
 )
 from openswe.slack.http import SlackRequestError
-from openswe.slack.thinking import sync_slack_background_status
+from openswe.slack.thinking import refresh_slack_background_status
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +32,6 @@ async def notify_slack_review(
     edited_at: str | None = None,
 ) -> None:
     """Attempt each review notice once, even if Slack's response is lost."""
-    client = get_client(url=ENV.LANGGRAPH_URL.get())
     action = "submitted" if edited_body is None else "edited"
     outcome = {
         "approved": "Approved",
@@ -48,10 +44,10 @@ async def notify_slack_review(
         f"{review_url}:{action}:{edited_at or edited_body or ''}".encode()
     ).hexdigest()
     try:
-        location = await get_active_slack_thread(client, thread_id)
+        location = await get_active_slack_thread(thread_id)
         while location is not None:
             async with slack_thread_mutation_lock(
-                client, location["channel_id"], location["thread_ts"], thread_id=thread_id
+                location["channel_id"], location["thread_ts"], thread_id=thread_id
             ) as active:
                 if active != location:
                     location = active
@@ -75,7 +71,7 @@ async def notify_slack_review(
                         extra={"agent_thread_id": thread_id, "slack_error": exc.code},
                     )
                 else:
-                    await sync_slack_background_status(client, thread_id, resume=True)
+                    await refresh_slack_background_status(thread_id, resume=True)
                 return
     except Exception:
         logger.warning(

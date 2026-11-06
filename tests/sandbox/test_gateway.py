@@ -12,9 +12,8 @@ from fireworks import AsyncFireworks
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
-
-from openswe.utils import model
-from openswe.utils.model import OpenAIReasoning
+from runtime_api import models as model
+from runtime_api.models import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",

@@ -10,6 +10,7 @@ import pytest
 from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
+from tests.conftest import serve_runs_from
 
 dispatch = importlib.import_module("openswe.dispatch")
 
@@ -235,18 +236,15 @@ async def test_create_durable_run_preserves_existing_prepare_id(
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
 
 
-@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
-def test_langsmith_system_followup_preserves_experience_without_github(experience: str) -> None:
+def test_langsmith_system_followup_runs_without_github() -> None:
     configurable = dispatch.follow_up_configurable(
         {
             "owner_login": "user:019abcde-0000-7000-8000-000000000001",
-            "experience": experience,
             "github_login": "admin",
             "repo": {"owner": "private", "name": "repo"},
         },
         "thread-1",
     )
-    assert configurable["experience"] == experience
     assert configurable["auth_provider"] == "langsmith"
     assert configurable["user_id"] == "019abcde-0000-7000-8000-000000000001"
     assert configurable["repo_explicitly_none"] is True
@@ -275,7 +273,7 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
     user = await User.sign_in("github", "2001", login="mason-gh")
     await user.link("slack", "U123", team_id="T1")
 
-    run_input = await dispatch._dispatch_input(
+    run_input = await dispatch.dispatch_input(
         "hello",
         "slack",
         {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
@@ -294,6 +292,7 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
     client.threads.get.return_value = {
         "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(
@@ -321,6 +320,7 @@ async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
             "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
         }
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(

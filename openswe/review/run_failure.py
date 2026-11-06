@@ -197,8 +197,8 @@ class ReviewRunFailure(BaseModel):
             conclusion="neutral",
             title="Review couldn't run",
             summary=(
-                f"Open SWE stopped before it could review this pull request: {self.reason}. "
-                "Push a commit or re-request a review from Open SWE to run it again."
+                f"Robin stopped before it could review this pull request: {self.reason}. "
+                "Push a commit or re-request a review from Robin to run it again."
             ),
         )
         await settle_review_check_run(

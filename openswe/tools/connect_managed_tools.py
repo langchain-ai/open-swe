@@ -26,15 +26,15 @@ from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thre
 
 def _langsmith_blocks(card: ConnectCard) -> list[Block]:
     target = dashboard_thread_url(card.thread_id) or ""
-    url = f"{dashboard_api_base_url()}/dashboard/api/langsmith/login?" + urlencode(
+    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login?" + urlencode(
         {"redirect_to": target}
     )
     return [
         section(
-            "Managed tools run with your own LangSmith account. Connect LangSmith, "
+            "Managed tools run with your LangSmith sign-in, which expired. Sign in again, "
             "then ask me again to connect the services they need."
         ),
-        actions(button("Connect LangSmith", action_id="connect_langsmith", url=url)),
+        actions(button("Sign in with LangSmith", action_id="connect_langsmith", url=url)),
     ]
 
 
@@ -52,7 +52,7 @@ def _slack_blocks(
         section(
             f"Connect these services to use them through the *{gateway.name}* managed tools. "
             "Each button opens the service's consent screen for your account only; sign "
-            f"in to Open SWE in your browser first. {then}"
+            f"in to Robin in your browser first. {then}"
         )
     ]
     if oauth:
@@ -110,7 +110,7 @@ async def connect_managed_tools(
         }
     configured = await instance_gateway()
     if configured is None:
-        return {"success": False, "error": "No managed tools are set up on this Open SWE"}
+        return {"success": False, "error": "No managed tools are set up on this Robin instance"}
     gateway = gateway_id(configured)
     try:
         status = await gateway_status(login, gateway)
@@ -135,7 +135,7 @@ async def connect_managed_tools(
         card = ConnectCard(
             thread_id=cfg.thread_id, card_id=tool_call_id, login=login, gateway=gateway
         )
-        if failed := await post("Connect LangSmith", _langsmith_blocks(card)):
+        if failed := await post("Sign in with LangSmith", _langsmith_blocks(card)):
             return failed
         return {"success": True, "status": "langsmith_required"}
 

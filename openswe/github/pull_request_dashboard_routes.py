@@ -156,4 +156,6 @@ async def api_resolve_review_threads(
 ) -> ResolveReviewThreadsResult:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     async with GitHubClient.as_user(session["sub"]) as github:
-        return await resolve_review_threads(github.repo(owner, repo).pull_request(number), body)
+        return await resolve_review_threads(
+            github.repo(owner, repo).pull_request(number), body.thread_ids
+        )

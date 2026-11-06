@@ -41,7 +41,7 @@ def channel_provider_config_for_name(name: str) -> JsonObject | None:
 
 def channel_auto_replies_for_name(name: str) -> bool:
     """Whether the channel posts a run's final answer: ``False`` only for one
-    declared with ``reply="none"``, which leaves replying to the agent."""
+    declared with ``auto_post=False``, which leaves replying to the agent."""
     return name not in _replies_none
 
 

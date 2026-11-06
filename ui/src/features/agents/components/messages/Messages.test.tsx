@@ -18,6 +18,11 @@ import { Messages } from "./Messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 
+vi.mock("@/lib/appCommands", () => ({
+  useAppCommand: () => undefined,
+  useRegisterAppCommands: () => {},
+}))
+
 vi.stubGlobal(
   "ResizeObserver",
   class {
@@ -32,7 +37,10 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   ),
 }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllEnvs()
+})
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>
@@ -41,6 +49,54 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("copies the displayed thread URL with the dashboard base path on another page", async () => {
+    vi.stubEnv("BASE_URL", "/robin/")
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <Messages
+        threadId="displayed-thread"
+        messages={[
+          {
+            id: "failed-message",
+            author: "user",
+            timestamp: "2026-11-06T20:18:00Z",
+            deliveryStatus: "failed",
+            deliveryError: "the message could not be started",
+            deliveryTurnId: "failed-turn",
+            chunks: [{ kind: "text", text: "When is the job scheduled?" }],
+          },
+        ]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Failed to send · the message could not be started · Copy debug details",
+        })
+      )
+    })
+    expect(writeText).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          url: `${window.location.origin}/robin/agents/displayed-thread`,
+          message_id: "failed-message",
+          turn_id: "failed-turn",
+          timestamp: "2026-11-06T20:18:00Z",
+          error: "the message could not be started",
+        },
+        null,
+        2
+      )
+    )
+    Reflect.deleteProperty(navigator, "clipboard")
+  })
+
   it("renders queued passage replies even without plain text", () => {
     render(
       <Messages
@@ -87,6 +143,36 @@ describe("Messages", () => {
 
     rerender(<Messages messages={[]} isStreaming={false} />)
     expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("links Slack user messages to their original message when metadata is available", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "slack-person",
+        content:
+          '<dynamic-context kind="person" id="slack:U123">\ndisplay_name: Alice\n</dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "slack-message",
+        content:
+          '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1787165499.123456" slack_message_ts="1787165487.000034">Hello</input-message>',
+      }),
+      new HumanMessage({
+        id: "legacy-slack-message",
+        content:
+          '<input-message sender="slack:U123" surface="slack" kind="human">Earlier message</input-message>',
+      }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    const link = screen.getByRole("link", {
+      name: "View message from Alice in Slack",
+    })
+    expect(link.getAttribute("href")).toBe(
+      "https://slack.com/archives/C123/p1787165487000034"
+    )
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(screen.getByRole("img", { name: "Slack" })).toBeTruthy()
   })
 
   it("renders attributed task activity with safe expandable details", async () => {

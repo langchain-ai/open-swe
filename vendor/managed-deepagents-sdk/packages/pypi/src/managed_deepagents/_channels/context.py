@@ -33,6 +33,10 @@ def trigger_channel_binding(
     """Build current typed facts and a private route without identity tokens."""
     if event["type"] == "message":
         typed = {"type": "message", "messages": event["input"]["messages"]}
+    elif event["type"] == "provider_event":
+        # A provider event starts only the run its handler returns, whose
+        # messages replace these (``binding_with_messages``).
+        typed = {"type": "message", "messages": []}
     elif event["type"] == "interrupt_resume":
         typed = {"type": "interrupt_resume", "resume": event["interaction"]["resume"]}
     else:

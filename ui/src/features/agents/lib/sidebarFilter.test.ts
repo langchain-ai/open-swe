@@ -93,6 +93,18 @@ describe("filterThreads", () => {
     ).toEqual([automation])
   })
 
+  it("hides Slack threads but keeps threads moved to the dashboard", () => {
+    const slack = makeThread({ source: "slack" })
+    const movedToWeb = makeThread({ source: "dashboard" })
+    const github = makeThread({ source: "github" })
+    expect(
+      filterThreads(
+        [slack, movedToWeb, github],
+        filters({ includeSlack: false })
+      )
+    ).toEqual([movedToWeb, github])
+  })
+
   it("filters by source, defaulting missing source to dashboard", () => {
     const gh = makeThread({ source: "github" })
     const noSource = makeThread({ source: undefined })
@@ -115,13 +127,23 @@ it("retains a nonmatching coordinator as context for matching workers", () => {
 })
 
 describe("hasActiveFilters", () => {
-  it("is false for defaults", () => {
-    expect(hasActiveFilters(DEFAULT_SIDEBAR_FILTERS)).toBe(false)
+  it("treats owned-only as filtering even when it is the default", () => {
+    expect(hasActiveFilters(DEFAULT_SIDEBAR_FILTERS)).toBe(true)
+    expect(hasActiveFilters(filters({ ownedOnly: false }))).toBe(false)
   })
 
-  it("is true when any dimension changes", () => {
-    expect(hasActiveFilters(filters({ sources: ["github"] }))).toBe(true)
-    expect(hasActiveFilters(filters({ includeAutomations: true }))).toBe(true)
-    expect(hasActiveFilters(filters({ includeResolved: true }))).toBe(true)
+  it("still detects other filters when showing all owners", () => {
+    expect(
+      hasActiveFilters(filters({ ownedOnly: false, includeSlack: false }))
+    ).toBe(true)
+    expect(
+      hasActiveFilters(filters({ ownedOnly: false, sources: ["github"] }))
+    ).toBe(true)
+    expect(
+      hasActiveFilters(filters({ ownedOnly: false, includeAutomations: true }))
+    ).toBe(true)
+    expect(
+      hasActiveFilters(filters({ ownedOnly: false, includeResolved: true }))
+    ).toBe(true)
   })
 })

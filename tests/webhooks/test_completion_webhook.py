@@ -12,7 +12,7 @@ from openswe.review import run_failure
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
-from tests.conftest import MemoryEventClaims
+from tests.conftest import MemoryEventClaims, serve_runs_from
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +44,30 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+async def test_concierge_receipt_is_cleared_when_its_run_ends(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    client = _FakeClient({})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    remove = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "remove_slack_reaction", remove)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": status,
+            "metadata": {
+                "slack_channel_id": "D1",
+                "slack_concierge_message_ts": "123.45",
+            },
+        }
+    )
+
+    remove.assert_awaited_once_with("D1", "123.45", "hourglass_flowing_sand")
+
+
 async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
@@ -61,8 +85,9 @@ async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.Mo
     notice = reply.await_args.kwargs["notice"]
     assert blocks[0]["block_id"] == notice.block_id
     assert notice.repeats({"blocks": blocks})
-    token = json.loads(blocks[1]["elements"][0]["value"])["response"]
-    assert SlackRetry.parse(token) == SlackRetry(
+    retry = SlackRetry.from_value(json.loads(blocks[1]["elements"][0]["value"]))
+    assert retry is not None
+    assert retry.model_copy(update={"expires_at": 0}) == SlackRetry(
         channel_id="C1", thread_ts="123.45", user_id="U1", nonce="run-1"
     )
 
@@ -246,7 +271,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     }
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_linear_notification", notify)
+    monkeypatch.setattr(completion, "_post_failure_reply", notify)
     task_messages, wakes = AsyncMock(), AsyncMock()
     monkeypatch.setattr(completion.TaskMessage, "deliver_to", task_messages)
     monkeypatch.setattr(completion.EventSubscription, "deliver_to", wakes)
@@ -261,7 +286,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     task_messages.assert_awaited_once_with("t1")
     wakes.assert_awaited_once_with("t1", "enqueue")
 
-    # A run the backend started on the same thread still gets its notice.
+    # A run the backend started on the same thread still goes to its failure reply.
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-2", "status": "error"}
     )
@@ -457,6 +482,7 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     metadata = {**_slack_metadata(), "running_background_tasks": ["cmd-1"]}
     client = _FakeActiveRunClient(metadata, active=False)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(completion, "post_slack_thread_reply", AsyncMock(return_value=True))
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)

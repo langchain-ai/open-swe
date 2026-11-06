@@ -256,7 +256,10 @@ def _upload_note(target: _Target) -> list[HumanMessage]:
         content = message["content"]
         notes.append(
             HumanMessage(
-                content=content if isinstance(content, str) else list[str | dict[str, Any]](content)
+                content=content
+                if isinstance(content, str)
+                else list[str | dict[str, Any]](content),
+                additional_kwargs=message.get("additional_kwargs", {}),
             )
         )
     return notes

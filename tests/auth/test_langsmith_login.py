@@ -12,24 +12,31 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, langsmith_routes, oauth
+from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
+from openswe.dashboard.profiles import router as profiles_router
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.github import dashboard_routes
 from openswe.review.routes import router as review_router
+from openswe.threads.principals import Principal
 from openswe.users import AccountConflict, UnauthorizedUser, User
 
 ISSUER = "https://api.smith.langchain.com"
 ALLOWED_ORG = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
+CALLBACK = "https://dashboard.example/dashboard/api/langsmith/callback"
 
 
 @dataclass
 class LangSmithServer:
     subject: str = "5bb3fb19-f328-4815-8fe8-0483b41312c2"
     organization: str = ALLOWED_ORG
+    deployment_org: str = ALLOWED_ORG
+    discoveries: int = 0
+    discovery_unavailable: bool = False
+    clock: float = 0.0
     member: bool = True
     revoked: bool = False
     unavailable: bool = False
@@ -47,6 +54,13 @@ class LangSmithServer:
         )
 
     async def respond(self, request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/auth/public":
+            self.discoveries += 1
+            if self.discovery_unavailable:
+                return httpx2.Response(503, json={"detail": "unavailable"})
+            assert request.headers["x-api-key"] == "deployment-key"
+            assert "authorization" not in request.headers
+            return httpx2.Response(200, json={"organization_id": self.deployment_org})
         if request.url.path == "/.well-known/openid-configuration":
             return httpx2.Response(
                 200,
@@ -73,6 +87,7 @@ class LangSmithServer:
                     return httpx2.Response(400, json={"error": "invalid_grant"})
             else:
                 assert body["code_verifier"][0]
+                assert body["redirect_uri"] == [CALLBACK]
             return httpx2.Response(
                 200, json={"access_token": "access", "refresh_token": "refresh", "expires_in": 3600}
             )
@@ -110,8 +125,9 @@ class LangSmithServer:
         query = parse_qs(urlparse(start.headers["location"]).query)
         assert query["scope"] == ["openid profile email offline_access"]
         assert query["resource"] == [ISSUER]
+        assert query["redirect_uri"] == [CALLBACK]
         callback = await client.get(
-            "/dashboard/api/auth/langsmith/callback",
+            "/dashboard/api/langsmith/callback",
             params={"state": query["state"][0], "code": "code"},
         )
         return callback
@@ -134,10 +150,15 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LANGSMITH_CONNECTION_URL", ISSUER)
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_ID", "test-client")
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", ALLOWED_ORG)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", ISSUER)
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     server = LangSmithServer()
+    monkeypatch.setattr(langsmith_login, "monotonic", lambda: server.clock)
+    monkeypatch.setattr(
+        langsmith_login, "LANGSMITH_ORG_DISCOVERY", langsmith_login.LangSmithOrgDiscovery()
+    )
     monkeypatch.setattr(
         langsmith_login, "pooled_transport", lambda: httpx2.MockTransport(server.respond)
     )
@@ -147,7 +168,7 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
         lambda _request, exc: JSONResponse({"detail": str(exc)}, status_code=409),
     )
     app.include_router(auth_routes.router, prefix="/dashboard/api")
-    app.include_router(langsmith_routes.router, prefix="/dashboard/api")
+    app.include_router(profiles_router, prefix="/dashboard/api")
     app.include_router(dashboard_routes.router, prefix="/dashboard/api")
     app.include_router(review_router, prefix="/dashboard/api")
     async with httpx.AsyncClient(
@@ -190,14 +211,12 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
     me = await client.get("/dashboard/api/me")
     assert me.status_code == 200
     assert me.json()["github_login"] is None and me.json()["auth_provider"] == "langsmith"
+    assert me.json()["requires_github_link"] is False
     assert me.json()["follow_up_behavior"] == "queue" and not me.json()["is_admin"]
     assert any(
         header.startswith(oauth.COOKIE_NAME + "=") for header in me.headers.get_list("set-cookie")
     )
     assert await langsmith_oauth.langsmith_access_token(session["sub"]) == "access"
-    status = await client.get("/dashboard/api/my-credentials/langsmith")
-    assert status.json()["connected"] is True
-    assert (await client.delete("/dashboard/api/my-credentials/langsmith")).status_code == 400
     assert (await client.get("/dashboard/api/repos")).status_code == 403
     assert (await client.get("/dashboard/api/repos/example/repo/merge-methods")).status_code == 403
     assert (await client.get("/dashboard/api/reviews/example/repo/1/labels")).status_code == 403
@@ -209,7 +228,7 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         await github_user.link("langsmith", server.subject)
 
 
-async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> None:
+async def test_slack_email_on_a_github_person_requires_linking(langsmith_client) -> None:
     server, client = langsmith_client
     github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
     await github_user.link("slack", "slack-alice", email="same@example.com")
@@ -217,38 +236,91 @@ async def test_slack_email_does_not_block_langsmith_login(langsmith_client) -> N
     assert callback.status_code == 302
     user = await User.for_identity("langsmith", server.subject)
     assert user is not None and user.id != github_user.id
+    exchanged = await server.exchange(client, callback)
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    assert (await client.get("/dashboard/api/me")).json()["requires_github_link"] is True
+    assert (await client.get("/dashboard/api/profile")).status_code == 403
 
 
-async def test_one_email_cannot_hold_both_a_github_and_a_langsmith_account(
+async def test_linking_github_returns_a_langsmith_person_to_their_github_account(
     langsmith_client,
 ) -> None:
     server, client = langsmith_client
-    await User.sign_in("github", "1", login="alice", email="Same@Example.com")
-    callback = await server.desktop_login(client)
-    assert callback.status_code == 409
-    assert "GitHub" in callback.json()["detail"]
-    assert await User.for_identity("langsmith", server.subject) is None
+    github_user = await User.sign_in("github", "1", login="alice", email="Same@Example.com")
+    await save_credential(
+        "langsmith_login",
+        "alice",
+        encrypted_access_token=encrypt_token("stale"),
+        encrypted_refresh_token=None,
+        access_token_expires_at=None,
+        client_id="test-client",
+        token_endpoint=ISSUER + "/oauth/token",
+        account_email=None,
+    )
+    await USER_PREFERENCES.put("alice", {"follow_up_behavior": "queue"})
+    github_thread = {"owner_login": "alice", "visibility": "private"}
+    start = await client.get("/dashboard/api/auth/langsmith/login")
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    callback = await client.get(
+        "/dashboard/api/langsmith/callback", params={"state": state, "code": "code"}
+    )
+    assert callback.status_code == 302
+    person = await User.for_identity("langsmith", server.subject)
+    assert person is not None and person.id != github_user.id
+    fresh = oauth.decode_session(client.cookies[oauth.COOKIE_NAME])
+    assert fresh["sub"] == f"user:{person.id}"
+    with pytest.raises(HTTPException):
+        Principal.of_person(fresh).assert_can_read(github_thread)
 
-    await User.sign_in(
+    joined = await person.join_github("1", login="alice", email="Same@Example.com")
+    assert joined.id == github_user.id
+    assert {identity.provider for identity in joined.identities} == {"github", "langsmith"}
+    assert await User.for_identity("langsmith", server.subject) == joined
+    credential = await load_credential("langsmith_login", "alice")
+    assert credential is not None and decrypt_token(credential.encrypted_access_token) == "access"
+    assert await load_credential("langsmith_login", f"user:{person.id}") is None
+    users, total = await User.page(offset=0, limit=10)
+    assert total == 1
+    assert [user.id for user in users] == [joined.id]
+    assert await User.get(person.id) is not None
+    users, total = await User.page(offset=0, limit=10, search=person.display_name)
+    assert person.id not in {user.id for user in users}
+
+    me = await client.get("/dashboard/api/me")
+    assert me.status_code == 200
+    assert me.json()["github_login"] == "alice" and me.json()["login"] == "alice"
+    assert me.json()["requires_github_link"] is False
+    session = oauth.decode_session(me.cookies[oauth.COOKIE_NAME])
+    assert (session["sub"], session["provider"]) == ("alice", "langsmith")
+    assert me.json()["follow_up_behavior"] == "queue"
+    Principal.of_person(session).assert_can_read(github_thread)
+    assert (await client.get("/dashboard/api/review-styles")).status_code != 403
+
+    other = await User.sign_in(
         "langsmith",
         "ls-other",
-        email="langsmith@example.com",
+        email="other@example.com",
         authorization=LangSmithAccount(sub="ls-other", ls_org_id=server.organization),
     )
+    users, total = await User.page(offset=0, limit=10)
+    assert total == 2
+    assert {user.id for user in users} == {joined.id, other.id}
     with pytest.raises(AccountConflict):
-        await User.sign_in("github", "2", login="alice", email="LangSmith@example.com")
+        await other.join_github("1", login="alice", email="Same@Example.com")
 
 
 async def test_login_without_desktop_proof_and_cross_purpose_codes_are_rejected(
     langsmith_client,
 ) -> None:
     server, client = langsmith_client
-    assert (await client.get("/dashboard/api/auth/langsmith/login")).status_code == 400
+    assert (
+        await client.get("/dashboard/api/auth/langsmith/login", params={"desktop_port": 43210})
+    ).status_code == 400
     state = oauth.issue_state(
         redirect_to="https://dashboard.example", nonce_hash="nonce", provider="langsmith"
     )
     callback = await client.get(
-        "/dashboard/api/auth/langsmith/callback", params={"state": state, "code": "code"}
+        "/dashboard/api/langsmith/callback", params={"state": state, "code": "code"}
     )
     assert callback.status_code == 400
     code = oauth.issue_connect_handoff(
@@ -337,13 +409,13 @@ async def test_changed_provider_subject_cannot_rebind_a_session(langsmith_client
     assert await load_credential("langsmith_login", session["sub"]) is None
 
 
-async def test_login_is_opt_in_and_org_changes_invalidate_cached_access(
+async def test_login_requires_an_org_source_and_org_changes_invalidate_cached_access(
     langsmith_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server, client = langsmith_client
     exchanged = await server.exchange(client, await server.desktop_login(client))
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
-    monkeypatch.delenv("LANGSMITH_LOGIN_ORG_ID")
+    monkeypatch.delenv("LANGSMITH_API_KEY")
     assert (await client.get("/dashboard/api/me")).status_code == 503
     start = await client.get(
         "/dashboard/api/auth/langsmith/login",
@@ -351,8 +423,37 @@ async def test_login_is_opt_in_and_org_changes_invalidate_cached_access(
     )
     assert start.status_code == 503
     assert langsmith_oauth.langsmith_oauth_configured()
-    monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", "different-org")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    server.deployment_org = "different-org"
+    server.clock += 61
     assert (await client.get("/dashboard/api/me")).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (403, {}),
+        (503, {}),
+        (302, {}),
+        (200, {}),
+        (200, {"organization_id": " "}),
+        (200, {"organization_id": 123}),
+        (200, []),
+    ],
+)
+async def test_deployment_org_discovery_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: object
+) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    monkeypatch.setattr(
+        langsmith_login, "LANGSMITH_ORG_DISCOVERY", langsmith_login.LangSmithOrgDiscovery()
+    )
+    transport = httpx2.MockTransport(lambda request: httpx2.Response(status, json=body))
+    monkeypatch.setattr(langsmith_login, "pooled_transport", lambda: transport)
+    with pytest.raises(HTTPException) as exc:
+        await langsmith_login.LangSmithLogin().allowed_org()
+    assert exc.value.status_code == 503
 
 
 async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
@@ -362,17 +463,28 @@ async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
     exchanged = await server.exchange(client, await server.desktop_login(client))
     session = oauth.decode_session(exchanged.json()["session"])
     checks = server.authorizations
+    discoveries = server.discoveries
+    server.discovery_unavailable = True
     monkeypatch.setattr(langsmith_login, "refresh_guard", lambda *args: pytest.fail("refresh lock"))
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert await langsmith_oauth.langsmith_access_token(session["sub"]) == "access"
     assert server.authorizations == checks
+    assert server.discoveries == discoveries
     credential = await load_credential("langsmith_login", session["sub"])
     assert credential is not None and credential.login_authorized_until is not None
     assert credential.login_authorized_until <= datetime.now(UTC) + timedelta(seconds=60)
     await server.expire_authorization(session["sub"])
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert server.authorizations == checks + 1
+    server.clock += 61
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    server.discovery_unavailable = False
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    assert server.discoveries == discoveries + 1
+    server.clock += 3
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    assert server.discoveries == discoveries + 2
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
@@ -391,8 +503,7 @@ async def test_logout_revokes_replayed_sessions_and_runtime_grants(
     assert await load_credential("langsmith_login", session["sub"]) is None
     client.cookies.set(oauth.COOKIE_NAME, token)
     assert (await client.get("/dashboard/api/me")).status_code == 401
-    with pytest.raises(HTTPException, match="LangSmith login expired"):
-        await langsmith_oauth.langsmith_access_token(session["sub"])
+    assert await langsmith_oauth.langsmith_access_token(session["sub"]) is None
     assert (await client.post("/dashboard/api/auth/logout")).status_code == 204
 
 
@@ -472,3 +583,35 @@ async def test_refresh_survives_transient_membership_failure(langsmith_client) -
     server.unavailable = False
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert server.refreshes == 1
+
+
+@pytest.mark.parametrize("setting", ["LANGSMITH_API_KEY", "LANGSMITH_ENDPOINT"])
+async def test_deployment_org_cache_is_bound_to_key_and_endpoint(
+    langsmith_client, monkeypatch: pytest.MonkeyPatch, setting: str
+) -> None:
+    server, client = langsmith_client
+    assert await langsmith_login.LangSmithLogin().allowed_org() == ALLOWED_ORG
+    server.discovery_unavailable = True
+    monkeypatch.setenv(
+        setting, "changed-value" if setting == "LANGSMITH_API_KEY" else "https://other.example"
+    )
+    assert (await client.get("/dashboard/api/auth/langsmith/login")).status_code == 503
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_concurrent_org_discovery_reuses_one_lookup(
+    langsmith_client, unavailable: bool
+) -> None:
+    server, _ = langsmith_client
+    server.discovery_unavailable = unavailable
+    results = await asyncio.gather(
+        *(langsmith_login.LangSmithLogin().allowed_org() for _ in range(10)),
+        return_exceptions=True,
+    )
+    if unavailable:
+        assert all(
+            isinstance(result, HTTPException) and result.status_code == 503 for result in results
+        )
+    else:
+        assert results == [ALLOWED_ORG] * 10
+    assert server.discoveries == 1

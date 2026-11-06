@@ -17,6 +17,7 @@ its own.
 import asyncio
 import logging
 import os
+import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -28,6 +29,7 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    add_notification_metadata,
     messages_to_dict,
 )
 from langgraph.runtime import get_runtime
@@ -43,6 +45,7 @@ from pydantic import (
 from runtime_api.catalog import Catalog, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
+from runtime_api.provenance import Provenance
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
@@ -144,10 +147,30 @@ def namespace() -> list[str]:
     return list(_namespace.get())
 
 
+def harness_message(
+    content: str, *, message_id: str, source: str, provenance: Provenance | None = None
+) -> HumanMessage:
+    """A message the harness adds for ``source``, marked so as to the model's integrations
+    and, with ``provenance`` or as ``source``'s context, to code reading what it is."""
+    stamped = provenance or Provenance.harness(source)
+    return add_notification_metadata(
+        HumanMessage(content=content, id=message_id, additional_kwargs=stamped.stamp()),
+        source=source,
+    )
+
+
 def human_messages(messages: Sequence[object]) -> list[dict[str, JsonValue]]:
     return _json_dicts.validate_python(
         messages_to_dict([message for message in messages if isinstance(message, HumanMessage)])
     )
+
+
+def since_last_reply[T](messages: Sequence[T]) -> Sequence[T]:
+    """What the model is handed that it has not answered yet."""
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], AIMessage):
+            return messages[index + 1 :]
+    return messages
 
 
 def issuing_message_id(state: Mapping[str, object], tool_call_id: str) -> str | None:
@@ -215,6 +238,14 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
         return CallFailure.model_validate_json(response.content)
     except ValidationError:
         return None
+
+
+_QUOTED: Final = re.compile(r"""(?<!-c )(?:'[^']*'|"(?:\\.|[^"\\])*")""")
+_SLEEP: Final = re.compile(r"(?<![\w./-])sleep\s+(\$\w+|\d+(?:\.\d+)?|\.\d+)([smhd]?)\b")
+_LOOP: Final = re.compile(r"(?<![\w=-])(?:while|until|for)(?=[\s(])")
+_UNIT_SECONDS: Final = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+_LONGEST_SLEEP_SECONDS: Final = 10
+_LONGEST_POLL_SECONDS: Final = 5
 
 
 class Run:
@@ -296,6 +327,26 @@ class Run:
         """What the run may do: a launched worker's own catalog once it adopted its run."""
         return self.adopted if self.adopted is not None else self.planned
 
+    def sleep_refusal(self, command: object) -> str | None:
+        """Why this run may not run shell ``command``: in Goal mode a command that waits,
+        sleeping in a loop or for long, holds the run while nothing happens, where the
+        thread's wait tools free it and wake it when there is something to see."""
+        loop = self.catalog.loop
+        rules = None if loop is None else loop.work_state
+        if rules is None or not rules.sleep_refusal or not isinstance(command, str):
+            return None
+        unquoted = _QUOTED.sub("", command)
+        sleeps = _SLEEP.findall(unquoted)
+        if not sleeps:
+            return None
+        pauses = [
+            float("inf") if amount.startswith("$") else float(amount) * _UNIT_SECONDS[unit]
+            for amount, unit in sleeps
+        ]
+        polls = _LOOP.search(unquoted) is not None and max(pauses) >= _LONGEST_POLL_SECONDS
+        waits = polls or sum(pauses) >= _LONGEST_SLEEP_SECONDS
+        return rules.sleep_refusal if waits else None
+
     async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""
         adopted = await call(
@@ -320,11 +371,9 @@ class Run:
 
 def current_run() -> Run:
     """The run in progress, which every call the graph makes acts as."""
-    context = get_runtime().context
+    context = getattr(get_runtime(), "context", None)
     if not isinstance(context, RunContext):
-        raise BackendCallError(
-            "This run carries no Open SWE run context; start it through Open SWE"
-        )
+        raise BackendCallError("This run carries no Robin run context; start it through Robin")
     return context.run()
 
 
@@ -429,9 +478,7 @@ class OpenSweBackend:
         label = path.rsplit("/", 1)[-1]
         bearer = self.run.bearer
         if bearer is None:
-            raise BackendCallError(
-                "This run carries no Open SWE run token; start it through Open SWE"
-            )
+            raise BackendCallError("This run carries no Robin run token; start it through Robin")
         headers = {
             **(TurnTrace.current_headers() if trace is None else trace),
             "Authorization": f"Bearer {bearer}",

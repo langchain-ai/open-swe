@@ -75,7 +75,7 @@ github_login: carol
   it("takes the envelope's own text as the message", () => {
     expect(
       parseStructuredInput(
-        '<input-message sender="slack:U_ALICE" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="1787165487.000034">\nplease add a greet() helper\n</input-message>'
+        '<input-message sender="slack:U_ALICE" channel="slack:C123" surface="slack" kind="human" timestamp="1787165499.123456" slack_message_ts="1787165487.000034">\nplease add a greet() helper\n</input-message>'
       )
     ).toEqual({
       type: "message",
@@ -83,7 +83,16 @@ github_login: carol
       sender: "slack:U_ALICE",
       senderKind: "person",
       surface: "slack",
+      slackMessageUrl: "https://slack.com/archives/C123/p1787165487000034",
     })
+  })
+
+  it("does not link an action timestamp without an identified source post", () => {
+    expect(
+      parseStructuredInput(
+        '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1787165487.000034">Yes</input-message>'
+      )
+    ).not.toHaveProperty("slackMessageUrl")
   })
 
   it("reads the passages a message replies to, as the backend writes them", () => {
@@ -106,7 +115,8 @@ github_login: carol
         "comment: Use a &lt;constant&gt;",
         "</reply>",
         "<reply>",
-        "source: conversation",
+        "source: pull_request",
+        "part: description",
         "selection: Opening a PR.",
         "</reply>",
         "</input-message>",
@@ -127,7 +137,8 @@ github_login: carol
           comment: "Use a <constant>",
         },
         {
-          source: "conversation",
+          source: "pull_request",
+          part: "description",
           before: "",
           selection: "Opening a PR.",
           after: "",

@@ -2,10 +2,10 @@
   "name": "open-swe-cli",
   "version": "0.1.0",
   "private": true,
-  "description": "Open SWE command-line client: runs a cloud agent against a local checkout",
+  "description": "Robin command-line client: runs a cloud agent against a local checkout",
   "type": "module",
   "scripts": {
-    "build": "bun run compile --outfile dist/oswe",
+    "build": "bun run compile --outfile dist/robin && cp dist/robin dist/oswe",
     "compile": "bun build --compile --minify --no-compile-autoload-dotenv src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test",

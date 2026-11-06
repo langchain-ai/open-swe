@@ -215,9 +215,15 @@ ENV.var(
     "in; defaults to this backend's own workspace.",
 )
 ENV.var(
+    "MDA_LANGSMITH_PROJECT",
+    "LangSmith project the deployment at MDA_RUNTIME_URL traces its runs into (its "
+    "LANGSMITH_PROJECT, which LangGraph Platform sets to the deployment name); trace links, "
+    "costs, feedback and reviewer evals read runs there. Defaults to LANGSMITH_PROJECT.",
+)
+ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
-    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
+    "signs each call its channels make to /mda/channel-api/* with it "
     "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
     "and GitHub channels.",
     secret=True,
@@ -265,13 +271,13 @@ ENV.var(
 ENV.var(
     "LANGCHAIN_API_KEY",
     "Legacy SDK alias.",
-    deprecated="Open SWE reads LANGSMITH_API_KEY; this legacy alias is ignored.",
+    deprecated="Robin reads LANGSMITH_API_KEY; this legacy alias is ignored.",
     replaced_by="LANGSMITH_API_KEY",
 )
 ENV.var(
     "LANGCHAIN_TRACING_V2",
     "Legacy SDK alias.",
-    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
+    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Robin.",
     replaced_by="LANGSMITH_TRACING",
 )
 # --- GitHub ------------------------------------------------------------------------------
@@ -286,7 +292,6 @@ ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
-ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
@@ -315,6 +320,10 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
+ENV.var(
+    "SLACK_ALERTS_CHANNEL_ID",
+    "Slack channel for rate-limited operational alerts; unset disables Slack delivery, not local logging.",
+)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
@@ -381,11 +390,6 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "LANGSMITH_LOGIN_ORG_ID",
-    "Organization allowed to sign in to Agent Workspace with LangSmith. Unset disables "
-    "LangSmith login without affecting personal LangSmith connections.",
-)
-ENV.var(
     "LMT_TENANT_ID",
     "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
     "person chose when connecting LangSmith.",
@@ -408,12 +412,27 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
+    "OPENSWE_SOURCE_REPO",
+    "GitHub repository (owner/name) the agent changes when asked to change Open SWE itself.",
+    default="langchain-ai/open-swe",
+)
+ENV.var(
+    "OPENSWE_SOURCE_PATH",
+    "Directory of OPENSWE_SOURCE_REPO that holds Open SWE, when it is not the repository root.",
+)
+ENV.var(
     "POSTHOG_API_KEY",
     "Optional PostHog project API key; public by design, it is also served to the dashboard "
     "for browser capture.",
     default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var(
+    "SEGMENT_BROWSER_WRITE_KEY",
+    "Optional public Segment browser source write key, served to the web and desktop UI. "
+    "Unset disables Segment; use a separate source for each deployment environment.",
+    default="",
+)
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")

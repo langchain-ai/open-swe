@@ -28,6 +28,7 @@ class PostHogProject(BaseModel):
 class TelemetryConfig(BaseModel):
     environment: str
     posthog: PostHogProject | None
+    segment_write_key: str | None
 
 
 @router.get("/analytics/config")
@@ -36,6 +37,7 @@ async def api_telemetry_config() -> TelemetryConfig:
     return TelemetryConfig(
         environment=ENV.DD_ENV.get(),
         posthog=PostHogProject(key=key, host=ENV.POSTHOG_HOST.get()) if key else None,
+        segment_write_key=ENV.SEGMENT_BROWSER_WRITE_KEY.get().strip() or None,
     )
 
 

@@ -5,19 +5,21 @@ from typing import Self
 
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ConfigDict, JsonValue
-
-from openswe.input_messages import message_sender_id
+from runtime_api.provenance import Provenance
 
 
 class OsweThreadMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str | None = None
+    type: str = ""
     content: JsonValue = None
+    additional_kwargs: dict[str, JsonValue] = {}
 
     @property
     def from_person(self) -> bool:
-        return message_sender_id(self.content, kind="human") is not None
+        provenance = Provenance.of(self.model_dump())
+        return provenance is not None and provenance.human
 
 
 class OsweThreadValues(BaseModel):

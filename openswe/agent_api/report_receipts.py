@@ -5,17 +5,19 @@ again whatever it did not hear was taken, to whichever replica answers. Each key
 recorded once: a delivery claims it before recording the report and keeps the reply
 once it has, so a later delivery of the key answers with that reply instead. A
 claim whose delivery died is taken over once it is older than any delivery runs.
+A delivery claims, keeps and gives up a batch's keys together, a statement each.
 """
 
 import asyncio
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
-from sqlalchemy import ForeignKey, delete, func, select, update
+from sqlalchemy import ForeignKey, bindparam, delete, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -82,62 +84,83 @@ class ReportReceipts:
     def __init__(self, thread_id: str) -> None:
         self.thread_id = thread_id
 
-    async def claim(self, key: str) -> Claim:
+    async def claim(self, keys: Iterable[str]) -> dict[str, Claim]:
+        """Claim every key of a batch at once, or learn who has each."""
+        # In one order, so two deliveries of overlapping batches lock their rows alike.
+        wanted = sorted(set(keys))
+        if not wanted:
+            return {}
         if not postgres.configured():
-            return Claimed(uuid7())
+            return {key: Claimed(uuid7()) for key in wanted}
         cls = ReportReceipt
-        async with postgres.session() as session:
-            claimed = await session.scalar(
+        async with postgres.transaction() as conn:
+            claimed = await conn.execute(
                 insert(cls)
-                .values(id=uuid7(), thread_id=self.thread_id, idempotency_key=key)
+                .values(
+                    [
+                        {"id": uuid7(), "thread_id": self.thread_id, "idempotency_key": key}
+                        for key in wanted
+                    ]
+                )
                 .on_conflict_do_update(
                     index_elements=[cls.thread_id, cls.idempotency_key],
                     set_={"updated_at": NOW},
                     where=cls.reply.is_(None) & (cls.updated_at < func.now() - _CLAIM_LEASE),
                 )
-                .returning(cls.id)
+                .returning(cls.idempotency_key, cls.id)
             )
-            if claimed is not None:
-                return Claimed(claimed)
-            reply = await session.scalar(
-                select(cls.reply).where(cls.thread_id == self.thread_id, cls.idempotency_key == key)
-            )
-        return Recording() if reply is None else Recorded(reply)
+            claims: dict[str, Claim] = {key: Claimed(id) for key, id in claimed}
+            held = [key for key in wanted if key not in claims]
+            if held:
+                replies = await conn.execute(
+                    select(cls.idempotency_key, cls.reply).where(
+                        cls.thread_id == self.thread_id, cls.idempotency_key.in_(held)
+                    )
+                )
+                for key, reply in replies:
+                    claims[key] = Recording() if reply is None else Recorded(reply)
+        # A key whose receipt was purged since is another delivery's to take.
+        return {key: claims.get(key, Recording()) for key in wanted}
 
-    async def record(self, claim: Claimed, reply: dict[str, JsonValue]) -> None:
-        if not postgres.configured():
+    async def record(self, kept: Sequence[tuple[Claimed, dict[str, JsonValue]]]) -> None:
+        if not kept or not postgres.configured():
             return
-        async with postgres.session() as session:
-            await session.execute(
-                update(ReportReceipt).where(ReportReceipt.id == claim.id).values(reply=reply)
+        cls = ReportReceipt
+        async with postgres.transaction() as conn:
+            await conn.execute(
+                update(cls)
+                .where(cls.id == bindparam("claim_id"))
+                .values(reply=bindparam("kept_reply")),
+                [{"claim_id": claim.id, "kept_reply": reply} for claim, reply in kept],
             )
 
-    async def keep(self, claim: Claimed, key: str, reply: dict[str, JsonValue]) -> None:
-        """Keep ``reply`` as what ``key`` answered, or else give the key up.
+    async def keep(self, kept: Sequence[tuple[Claimed, str, dict[str, JsonValue]]]) -> None:
+        """Keep each reply as what its key answered, or else give the keys up.
 
-        The report is recorded either way. A key left claimed would hold every report
+        The reports are recorded either way. A key left claimed would hold every report
         behind it until the lease runs out, and then be recorded again anyway; given
         up, only a delivery sent again after this one's answer was lost records it again.
         """
         try:
-            await self.record(claim, reply)
+            await self.record([(claim, reply) for claim, _, reply in kept])
         except BaseException as exc:
-            await asyncio.shield(self.release(claim))
+            await asyncio.shield(self.release(claim for claim, _, _ in kept))
             if not isinstance(exc, Exception):
                 raise
             logger.exception(
-                "An MDA report's reply was not kept; its key was given up",
-                extra={"agent_thread_id": self.thread_id, "report_key": key},
+                "MDA reports' replies were not kept; their keys were given up",
+                extra={"agent_thread_id": self.thread_id, "report_keys": [k for _, k, _ in kept]},
             )
 
-    async def release(self, claim: Claimed) -> None:
-        """Give the key up unrecorded, so the next delivery records it."""
-        if not postgres.configured():
+    async def release(self, claims: Iterable[Claimed]) -> None:
+        """Give the keys up unrecorded, so the next delivery records them."""
+        ids = [claim.id for claim in claims]
+        if not ids or not postgres.configured():
             return
-        async with postgres.session() as session:
-            await session.execute(
+        async with postgres.transaction() as conn:
+            await conn.execute(
                 delete(ReportReceipt).where(
-                    ReportReceipt.id == claim.id, ReportReceipt.reply.is_(None)
+                    ReportReceipt.id.in_(ids), ReportReceipt.reply.is_(None)
                 )
             )
 

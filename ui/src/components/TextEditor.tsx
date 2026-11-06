@@ -27,6 +27,7 @@ interface TextEditorProps {
   onChange: (value: string) => void
   language?: "markdown" | "shell"
   ariaLabel?: string
+  autoFocus?: boolean
   disabled?: boolean
   placeholder?: string
 }
@@ -37,6 +38,7 @@ export function TextEditor({
   onChange,
   language = "markdown",
   ariaLabel,
+  autoFocus,
   disabled,
   placeholder,
 }: TextEditorProps) {
@@ -50,6 +52,8 @@ export function TextEditor({
         inputClassName="h-full font-mono text-xs"
         resize="none"
         size="md"
+        aria-label={ariaLabel}
+        autoFocus={autoFocus}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
@@ -66,6 +70,9 @@ export function TextEditor({
         value={value}
         onChange={(next) => onChange((next ?? "").replace(/\r\n/g, "\n"))}
         beforeMount={defineThemes}
+        onMount={(editor) => {
+          if (autoFocus) editor.focus()
+        }}
         theme={`app-${theme}`}
         options={{
           ariaLabel,

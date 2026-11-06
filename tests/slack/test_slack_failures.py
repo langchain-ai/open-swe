@@ -41,11 +41,11 @@ async def test_unexpected_failure_replies_with_a_uuid7_error_id_that_is_logged(
     assert "unexpected error" in await_args.args[2]
     assert f"Error ID: `{error_id}`" in await_args.args[2]
     button = await_args.kwargs["blocks"][1]["elements"][0]
-    token = json.loads(button["value"])["response"]
-    assert SlackRetry.parse(token) == SlackRetry(
+    retry = SlackRetry.from_value(json.loads(button["value"]))
+    assert retry is not None
+    assert retry.model_copy(update={"expires_at": 0}) == SlackRetry(
         channel_id="C1", thread_ts="1.0", user_id="U1", message_ts="1.5", nonce=error_id
     )
-    assert SlackRetry.parse(token + "tampered") is None
 
     [record] = [r for r in caplog.records if r.getMessage() == "Slack request failed"]
     assert record.error_id == error_id  # type: ignore[attr-defined]
@@ -106,7 +106,6 @@ async def test_failure_retry_only_replays_explicitly_replayable_messages(
     if origin in {"button", "reaction"} and not has_thread:
         assert blocks is None
         return
-    token = json.loads(blocks[1]["elements"][0]["value"])["response"]
-    retry = SlackRetry.parse(token)
+    retry = SlackRetry.from_value(json.loads(blocks[1]["elements"][0]["value"]))
     assert retry is not None
     assert retry.message_ts == ("1.5" if origin in {"message", "retry"} else "")

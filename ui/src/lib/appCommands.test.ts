@@ -1,6 +1,25 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { cleanup, fireEvent, render } from "@testing-library/react"
+import { AppCommandProvider, useRegisterAppCommands } from "./appCommands"
+
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
+vi.mock("@/lib/session", () => ({ useSession: () => ({ data: {} }) }))
+vi.mock("@/lib/theme", () => ({ useTheme: () => ({ toggleTheme: vi.fn() }) }))
+vi.mock("@/components/AppShortcutReference", () => ({
+  AppShortcutReference: () => null,
+}))
+vi.mock("@/components/AppCommandPalette", async (original) => ({
+  ...(await original<object>()),
+  AppCommandPalette: () => null,
+}))
+
+function CommandFixture({ commands }: { commands: ReadonlyArray<AppCommand> }) {
+  useRegisterAppCommands(commands)
+  return createElement("textarea", { "aria-label": "Composer" })
+}
 
 import { createNewThreadCommand, resolveAppCommands } from "./appCommands"
 import { eventMatchesShortcut } from "./hotkeys"
@@ -13,6 +32,39 @@ function command(id: string, label = id): AppCommand {
 }
 
 describe("app commands", () => {
+  it("only allows opted-in modifier commands from text fields", () => {
+    const find = vi.fn()
+    const navigate = vi.fn()
+    const commands: AppCommand[] = [
+      {
+        ...command("conversation-find"),
+        shortcuts: ["mod+f"],
+        enableInFormFields: true,
+        run: find,
+      },
+      { ...command("navigate"), shortcuts: ["mod+j"], run: navigate },
+    ]
+    const view = render(
+      createElement(
+        AppCommandProvider,
+        null,
+        createElement(CommandFixture, { commands })
+      )
+    )
+    const input = view.getByRole("textbox")
+    const modifier = /mac|iphone|ipad|ipod/i.test(
+      navigator.platform || navigator.userAgent
+    )
+      ? { metaKey: true }
+      : { ctrlKey: true }
+    fireEvent.keyDown(input, { key: "f", ...modifier })
+    fireEvent.keyDown(input, { key: "j", ...modifier })
+    expect(find).toHaveBeenCalledOnce()
+    expect(navigate).not.toHaveBeenCalled()
+    fireEvent.keyDown(window, { key: "j", ...modifier })
+    expect(navigate).toHaveBeenCalledOnce()
+    cleanup()
+  })
   it("requires a modifier to create a new thread", () => {
     const newThread = createNewThreadCommand(vi.fn())
     const matches = (key: string, ctrlKey = false, shiftKey = false) =>

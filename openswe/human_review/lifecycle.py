@@ -12,6 +12,7 @@ from uuid import UUID
 import httpx2
 from langgraph_sdk import get_client
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dispatch import dispatch_agent_run
 from openswe.expedited_review import card as expedited_card
 from openswe.expedited_review.channels import (
@@ -101,6 +102,9 @@ class ReviewCard:
         request = self.request
         if request.awaiting_ready or not request.slack_message_ts:
             return
+        profile = await PROFILES.get(request.requester_login) if request.requester_login else None
+        if not profile or profile.get("github_review_request_comments") is not True:
+            return
         anchor = request.slack_thread_ts or request.slack_message_ts
         permalink = await get_slack_permalink(request.slack_channel_id, anchor)
         if permalink is None and anchor != request.slack_message_ts:
@@ -138,7 +142,7 @@ class ReviewCard:
                 standard = self.request.kind == "standard"
                 files = await ChangedFile.of_pull(
                     pull,
-                    max_pages=30 if standard else 1,
+                    max_pages=30,
                     count=pr.changed_files if standard else None,
                 )
                 if standard and files is not None and pr.changed_files != len(files):
@@ -272,7 +276,10 @@ class ReviewCard:
 
     async def _channel_choices(self) -> list[ChannelChoice]:
         pr = self.request.pull_request
-        if (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip():
+        configured = self.request.run_config.get("expedited_review_channel")
+        if configured is None:
+            configured = (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip()
+        if configured:
             return []
         choices = self.request.slack_channel_choices or await own_choices(self.request)
         if self.request.slack_message_ts == self.request.slack_thread_ts:
@@ -446,7 +453,19 @@ class ReviewCard:
         if approval.sent_elsewhere or approval.approved or approval.awaiting_ready:
             return
         pr = approval.pull_request
-        configured = (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip()
+        configured = approval.run_config.get("expedited_review_channel")
+        if not isinstance(configured, str):
+            settings = await RepoSettings.cached(pr.owner, pr.repo)
+            if settings.review_channel_rules:
+                files = await self._files()
+                if files is None:
+                    logger.warning("Could not route expedited review without its changed files")
+                    return
+                configured = settings.channel_for_files([file.filename for file in files])
+            else:
+                configured = settings.review_channel.strip()
+            approval.run_config = {**approval.run_config, "expedited_review_channel": configured}
+            await approval.save()
         if not configured:
             return
         channel = await SlackChannel.resolve(configured)
@@ -484,6 +503,14 @@ class ReviewCard:
             if files is None:
                 logger.warning("Could not publish ready expedited card without its changed files")
                 return
+            pr = request.pull_request
+            settings = await RepoSettings.cached(pr.owner, pr.repo)
+            request.run_config = {
+                **request.run_config,
+                "expedited_review_channel": settings.channel_for_files(
+                    [file.filename for file in files]
+                ),
+            }
             try:
                 message_ts = await self.post_expedited(
                     title=request.pull_request.title, files=files
@@ -1026,7 +1053,7 @@ class ReviewPicks:
             await self._close(
                 reviewer,
                 f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
+                "Robin removed you as a reviewer.",
             )
         return await HumanReviewRequest.get(request.id) or current
 

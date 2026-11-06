@@ -84,6 +84,18 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
+class PluginChatConfig(BaseModel):
+    """The plugin a thread chats beside: the tools its frame runs, and what it says about them."""
+
+    chat_id: str
+    plugin: str
+    """The plugin's display name."""
+    prefix: str
+    """What every one of its tool names starts with, so none can stand in for another tool."""
+    tools: list[ClientToolSpec] = Field(default_factory=list)
+    instructions: str = ""
+
+
 # Where a review run publishes: to the pull request, an eval's snapshot, or a shadow's record.
 type ReviewDestination = Literal["github", "eval", "shadow"]
 
@@ -99,6 +111,7 @@ class RunConfig(BaseModel):
     invocation_started_at: str | None = None
     offload_conversation: bool = False
     client_tools: list[ClientToolSpec] = Field(default_factory=list)
+    plugin_chat: PluginChatConfig | None = None
     source: str | None = None
     task: str | None = None
     environment: str | None = None
@@ -163,7 +176,6 @@ class RunConfig(BaseModel):
     reviewer_subagent_reasoning_effort: str | None = None
 
     # Behavior toggles
-    experience: Literal["coding", "agent_workspace"] = "coding"
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     slack_ask: bool | None = None
@@ -172,6 +184,7 @@ class RunConfig(BaseModel):
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
+    slack_action_token: str | None = None
     # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None

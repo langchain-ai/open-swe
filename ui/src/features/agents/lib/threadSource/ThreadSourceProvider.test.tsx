@@ -35,26 +35,3 @@ it("switches a recorded thread to SDK streaming and back without changing its UI
   rendered.rerender(view(false))
   expect(screen.getByText("stream")).toBeTruthy()
 })
-
-it("keeps Work v2 on its run-aware transcript while preserving the Coding stream preference", () => {
-  function Conversation() {
-    return <div>{useThreadSource().kind}</div>
-  }
-  setUseStreamPreference(true)
-  const rendered = render(
-    <ThreadSourceProvider
-      threadId="work"
-      transcript
-      experience="agent_workspace"
-    >
-      <Conversation />
-    </ThreadSourceProvider>
-  )
-  expect(screen.getByText("transcript")).toBeTruthy()
-  rendered.rerender(
-    <ThreadSourceProvider threadId="coding" transcript experience="coding">
-      <Conversation />
-    </ThreadSourceProvider>
-  )
-  expect(screen.getByText("stream")).toBeTruthy()
-})

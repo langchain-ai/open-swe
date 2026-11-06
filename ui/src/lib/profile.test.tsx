@@ -28,6 +28,7 @@ function mockServer() {
     login: "alice",
     draft_prs: true,
     review_draft_prs: null,
+    github_review_request_comments: true,
   }
   const requests: Array<Pending> = []
   vi.spyOn(api, "profile").mockImplementation(async () => stored)
@@ -81,6 +82,7 @@ it("chains a second page's save behind the first and keeps both fields", async (
   expect(result.current.profile.data).toMatchObject({
     draft_prs: false,
     review_draft_prs: true,
+    github_review_request_comments: true,
   })
 
   act(() => requests[0]!.resolve())
@@ -88,6 +90,7 @@ it("chains a second page's save behind the first and keeps both fields", async (
   expect(requests[1]!.body).toMatchObject({
     draft_prs: false,
     review_draft_prs: true,
+    github_review_request_comments: true,
   })
 
   act(() => requests[1]!.resolve())
@@ -95,6 +98,7 @@ it("chains a second page's save behind the first and keeps both fields", async (
     expect(result.current.profile.data).toMatchObject({
       draft_prs: false,
       review_draft_prs: true,
+      github_review_request_comments: true,
     })
   )
 })
@@ -115,6 +119,7 @@ it("does not resend a failed save's field with the next one", async () => {
   expect(requests[1]!.body).toMatchObject({
     draft_prs: true,
     review_draft_prs: true,
+    github_review_request_comments: true,
   })
   expect(result.current.profile.data?.draft_prs).toBe(true)
 
@@ -123,6 +128,7 @@ it("does not resend a failed save's field with the next one", async () => {
     expect(result.current.profile.data).toMatchObject({
       draft_prs: true,
       review_draft_prs: true,
+      github_review_request_comments: true,
     })
   )
 })

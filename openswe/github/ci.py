@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 FAILING_CONCLUSIONS: frozenset[str] = frozenset(["failure", "timed_out", "action_required"])
 
 # Check runs Open SWE itself produces; never treat them as fixable CI.
-_OPEN_SWE_CHECK_NAMES: frozenset[str] = frozenset([REVIEW_CHECK_RUN_NAME, "Open SWE Auto-fix"])
+_OPEN_SWE_CHECK_NAMES: frozenset[str] = frozenset(
+    [REVIEW_CHECK_RUN_NAME, "Open SWE Review", "Robin Auto-fix", "Open SWE Auto-fix"]
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -539,7 +539,7 @@ function FileRow({
   const description = [
     file.path,
     `${changed} lines changed`,
-    worst && "Open SWE finding",
+    worst && "Robin finding",
     threads > 0 && plural(threads, "open conversation"),
     viewed && "viewed",
   ]
@@ -591,7 +591,7 @@ function FileRow({
           <span
             className="size-1.5 shrink-0 rounded-full"
             style={{ background: findingGroupColor[worst.group] }}
-            title="Open SWE finding"
+            title="Robin finding"
           />
         )}
         {threads > 0 && (

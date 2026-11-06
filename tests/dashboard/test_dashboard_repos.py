@@ -1,9 +1,9 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
+import httpx2
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from openswe.api.github_errors import add_github_error_handlers
@@ -38,11 +38,11 @@ async def test_list_repos_refreshes_expired_user_token(monkeypatch: pytest.Monke
         repos, "get_valid_access_token", AsyncMock(side_effect=["expired", "fresh"])
     )
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         if request.headers["authorization"].split()[-1] == "expired":
-            return httpx.Response(401, json={"message": "Bad credentials"})
+            return httpx2.Response(401, json={"message": "Bad credentials"})
         assert request.headers["authorization"].split()[-1] == "fresh"
-        return httpx.Response(200, json={"installations": []})
+        return httpx2.Response(200, json={"installations": []})
 
     mock_github_sdk(monkeypatch, handle)
     assert await repos.fetch_user_installations_and_repos("octocat") == ([], [])
@@ -77,9 +77,45 @@ def test_missing_github_authorization_returns_direct_reconnect_without_clearing_
         assert response.status_code == 401
         detail = response.json()["detail"]
         assert "octocat" in detail
-        assert "https://api.example/prefix/dashboard/api/auth/login" in detail
+        assert "https://api.example/prefix/my-settings/connections" in detail
         assert client.cookies.get("osw_session") == "existing-session"
         assert "set-cookie" not in response.headers
+
+
+async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = {"token": "expired"}
+    checks: list[str] = []
+
+    async def token(login: str, *, force_refresh: bool = False) -> str:
+        if force_refresh:
+            stored["token"] = "fresh"
+        return stored["token"]
+
+    async def check(full_name: str, token: str) -> str:
+        checks.append(token)
+        await asyncio.sleep(0)
+        if token == "revoked":
+            raise HTTPException(404, "repository not found")
+        if token == "expired":
+            raise HTTPException(401, "GitHub credentials rejected")
+        return full_name
+
+    monkeypatch.setattr(repo_access, "get_valid_access_token", token)
+    monkeypatch.setattr(repo_access, "assert_repo_access", check)
+
+    tokens = await asyncio.gather(
+        *(repo_access.require_repo_access_for_user("octocat", "acme/api") for _ in range(3))
+    )
+
+    assert tokens == ["fresh"] * 3
+    assert checks == ["expired", "fresh"]
+
+    stored["token"] = "revoked"
+    with pytest.raises(HTTPException) as excinfo:
+        await repo_access.require_repo_access_for_user("octocat", "acme/api")
+    assert excinfo.value.status_code == 404
 
 
 async def test_list_repos_follows_installation_and_repository_next_links(
@@ -87,19 +123,19 @@ async def test_list_repos_follows_installation_and_repository_next_links(
 ) -> None:
     monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value="token"))
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         assert request.headers["x-github-api-version"] == "2022-11-28"
         if request.url.path == "/user/installations":
             if request.url.params.get("page") == "2":
-                return httpx.Response(200, json={"installations": [{"id": 456, "account": None}]})
-            return httpx.Response(
+                return httpx2.Response(200, json={"installations": [{"id": 456, "account": None}]})
+            return httpx2.Response(
                 200,
                 json={"installations": [{"id": 123, "account": None}]},
                 headers={"Link": '<https://api.github.com/user/installations?page=2>; rel="next"'},
             )
         if request.url.path == "/user/installations/123/repositories":
             if request.url.params.get("page") == "2":
-                return httpx.Response(
+                return httpx2.Response(
                     200,
                     json={
                         "repositories": [
@@ -107,14 +143,14 @@ async def test_list_repos_follows_installation_and_repository_next_links(
                         ]
                     },
                 )
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 json={"repositories": [{"full_name": "acme/first", "private": False}]},
                 headers={
                     "Link": '<https://api.github.com/user/installations/123/repositories?page=2>; rel="next"'
                 },
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, json={"repositories": [{"full_name": "other/api", "private": True}]}
         )
 
@@ -138,10 +174,10 @@ async def test_access_checks_observe_removed_repositories_without_http_cache(
     monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value="token"))
     allowed = True
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/user/installations":
-            return httpx.Response(200, json={"installations": [{"id": 123, "account": None}]})
-        return httpx.Response(
+            return httpx2.Response(200, json={"installations": [{"id": 123, "account": None}]})
+        return httpx2.Response(
             200,
             json={"repositories": [{"full_name": "Acme/API", "private": True}] if allowed else []},
             headers={"Cache-Control": "public, max-age=3600"},
