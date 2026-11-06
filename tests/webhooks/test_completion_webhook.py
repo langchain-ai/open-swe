@@ -68,7 +68,10 @@ async def test_concierge_receipt_is_cleared_when_its_run_ends(
     remove.assert_awaited_once_with("D1", "123.45", "hourglass_flowing_sand")
 
 
-async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("is_fallback", [False, True])
+async def test_failed_run_offers_a_requester_scoped_retry(
+    monkeypatch: pytest.MonkeyPatch, is_fallback: bool
+) -> None:
     import json
 
     from openswe.slack.retry import SlackRetry
@@ -76,12 +79,17 @@ async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.Mo
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
-    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    error_link = completion.LangSmithErrorLink("https://smith.example/trace", is_fallback)
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=error_link))
     metadata = _slack_metadata()
     metadata["source_context"]["slack_thread"]["triggering_user_id"] = "U1"
     await completion._post_failure_reply("t1", metadata, "error", invocation_id="run-1")
     assert reply.await_args is not None
+    text = reply.await_args.args[2]
+    assert ("Couldn't link to the specific error trace" in text) is is_fallback
+    assert f"<{error_link.url}|LangSmith>" in text
     blocks = reply.await_args.kwargs["blocks"]
+    assert blocks[0]["text"]["text"] == text
     notice = reply.await_args.kwargs["notice"]
     assert blocks[0]["block_id"] == notice.block_id
     assert notice.repeats({"blocks": blocks})
@@ -412,7 +420,7 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
 
     error_url = "https://smith.example/o/tenant/projects/p/project/r/failed-span"
-    trace = AsyncMock(return_value=error_url)
+    trace = AsyncMock(return_value=completion.LangSmithErrorLink(error_url, is_fallback=False))
     monkeypatch.setattr(completion, "get_langsmith_error_url", trace)
 
     result = await completion.handle_run_completion(

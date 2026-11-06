@@ -55,7 +55,7 @@ from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_error_url
+from openswe.utils.langsmith import LangSmithErrorLink, get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -141,12 +141,24 @@ def _failure_reason(status: str, reason_code: str | None) -> str:
     return "the run hit an unexpected error"
 
 
-def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
+def _failure_text(
+    status: str,
+    trace_link: LangSmithErrorLink | None = None,
+    reason_code: str | None = None,
+    *,
+    follow_up: str | None = None,
+) -> str:
     reason = _failure_reason(status, reason_code)
-    follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
+    follow_up = follow_up or _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
     text = warning(f"Robin wasn't able to finish that — {reason}. {follow_up}")
-    if trace_url:
-        text += f" View the error in <{trace_url}|LangSmith>."
+    if trace_link:
+        if trace_link.is_fallback:
+            text += (
+                " Couldn't link to the specific error trace; "
+                f"view this conversation's traces in <{trace_link.url}|LangSmith>."
+            )
+        else:
+            text += f" View the error in <{trace_link.url}|LangSmith>."
     return text
 
 
@@ -184,10 +196,10 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
+            trace_link = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             from openswe.slack.retry import SlackRetry
 
-            slack_text = _failure_text(status, trace_url, reason_code)
+            slack_text = _failure_text(status, trace_link, reason_code)
             blocks = None
             slack_thread = ctx.slack_thread
             if (
@@ -195,12 +207,12 @@ async def _post_failure_reply(
                 and not slack_thread.triggering_bot_id
                 and reason_code not in {"context_too_long", "model_unavailable"}
             ):
-                retry_text = warning(
-                    f"Robin wasn't able to finish that — {_failure_reason(status, reason_code)}. "
-                    "Click Retry to pick this back up."
+                retry_text = _failure_text(
+                    status,
+                    trace_link,
+                    reason_code,
+                    follow_up="Click Retry to pick this back up.",
                 )
-                if trace_url:
-                    retry_text += f" View the error in <{trace_url}|LangSmith>."
                 blocks = SlackRetry(
                     channel_id=location[0],
                     thread_ts=slack_thread.thread_ts,
