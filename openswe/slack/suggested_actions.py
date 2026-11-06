@@ -169,7 +169,7 @@ async def handle_button(
             text=action.request.format(subject=value.subject),
             bot_user_id=common.SLACK_BOT_USER_ID,
             thread_id=thread_id,
-            kitchen_channel=await is_kitchen_channel(channel_id),
+            kitchen_channel=await is_kitchen_channel(channel_id, slack_user_id=user_id),
             turn_context=action.turn_context(user_id, value.subject),
         ),
         repo,

@@ -25,6 +25,7 @@ from typing import Literal
 
 from openswe.config import ENV
 from openswe.dashboard.user_preferences import get_user_preferences
+from openswe.users import User
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
@@ -104,14 +105,22 @@ async def workspace_for_slack_channel(channel_id: str) -> str | None:
         return None
 
 
-async def is_kitchen_channel(channel_id: str) -> bool:
+async def is_kitchen_channel(channel_id: str, *, slack_user_id: str = "") -> bool:
     """Whether untagged human messages in this Slack channel reach the agent.
 
     Fails soft: a failed lookup reads as off, logged at error, so the channel
     keeps requiring mentions.
     """
     try:
-        return await WORKSPACES.is_kitchen_channel(channel_id)
+        if await WORKSPACES.is_kitchen_channel(channel_id):
+            return True
+        if not channel_id or not slack_user_id:
+            return False
+        user = await User.for_identity("slack", slack_user_id)
+        return (
+            user is not None
+            and user.typed_preferences.personal_kitchen_channel_id == channel_id.strip().upper()
+        )
     except Exception:
         logger.error(
             "kitchen channel lookup failed; treating the channel as not a kitchen channel",

@@ -6107,6 +6107,17 @@
             ],
             "title": "Goal Mode"
           },
+          "personal_kitchen_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personal Kitchen Channel Id"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {

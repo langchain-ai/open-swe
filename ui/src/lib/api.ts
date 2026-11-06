@@ -346,6 +346,7 @@ export interface Profile {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
   updated_at?: string
 }
 
@@ -367,6 +368,7 @@ export interface ProfileUpdate {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
 }
 
 export interface SlackBotOption {

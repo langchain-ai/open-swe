@@ -390,6 +390,7 @@ class User(Base):
         changes = patch.model_dump(exclude_none=True)
         if not changes:
             return user.typed_preferences
+        await patch.validate_channel(user)
         incoming = bindparam("preferences_patch", changes, type_=JSONB)
         merged = (
             incoming.op("||")(cls.preferences)

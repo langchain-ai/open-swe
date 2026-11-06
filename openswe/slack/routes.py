@@ -366,7 +366,7 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
     channel_id = event.resolve_channel_id()
     if event.channel_type == "im" or await common.is_code_channel(channel_id):
         return True
-    if await is_kitchen_channel(channel_id):
+    if await is_kitchen_channel(channel_id, slack_user_id=event.user):
         return True
     return bool(event.thread_ts) and await allow_solo_thread_followup(
         get_langgraph_client(),
@@ -652,7 +652,7 @@ async def slack_webhook(
         and not is_dm_channel(channel_context)
         and event.type == "message"
         and not (bot_user_id and f"<@{bot_user_id}>" in text)
-        and await is_kitchen_channel(channel_id)
+        and await is_kitchen_channel(channel_id, slack_user_id=user_id)
     )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)

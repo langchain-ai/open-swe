@@ -156,7 +156,9 @@ class SlackRetry(BaseModel):
                 reply_thread_ts=self.reply_thread_ts,
                 concierge_mode=self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D"),
                 code_channel=code_channel,
-                kitchen_channel=await is_kitchen_channel(self.channel_id),
+                kitchen_channel=await is_kitchen_channel(
+                    self.channel_id, slack_user_id=self.user_id
+                ),
                 treat_all_messages_as_mentions=True,
                 explicit_request=True,
             )

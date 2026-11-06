@@ -5,6 +5,9 @@ No login, email, thread ID, or on-behalf-of identity is accepted.
 Model selection uses workspace defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
+- `personal_kitchen_channel_id`: one internal Slack channel Open SWE has joined; requires a linked Slack account.
+  Pass the channel ID; an empty string clears it.
+  Only the requester’s untagged messages get kitchen handling, without changing workspace kitchen channels.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `workspace_default_repos`: a complete map of workspace slugs to `owner/repo` defaults.
   Read the current map first and preserve entries the user did not ask to change.
