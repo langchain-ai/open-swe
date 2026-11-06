@@ -4577,8 +4577,8 @@ fn compile_wires_python_browser_and_adds_stagehand() {
         "./_mda_entry.py:browser_handoff_watcher"
     );
     let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
-    assert!(pyproject.contains("stagehand==4.3.0"));
-    assert!(pyproject.contains("stagehand-middleware==0.1.0"));
+    assert!(pyproject.contains("stagehand==4.4.0"));
+    assert!(pyproject.contains("stagehand-middleware==0.1.2"));
 
     // Eval trials never get a browser, so they never install its client or tools.
     let eval_dir = root.path().join("eval");
@@ -4644,8 +4644,8 @@ fn compile_wires_typescript_browser_and_adds_stagehand() {
     );
     let package: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("package.json")).unwrap()).unwrap();
-    assert_eq!(package["dependencies"]["@browserbasehq/stagehand"], "4.3.0");
-    assert_eq!(package["dependencies"]["stagehand-middleware"], "0.1.1");
+    assert_eq!(package["dependencies"]["@browserbasehq/stagehand"], "4.4.0");
+    assert_eq!(package["dependencies"]["stagehand-middleware"], "0.1.2");
 
     // Eval trials never get a browser, so they never install Stagehand.
     let eval_dir = root.path().join("eval");

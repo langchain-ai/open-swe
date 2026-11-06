@@ -148,8 +148,8 @@ typing = [
     "fastmcp>=4.0.10,<5",
     "mcp>=2.2.0,<3",
     # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
-    "stagehand==4.3.0",
-    "stagehand-middleware==0.1.0",
+    "stagehand==4.4.0",
+    "stagehand-middleware==0.1.2",
     # The browser's `record` tool runs its recorder in the browser's sandbox and installs
     # these there (browser._RECORDER_PACKAGES); here they type-check and test it.
     "av>=15,<20",
