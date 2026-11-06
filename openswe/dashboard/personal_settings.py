@@ -27,6 +27,7 @@ PROFILE_SETTING_KEYS = frozenset(
         "branch_prefix",
         "auto_fix_ci",
         "auto_human_review_enabled",
+        "github_review_request_comments",
         "draft_prs",
         "review_draft_prs",
     }

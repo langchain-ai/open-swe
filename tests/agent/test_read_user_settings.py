@@ -58,7 +58,10 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
         "participants": [
             {
                 "login": "octocat",
-                "profile": {"auto_human_review_enabled": True},
+                "profile": {
+                    "auto_human_review_enabled": True,
+                    "github_review_request_comments": False,
+                },
                 "instructions": "Be concise.",
             }
         ],

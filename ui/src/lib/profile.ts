@@ -174,6 +174,8 @@ export function buildProfileUpdate(
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
+    github_review_request_comments:
+      current?.github_review_request_comments ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_background_callbacks:

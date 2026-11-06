@@ -6091,6 +6091,11 @@
             ],
             "title": "Experimental Memory"
           },
+          "github_review_request_comments": {
+            "default": false,
+            "title": "Github Review Request Comments",
+            "type": "boolean"
+          },
           "goal_mode": {
             "anyOf": [
               {

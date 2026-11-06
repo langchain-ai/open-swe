@@ -12,6 +12,7 @@ from uuid import UUID
 import httpx2
 from langgraph_sdk import get_client
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dispatch import dispatch_agent_run
 from openswe.expedited_review import card as expedited_card
 from openswe.expedited_review.channels import (
@@ -100,6 +101,9 @@ class ReviewCard:
         """Link the published Slack review request from its pull request."""
         request = self.request
         if request.awaiting_ready or not request.slack_message_ts:
+            return
+        profile = await PROFILES.get(request.requester_login) if request.requester_login else None
+        if not profile or profile.get("github_review_request_comments") is not True:
             return
         anchor = request.slack_thread_ts or request.slack_message_ts
         permalink = await get_slack_permalink(request.slack_channel_id, anchor)

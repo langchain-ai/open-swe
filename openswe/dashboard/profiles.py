@@ -87,6 +87,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
+    github_review_request_comments: bool = False
     concierge_mode: bool | None = None
     pr_failure_reactions: bool | None = None
     goal_mode: bool | None = None
@@ -119,6 +120,7 @@ class ProfileUpdate(BaseModel):
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.setdefault("auto_human_review_enabled", True)
+    value.setdefault("github_review_request_comments", False)
     value.setdefault("workspace_default_repos", {})
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
@@ -158,6 +160,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.auto_human_review_enabled
             if "auto_human_review_enabled" in update.model_fields_set
             else existing.get("auto_human_review_enabled", True)
+        ),
+        "github_review_request_comments": (
+            update.github_review_request_comments
+            if "github_review_request_comments" in update.model_fields_set
+            else existing.get("github_review_request_comments", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
