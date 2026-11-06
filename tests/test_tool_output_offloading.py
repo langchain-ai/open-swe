@@ -18,9 +18,6 @@ class FakeExa:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
 
-    def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
-        return self.result
-
     def search(self, *args: Any, **kwargs: Any) -> str:
         return self.result
 
