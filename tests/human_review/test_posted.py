@@ -90,15 +90,18 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         reactions = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.add" and params["name"] != "white_check_mark"
+            if method == "reactions.add"
         }
         assert reactions == expected
         removed = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.remove" and params["name"] != "white_check_mark"
+            if method == "reactions.remove"
         }
-        assert removed == ({"warning", "construction", "pencil2"} - expected) | {"x"}
+        assert removed == ({"warning", "construction", "pencil2"} - expected) | {
+            "x",
+            "white_check_mark",
+        }
         assert all(
             params["channel"] == "C1" and params["timestamp"] == "1.0"
             for _, params in slack_api.calls[start:]
@@ -166,7 +169,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     assert stored is not None and stored.state == "merged"
 
 
-async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failures(
+async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_explain_failures(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = User(identities=[UserIdentity(provider="slack", external_id="U1")])
@@ -207,12 +210,12 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         AsyncMock(return_value=UserPreferences(pr_failure_reactions=True)),
     )
     first, second = map(ReviewCard, requests)
-    reactions.add("x")
+    reactions.update({"x", "white_check_mark"})
     await first.mark_approved()
     assert "x" not in reactions
     assert "white_check_mark" not in reactions
     await second.mark_approved()
-    assert "white_check_mark" in reactions
+    assert "white_check_mark" not in reactions
     snapshot = PullRequestSnapshot(
         state="open",
         merged=False,
@@ -323,7 +326,7 @@ async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     monkeypatch.setattr(posted, "settle", settle)
     await posted.watch_post("C1", "1.0", "U1", " ".join(pr.url for pr in pulls.values()))
     assert [request.pull_request.number for request in requests] == [7, 9]
-    assert approved_after_settle == [False, True]
+    assert approved_after_settle == [False, False]
     await ReviewCard(requests[0]).mark_merged()
     assert "merged" not in reactions
     await ReviewCard(requests[1]).mark_merged()

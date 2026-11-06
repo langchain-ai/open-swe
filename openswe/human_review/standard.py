@@ -1017,7 +1017,7 @@ async def _settle_posted(
     snapshot: PullRequestSnapshot,
     states: dict[str, str],
 ) -> None:
-    """React once the pull request's owners approve; until then, time how long it has sat green."""
+    """Record owner approvals; until then, time how long the pull request has sat green."""
     approvers = {login for login, state in states.items() if state == "APPROVED"}
     approved = bool(approvers)
     if approved:

@@ -797,10 +797,7 @@ class ReviewCard:
                 "warning": bool(failures),
                 "construction": any(row.run_config.get("posted_conflicted") for row in active),
                 "pencil2": any(row.run_config.get("posted_draft") for row in active),
-                "white_check_mark": complete
-                and all(
-                    row.approved_at is not None and row.state in {"open", "merged"} for row in rows
-                ),
+                "white_check_mark": False,
             }
             if complete and all(row.state == "merged" for row in rows):
                 reactions["merged"] = True
@@ -849,12 +846,12 @@ class ReviewCard:
             await ReviewPicks(updated).release("it was closed")
 
     async def mark_approved(self) -> None:
-        """React to a posted request's message the first time its pull request is approved."""
+        """Record the first approval and refresh a watched post's status reactions."""
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is None or row.state != "open" or row.approved_at is not None:
                 return
             row.approved_at = datetime.now(UTC)
-        await self._react("white_check_mark")
+        await self.update_blocked_reactions()
 
     async def withdraw_reviews(self) -> None:
         """Dismiss the GitHub reviews every closed, unmerged card of this PR still has standing.
