@@ -258,10 +258,11 @@ async def test_the_author_cannot_approve_their_own_pull_request(
     assert harness.agent_prompts == []
 
 
+@pytest.mark.parametrize("author", ["ada", "robin-agent[bot]"])
 async def test_a_draft_waits_for_its_author_to_mark_it_ready(
-    harness: _Harness, open_approval: OpenApproval
+    harness: _Harness, open_approval: OpenApproval, author: str
 ) -> None:
-    approval = await open_approval(awaiting_ready=True)
+    approval = await open_approval(awaiting_ready=True, author=author)
 
     early = await _click(approval, "U_GRACE")
     stranger = await _click(approval, "U_GRACE", decision="ready")

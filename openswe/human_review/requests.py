@@ -41,6 +41,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.expedited_review.eligibility import ExcludedHunk
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
@@ -207,13 +208,28 @@ class HumanReviewRequest(Base):
             return self.requested_by.github_login
         return RunConfig.parse(self.run_config).github_login or ""
 
+    async def responsible_author(self) -> User | None:
+        pr = self.pull_request
+        if self.kind == "expedited" and pr.author.lower() in OPEN_SWE_GITHUB_LOGINS:
+            return self.requested_by
+        return (
+            await User.get(pr.author_user_id)
+            if pr.author_user_id
+            else await User.for_login("github", pr.author)
+        )
+
     async def author_mention(self) -> str:
         pr = self.pull_request
-        author = await User.get(pr.author_user_id) if pr.author_user_id else None
+        if self.kind == "expedited" and pr.author.lower() in OPEN_SWE_GITHUB_LOGINS:
+            author = self.requested_by
+        else:
+            author = await User.get(pr.author_user_id) if pr.author_user_id else None
         return slack_mention(author, pr.author or "the author")
 
     def is_author(self, user_id: UUID, login: str) -> bool:
         pr = self.pull_request
+        if self.kind == "expedited" and pr.author.lower() in OPEN_SWE_GITHUB_LOGINS:
+            return self.requested_by_user_id == user_id
         if pr.author_user_id is not None:
             return pr.author_user_id == user_id
         return bool(pr.author) and bool(login) and pr.author.lower() == login.lower()

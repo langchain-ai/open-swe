@@ -18,18 +18,22 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def open_approval(registry_db: None) -> OpenApproval:
-    """Register ada, grace and linus, and open a card on ada's pull request."""
+    """Register three people and open a card on a pull request."""
 
-    async def make(*, fingerprint: str = "", awaiting_ready: bool = False) -> HumanReviewRequest:
+    async def make(
+        *, fingerprint: str = "", awaiting_ready: bool = False, author: str = "ada"
+    ) -> HumanReviewRequest:
         for slack_id, (login, github_id) in PEOPLE.items():
             user = await User.sign_in("github", github_id, login=login)
             await user.link("slack", slack_id, team_id="T1")
-        pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
-        assert pr.author_user_id is not None
+        pr = await PullRequest(owner="lc", repo="repo", number=7, author=author).save()
+        requester = await User.for_login("github", "ada")
+        assert requester is not None
         return await HumanReviewRequest(
             pull_request_id=pr.id,
             head_sha="abc123",
             kind="expedited",
+            requested_by_user_id=requester.id if author != "ada" else None,
             diff_fingerprint=fingerprint,
             awaiting_ready=awaiting_ready,
             thread_id="thread-1",

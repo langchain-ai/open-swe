@@ -23,6 +23,7 @@ from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.codeowners import CodeOwners
 from openswe.github.comments import derive_pr_state
 from openswe.github.http import GitHubClient, RepoFileUnreadableError, or_none
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard
@@ -30,6 +31,7 @@ from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.human_review.standard import Origin, summary_line
 from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
+from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.dm import send_dm
@@ -160,6 +162,32 @@ class ExpeditedReviewNomination:
         entry.enrichments.expedited_exclusions.pull_request_id = pull_request_id
         entry.enrichments.resource_ids = [str(pull_request_id)]
 
+    async def responsible_author(self, author: str) -> User:
+        if author.lower() not in OPEN_SWE_GITHUB_LOGINS:
+            person = await User.for_login("github", author)
+            if person is not None:
+                return person
+            raise ExpeditedReviewIneligible(
+                "Expedited review is only available for PRs authored by Robin users. "
+                "Use request_human_review instead."
+            )
+        person = self.origin.requester
+        if person is None:
+            cfg = RunConfig.parse(self.origin.run_config)
+            if cfg.github_login:
+                person = await User.for_login("github", cfg.github_login)
+        if (
+            person is not None
+            and person.github_login
+            and person.github_login.lower() not in OPEN_SWE_GITHUB_LOGINS
+            and person.slack_user_id
+        ):
+            return person
+        raise ExpeditedReviewIneligible(
+            "App-authored PRs need an accountable Robin requester with linked GitHub and Slack "
+            "identities for expedited review. Use request_human_review instead."
+        )
+
     async def start(
         self,
         channel_id: str,
@@ -175,6 +203,11 @@ class ExpeditedReviewNomination:
         async with GitHubClient.connect(token=token) as github:
             pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
             pr = await or_none(pull.pull())
+            responsible = (
+                await self.responsible_author(PullRequestPayload.model_validate(pr).author)
+                if pr and pr.get("state") == "open"
+                else None
+            )
             files = await ChangedFile.of_pull(pull, max_pages=FILE_PAGES) if pr else None
             if not replace_standard and pr:
                 if files is None or isinstance(
@@ -185,11 +218,6 @@ class ExpeditedReviewNomination:
                     Ineligible,
                 ):
                     raise ExpeditedReviewIneligible("The diff needs standard review.")
-                if (
-                    await User.for_login("github", PullRequestPayload.model_validate(pr).author)
-                    is None
-                ):
-                    raise ExpeditedReviewIneligible("The author needs standard review.")
             if pr and pr.get("state") == "open" and files is not None and len(files) < MAX_FILES:
                 payload = PullRequestPayload.model_validate(pr)
                 states = await latest_review_states(pull, payload.author)
@@ -243,10 +271,6 @@ class ExpeditedReviewNomination:
                 "shows that condition instead of the diff. Otherwise ask for a normal review."
             )
 
-        if await User.for_login("github", payload.author) is None:
-            raise ExpeditedReviewIneligible(
-                "Expedited review is only available for PRs authored by Robin users."
-            )
         settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo)
         review_channel = settings.channel_for_files([file.filename for file in files])
         broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
@@ -337,6 +361,9 @@ class ExpeditedReviewNomination:
             is None
         ):
             return self.failure("The pull request's review request changed meanwhile. Try again.")
+        requested_by = (
+            responsible if payload.author.lower() in OPEN_SWE_GITHUB_LOGINS else requester
+        )
         approval = await HumanReviewRequest(
             pull_request_id=pull_request.id,
             thread_id=thread_id,
@@ -350,7 +377,7 @@ class ExpeditedReviewNomination:
             slack_channel_id=channel_id,
             slack_thread_ts=thread_ts,
             run_config=origin.run_config,
-            requested_by_user_id=requester.id if requester is not None else None,
+            requested_by_user_id=requested_by.id if requested_by is not None else None,
         ).save()
         if approval.awaiting_ready:
             readiness_warning = await ReviewCard(approval).prompt_author_ready()

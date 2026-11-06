@@ -1,5 +1,7 @@
 Post a Slack card asking someone other than the author to approve a tiny pull request instead of a normal GitHub review.
-Any open pull request that still needs review qualifies, not only ones you opened, and you do not need to be asked: nominate a qualifying pull request on your own.
+Nominate qualifying open pull requests that still need review on your own, whether or not you opened them.
+The author must be a Robin user, or Robin's GitHub App with an accountable Robin requester linked to GitHub and Slack; that requester receives the author DM, can mark drafts ready, and cannot approve their own card.
+For an App-authored PR without that requester, use `request_human_review` instead.
 Never nominate a pull request already fully approved on GitHub, including all of its code owner areas; it needs no additional review.
 
 Use it only when what the reviewer sees is at most 20 lines in ordinary text files that they can judge from the diff alone.
