@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import mda_forwarding
+from openswe.threads.store import THREADS
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -18,5 +19,7 @@ def _backend_keeps_conversations(
     """Slack conversations stay on the backend unless a test says MDA holds or starts them."""
     if request.node.get_closest_marker("mda_lookups"):
         return
+    if "registry_db" not in request.fixturenames:
+        monkeypatch.setattr(THREADS, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(mda_forwarding, "startable_thread", AsyncMock(return_value=None))

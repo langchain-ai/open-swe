@@ -2,7 +2,8 @@
 
 A Slack thread binds to one Open SWE thread. Detaching it leaves a nonce in
 place of the binding, so resolving the location again names a fresh thread
-instead of the one that moved away. The thread also records who its untagged
+instead of the detached one. Moving keeps the source binding and message records
+so old events still identify the same session. The thread also records who its untagged
 messages route from and the kickoff message its next reply replaces.
 
 Each run started for a Slack thread keeps the last message it posted, and the
@@ -51,6 +52,7 @@ from openswe.slack.client import (
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
 from openswe.threads import index
+from openswe.threads.store import THREADS
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,15 @@ class SlackThread(Base):
     @property
     def kickoff_recorded(self) -> bool:
         return _live(self.kickoff_expires_at)
+
+    @staticmethod
+    async def moved_from(thread_id: str, channel_id: str, thread_ts: str) -> bool:
+        """Whether the bound session now belongs to another Slack location."""
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            return False
+        active = SourceContext.from_metadata(thread.metadata).slack_thread
+        return active is not None and active.location != (channel_id, thread_ts)
 
     @classmethod
     async def find(cls, channel_id: str, thread_ts: str) -> Self | None:

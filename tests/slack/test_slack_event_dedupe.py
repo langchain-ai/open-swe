@@ -11,6 +11,7 @@ from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
 from openswe.slack import routes as slack_routes
 from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.records import THREADS
 from openswe.webhooks import common as webhook_common
 
 
@@ -84,6 +85,7 @@ async def _post(
 def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
     slack_events.reset_slack_event_claims()
     claims = _FakeClaims()
+    monkeypatch.setattr(THREADS, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
     )
@@ -422,3 +424,64 @@ async def test_preprocessing_failure_replies_and_does_not_claim_event(
 
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", original_repo_config)
     assert (await _post(_mention_payload(), background_tasks))["status"] == "accepted"
+
+
+@pytest.mark.parametrize("edited", [False, True])
+@pytest.mark.parametrize("from_bot", [False, True])
+async def test_moved_source_does_not_dispatch_a_represented_root(
+    monkeypatch: pytest.MonkeyPatch, edited: bool, from_bot: bool
+) -> None:
+    from types import SimpleNamespace
+
+    from openswe.slack import webhook
+
+    process = AsyncMock()
+    monkeypatch.setattr(webhook, "process_slack_mention", process)
+
+    monkeypatch.setattr(
+        THREADS,
+        "get",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                metadata={
+                    "source_context": {"slack_thread": {"channel_id": "C-code", "thread_ts": "0"}}
+                }
+            )
+        ),
+    )
+    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(
+        webhook_common,
+        "lookup_slack_run_mapping",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                thread_ts="1786573369.551099", triggering_user_id="U1", agent_thread_id="t1"
+            )
+        ),
+    )
+    payload = _bot_payload() if from_bot else _mention_payload("EvReplay")
+    if from_bot:
+        monkeypatch.setattr(
+            slack_routes,
+            "resolve_allowed_slack_bot",
+            AsyncMock(return_value=SimpleNamespace(bot_id="B123")),
+        )
+    slack_events.reset_slack_event_claims()
+    if edited:
+        original = payload["event"].copy()
+        payload["event"] = {
+            "type": "message",
+            "subtype": "message_changed",
+            "channel": "C1",
+            "event_ts": "1786573399.000001",
+            "message": {**original, "text": "<@BOT> updated request"},
+            "previous_message": original,
+        }
+    tasks = _FakeBackgroundTasks()
+    response = await _post(payload, tasks)
+    for func, args in tasks.tasks:
+        await func(*args)
+    assert response["status"] in {"accepted", "ignored"}
+    process.assert_not_awaited()
+    if not edited:
+        assert tasks.tasks == []

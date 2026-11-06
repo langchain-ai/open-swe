@@ -107,11 +107,7 @@ async def rebind_slack_thread(
     source: SlackThreadRef,
     destination: SlackThreadRef,
 ) -> None:
-    """Point the thread at `destination` and carry everything keyed to `source` along.
-
-    Finishes a rebind whose metadata already points at `destination`, so a retry
-    after a partial failure completes instead of reporting a concurrent move.
-    """
+    """Rebind to the destination while retaining the source as an alias for the session."""
     source_location = (source.channel_id, source.thread_ts)
     target_location = (destination.channel_id, destination.thread_ts)
     bound_here = False
@@ -123,6 +119,8 @@ async def rebind_slack_thread(
             current = (
                 SlackThreadRef.model_validate(locked_active).location if locked_active else None
             )
+            if current in {source_location, target_location}:
+                await bind_slack_thread_id(*source_location, thread_id)
             if current == target_location:
                 await bind_slack_thread_id(*target_location, thread_id)
             elif current == source_location:
@@ -162,7 +160,6 @@ async def rebind_slack_thread(
         await _carry_run_mapping(source, destination)
         await release_slack_location_status(*source_location)
         await sync_slack_background_status(client, thread_id, resume=True)
-        await delete_slack_thread_associations(*source_location, expected_thread_id=thread_id)
     except Exception as exc:
         raise SlackRebindError(str(exc), moved=True) from exc
 
