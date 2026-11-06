@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:2221e5ef5ada4cc78d1f132a04f1ad5a904d1fbb6ce3c0ecd455f49c288e9f60",
+  "claims": [
+    {
+      "id": "claim_96b4d27dc4fd48789997c7ec3846f4bd",
+      "statement": "Backend and Managed Deep Agents (MDA) are separate projects: MDA owns the model loop, checkpoints, sandbox, tool calls, and runtime middleware, while the backend provides stateless typed `/agent-api/{endpoint}` operations; their shared interface is `packages/runtime-api`.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L14-L28",
+          "version": "repo-lines-v1:sha256:b9a82480589de0511fe68145e71f2abddda53c2f40efe436116ddc75a246c2b9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1MzU1YTc2NjEyZTQ0MzBlMmNlNWZlY2QwYmIwMTc1ODM1OGQ5MzdkNmRkMTFlOThjOTBkZGYxNThkOGY2YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE4ODUxMjRjMGVjMGRjMzJhZDBiNjkyNjYyZDVlZWVlMTFlOThkZWE0OTllOWUzYjgwYmExMDU4ZmE0MWMwNGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAxNmI3YmU2ODQwMGU1YWQyZTNjNTQ1MzVjYmQ0OWFmOWE2ZTNmZGU3MWMxMmMyNGU4NDQ0MTRhNjUwNzNmYjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE3ZmM0NTI4N2Y3MGJiNTVjZDUwNGY1MWFhNTgyMThlYTUwYzc5MGRlODZhYzRhM2ZhNzA5YTdkMzg4N2JmZmQifQ"
+        },
+        {
+          "resource": "repo://mda/pyproject.toml#L36-L46",
+          "version": "repo-lines-v1:sha256:977cb4096da6314f17b35c565f476ad5c1a456bcde8789895dce8ea27655376b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkYmQyNGI2ZjQ3MGJjNDZlMjllYzlmZWM1OTIyZTRjMTk1OTAyMTk2MjE0ZmYzODE5MjZmNWY0ZDQ5ZDNhMzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjZTRlNWFmMDVlY2Y4OWMwYjg3ZDgxZWZmYjEwZjg5Y2Y4MDFjNjAwZmM2ZGJkMDI5ZmMxODM0OWVhYjk2ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAwZTRkY2FhZDFlMjMyYmU3Y2I4NmM3MzdmOThhN2YwODVjY2Q0NmM0ZDExYmI3YmE5NGI4ZDAyYWRjMTA3OWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZiZjAwNTcwODk0MjYwMmQ3OGNmMDI1NjY3ZDkyMzEzODJiMDlhMGRhMTRlNzcxM2E0YzhhZDAwMDg0MjA3ODMifQ"
+        },
+        {
+          "resource": "repo://pyproject.toml#L64-L67",
+          "version": "repo-lines-v1:sha256:3d2affdb870459504770b013f1a7797d96a7166d9b6f4489d9a34a9a349e5caa:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTlhOTNjMTc4ODY1MWFhNjk4ZWQyN2JkMDViNGFiNDgyZDFjOWEyNjY1YjM4MTA3ZGEwYTAwYjE4ODBiNzVhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDk2MGEwYzhlMTM1MWM0YmIzNzE1MWQzZWFjOGNmMGE0ZmM2NzBjMmI3OGJlZDRlZjYwZmI0ODA0YTBkZDMxZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGY4ZGE2OGM5MGU2ZjZjMzRjNzBkZmI4NGQxYWQwNmVlYmRjNzI0MWJmNTgwMmM0MWI1NWViM2Y2YWQxNTZiMSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzRiODMyNDBiYjc1MWQ0MjkwZmUzNmJhN2FmMjM3MzZmNDk3ODQ3OGJmODBmMDZhYTA0ODdlYzVmYzg5YzhlOSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_1cec51618ce9454c9dfc4fd4fe11e381",
+      "statement": "MDA tests run in MDA's own environment and must not import `openswe`; endpoint behavior is tested on each side against the exchanged models/contracts.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L98-L104",
+          "version": "repo-lines-v1:sha256:c6186e3c627539275e2edbfbb10365f3e8f79946e8b79bd4732a43946f1115af:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOTVlODZmNjg3ZWExZWEwNGJhOTZjYzg3OWYyZmY5MjkyODA0NTg1ZWZhNTg2ZTc2MDc4NjA3ODg1ZWM5MzAyOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDZiZjZmMTM5YTQ1YmRkNjFkNjg1YmYzMzU3NzhmNzE0ZWQ5OTZkOTJkM2JkZDEzOTkyZDRjM2I0NjUxNzIxOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTNmOGVhN2Y0NmZiMzUwMWZlYjI2YWQwMWEyYTRjMzNhNDBlN2NjZjQ5YjVjMWE3NDJiNDgzYzA3ODFlNDZmYiJ9"
+        },
+        {
+          "resource": "repo://mda/pyproject.toml#L45-L56",
+          "version": "repo-lines-v1:sha256:2b483c1410bfff45e187d61bf12df58cf04c329ff8616bd70de87bb181f7db0d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0YjBhZDRhOWY1YjU1M2Q4NzA5Mzk0ZGIwZmYzNjdmZGNjYTRiYTI3MWI5ZWY2MjVkM2YyN2Y4ZjA0Mjc3YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwMzFkY2U5MzcxNTg5NmE3YTJhMzRlMTAzNWFjN2YxYTBmOTcwYzc4ZTdjZGFiNWU5OGExZmViYzI0Y2ZhMmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmMGNmNDE1NzRkYmU2MWU5M2M1YTRhYTlkMmNmZTI2Mzc0N2Y4YmEzYTJmYzJjODFiMDk4ZWZiYWE0NjFiNzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f587b6202af846e6b8b7693a826725c7",
+      "statement": "Root pytest collects `tests/` with asyncio auto mode, whereas MDA's pytest configuration collects `mda/tests/` independently.",
+      "evidence": [
+        {
+          "resource": "repo://mda/pyproject.toml#L52-L56",
+          "version": "repo-lines-v1:sha256:65f39e4eb42cf9f8ce74fa05daa8f780f1f15f6c1afa160a4c27e5bc4f292de4:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODY3NmU2NDE0NjVhNjU1MWU5ZTljZmZkN2ZhYTFlNmE0MmY5YjcyNDgwOTgxM2M5MDNkN2VkY2I1MmYzMDA2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDAzMWRjZTkzNzE1ODk2YTdhMmEzNGUxMDM1YWM3ZjFhMGY5NzBjNzhlN2NkYWI1ZTk4YTFmZWJjMjRjZmEyZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmE2MWM1Y2Q1ZTgzYjFjZjAwZDcxNDNkNzNkZDlmZDAzMjNjZDViNDUzMWQxZDEwM2U1MjFlMWM5NTQwNDNhNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L127-L132",
+          "version": "repo-lines-v1:sha256:15d2e20708c7a7482872819360ebf432b655e05dcd1756832b19fb723dbc75c9:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODY3NmU2NDE0NjVhNjU1MWU5ZTljZmZkN2ZhYTFlNmE0MmY5YjcyNDgwOTgxM2M5MDNkN2VkY2I1MmYzMDA2ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZWU5ZWRmYmYxODlmYWVlMjM1NTEwYzZkZDk4NmQzMWM3N2E0NjI4YTVhNjMwZGEzMzUyMDlhZGJmNjhkMGIyMCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGQzOTYxNWY5N2I3MjdkMGQzYjY0ZjMyMjllOTY5OGU5NTJmM2VjZjVmOThmNGQ5NzZkZjNlMjNkYWU2NWQ0YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODE2NGM0ODJmZGFhZDQzYjFiMTkwNThkZDdlYTc2Y2Y2YTVlNzdmODQ0ZjYyNGRmYzY3YmFiODIzMmU4YzA2NyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_c8c7841f3811443eb9c8a0e253633d7a",
+      "statement": "`tests/mda_helpers.py` lets backend tests evaluate channel answers as MDA does and stub signed remote-run context without starting MDA.",
+      "evidence": [
+        {
+          "resource": "repo://tests/mda_helpers.py#L14-L47",
+          "version": "repo-lines-v1:sha256:3542c3dc07e06a2836db2396d38bc2b56870dc160b34df4dd302857bcf3313ba:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ZTAxNWIwZDg3Nzg1NjdmMzM0ZTM3NjMzZjBlYzg3OGJiNGMzZjgxOTk1NTBmMmViYWE0MWI0NjU0YThjYmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MzYyYzBhN2Y2YWVhOGZmNjRhMTQ0MmY1MTQwNTBkMDBiZjNmODdiYzY3OTYxZTU4Zjg4M2I3MjFjNjQ2NGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFjM2FiMjhlMzBjYWZmYmUwZjQ2MTMzZjUxM2VhNDIwY2Y2OGEwZmE4Y2ExM2IzZDcyNjI1Njc4M2Q1OGRlMTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMxYjAwMThlMzQ5MTA1ZGI5NDQzZWY3MTJhNjY3MTBkOWY3YjE2NjAwZTE2NDQ0ZjNlMDliN2Q0OWE4N2E2OTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e52a08269bea45c0b0fbd40d4e2aea8c",
+      "statement": "Backend tests use focused families for owner-specific behavior, including agent state, thread lifecycle and runtime access, and runtime configuration invariants.",
+      "evidence": [
+        {
+          "resource": "repo://tests/agent/test_agent_thread_pr_state.py#L43-L87",
+          "version": "repo-lines-v1:sha256:bda68d67073269dc0c9263488de536890750abf89da4ef7e242daef6ee6f7d49:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmZDJjMDI5YjU1MGEwOTFkZjY2YWNiYTk5ZWM3YWI0Y2ExYTQzNDhhNDU2NGIxY2ExMDU2NjU3Yjk4YzUwMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+        },
+        {
+          "resource": "repo://tests/runtime/test_bindable_config.py#L11-L39",
+          "version": "repo-lines-v1:sha256:ef5670f3d3091b340892171afa6cc851c5c4c1534843cc4f1cc83b39b8aaec57:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmNDBhOGQ3NjQxMzFjODQzYzRhNGVhMDNiYzgyMzUyMWUzZjU2MWEzYWZmMjBkNzc1ZjdkNjU1ZWMyZDk1YTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwMjcyNzc5ZTM4MGFlNWJiNWI1MTY1Y2UyYmE1MmYyMjA3Mzg0NDk4MDNmMjA3YTI0MjQwYjFmY2QxMmI0MDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwYWM1N2Y1NjgyZGQ4M2U3ODdhYTAyOGUxY2IyNTExMmI4OWM1MmMzMjU1NDE4OGE2YjZhMTUyOTkzNWQ0MGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ4YjA0MWQxZmRiZWJkZWU4ODdiYjliMWVmZjU0NGI1NDlkM2UwYmI4NWQ2NzU1MzUzZDVjNzhlOTkyM2FiMzYifQ"
+        },
+        {
+          "resource": "repo://tests/threads/test_mda_runtime_auth.py#L17-L60",
+          "version": "repo-lines-v1:sha256:64bf076783f445e6a82a1c4d82a6c4f0eed2c81ba90685b710cbe018887550bd:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM1NDdhZjY2NDM1ZTc2YTZkMGZjODliODliYWQ3YzcwMmRjZmQyMDFlYTc0OGJjNzMzNzNjOWNkYjBmZWRkNjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJiZTRlNDRlYmMzNjUyNDUwM2FjMWNkZWE1Mjg0MDM5ZjU1NWNiNDU1NjA2ZmUyMmQ3Mzk4NTMyOTFlMjkxOWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg4MDdmZTkzMDU4MGMxMDNlYTlhMzczNDE2Y2Y4ZGRmOTA2YTNiNDk5YmE0MWU5MDgzMzU2ZWE0YmJiODMwZmEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a7d4bc61ba444ed3be15e5e83c529177",
+      "statement": "MDA runtime tests exercise shared graph/backend interactions through `runtime_api` contract models and fake backend behavior, including end-state failure semantics.",
+      "evidence": [
+        {
+          "resource": "repo://mda/tests/test_backend_calls.py#L83-L165",
+          "version": "repo-lines-v1:sha256:2c5c83a8b4d46a85601ac8869d3e4b77fae30bf4e9634940359f46e07e2be430:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIwM2NlZGZlNjZmZDgyNmU0NDVmOTQ3Y2RjODkyYTIyMDcyNzcyMTYwMTEyNjM5NzdmMDc2NTE0MWViMGI1ZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlN2ZlM2MwYmVhODkyYjQ3ODhhODQ0ZDA0OGY3ZGNiNGRhYWJmYTc1ZDIwZmQ1MDQyMjA2YTBmYWY5MGRjM2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY5ODAxMDg0ZWIzOTA5NjVhYzkyNGEwODE3MzEyOGYwNDY2MDE4NTZiYjNiMGIwYTdhZDkxZTgzMjVlYmQyNWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyNWQxNWIyOGY4N2U0MjZkY2QwZDQ0ZTM2ZTBkMWNmZTk3MThmNTI3ZGI1NWIzNGM2ZDUzZTM5MjhjMGY0NDIifQ"
+        },
+        {
+          "resource": "repo://mda/tests/test_shared_graph.py#L91-L137",
+          "version": "repo-lines-v1:sha256:754f61961a9db7e4e862e33f72766c1b1d246137844d8f808558864dc9bc0589:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1NTE1YjRiZDc2Y2Y3OTBjMTZiMjg4Y2VlMTYxNDlmYzdhNTMxNDgyYTNlZDZhMDgxOTQ2YWQ1NjlhOTU0ZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwZmUzZmMxNDM1Mjc3YmEyYmQ5MjZlNjQ1Y2JhMWE3NzY4M2IxMzAyNTEyYmRlYWRlMGFlOThmMWZlNDE0ZGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyMmZmNmEzMDQ4ZGQ3YTllODY0Yzg3NGUwZTgwOGJkMzNhNjVmMmFmMTlmMGQzOTIyYWNmNTY5YjM0YzNkYjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3e07d2f7e5984f738d3022f1771aa842",
+      "statement": "Root test fixtures prevent unintended integration: outbound network access is refused, local dashboard builds are hidden, caches and sandbox registries are reset, and behavioral fakes support users and selected tool access.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py#L107-L153",
+          "version": "repo-lines-v1:sha256:47791e7d0e0f880abee7d8ab603beb9354560be9bb85473897494bca41788536:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY1ZGMzZjllNzQ0MTAwZTA4MGEzZWUwNDNmNTBiYzhiNmI3MzMzMjE3YTVkYWU2NWFjYzQ4ODVlNDA5ODBmYzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyZjc1MTgxMDlhN2ZlNTI4ZDhiNjRiMzQ1NDRjYmRkOWM3MjU2ZjMyODlkMzM4MmFmYmMxMWNkMDcwOTY3MmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE3ZDA4MDBhOThkYjgwNjhjZmFkNmY2OTJmODY3NDM0OTRlMTAwMWExOTdjYTNjY2ZjOGQyZjE3NjVlNTRiZTQifQ"
+        },
+        {
+          "resource": "repo://tests/conftest.py#L274-L369",
+          "version": "repo-lines-v1:sha256:6bdec9eab488aa8f5ab99d8edb1b6fc740b7dafeb957069308b9aa13f301165b:eyJzZWxlY3RlZExpbmVDb3VudCI6OTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkNDlkNWY2MjU1NTQzZDQzODFlYmFjZTMyNTU2YjQ1MTY0ZjQ3ZmZiNDc1MjE4MzY1YWRhOGIyNTAyMjk1NDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE2MjQzMWMyNDczYWRkYjE5MzY4NmY3YWMzNDJkMzc5NDI3NGRmNTJhNDAzM2EwYmFlMDc5MTM1OGU1MWMyZjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwNjE5ODFjOTc1YWYwNjYzYTcxNDBjNDMyNzEyNWIyMTExMDk1NTBiY2IxZWVjZmFjNzZkNTI0MmRjZDg0MTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFlZjExYzliNzE2N2MwYWRjNDJmZWE4NTRhYjYzNDk5NzcwODE0YjBlNzE4MTAzYTllYzBmOWJlN2FmNjk5NzkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d9d529eeb4fc44b0b1516e24196c04c9",
+      "statement": "Database regression tests require `TEST_ANALYTICS_POSTGRES_URI`; `registry_db` skips if it is absent and otherwise uses an isolated migrated database, while the database role needs `CREATEDB` and should be separate from local development.",
+      "evidence": [
+        {
+          "resource": "repo://docs/DEVELOPMENT.md#L127-L134",
+          "version": "repo-lines-v1:sha256:8129cd71e48d1253e88432af42d2967f59262ec68a679dda5e060cea2f106cd0:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZmZlNTU3ZTQ4ZGRlODQ0NTFiNWFmYTIzN2UxNTM3MDA4MDZkMGZjNTgyMjVlZDg1NTRlNmVhYWRkODQ1MTM1ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjVlNTYyMTc0NDM0ZmFiNDA1MGM4ZjQ5YmUxZDIwOTczNTVlOTNiMzYwN2NkZGEyZTRmZTJhOTVhY2NjZDg2MiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGUwNjBjMDg5NWRmNTIxMmUyOWQyZWUwOWFiOGNlYzM1NjNiMGMzZjllNTE2MDg4NTY1ZWQyYzBiZjdmNmMxNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNmNhNjMwMjgxMDA4Nzg4Mjg0YTY1NmZlNzIwNTM3MGI4YzU3OTA1NWZlYzkwNDU1MjIxMGI5OTkxZmE4ZDgzYyJ9"
+        },
+        {
+          "resource": "repo://tests/conftest.py#L199-L228",
+          "version": "repo-lines-v1:sha256:ef07e3047ea268e1cffc5bb14984d8efe3a5ea5e75047a5832facd6c28be63f3:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyNjVhZWFhY2Q1OWQ4MzEyZGM5NTJiYjg4NzM4ZGVhY2MyMDc5NWQ4MTg0MTA3NjI3OTJjZTA3ODQ2ZTc2MjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMWVmMjVlM2RlYjQ5ZDliZTEzZGUyYTVlMzk3OGY1MTA2M2FkYjViMDg2ZmE1MTdmZjU4YzJiYmYyYmY0MDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBjZTQyNmM2MTBhZGQ2MzMzOTcyYzVlMzU1OTIyOGE0N2UxMTMwNmQyY2UwYzhjZjU3ZTAxNWI4ZWVjOTRkOWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxYzE0MjZiZWE3ZmFiYTA1YTEyYzFlMWM4NjBkYTY3YzYxNzM4ZmZjY2NjYTRmNjc2ZTRiOTI2ZGVhNjZlMDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_021d9f5601ed4089a459e69d831021cd",
+      "statement": "The Makefile supports focused root test paths through `TEST_FILE` and direct pytest is needed for a node id; MDA test and type-check targets run from the separate MDA project environment.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L106-L121",
+          "version": "repo-lines-v1:sha256:720dc221c7d9198cfbac180098d9eb93814ce8f17ede9015ff9b668eb7f55c1d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiZTA4NmJjNzE2ZTQ1ZjVjN2NkMjMwMTFkZTgyNjgyNWU2ZjM5NmI5NDBlOTMyNDdjMzYxZjJmOWQ5YWNjOGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlY2IzODFhYjc5MmQ4MjNmMDEzZjgyYzcwNjdmY2YwNjE0NTZjY2I2ODU2ZTJmYTNkMzZkNDA2ODZiZjhlYjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJiMGExMGJiYzAyMTY5M2VkNjhhOTljMmRmMjJiMzRlODdmMjI1YzNhMjk1ZGVhMzhkNjE2NTAxNzYwN2U5YzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU3MDU0ZGJkMTA4YzFjMmZkZjZiZDVhODdjNTI0Mjg2MzI3MmI4N2Q5ZmQ4ZWU1NzM0ZGZmMWY3ZjhlZDBiOTgifQ"
+        },
+        {
+          "resource": "repo://Makefile#L140-L150",
+          "version": "repo-lines-v1:sha256:05d9fe927c2f9a58866ed6127416834dbf8b03b7f11ef6543505ac9a47fed7c7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxYmUzNGYwMWZlZDUxODUzZjExYmU4OGZjMWM1MDNlNTAxY2Q4Zjc1YjBjMzFmNDZhZDQ3NWY3MDBjOWE2YzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZjNmNWY2NDAyZTljNGFiY2I0ZTJiYWU4N2FmNjJkMmJhMGRiMzNjYjA0M2Q0MTNlYjAyOWUyYTdhM2U1NWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlNzVkNjM2NzVlMzUwNGJmZjE4MTllYWQ2OTU0ODYzYTcxMzMwOWNiYTAxMzY1NzgyZmU0MWI2YTZlMWZiMTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYWI5YzQ3MzQ2NGI2ZGQ3YThmMzBlMTNlYzYzMzlkNzk5MWFmNDNkNjc5NTZlM2NiYmQ4NTE4NjA5ZjJhZWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5e17fcec18a14cbcbad662161bf6dc14",
+      "statement": "Project guidance requires the narrowest focused behavioral validation rather than the full local suite, and prioritizes targeted coverage for security, authorization, data integrity, difficult state transitions, and bug regressions.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L98-L116",
+          "version": "repo-lines-v1:sha256:454b4354e80407a6148e1b4304fa7918f00d1dc8aa478fb53c75562a2fa370ce:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1ZTg2ZjY4N2VhMWVhMDRiYTk2Y2M4NzlmMmZmOTI5MjgwNDU4NWVmYTU4NmU3NjA3ODYwNzg4NWVjOTMwMjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4Nzc2NDllNTU3NjNlYzcyOTMyYjU2NTczZTc0ODI4N2MxMTc0NGM5NjU3NWE5NDI5M2M5ZTcwMzg1NzIxMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA2YmY2ZjEzOWE0NWJkZDYxZDY4NWJmMzM1Nzc4ZjcxNGVkOTk2ZDkyZDNiZGQxMzk5MmQ0YzNiNDY1MTcyMTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxMGZiMmFlN2MxMTU2ODE1YTBmNDdkOTkwYTFjMzJlMjU4MDQ5NGVkMmE1MDIwNTNmNzFlMDJhMTgwYmUwNDQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_48a93f4b001b4b53966c0fe8aa6aa8fc",
+      "statement": "The dashboard package provides Vitest through its `test` script and TypeScript checking through its `typecheck` script; colocated UI tests can mock only a controlled boundary such as lazy tool-output fetching.",
+      "evidence": [
+        {
+          "resource": "repo://ui/package.json#L5-L11",
+          "version": "repo-lines-v1:sha256:6483cb4be377146542e2adbfc56c5fb28d8d241737709add53353755d71aca22:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ4MzNkNTk0OWMwM2E0MGNhOTUyNDkxNjEwYTY2NTk2NDRiM2FhNDY2MzYyZjc5OTAyMGRiZjE5ODE1NDdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGI3OWU4NTBhOGIwMzZkZWY3NGFhMjAyYjU5YWU2YmZlOTIxZDNmMjRhM2RmZjEwODg5ZWI5N2VhNzk1YTdmOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2JjZWMwZTNhOGE3NjAxNDczMjQxM2RmNGYzMjhkMDgzY2U0YzFiNjhlZmExNjExZTRkOTc4ZGMyOTMwYTlhNiJ9"
+        },
+        {
+          "resource": "repo://ui/src/features/agents/lib/transcript/reducer.test.ts#L31-L36",
+          "version": "repo-lines-v1:sha256:2f5b33b51c20047ef9a4c4bdcfe00092564999ca8fb74066ff99ac3709caa93d:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiY2E4MzJmN2ExMzEyYmEzYWE1ODNlZTk5ODFhYzEwOWYwOTlhZjdjOTM1YTllZmMzNDNhYjE2Y2M2NGI1OTlmMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNWMyZDdiMGU2ZmM0ZjBjMjliOGRmODMyYjMzZjU2MmZmYTAzODUzNDg4NjM1YTM0M2FlM2EyNDY0NzE3NGEyMiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYWIwZTYzNzcyNDI1NTVjYTMwZTkzNjMwYmFkOWVhOGNkMzBhNWMzZmVjNDZmZWYzN2U5MWU3ZjE1OWVjNDM0ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODJlMjM3NjU2NzIzZjBkODk0M2QzNGViYzA4ZWMyYTUwNjcxMWQwYjI3ODhiODU0MDUzNjA2MGJmMjNmMGVkNiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_80423b2d312041bb8de8e0f10dc8cf70",
+      "statement": "The E2E harness runs real webhook-to-agent execution, a local MDA server, real tools and middleware, sandbox creation, and dashboard UI while substituting the model and external SaaS boundaries with controlled fakes.",
+      "evidence": [
+        {
+          "resource": "repo://tests/e2e/README.md#L1-L38",
+          "version": "repo-lines-v1:sha256:dd6074ec7b63123a64820282bfb63c98b110a04aad4e081595d392f2a77511e0:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkMjcyNDBhZmIzNzliZGU4NTg3MmNmYmY2ZGE5N2VmY2MyMjQyZTZhNmRlMWVjMTliMmRjM2M1ZWRkZjU4ZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMDQ5OWMyMGU4M2JlNWZkNGQ0ZThiYjg4ZWI3YTc3ODlkMTE3ZTA0MTMxZWU0Mzk3MWM0NWU0OWExMmU0NTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyMWQxOTBkZWUwYzkwNDE1MmMwMmNlNWViMDUxOTk0ZjJkMTc0M2ExNmE3ZTZlMTMzYTE3NzM2MGI5YjUzZDAifQ"
+        },
+        {
+          "resource": "repo://tests/e2e/README.md#L58-L68",
+          "version": "repo-lines-v1:sha256:02395e9a2b5e6e4de1ef9409e306b696f737e21402188113628e4acf0ff22c71:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0YjFlMjY5N2UyZmFlN2I2NGIzOGUyZmI4M2U1YjM5M2E3ZTFhZTNkMzRkZTliNTM5MDZhNTBkNjIzMzFhMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxNGRjY2U4NWFmYjllOWEwMTBjZDc1MTVhMTE0OTQxOGQ0MzZkNzUwZWVlYjU2YTNjNGJmYTliNWQwZjhlMmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjllNDBmNGY4MmExN2Q0YWRjYmRjYjE3OWJiMjE1MGI2YTJmYTA1OGU1MWQ1NmQwYmUyYWE0ODAzNTVkMzBkMGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRjMmNkMGJmMWM0YjQ5MjY4MzBmMWQyYmIzY2MwOTk5OWEyZDhjNWFlZGVhY2UyZTAzYzZkZWFiYWQwYWQ2MGIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f9fcbd2993c24ab886279e01e70effd2",
+      "statement": "E2E requires PostgreSQL through `POSTGRES_URI`; Playwright retains failure diagnostics and supports explicit artifact capture for diagnostic runs.",
+      "evidence": [
+        {
+          "resource": "repo://tests/e2e/README.md#L93-L110",
+          "version": "repo-lines-v1:sha256:0a2fa51dfc65246bc73be8c8ac5dc527efc99ea7bc030dc69b67c18523f6090a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwNGZlNGM1MTJlM2YyZDk0YTc3ZTcyY2VkMGJmYTI3OTEyNWQ1ZjcyNmQxNDM1MzU0YTk3N2NjMWRkM2E5ZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4MDA2MDYyZjFhMDlhNjg3OWE3OWEzYmU2YTUyNGZhMzk4Y2FjNTQwZmU4NTA2YzVhYWZhNjgzMTMyMTgwOGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlNDZkMzI3MzQ3YzIyYzMwNjdiODAxMjJhMjQ2ZDQyMmJjYjExZmQwNzE2NTVjMGM1NjYxMjA3ZWJkZjc0ZmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViYjdhZTQ4OGRjNmIwMzAzMTAyYTUwZWQ0YzM1NTY2NWExN2Q3NGI3OTBkY2NjZjc3YTliNzc1MWQxNWMyODgifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-11-04T08:09:12.042Z"
+  }
+}
