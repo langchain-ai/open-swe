@@ -17,6 +17,7 @@ import type {
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { HumanInputText } from "./HumanInputCard"
+import { DismissFinding } from "./DismissFinding"
 import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
@@ -316,6 +317,7 @@ function Conversation({
   target: PullRequestRef
   resolve: ReturnType<typeof useResolveThreads>
 }) {
+  const [owner = "", repo = ""] = target.repo.split("/")
   const [open, setOpen] = useState(false)
   const [clamped, setClamped] = useState(false)
   // Only offer the toggle when there is something hidden to show.
@@ -336,6 +338,14 @@ function Conversation({
         <div className="ml-auto flex shrink-0 items-center gap-space-2 text-primary">
           {thread.url && (
             <AddToAgentBatch target={target} commentUrl={thread.url} />
+          )}
+          {thread.finding_id && (
+            <DismissFinding
+              pr={{ owner, repo, number: target.number }}
+              findingId={thread.finding_id}
+              size="xs"
+              variant="outlined"
+            />
           )}
           {thread.thread_id && (
             <Button

@@ -8,16 +8,11 @@ by the dashboard chat proxy.
 from collections.abc import Mapping
 from typing import Any
 
-from fastapi import HTTPException
-
-from openswe import thread_ids
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.review.findings import ReviewerThreadMissingError
 from openswe.review.findings import list_findings as list_findings_async
 from openswe.run_config import RunConfig
-from openswe.slack.client import parse_github_pr_url
-from openswe.threads import index
 from openswe.tools.mcp_exposure import expose_mcp
+from openswe.tools.review_finding_target import ReviewFindingTarget
 
 _COMPACT_FIELDS = (
     "id",
@@ -50,17 +45,12 @@ async def list_review_findings(
 
     cfg = RunConfig.from_runtime()
     reviewer_thread_id = cfg.reviewer_thread_id
-    if caller := cfg.mcp_caller:
-        pr_ref = parse_github_pr_url(pr_url)
-        if pr_ref is None:
-            return {"findings": [], "count": 0, "error": "pr_url must be a GitHub PR URL"}
+    if cfg.mcp_caller or pr_url.strip() or not reviewer_thread_id:
         try:
-            await require_repo_access_for_user(caller, f"{pr_ref.owner}/{pr_ref.repo}")
-        except HTTPException as exc:
-            return {"findings": [], "count": 0, "error": f"Repository access denied: {exc.detail}"}
-        reviewer_thread_id = await index.current_thread_id(
-            thread_ids.reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
-        )
+            target = await ReviewFindingTarget.resolve(pr_url)
+        except ValueError as exc:
+            return {"findings": [], "count": 0, "error": str(exc)}
+        reviewer_thread_id = await target.reviewer_thread_id()
     if not reviewer_thread_id:
         return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 

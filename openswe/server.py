@@ -282,6 +282,8 @@ from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
 )
+from openswe.tools.dismiss_review_finding import dismiss_review_finding
+from openswe.tools.list_review_findings import list_review_findings
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
@@ -783,6 +785,8 @@ AGENT_TOOLS: Final = (
     auto_assign_human_reviewer,
     dismiss_human_review_request,
     get_human_review_status,
+    list_review_findings,
+    dismiss_review_finding,
     open_pull_request,
     link_pull_request,
     output_iframe,

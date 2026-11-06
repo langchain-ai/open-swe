@@ -329,3 +329,38 @@ async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> 
     with patch("openswe.review.findings.get_client", return_value=fake_client):
         with pytest.raises(ReviewerThreadMissingError):
             await get_thread_metadata("tid")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_dismissing_a_finding_records_the_reason_once() -> None:
+    from sqlalchemy import select
+
+    from openswe.database import postgres
+    from openswe.review.dismissals import FindingDismissal, FindingDismisser, FindingSettled
+
+    def dismisser() -> FindingDismisser:
+        return FindingDismisser(
+            owner="acme",
+            repo="app",
+            number=1,
+            finding_id="f_a",
+            login="alice",
+            user_id=None,
+            reason="Intentional",
+        )
+
+    with (
+        patch("openswe.review.findings.get_client", return_value=_metadata_client()),
+        patch("openswe.review.dismissals.index.current_thread_id", AsyncMock(return_value="tid")),
+    ):
+        await append_finding("tid", _f(id="f_a"))
+        dismissed = await dismisser().dismiss()
+        with pytest.raises(FindingSettled):
+            await dismisser().dismiss()
+        stored = await list_findings("tid")
+
+    async with postgres.session() as session:
+        reasons = list(await session.scalars(select(FindingDismissal.reason)))
+    assert dismissed["status"] == "dismissed"
+    assert stored[0]["resolution_note"] == "Dismissed by @alice: Intentional"
+    assert reasons == ["Intentional"]
