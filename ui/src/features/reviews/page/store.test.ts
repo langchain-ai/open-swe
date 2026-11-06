@@ -46,6 +46,7 @@ const walkthrough: ReviewWalkthrough = {
       summary: "",
       other: false,
       files: [{ path: split.path, added: [[2, 2]], deleted: [[2, 2]] }],
+      notes: [],
     },
     {
       index: 2,
@@ -53,6 +54,7 @@ const walkthrough: ReviewWalkthrough = {
       summary: "",
       other: false,
       files: [{ path: split.path, added: [[7, 7]], deleted: [[7, 7]] }],
+      notes: [],
     },
   ],
 }

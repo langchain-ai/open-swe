@@ -10,6 +10,8 @@ names an ``op``:
   pinned ones, so line sets can be carried to the new head.
 - ``render``: line sets as a reader sees them, at real line numbers.
 - ``wordless``: which line sets hold only braces, punctuation or blank lines.
+- ``locate``: where each text matches among a line set's changed lines, as an
+  edit tool matches its old text: the last line of every match.
 """
 
 import base64
@@ -344,7 +346,25 @@ def wordless(request):
     }
 
 
-OPS = {"index": index, "maps": maps, "render": render, "wordless": wordless}
+def locate(request):
+    line_set = request["lines"]
+    chosen = selected(changed_lines(set(line_set)), line_set)
+    found = []
+    for query in request["find"]:
+        lines = chosen.get(query["path"], [])
+        joined = "".join(line[2] + "\n" for line in lines)
+        text = query["text"]
+        ends = []
+        at = joined.find(text) if text else -1
+        while at >= 0:
+            last = lines[joined.count("\n", 0, at + len(text) - 1)]
+            ends.append([last[0], last[1]])
+            at = joined.find(text, at + 1)
+        found.append(ends)
+    return {"found": found}
+
+
+OPS = {"index": index, "maps": maps, "render": render, "wordless": wordless, "locate": locate}
 
 
 def read_request(argument):

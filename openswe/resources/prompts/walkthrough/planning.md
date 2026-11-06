@@ -45,6 +45,8 @@ Never hide a real behavior change in Other: a new condition, a different call, a
   The code is rendered from its hunks, so never paste code into the explanation.
   The explanation is two to four plain sentences: what the chunk changes, why, how its hunks fit together, and anything worth a second look.
   Wrap identifiers, types, flags and paths in `backticks`.
+  When a line is easy to misread or carries the change's real risk (a subtle condition, an off-by-one boundary, an ordering or concurrency assumption, a non-obvious side effect), pin a short note to that line with `notes` instead of describing it in the explanation.
+  Notes are for the few lines a careful reader would otherwise stop on; most chunks need none, and never use them to restate what a line plainly does.
 - `walkthrough_split_hunks` splits unplanned hunks at changed lines you name, before you place their parts.
 - `walkthrough_move_to_other` sends hunks to Other without placing a chunk, or with `restore: true` takes them out again.
 - `walkthrough_describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds.

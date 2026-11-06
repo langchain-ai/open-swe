@@ -1236,12 +1236,21 @@ export interface ReviewWalkthroughFile {
   deleted: Array<ReviewLineRange>
 }
 
+/** The scout's note on one tricky changed line of a step: a head line on RIGHT, a merge-base line on LEFT. */
+export interface ReviewWalkthroughNote {
+  path: string
+  side: "LEFT" | "RIGHT"
+  line: number
+  note: string
+}
+
 export interface ReviewWalkthroughStep {
   index: number
   title: string
   summary: string
   other: boolean
   files: Array<ReviewWalkthroughFile>
+  notes: Array<ReviewWalkthroughNote>
 }
 
 /** The review scout's reading order for the PR's current head. */

@@ -14,7 +14,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.ui_invalidations import Topic
 from openswe.walkthrough.checkout import CheckoutError
-from openswe.walkthrough.plan import FileHunks, FileSplits, RangeError
+from openswe.walkthrough.plan import FileHunks, FileNote, FileSplits, RangeError
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
@@ -76,6 +76,7 @@ async def walkthrough_plan_chunk(
     show: list[FileHunks] | None = None,
     explanation: str = "",
     other: list[FileHunks] | None = None,
+    notes: list[FileNote] | None = None,
     after: int | None = None,
     replace: list[int] | None = None,
     pr_url: str | None = None,
@@ -90,6 +91,7 @@ async def walkthrough_plan_chunk(
             show=show,
             explanation=explanation,
             other=other,
+            notes=notes,
             after=after,
             replace=replace,
         )
