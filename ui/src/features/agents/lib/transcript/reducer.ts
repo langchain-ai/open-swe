@@ -1201,6 +1201,7 @@ function turnMessages(
                 ...message,
                 deliveryStatus: "failed",
                 deliveryError: turn.error ?? undefined,
+                deliveryTurnId: turn.turnId,
               }
             : message
         )

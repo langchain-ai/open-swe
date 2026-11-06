@@ -223,6 +223,7 @@ export interface Message {
   timestamp: string
   deliveryStatus?: "sending" | "failed"
   deliveryError?: string
+  deliveryTurnId?: string
   optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"

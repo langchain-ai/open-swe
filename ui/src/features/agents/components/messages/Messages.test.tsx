@@ -37,7 +37,10 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   ),
 }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllEnvs()
+})
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>
@@ -46,6 +49,54 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("copies the displayed thread URL with the dashboard base path on another page", async () => {
+    vi.stubEnv("BASE_URL", "/robin/")
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <Messages
+        threadId="displayed-thread"
+        messages={[
+          {
+            id: "failed-message",
+            author: "user",
+            timestamp: "2026-11-06T20:18:00Z",
+            deliveryStatus: "failed",
+            deliveryError: "the message could not be started",
+            deliveryTurnId: "failed-turn",
+            chunks: [{ kind: "text", text: "When is the job scheduled?" }],
+          },
+        ]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Failed to send · the message could not be started · Copy debug details",
+        })
+      )
+    })
+    expect(writeText).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          url: `${window.location.origin}/robin/agents/displayed-thread`,
+          message_id: "failed-message",
+          turn_id: "failed-turn",
+          timestamp: "2026-11-06T20:18:00Z",
+          error: "the message could not be started",
+        },
+        null,
+        2
+      )
+    )
+    Reflect.deleteProperty(navigator, "clipboard")
+  })
+
   it("renders queued passage replies even without plain text", () => {
     render(
       <Messages
