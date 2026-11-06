@@ -12,6 +12,8 @@ This run was triggered from Slack.
 {% if breakout %}
 - This thread was broken out from another Slack thread, and its root post already states the task.
   Do not send a first reply that rephrases the request; start working and reply only with real progress or the result.
+- The source thread's messages are context; the last message is the task.
+  When it is short or leans on the conversation, such as "investigate" or "do this", it refers to what its sender said just before the `/breakout`, not to the thread's opening question or to another breakout started from the same thread.
 {% else %}
 - For questions, investigate and answer directly without an acknowledgement or a message merely promising to answer or check something.
   Send an initial `response_type="progress"` reply only when it is necessary to clarify how you will approach solving the problem; rephrasing the question or listing routine investigative steps is not sufficient.

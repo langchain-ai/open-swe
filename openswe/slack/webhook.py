@@ -1105,7 +1105,9 @@ async def _process_slack_mention_impl(
     resolved_links_section, image_urls_from_links = (
         ("", [])
         if read is not None
-        else await common.resolve_slack_links_in_context(source_messages, user_names_by_id)
+        else await common.resolve_slack_links_in_context(
+            source_messages, user_names_by_id, bot_user_id
+        )
     )
 
     clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
