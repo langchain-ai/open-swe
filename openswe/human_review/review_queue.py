@@ -211,7 +211,7 @@ class ReviewQueue:
         return payload if payload.get("state") == "open" else None
 
     async def _row(self, queued: QueuedPullRequest) -> tuple[OpenPullRequest, str] | None:
-        """The row and the PR's author, or ``None`` for a closed PR this person wrote."""
+        """The row and its author, or ``None`` for a closed or draft PR or one this person wrote."""
         ref = queued.ref
         if (listed := queued.listed) is not None:
             return listed, listed.author or ""
@@ -221,6 +221,7 @@ class ReviewQueue:
                 repo=pr.repo_full_name,
                 number=ref.number,
                 title=pr.title,
+                author=pr.author,
                 created_at=request.created_at.isoformat() if request.created_at else None,
                 updated_at=request.updated_at.isoformat() if request.updated_at else None,
                 details_loading=True,
@@ -234,13 +235,14 @@ class ReviewQueue:
         author = user.get("login") if isinstance(user, Mapping) else None
         if not isinstance(author, str) or author.lower() == self.login.lower():
             return None
-        if queued.assignment == "speculative" and payload.get("draft") is not False:
+        if payload.get("draft") is not False:
             return None
         created, updated, title = (payload.get(k) for k in ("created_at", "updated_at", "title"))
         row = OpenPullRequest(
             repo=queued.repo_full_name,
             number=ref.number,
             title=title if isinstance(title, str) else "",
+            author=author,
             created_at=created if isinstance(created, str) else None,
             updated_at=updated if isinstance(updated, str) else None,
             details_loading=True,

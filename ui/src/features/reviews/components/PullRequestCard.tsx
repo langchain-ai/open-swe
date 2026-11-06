@@ -9,6 +9,8 @@ import {
 
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { displayName, sameLogin } from "@/features/reviews/lib/logins"
+import { Avatar } from "@/features/reviews/page/notes/Byline"
 import { dateLabel } from "../lib/dateLabel"
 import { statusDetail, statusLabels } from "../lib/status"
 import { Diffstat } from "./Diffstat"
@@ -47,6 +49,31 @@ function AssignmentBadge({ pr }: { pr: OpenPullRequest }) {
     <Badge size="sm" color="secondary" title={label[1]}>
       {label[0]}
     </Badge>
+  )
+}
+
+/** Who opened the PR, so your own drafts and others' reviews read apart at a glance. */
+function PullRequestAuthor({
+  pr,
+  login,
+}: {
+  pr: OpenPullRequest
+  login: string
+}) {
+  if (!pr.author) return null
+  const bot = pr.author.endsWith("[bot]")
+  const author = {
+    login: pr.author,
+    avatar_url: bot ? "" : `https://github.com/${pr.author}.png?size=40`,
+    bot,
+  }
+  return (
+    <span className="inline-flex min-w-0 items-center gap-space-1 text-primary">
+      <Avatar author={author} size="xs" />
+      <span className="truncate">
+        {sameLogin(pr.author, login) ? "You" : displayName(author)}
+      </span>
+    </span>
   )
 }
 
@@ -106,9 +133,10 @@ export function PullRequestCard({
           )}
         />
         <span id={contentId} className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-space-2 text-xs text-secondary">
+          <span className="flex items-center gap-space-2 text-xs text-secondary">
             <span className="min-w-0 truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
+            <PullRequestAuthor pr={pr} login={login} />
           </span>
           <span className="mt-0.5 block truncate text-xs font-medium text-primary">
             {pr.title}
@@ -165,6 +193,7 @@ export function PullRequestCard({
               {pr.repo}{" "}
               <span className="font-mono tabular-nums">#{pr.number}</span>
             </span>
+            <PullRequestAuthor pr={pr} login={login} />
             <AssignmentBadge pr={pr} />
             {statusLabels(pr).map((status) => (
               <StatusPill key={status} status={status} />
