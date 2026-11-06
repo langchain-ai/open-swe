@@ -29,6 +29,9 @@ The backend never runs middleware around a model call; the only middleware objec
 
 ## Conventions
 
+- Do not build special-purpose features when the need can be met by composing generic capabilities such as plugins, automations, skills, or external MCP servers.
+  First check whether existing capabilities, with small generic additions if needed, can deliver the feature.
+
 - Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
 - Flag likely desktop-release requirements to the developer for native shell/preload, bundled bridge/CLI, packaging, or incompatible IPC changes; downloaded UI and backend-only changes need no desktop release.
 
