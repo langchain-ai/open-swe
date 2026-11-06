@@ -21,6 +21,7 @@ from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
+from openswe.tasks.store import sidebar_memberships
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
@@ -622,20 +623,19 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
 async def resolve_dashboard_thread(
     thread_id: str, login: str, *, resolved: bool, email: str | None = None
 ) -> dict[str, Any]:
-    """Mark a thread resolved/unresolved via thread metadata."""
-    client = langgraph_client()
+    """Archive a thread with its readable task workers, or restore only the thread."""
     await _authorized_thread(thread_id, login, email=email)
     try:
         async with agent_thread_pr_state_lock(thread_id):
             thread = await _authorized_thread(thread_id, login, email=email)
             metadata = thread_metadata(thread)
-            metadata_update: dict[str, Any] = {
+            metadata_update: JsonObject = {
                 "resolved": resolved,
                 "resolved_at_ms": _now_ms() if resolved else None,
                 "auto_resolved_by_prs": False,
                 "attention_reason": None,
             }
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await THREADS.update(thread_id, metadata_update)
             if resolved:
                 from openswe.analytics.emitter import task_accepted, task_marked_complete
 
@@ -646,6 +646,24 @@ async def resolve_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
+    if resolved:
+        try:
+            workers = await sidebar_memberships([thread_id], workers_of=True)
+        except Exception:
+            logger.exception(
+                "Could not list task workers during archive", extra={"thread_id": thread_id}
+            )
+            workers = {}
+        for worker_id in workers:
+            try:
+                async with agent_thread_pr_state_lock(worker_id):
+                    await _authorized_thread(worker_id, login, email=email)
+                    await THREADS.update(worker_id, metadata_update)
+            except Exception:
+                logger.exception(
+                    "Could not archive task worker",
+                    extra={"thread_id": worker_id, "coordinator_thread_id": thread_id},
+                )
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return await _thread_summary(thread, viewer_login=login)
 

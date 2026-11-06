@@ -60,6 +60,71 @@ def _empty_thread_pins(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "list_thread_pin_ids", empty_pins)
 
 
+@pytest.mark.parametrize(
+    ("thread_id", "resolved", "failure", "expected"),
+    [
+        ("parent", True, None, {"parent", "worker"}),
+        ("parent", False, None, {"worker", "private"}),
+        ("worker", True, None, {"worker"}),
+        ("parent", True, "lookup", {"parent"}),
+        ("parent", True, "update", {"parent", "worker"}),
+    ],
+)
+async def test_archive_cascades_only_to_readable_task_workers(
+    monkeypatch, thread_id: str, resolved: bool, failure: str | None, expected: set[str]
+) -> None:
+    from openswe.analytics import emitter
+
+    initial = not resolved
+    metadata: dict[str, dict[str, object]] = {
+        key: {"resolved": initial, "owner_login": "octocat", "visibility": "public"}
+        for key in ("parent", "worker", "private", "unrelated")
+    }
+    metadata["private"].update(owner_login="someone-else", visibility="private")
+    metadata["unrelated"]["resolved"] = False
+
+    async def get(key: str) -> dict[str, object]:
+        return {"thread_id": key, "metadata": dict(metadata[key])}
+
+    async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        if failure == "update" and thread_id == "failing":
+            raise RuntimeError("worker update unavailable")
+        for key, value in metadata.items():
+            state[thread_id][key] = value
+
+    state = metadata
+    if failure == "update":
+        state["failing"] = dict(state["worker"])
+    client = SimpleNamespace(threads=SimpleNamespace(get=get, update=update))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr(handlers, "agent_thread_pr_state_lock", _unlocked)
+    monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
+    monkeypatch.setattr(emitter, "task_marked_complete", AsyncMock())
+    monkeypatch.setattr(emitter, "task_accepted", AsyncMock())
+    memberships = {
+        key: SidebarTaskMembership(key, "task", "worker", "parent")
+        for key in (
+            ("failing", "worker", "private") if failure == "update" else ("worker", "private")
+        )
+    }
+    monkeypatch.setattr(
+        handlers,
+        "sidebar_memberships",
+        AsyncMock(
+            return_value=memberships if thread_id == "parent" else {},
+            side_effect=RuntimeError("worker lookup unavailable") if failure == "lookup" else None,
+        ),
+    )
+
+    await handlers.resolve_dashboard_thread(thread_id, "octocat", resolved=resolved)
+
+    assert {key for key, value in state.items() if value["resolved"]} == expected
+    if resolved and thread_id == "parent" and failure != "lookup":
+        assert state["worker"]["resolved_at_ms"] == state["parent"]["resolved_at_ms"]
+        assert state["worker"]["auto_resolved_by_prs"] is False
+        assert state["worker"]["attention_reason"] is None
+
+
 @pytest.mark.parametrize("start", [True, False])
 async def test_create_session_starts_only_when_requested(monkeypatch, start: bool) -> None:
     create = AsyncMock(return_value="new-thread")
