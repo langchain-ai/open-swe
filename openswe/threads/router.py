@@ -109,7 +109,7 @@ def _started(thread_id: str, starting_ms: int) -> Callable[[Headers], Awaitable[
 
 
 # Thread routes that read though they are POSTs.
-_POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
+_POST_READS: Final = frozenset({"/history", "/state/checkpoint", "/stream/events"})
 
 
 async def adopt_channel_run(
