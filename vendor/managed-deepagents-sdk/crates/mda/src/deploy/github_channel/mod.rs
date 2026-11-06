@@ -47,7 +47,7 @@ use crate::langsmith::github_app_setup::{
     AgentAuthApp, ExistingApp, GitHubAppManifest, GitHubAppSessionStart, GitHubAppState,
 };
 use crate::langsmith::github_channel::{
-    GitHubChannelStatus, GitHubInstallation, GitHubSyncOutcome,
+    GitHubAccount, GitHubChannelStatus, GitHubInstallation, GitHubSyncOutcome,
 };
 use crate::langsmith::{self, ApiError, ConnectionOwnerPolicy, OAuthAuthorizationSession};
 use crate::secret_input::value_from_file;
@@ -853,14 +853,45 @@ fn sync_token_scopes(
         return Ok(());
     }
     let scopes = permission_scopes(channel);
+    let narrowing = report::narrows(&connection.scopes, &scopes);
+    // `MDA_GITHUB_APP_INSTALLATION_ID` names the installation the token is
+    // minted on, however many the App has.
+    let pinned = match env.installation_from_env() {
+        Some(id) => match pinned_installation(status, connection, &id) {
+            Ok(found) => Some(found),
+            // No installation to mint on: a narrowing still drops the
+            // broader token, anything else leaves the token as it is.
+            Err(problem) if narrowing => return drop_token(env, connection, &scopes, &problem),
+            Err(problem) => {
+                return env.warning(&format!(
+                    "{problem}, so the agent's GitHub token keeps its current permissions."
+                ))
+            }
+        },
+        None => None,
+    };
     if connection.scopes == scopes {
+        let described = pinned
+            .as_ref()
+            .map_or(active[0], |(installation, _)| installation);
         return env.info(&report::token_summary(
-            channel, status, active[0], &scopes, false,
+            channel, status, described, &scopes, false,
         ));
     }
-    let narrowing = report::narrows(&connection.scopes, &scopes);
-    let installation = match active.as_slice() {
-        [installation] => *installation,
+    if let Some((installation, false)) = &pinned {
+        // Past the report, what the installation grants beyond the current
+        // token is unknown, and a failed widening would lose a token that
+        // works: only a narrowing goes ahead.
+        if !narrowing {
+            return env.info(&format!(
+                "GitHub App installation {} ({INSTALLATION_ID_ENV}) is not among the first 100 installations Agent Auth reports, so deploy cannot see what it grants and the agent's GitHub token keeps its current permissions.",
+                installation.id
+            ));
+        }
+    }
+    let installation = match (&pinned, active.as_slice()) {
+        (Some((installation, _)), _) => installation,
+        (None, [installation]) => *installation,
         _ if narrowing => {
             return drop_token(
                 env,
@@ -916,6 +947,66 @@ fn sync_token_scopes(
             "Could not update the agent's GitHub token ({error:#}), and the agent has no GitHub token until it is renewed. Run `mda deploy` again to set it up."
         )),
     }
+}
+
+/// The installation `MDA_GITHUB_APP_INSTALLATION_ID` pins, with what it
+/// grants, and whether the report lists it. Agent Auth reports only the
+/// App's first 100 installations, so for a pinned one past them only what
+/// the agent's current token holds is known to be granted: that token was
+/// minted on it. An unrestricted token held everything the installation
+/// accepted, bounded by the App's permissions. The error says why the token
+/// cannot be minted there: a
+/// suspended installation, or one the App does not have.
+fn pinned_installation(
+    status: &GitHubChannelStatus,
+    connection: &AppConnection,
+    id: &str,
+) -> std::result::Result<(GitHubInstallation, bool), String> {
+    let Ok(id) = id.parse::<u64>() else {
+        return Err(format!(
+            "{INSTALLATION_ID_ENV} is not a GitHub App installation ID"
+        ));
+    };
+    if let Some(installation) = status.installations.iter().find(|i| i.id == id) {
+        if installation.suspended_at.is_some() {
+            return Err(format!(
+                "GitHub App installation {id} ({INSTALLATION_ID_ENV}) is suspended"
+            ));
+        }
+        return Ok((installation.clone(), true));
+    }
+    if !status.installations_truncated {
+        return Err(format!(
+            "The GitHub App is not installed as installation {id} ({INSTALLATION_ID_ENV})"
+        ));
+    }
+    // An unrestricted token (no scopes) holds whatever the installation
+    // accepted, which the App's own permissions bound; moving from it only
+    // ever narrows.
+    let held = if connection.scopes.is_empty() {
+        status.app.permissions.clone()
+    } else {
+        connection
+            .scopes
+            .iter()
+            .filter_map(|scope| scope.split_once(':'))
+            .map(|(name, level)| (name.to_string(), level.to_string()))
+            .collect()
+    };
+    let unlisted = GitHubInstallation {
+        id,
+        account: GitHubAccount {
+            login: format!("the account with installation {id}"),
+            kind: String::new(),
+        },
+        repository_selection: String::new(),
+        repositories: Vec::new(),
+        repositories_truncated: false,
+        permissions: held,
+        suspended_at: None,
+        settings_url: None,
+    };
+    Ok((unlisted, false))
 }
 
 /// Set the narrower scopes without minting a token, which drops the

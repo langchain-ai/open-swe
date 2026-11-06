@@ -13,3 +13,4 @@
 1245 5dcc41e9ca1a5fa78a56d7b6c78eab077f5120d6 refactor(channels): share one set of types across GitHub, Linear and Slack
 1252 f2e0954fd8fd8e7854b2551c418ff246ae844484 feat(channels): handle GitHub pull_request_review_thread resolved and unresolved
 1255 967f66aa3445524820e9e293495172e9ccf8eb52 feat(channels): forward every GitHub delivery to the backends a channel names
+1286 c81db288329388759f64b752fdf7186405417fcf fix(cli): renew the GitHub token on the installation MDA_GITHUB_APP_INSTALLATION_ID names

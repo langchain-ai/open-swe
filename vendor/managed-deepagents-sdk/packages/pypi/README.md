@@ -1347,7 +1347,9 @@ To skip the questions, with or without a terminal, set these in the shell or
   `@me`, the personal account of whoever creates it.
 - `MDA_GITHUB_APP_ID`, `MDA_GITHUB_APP_PRIVATE_KEY_FILE` (the path to its
   `.pem` file) and `MDA_GITHUB_WEBHOOK_SECRET`: use this existing App instead.
-  Add `MDA_GITHUB_APP_INSTALLATION_ID` when it's installed in several accounts.
+  Add `MDA_GITHUB_APP_INSTALLATION_ID` when it's installed in several accounts:
+  the agent's token is minted on that installation, and each deploy renews it
+  there when the channel's permissions change.
 - `MDA_GITHUB_WEBHOOK_SECRET` alone: the webhook secret of an existing App
   whose secret Agent Auth doesn't have yet.
 - `MDA_GITHUB_WEBHOOK_ELSEWHERE`: the URL an existing App's webhook keeps.

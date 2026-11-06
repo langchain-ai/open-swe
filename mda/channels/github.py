@@ -20,6 +20,9 @@ from rt.intake import backend_endpoint
 channel = channels.github(
     # The App's repository permissions (docs/INSTALLATION.md): its token
     # (``mda/github-token``) is the one a sandbox's GitHub proxy carries where MDA writes it.
+    # No security_events for now: robin-agent has it as read only, and asking for write
+    # kept deploy from renewing prod's token on the langchain-ai installation, past the
+    # 100 installations Agent Auth reports. Add it back once the App grants write.
     app={
         "permissions": {
             "contents": "write",
@@ -27,7 +30,6 @@ channel = channels.github(
             "issues": "write",
             "checks": "write",
             "statuses": "read",
-            "security_events": "write",
             "actions": "read",
             "workflows": "write",
         }
