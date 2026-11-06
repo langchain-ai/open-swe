@@ -62,30 +62,54 @@ function hunkRows(meta: FileDiffMetadata, hunk: Hunk): Array<Row> {
 /**
  * The runs of `rows` that hold the step's lines, each with a little context.
  *
- * A run never crosses a changed line the step does not hold, so a hunk the
- * plan split between steps shows each step only its own part.
+ * Context is the unchanged lines around them and the lines other steps added:
+ * a file the PR adds has no unchanged lines, so without them a step's few lines
+ * would show as islands. A line another step added is shown as unchanged only
+ * after a run's last base line, or in a run with none; before or between base
+ * lines it stays an added line, since an unchanged line would take a base line
+ * number and shift the real ones. A run never crosses a deletion the step does
+ * not hold, so a hunk the plan split between steps shows each step only its own
+ * deletions.
  */
 function stepRuns(
   rows: Array<Row>,
   mine: (row: Row) => boolean
 ): Array<Array<Row>> {
-  const runs: Array<Array<Row>> = []
-  let from = 0
-  for (let i = 0; i <= rows.length; i++) {
-    const row = rows[i]
-    if (row && (row.sign === " " || mine(row))) continue
-    const span = rows.slice(from, i)
-    const first = span.findIndex((r) => r.sign !== " ")
-    if (first >= 0) {
-      const last =
-        span.length - 1 - [...span].reverse().findIndex((r) => r.sign !== " ")
-      runs.push(
-        span.slice(Math.max(0, first - CONTEXT_LINES), last + 1 + CONTEXT_LINES)
-      )
+  const blocks = (row: Row) => row.sign === "-" && !mine(row)
+  const shown = Array.from({ length: rows.length }, () => false)
+  rows.forEach((row, i) => {
+    if (!mine(row)) return
+    shown[i] = true
+    for (const step of [-1, 1]) {
+      for (let d = 1; d <= CONTEXT_LINES; d++) {
+        const near = rows[i + step * d]
+        if (!near || blocks(near)) break
+        shown[i + step * d] = true
+      }
     }
-    from = i + 1
-  }
-  return runs
+  })
+  const runs: Array<Array<Row>> = []
+  let run: Array<Row> = []
+  rows.forEach((row, i) => {
+    if (shown[i]) {
+      run.push(row)
+      return
+    }
+    if (run.length > 0) runs.push(run)
+    run = []
+  })
+  if (run.length > 0) runs.push(run)
+  return runs.map((found) => {
+    const onBase = (row: Row) =>
+      row.sign === "-" || (row.sign === " " && !mine(row))
+    const first = found.findIndex(onBase)
+    const last = found.findLastIndex(onBase)
+    return found.map((row, i) =>
+      row.sign === "+" && !mine(row) && (first < 0 || i > last)
+        ? { ...row, sign: " " as const }
+        : row
+    )
+  })
 }
 
 function runPatch(run: Array<Row>, hunkContext: string | undefined): string {

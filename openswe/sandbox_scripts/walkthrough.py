@@ -186,7 +186,12 @@ def maps(request):
 
 
 def changed_lines(paths):
-    """Each of ``paths``' changed lines at the pinned head, with what renders them."""
+    """Each of ``paths``' changed lines at the pinned head, with what renders them.
+
+    A line is ``(sign, lineno, text, hunk, anchor)``: a deleted line is numbered at the merge
+    base and anchored to the head line before it; an added line is numbered at the head and
+    anchored to the merge base line it precedes.
+    """
     found = {}
     ordered = sorted(paths)
     for at in range(0, len(ordered), PATHS_PER_CALL):
@@ -213,7 +218,7 @@ def changed_lines(paths):
                 found.setdefault(path, []).append(("-", old, line[1:], hunk, new - 1))
                 old += 1
             elif line.startswith("+"):
-                found.setdefault(path, []).append(("+", new, line[1:], hunk, new - 1))
+                found.setdefault(path, []).append(("+", new, line[1:], hunk, old))
                 new += 1
             elif not line.startswith("\\"):
                 old += 1
@@ -291,34 +296,73 @@ def head_file(path, cache):
     return cache[path]
 
 
+def span(run):
+    """The head lines ``run`` covers, as ``(first, last)``; a pure deletion covers none."""
+    plus = [line for line in run if line[0] == "+"]
+    if plus:
+        return plus[0][1], plus[-1][1]
+    return run[0][4] + 1, run[0][4]
+
+
+def grouped(runs_in_file):
+    """Runs whose context would touch or overlap, as one group read top to bottom."""
+    out = []
+    for run in runs_in_file:
+        if out and out[-1][-1][0][3] == run[0][3]:
+            if span(run)[0] - span(out[-1][-1])[1] - 1 <= 2 * CONTEXT_LINES:
+                out[-1].append(run)
+                continue
+        out.append([run])
+    return out
+
+
+def render_diff(text, changed, lost, group):
+    """A group of runs as one diff, with the lines around and between its runs.
+
+    ``lost`` holds the deletions the chunk does not, by the head line each follows, so a
+    replacement between two runs is not shown as a plain insertion.
+    """
+    before = context(text, changed, span(group[0])[0] - 1, -1)
+    after = context(text, changed, span(group[-1])[1] + 1, 1)
+    rows = [" " + text[n - 1] for n in before]
+    for run, following in zip(group, [*group[1:], None]):
+        rows += [line[0] + line[2] for line in run]
+        if following:
+            first, stop = span(run)[1] + 1, span(following)[0]
+            for n in range(first - 1, stop):
+                if n >= first:
+                    rows.append(("+" if n in changed else " ") + text[n - 1])
+                rows += ["-" + deleted for deleted in lost.get(n, [])]
+    rows += [" " + text[n - 1] for n in after]
+    old_count = sum(row[0] != "+" for row in rows)
+    new_count = sum(row[0] != "-" for row in rows)
+    head = group[0][0]
+    old_start = (head[1] if head[0] == "-" else head[4]) - len(before)
+    new_start = before[0] if before else span(group[0])[0]
+    # A header that adds lines to nothing names the line before them.
+    header = f"@@ -{max(old_start - (not old_count), 0)},{old_count} +{new_start},{new_count} @@"
+    return fenced("\n".join([header, *rows]), "diff")
+
+
 def render_one(chosen, lines_by_path, files):
     blocks = []
     for path, path_lines in chosen.items():
         text = head_file(path, files)
         changed = {line[1] for line in lines_by_path.get(path, []) if line[0] == "+"}
-        for run in runs(path_lines):
-            plus = [line for line in run if line[0] == "+"]
-            minus = [line for line in run if line[0] == "-"]
-            if not minus:
-                span = f"L{plus[0][1]}" + (f"–{plus[-1][1]}" if len(plus) > 1 else "")
-                source = "\n".join(line[2] for line in plus)
-                blocks.append(f"`{path}` {span}\n{fenced(source, language_for(path))}")
-                continue
-            first_new = plus[0][1] if plus else run[0][4] + 1
-            last_new = plus[-1][1] if plus else run[0][4]
-            before = context(text, changed, first_new - 1, -1)
-            after = context(text, changed, last_new + 1, 1)
-            new_start = before[0] if before else first_new
-            old_start = minus[0][1] - len(before)
-            old_count = len(before) + len(minus) + len(after)
-            new_count = len(before) + len(plus) + len(after)
-            body = [
-                f"@@ -{old_start},{old_count} +{new_start},{new_count} @@",
-                *(" " + text[n - 1] for n in before),
-                *(line[0] + line[2] for line in run),
-                *(" " + text[n - 1] for n in after),
-            ]
-            blocks.append(f"`{path}`\n{fenced(chr(10).join(body), 'diff')}")
+        chosen_deletions = {line[1] for line in path_lines if line[0] == "-"}
+        lost = {}
+        for line in lines_by_path.get(path, []):
+            if line[0] == "-" and line[1] not in chosen_deletions:
+                lost.setdefault(line[4], []).append(line[2])
+        for group in grouped(runs(path_lines)):
+            run = group[0]
+            if len(group) == 1 and all(line[0] == "+" for line in run):
+                first, last = span(run)
+                where = f"L{first}" + (f"–{last}" if last > first else "")
+                source = "\n".join(line[2] for line in run)
+                blocks.append(f"`{path}` {where}\n{fenced(source, language_for(path))}")
+            else:
+                blocks.append(f"`{path}`\n{render_diff(text, changed, lost, group)}")
     return "\n".join(blocks)
 
 

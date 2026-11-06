@@ -158,7 +158,7 @@ async def test_a_changed_line_renders_as_a_diff_with_unchanged_context(
     )
 
 
-async def test_context_separated_deletion_and_addition_render_separately(
+async def test_a_deletion_and_an_addition_a_line_apart_render_as_one_diff(
     repo: Path, checkout: PinnedCheckout
 ) -> None:
     base = _commit(repo, {"lines.txt": "one\ntwo\nthree\nfour\nsix\n"}, "lines")
@@ -167,9 +167,41 @@ async def test_context_separated_deletion_and_addition_render_separately(
     index = await _pin(checkout, base, head)
 
     assert await checkout.render(index.lines) == (
-        "`lines.txt`\n```diff\n@@ -1,4 +1,3 @@\n one\n-two\n three\n four\n```\n"
-        "`lines.txt` L4\n```txt\nFIVE\n```"
+        "`lines.txt`\n```diff\n@@ -1,5 +1,5 @@\n one\n-two\n three\n four\n+FIVE\n six\n```"
     )
+
+
+async def test_scattered_added_lines_render_as_one_diff_with_the_lines_between(
+    repo: Path, checkout: PinnedCheckout
+) -> None:
+    base = _commit(repo, {"f.py": "if x:\n    y = 1\nelse:\n    y = 2\nlog(y)\n"}, "f")
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(
+        repo,
+        {"f.py": "if x:\n    y = 1\n    return y\nelse:\n    y = 2\n\n    return y\nlog(y)\n"},
+        "returns",
+    )
+    await _pin(checkout, base, head)
+
+    code = await checkout.render(_added("f.py", (3, 3), (6, 7)))
+
+    assert code == (
+        "`f.py`\n```diff\n@@ -1,5 +1,8 @@\n if x:\n     y = 1\n+    return y\n else:\n"
+        "     y = 2\n+\n+    return y\n log(y)\n```"
+    )
+
+
+async def test_a_deletion_the_chunk_lacks_stays_in_the_diff_between_its_runs(
+    repo: Path, checkout: PinnedCheckout
+) -> None:
+    base = _commit(repo, {"g.txt": "a\nb\nc\ne\n"}, "g")
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"g.txt": "a\nX\nb\nY\ne\n"}, "replace c")
+    await _pin(checkout, base, head)
+
+    code = await checkout.render(_added("g.txt", (2, 2), (4, 4)))
+
+    assert code == "`g.txt`\n```diff\n@@ -1,4 +1,5 @@\n a\n+X\n b\n-c\n+Y\n e\n```"
 
 
 async def test_a_chunk_too_large_for_a_command_line_still_renders(
@@ -184,8 +216,7 @@ async def test_a_chunk_too_large_for_a_command_line_still_renders(
 
     code = await checkout.render(scattered)
 
-    assert code.count("`lines.txt` L") == 15_000
-    assert code.startswith("`lines.txt` L1\n```txt\nline 1\n```")
+    assert code.startswith("`lines.txt`\n```diff\n@@ -0,0 +1,29999 @@\n+line 1\n+line 2\n")
 
 
 async def test_a_chunk_takes_whole_hunks_across_files_and_a_hunk_is_placed_once(
