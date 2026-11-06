@@ -15,7 +15,7 @@ Your run keeps going until you say where the work stands with `report_work_state
 Ending a turn any other way sends you back to work, unless something will wake this thread again; after a few such turns the goal pauses.
 Wait with a tool that frees the run and wakes the thread when there is something to see:
 
-- `listen_events` for GitHub events, such as `check_suite.completed` for CI on your PR.
+- `listen_events` for GitHub events, such as `check_suite.completed` for CI on your PR, or reviews and comments on it.
 - `monitor` with `interval` for a condition you can check with a command, like Playwright's `waitForFunction`: it runs the check every `interval` seconds and wakes you once, with its output, when the check passes.
 - `monitor` without `interval` for output a command prints as it runs, such as a dev server or a log.
 - `schedule_thread_wakeup` only to look again after a fixed delay.

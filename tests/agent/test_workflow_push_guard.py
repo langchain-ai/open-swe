@@ -275,6 +275,57 @@ async def test_release_branch_push_excludes_inherited_workflows(
         assert await middleware._change_for_request(request) is None
 
 
+async def test_merging_default_branch_skips_approval_for_its_workflows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = tmp_path / "origin.git"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    backend = _GitBackend(repo)
+    await backend.git(f"init -q --bare -b main {shlex.quote(str(origin))}")
+    await backend.git("init -q -b main")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    await backend.git(f"remote add origin {shlex.quote(str(origin))}")
+    workflow = repo / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("v1\n")
+    await backend.git("add .")
+    await backend.git("commit -qm initial")
+    await backend.git("push -q origin main")
+    await backend.git("checkout -qb feature")
+    (repo / "app.py").write_text("feature\n")
+    await backend.git("add app.py")
+    await backend.git("commit -qm feature")
+    await backend.git("push -q origin feature")
+    await backend.git("checkout -q main")
+    workflow.write_text("v2\n")
+    await backend.git("commit -qam 'main workflow'")
+    await backend.git("push -q origin main")
+    await backend.git("checkout -q feature")
+    await backend.git("merge -q --no-edit main")
+    monkeypatch.setattr(guard, "_backend", AsyncMock(return_value=backend))
+    request = _Request(f"git -C {shlex.quote(str(repo))} push origin feature")
+    middleware = guard.WorkflowPushGuardMiddleware()
+    assert await middleware._change_for_request(request) is None
+
+    await backend.git("config remote.origin.pushurl https://github.com/example/other.git")
+    assert await middleware._change_for_request(request) is not None
+    await backend.git("config --unset remote.origin.pushurl")
+
+    await backend.git("config --add remote.origin.url https://github.com/example/other.git")
+    assert await middleware._change_for_request(request) is not None
+    await backend.git("config --unset-all remote.origin.url")
+    await backend.git(f"config remote.origin.url {shlex.quote(str(origin))}")
+    assert await middleware._change_for_request(request) is None
+
+    workflow.write_text("v3\n")
+    await backend.git("commit -qam 'feature workflow'")
+    change = await middleware._change_for_request(request)
+    assert change is not None
+    assert "+v3" in change.diff_preview
+
+
 async def test_new_branch_without_shared_remote_history_fails_closed(tmp_path: Path) -> None:
     backend = _GitBackend(tmp_path)
     await backend.git("init -b feature")

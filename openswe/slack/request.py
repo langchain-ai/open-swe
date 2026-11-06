@@ -19,6 +19,8 @@ class SlackRequest(BaseModel):
     user_name: str = ""
     text: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
+    # Slack's search grant, sent only with a message that @mentions Open SWE or is a DM.
+    action_token: str = ""
     bot_user_id: str = ""
     triggering_bot_id: str = ""
     triggering_bot_app_id: str = ""

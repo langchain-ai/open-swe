@@ -168,7 +168,6 @@ async def authorized_context(
         # Participants steer only from the coordinator; a worker thread stays owner-only.
         await authorized_metadata(actor)
     workspace = metadata.workspace or metadata.environment
-    # A task its thread worked alone takes its first delegation's workspace.
     if workspace and workspace != context.task.workspace.slug and context.task.delegated:
         raise PermissionError("The thread no longer belongs to the task's workspace")
     if coordinator and (
@@ -519,7 +518,6 @@ class Delegation:
             raise ValueError("The coordinator needs an attached sandbox before delegation")
         workspace_value = metadata.workspace or metadata.environment
         workspace = await resolve_workspace(
-            # A task its thread worked alone takes the workspace its first delegation resolves.
             thread_workspace=(
                 context.task.workspace.slug
                 if context is not None and context.task.delegated

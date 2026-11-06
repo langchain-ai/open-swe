@@ -23,7 +23,6 @@ from openswe.input_messages import dynamic_context_hash, input_message_text
 from openswe.prompts import prompt
 
 if TYPE_CHECKING:
-    # The webhook reads the branch prefix and must not load the agent stack.
     from deepagents.backends.protocol import SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)

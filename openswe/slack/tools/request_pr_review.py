@@ -50,7 +50,6 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     source = configurable.get("source") or "agent"
     github_login = configurable.get("github_login", "")
     thread_id = configurable.get("thread_id")
-    # A Goal mode run's review comes back to it to address; the person hears nothing.
     turn = configurable.get(AGENT_TURN_KEY)
     goal_mode = isinstance(turn, dict) and turn.get("goal_mode") is True
     goal_review = (

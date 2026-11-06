@@ -16,15 +16,9 @@ from openswe.database.orm import NOW, Base
 from openswe.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
-# Why a goal waits on its person: the agent needs something only they can give, or
-# the work is ready for them, such as a reviewed draft to mark ready.
 type UserWaitReason = Literal["blocked", "ready"]
-# Why a goal paused: the person stopped the run or asked the agent to pause; or, as
-# Codex blocks a goal, three automatic turns in a row did nothing, three in a row ran
-# only failing commands, or a run failed.
 type PauseReason = Literal["stopped", "requested", "no_progress", "failing_commands", "error"]
 type GoalReason = UserWaitReason | PauseReason
-# Pauses only the person lifts, by writing again: their stop, or one they asked for.
 _PERSON_PAUSES: Final = ("stopped", "requested")
 
 
@@ -55,7 +49,6 @@ class Task(Base):
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
-    # What the goal is for: the person's request, in the shape the work should take.
     goal_objective: Mapped[str | None] = mapped_column(Text, default=None)
     goal_state: Mapped[GoalState | None] = mapped_column(Text, default=None)
     goal_reason: Mapped[GoalReason | None] = mapped_column(Text, default=None)
@@ -107,8 +100,6 @@ class Task(Base):
                         raise PermissionError(
                             "The thread no longer belongs to the task's workspace"
                         )
-                    # A task its thread has worked alone took the workspace it ran in, or
-                    # the default one; its first delegation settles where it works.
                     task.workspace_id = workspace_row.id
                     task.workspace = workspace_row
             existing = await session.get(TaskDelegation, worker_thread_id)
@@ -161,6 +152,7 @@ class Task(Base):
         waits: list[dict[str, JsonValue]] | None = None,
         by: UUID | None = None,
         over_stop: bool = True,
+        from_state: GoalState | None = None,
     ) -> bool:
         """Set the task's goal, or clear it with no ``state``; whether it moved. Its
         ``objective`` stays unless given, and goes with the goal.
@@ -183,6 +175,8 @@ class Task(Base):
                 goal_updated_by=by,
             )
         )
+        if from_state is not None:
+            statement = statement.where(cls.goal_state == from_state)
         if not over_stop:
             statement = statement.where(
                 (cls.goal_state.is_distinct_from("paused"))

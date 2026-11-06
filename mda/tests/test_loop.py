@@ -567,10 +567,7 @@ def _turn(kind: str) -> list[BaseMessage]:
     [
         (Goal(state="working"), "asked", {}, True, None),
         (Goal(state="working", waits=["wakeup"]), "asked", {}, False, ("waiting", None)),
-        # As Codex blocks a goal: three idle turns in a row, or three running only failing
-        # commands; anything the model gets done starts the count again.
         (Goal(state="working"), "idle", {"goal_empty_turns": 2}, False, ("paused", "no_progress")),
-        # Words are no progress: only a tool call is, until a token budget bounds the goal.
         (
             Goal(state="working"),
             "talking",
@@ -587,6 +584,7 @@ def _turn(kind: str) -> list[BaseMessage]:
         ),
         (Goal(state="working"), "working", {"goal_failing_turns": 2}, True, None),
         (Goal(state="waiting_on_user", reason="ready"), "asked", {}, False, None),
+        (Goal(), "asked", {}, False, None),
         (BackendCallError("down"), "asked", {}, False, None),
     ],
 )
@@ -611,12 +609,26 @@ async def test_goal_mode_work_is_sent_back_until_its_goal_rests_or_stalls(
         assert [message.content for message in messages_from_dict(ended.messages)] == [_WORK_NUDGE]
 
 
+async def test_only_consecutive_failing_turns_count_toward_pausing_the_goal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch, {"goal": Goal(state="working"), "set_goal": Done()}, _GOAL_RULES
+    )
+
+    quiet = await RunLoop(backend).after_model(
+        _state(*_turn("talking"), reply_surface="web", goal_failing_turns=2)
+    )
+
+    assert quiet.jump_to == "model"
+    assert quiet.update["goal_failing_turns"] == 0
+    assert [name for name, _body in calls if name == "set_goal"] == []
+
+
 @pytest.mark.parametrize(
     ("goal", "came_in", "runs", "moved"),
     [
-        # A wakeup, a monitor's event or a review's findings put a waiting goal to work.
         (Goal(state="waiting"), "system", True, "working"),
-        # A stopped goal ignores them until its person writes.
         (Goal(state="paused", reason="stopped"), "system", False, None),
         (Goal(state="paused", reason="stopped"), "human", True, "working"),
         (Goal(state="waiting_on_user", reason="blocked"), "human", True, "working"),
@@ -648,7 +660,8 @@ async def test_a_goal_starts_from_the_request_and_its_objective_stays_in_view(
     backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
     loop = RunLoop(backend)
     asked = HumanMessage(
-        content='<input-message sender="u" surface="web" kind="human">Fix it</input-message>',
+        content='<input-message sender="u" surface="web" kind="human">Fix it'
+        '<pull-request repo="o/r" head="abc123" /></input-message>',
         id="in-1",
     )
 

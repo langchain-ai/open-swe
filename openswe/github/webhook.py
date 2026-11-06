@@ -366,11 +366,9 @@ async def trigger_pr_review_from_ref(
         metadata = await common.get_thread_metadata_safe(thread_id) or {}
         kept = GoalReview.of(metadata)
         if not pr_metadata.get("draft") and (kept is None or not kept.handoff):
-            # A ready PR the person is not waiting to hand off is reviewed in public.
             goal_review = None
         elif kept is not None:
             goal_review = kept.model_copy(update={"thread_id": goal_review.thread_id})
-            # Later rounds reconcile the findings the agent was sent instead of starting over.
             if isinstance(reviewed := metadata.get("last_reviewed_sha"), str):
                 last_reviewed_sha = reviewed
     await common.set_reviewer_thread_metadata(
@@ -392,7 +390,6 @@ async def trigger_pr_review_from_ref(
             token=app_token,
         )
     else:
-        # The check the agent waits on, and what marks the draft reviewed once it passes.
         check_run_id = await common.create_review_check_run(
             owner=pr_ref.owner,
             repo=pr_ref.repo,
@@ -522,7 +519,6 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
                 return
             existing_last_reviewed_sha = metadata.get("last_reviewed_sha")
             if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
-                # A Goal mode review whose head has not passed runs again, privately.
                 if existing_last_reviewed_sha == head_sha and goal_review is None:
                     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
                     common.logger.info(
@@ -697,7 +693,6 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
             and head_ref.startswith(f"{BRANCH_PREFIX}/")
             and (await User.preferences_for_login(author_login)).goal_mode
         ):
-            # A Goal mode agent asks for its draft's review itself, and gets the findings back.
             common.logger.info(
                 "Skipping auto-review of draft PR by %s: Goal mode reviews it on request",
                 author_login,
@@ -970,7 +965,6 @@ async def _process_github_head_update(
     if pull_request.state == "closed":
         return
     if GoalReview.of(metadata) is not None:
-        # A Goal mode agent asks for each round itself until its PR is ready and reviewed.
         return
     if pull_request.draft and not await common.draft_review_enabled_for_author(
         pull_request.author, repo_config

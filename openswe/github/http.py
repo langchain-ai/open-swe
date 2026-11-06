@@ -761,6 +761,29 @@ class RepoClient:
         """The rulesets' rules that apply to branch ``name``."""
         return await self.pages(f"rules/branches/{quote(self.inside(name), safe='')}")
 
+    async def requires_conversation_resolution(self, branch: str) -> bool:
+        """Whether a ruleset or classic protection on ``branch`` holds merges for open threads."""
+        for rule in await self.branch_rules(branch):
+            parameters = rule.get("parameters")
+            if (
+                rule.get("type") == "pull_request"
+                and isinstance(parameters, Mapping)
+                and parameters.get("required_review_thread_resolution") is True
+            ):
+                return True
+        data = await self.graphql(
+            """query($owner:String!,$repo:String!,$ref:String!) {
+              repository(owner:$owner,name:$repo) {
+                ref(qualifiedName:$ref) { refUpdateRule { requiresConversationResolution } }
+              }
+            }""",
+            {"ref": f"refs/heads/{branch}"},
+        )
+        repository = data.get("repository")
+        ref = repository.get("ref") if isinstance(repository, Mapping) else None
+        rule = ref.get("refUpdateRule") if isinstance(ref, Mapping) else None
+        return isinstance(rule, Mapping) and rule.get("requiresConversationResolution") is True
+
     async def commits(
         self,
         *,

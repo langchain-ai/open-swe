@@ -14,7 +14,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useState } from "react"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
-import { ConfirmDialog } from "@/features/settings/components/ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import {
   type Project,
   type ProjectMember,

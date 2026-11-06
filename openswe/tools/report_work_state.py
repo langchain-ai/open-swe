@@ -22,11 +22,14 @@ async def report_work_state(
     """Implement the `report_work_state` tool."""
     if not message.strip():
         return {"success": False, "error": "message is required: it is the reply the person gets"}
-    # Recorded first: a failure after the reply posts would have the agent post it again.
-    await ThreadGoals.reported(ThreadGoals.run_thread_id(), state, message)
+    thread_id = ThreadGoals.run_thread_id()
+    await ThreadGoals.reported(thread_id, state, message)
     if current_reply_surface(run_state or {}) == SLACK_REPLY_SURFACE:
         result = await send_slack_reply(message, "final", state=run_state)
-        return {**result, "work_state": state} if result.get("success") else result
+        if not result.get("success"):
+            await ThreadGoals.unreported(thread_id)
+            return result
+        return {**result, "work_state": state}
     return {
         "success": True,
         "work_state": state,

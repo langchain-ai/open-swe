@@ -66,7 +66,6 @@ export class InvalidationTab {
           event.type === "removed" ||
           event.type === "observerAdded" ||
           event.type === "observerRemoved" ||
-          // Topics read from a query's data change with it.
           (event.type === "updated" &&
             event.action.type === "success" &&
             typeof event.query.meta?.invalidatedBy === "function")

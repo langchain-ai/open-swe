@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
 
-# The draft PR whose Goal mode review this thread waits on, until its findings arrive.
 REVIEW_PENDING_KEY: Final = "goal_review_pending"
 _MAX_ASK_CHARS: Final = 1000
 
@@ -41,10 +40,7 @@ class GoalWait(BaseModel):
     """One thing that wakes the thread again."""
 
     kind: Literal["wakeup", "command", "monitor", "event", "review"]
-    # When it fires, for a wakeup; when it stops waiting, for an event subscription.
     until: datetime | None = None
-    # What it waits for: an event subscription's event types and target, or the PR
-    # under review.
     detail: str | None = None
 
 
@@ -56,6 +52,7 @@ class _GoalChange(TypedDict, total=False):
     waits: list[dict[str, JsonValue]] | None
     by: UUID | None
     over_stop: bool
+    from_state: GoalState | None
 
 
 class Goal(BaseModel):
@@ -63,9 +60,7 @@ class Goal(BaseModel):
 
     state: GoalState = "working"
     reason: UserWaitReason | PauseReason | None = None
-    # What the goal is for: the person's request, in the shape the work should take.
     objective: str | None = None
-    # What the agent waits on its person for, in its own words, while it does.
     ask: str | None = None
     waits: list[GoalWait] = []
     updated_at_ms: int = 0
@@ -187,6 +182,20 @@ class ThreadGoals:
         )
 
     @classmethod
+    async def unreported(cls, thread_id: str) -> None:
+        """The report never reached the person: the goal goes back to work, unless they
+        stopped it meanwhile."""
+        task = await cls._task(thread_id)
+        if task is not None:
+            await cls._move(
+                thread_id,
+                task.id,
+                state="working",
+                over_stop=False,
+                from_state="waiting_on_user",
+            )
+
+    @classmethod
     async def stopped(cls, thread_id: str, *, by: str | None = None) -> None:
         """The person logged in as ``by`` stopped the thread's run: its goal pauses until
         they write again, recorded as theirs.
@@ -251,15 +260,42 @@ class ThreadGoals:
 
     @classmethod
     async def shown(cls, thread_id: str) -> Goal | None:
-        """The goal as the dashboard shows it: a goal resting on waits that have all
-        lapsed, with nothing left to wake the thread, has stalled and pauses."""
+        """The goal as the dashboard shows it, without changing it: one resting on waits
+        that have all lapsed shows as stalled until the person writes again."""
         goal = await cls.current(thread_id)
         if goal is None or goal.state != "waiting":
             return goal
         if waits := await cls.waits(thread_id):
             return goal.model_copy(update={"waits": waits})
-        await cls.change(thread_id, "paused", "no_progress")
-        return await cls.current(thread_id)
+        return goal.model_copy(update={"state": "paused", "reason": "no_progress", "waits": []})
+
+    @classmethod
+    async def for_run(
+        cls, thread_id: str, *, sender: str | None, sender_goal_mode: bool, worker: bool
+    ) -> bool:
+        """Whether a run keeps the thread's goal: its sender's Goal mode, or for a wake
+        no person sent, the goal it continues. The owner turning Goal mode off clears it."""
+        if worker:
+            return False
+        if not sender:
+            return await cls.current(thread_id) is not None
+        if not sender_goal_mode and await cls._sent_by_owner(thread_id, sender):
+            await cls.change(thread_id, None)
+        return sender_goal_mode
+
+    @staticmethod
+    async def _sent_by_owner(thread_id: str, sender: str) -> bool:
+        from openswe.tasks.schemas import ThreadMetadata, user_for_login
+
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            return False
+        try:
+            owner = await ThreadMetadata.model_validate(thread.metadata).owner()
+        except PermissionError:
+            return False
+        person = await user_for_login(sender)
+        return person is not None and person.id == owner.id
 
     @classmethod
     async def _task(cls, thread_id: str) -> Task | None:

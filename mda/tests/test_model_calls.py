@@ -365,7 +365,6 @@ async def test_a_reminder_rides_on_the_latest_input_after_the_cached_prefix(
             "text": "<system-reminder>\nStill waiting on the person.\n</system-reminder>",
         },
     ]
-    # The conversation's own breakpoint replaces the automatic one, keeping four.
     assert "cache_control" not in reminded.model_settings
     assert messages[-1] is latest
     assert "system-reminder" not in str(latest.content)

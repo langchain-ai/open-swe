@@ -257,6 +257,7 @@ from openswe.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_search,
     slack_start_review_channel,
     snapshotctl,
     start_thread,
@@ -819,6 +820,7 @@ AGENT_TOOLS: Final = (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_search,
     slack_breakout_thread,
     slack_start_review_channel,
     submit_thread_feedback,
@@ -1942,26 +1944,23 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    # A task's goal is its coordinator's: workers report back to it and keep none.
-    goal_mode = (
-        bool(profile_login)
-        and not (task_coordination and task_coordination.is_worker)
-        and sender_preferences.goal_mode
-    )
+    goal_worker = bool(task_coordination and task_coordination.is_worker)
+    goal_mode = bool(profile_login) and not goal_worker and sender_preferences.goal_mode
     try:
-        # Every agent thread works on a task, coordinating its own until it joins another's.
         if cfg.source != "incidents_agent" and postgres.configured():
             indexed = await THREADS.get(thread_id)
             title = indexed.metadata.get("title") if indexed is not None else None
             await Task.for_thread(
                 thread_id,
                 title=title if isinstance(title, str) and title.strip() else "Untitled",
-                # Delegation reads a thread without a workspace as the default one's.
                 workspace=cfg.workspace_slug or "default",
             )
-        if not goal_mode:
-            # One left from when the person had Goal mode on would show, and pause, forever.
-            await ThreadGoals.change(thread_id, None)
+        goal_mode = await ThreadGoals.for_run(
+            thread_id,
+            sender=profile_login,
+            sender_goal_mode=sender_preferences.goal_mode,
+            worker=goal_worker,
+        )
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
     work_state_tool = _registered_tool_name(report_work_state)
@@ -2057,6 +2056,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_no_reply_needed,
         slack_post_message,
         slack_reply,
+        slack_search,
         slack_breakout_thread,
         slack_start_review_channel,
     ]

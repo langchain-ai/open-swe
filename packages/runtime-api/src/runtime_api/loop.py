@@ -119,8 +119,6 @@ class ModelCall(BaseModel):
     # Another provider's model, tried once when a call to ``model`` fails.
     fallback: ModelSpec | None = None
     use_gateway: bool = False
-    # Appended as a ``<system-reminder>`` to the latest input this call sends, a tool result
-    # or a message, and kept nowhere: the conversation, and so the transcript, never holds it.
     reminder: str | None = None
 
 
@@ -285,28 +283,17 @@ GoalState = Literal["working", "waiting", "waiting_on_user", "paused"]
 
 
 class GoalRead(RunRequest):
-    # Whether to list what will wake the thread again, which costs lookups; the run
-    # asks only as a turn ends.
     waits: bool = False
 
 
 class Goal(BaseModel):
     """A Goal mode thread's goal as the backend keeps it."""
 
-    # None: the thread has no goal.
     state: GoalState | None = None
-    # Why it waits on its person (``blocked``, ``ready``) or paused (``stopped``,
-    # ``no_progress``).
     reason: str | None = None
-    # The goal's objective, the person's request in the shape the work should take, as
-    # the run's guidance block for the conversation (``<dynamic-context id="goal">``).
     objective: str | None = None
-    # What the agent asked its person for, while it waits on them.
     ask: str | None = None
-    # When the goal last changed, in epoch milliseconds.
     updated_at_ms: int = 0
-    # What will wake the thread again, when asked for: ``wakeup``, ``command``,
-    # ``monitor``, ``event`` or ``review``.
     waits: list[str] = []
 
 
@@ -315,7 +302,6 @@ class GoalChange(RunRequest):
 
     state: Literal["working", "waiting", "paused"] | None
     reason: Literal["no_progress", "failing_commands"] | None = None
-    # The person's request that starts a goal, which its objective is made from.
     request: str | None = None
 
 

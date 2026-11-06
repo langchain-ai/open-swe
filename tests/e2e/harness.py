@@ -54,6 +54,7 @@ from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
     JSONResponse,
+    PlainTextResponse,
     RedirectResponse,
     Response,
 )
@@ -112,12 +113,14 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 # --- control + Slack compose (the test driver) -----------------------------
 # Where the inbox spec holds its run: the fake model waits on it, the spec releases it.
 INBOX_GATE = {"waiting": False, "released": False}
+GOAL_CHECK = {"released": False}
 
 
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
     INBOX_GATE.update(waiting=False, released=False)
+    GOAL_CHECK.update(released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -440,6 +443,20 @@ async def control_inbox_gate(waiting: bool = False) -> JSONResponse:
 async def control_release_inbox_gate() -> JSONResponse:
     INBOX_GATE["released"] = True
     return JSONResponse(INBOX_GATE)
+
+
+@app.get("/control/goal-check")
+async def control_goal_check() -> PlainTextResponse:
+    """The condition a Goal mode spec's monitor checks: failing until the spec passes it."""
+    if not GOAL_CHECK["released"]:
+        return PlainTextResponse("not yet", status_code=503)
+    return PlainTextResponse("GOAL_CHECK_PASSED")
+
+
+@app.post("/control/goal-check")
+async def control_pass_goal_check() -> JSONResponse:
+    GOAL_CHECK["released"] = True
+    return JSONResponse(GOAL_CHECK)
 
 
 @app.post("/control/monitors/sync")

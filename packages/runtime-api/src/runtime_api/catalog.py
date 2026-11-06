@@ -220,20 +220,15 @@ class CliResultRules(Nudging):
 class WorkStateRules(Nudging):
     """Goal mode: the person wants the run to keep working until it calls ``tool`` to say
     it is blocked or complete. A turn that ends while the thread's goal neither says so
-    nor waits on anything is sent back with ``nudges``; as Codex blocks a goal, three such
+    nor waits on anything is sent back with ``nudge``; as Codex blocks a goal, three such
     turns in a row that do nothing, or that run only failing commands, pause it. Its
     commands wait with the thread's wait tools, never ``sleep``."""
 
     tool: str
-    # Tools that wake the thread again, for runtimes deployed before the backend kept the
-    # goal (``runtime_api.loop.GOAL``); the runtime reads the goal's waits instead.
     waits: list[str] = []
     nudge_sender: str = ""
-    # How often runtimes deployed before Codex's rules send the model back.
     max_nudges: int = 3
-    # Said with each input while the goal waits on its person, ahead of what was asked.
     reminder: str = ""
-    # Said when a command waits with ``sleep``, refusing it.
     sleep_refusal: str = ""
 
 

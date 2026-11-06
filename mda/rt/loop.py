@@ -97,16 +97,11 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
-# The goal's last change the model saw: an input after it carries the goal's reminder.
 _GOAL_SEEN: Final = "goal_seen_ms"
-# The id of the goal's guidance block.
 _GOAL: Final = "goal"
-# Turns in a row Codex lets a goal do nothing, or run only failing commands, before
-# blocking it; counted in the run's state.
 _STALLED_TURNS: Final = 3
 _EMPTY_TURNS: Final = "goal_empty_turns"
 _FAILING_TURNS: Final = "goal_failing_turns"
-# How ``execute`` ends the result of a command that exited non-zero.
 _FAILED_COMMAND: Final = "[Command failed with exit code"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
@@ -197,14 +192,9 @@ def latest_with_id(messages: Sequence[BaseMessage], prefix: str) -> str | None:
 class _GoalTurn:
     """What a Goal mode turn did, as Codex counts it toward blocking the goal."""
 
-    # Sent back by the guard, the model called no tool, whatever it said.
     empty: bool
-    # It did something, which ends a run of empty turns.
     active: bool
-    # Its only results were commands that ran and failed.
     failing: bool
-    # A tool call succeeded, which ends a run of failing turns.
-    succeeded: bool
 
 
 class _RunGuidance:
@@ -403,15 +393,13 @@ class RunLoop:
             for key, text in guidance.latest(messages).items()
             if key not in {"task-role", _GOAL} and text != visible_guidance.get(key)
         ]
-        # The goal is always in view: told when it starts or changes, and again once
-        # summarization drops it; as a message, so a change never moves the cached prefix.
         if objective is not None and objective != visible_guidance.get(_GOAL):
             added.append(
                 harness_message(
                     objective,
                     message_id=f"goal:{uuid.uuid4()}",
                     source="goal",
-                    provenance=Provenance(kind="context", sender=f"run:{_GOAL}"),
+                    provenance=Provenance(kind="context", sender="run:goal"),
                 )
             )
         if context.instructions and context.instructions != latest_with_id(visible, _ROLE):
@@ -747,15 +735,8 @@ class RunLoop:
         inputs = self._inputs(_messages(state))
         requests = [text for message in inputs if (text := self._request(message)) is not None]
         woken = not requests and any(
-            isinstance(message, HumanMessage)
-            and (
-                (provenance := Provenance.of(message)) is None
-                or provenance.human
-                or (provenance.kind == "system" and provenance.sender not in self._guards)
-            )
-            for message in inputs
+            isinstance(message, HumanMessage) and self._wakes(message) for message in inputs
         )
-        # A pause the person made, or asked for, lasts until they write.
         if woken and goal.state == "paused" and goal.reason in {"stopped", "requested"}:
             return True, None, goal.objective
         if (
@@ -778,7 +759,6 @@ class RunLoop:
             return False, None, goal.objective
         seen = held.get(_GOAL_SEEN)
         update[_GOAL_SEEN] = goal.updated_at_ms
-        # Changed since the last call: what comes in is the report itself.
         if seen != goal.updated_at_ms:
             return False, None, goal.objective
         return (
@@ -803,17 +783,15 @@ class RunLoop:
         or three in a row that ran only failing commands, pause it instead.
         """
         goal = await self._read_goal(GoalRead(run_id=run_id(), waits=True))
-        if goal is None or goal.state in {"waiting_on_user", "paused"} or goal.waits:
+        if goal is None or goal.state in {None, "waiting_on_user", "paused"} or goal.waits:
             update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
-            if goal is not None and goal.waits and goal.state not in {"waiting_on_user", "paused"}:
+            if goal is not None and goal.waits and goal.state in {"working", "waiting"}:
                 await self._set_goal(GoalChange(run_id=run_id(), state="waiting"))
             return None
         turn = self._last_turn(_messages(state))
         empty = self._counted(held, _EMPTY_TURNS, turn.empty, reset=turn.active)
-        failing = self._counted(held, _FAILING_TURNS, turn.failing, reset=turn.succeeded)
+        failing = self._counted(held, _FAILING_TURNS, turn.failing, reset=not turn.failing)
         update.update({_EMPTY_TURNS: empty, _FAILING_TURNS: failing})
-        # TODO: a token budget, as Codex has: count the goal's tokens across its runs and,
-        # once spent, tell the model to wrap up and pause the goal as over budget.
         if empty >= _STALLED_TURNS or failing >= _STALLED_TURNS:
             reason = "no_progress" if empty >= _STALLED_TURNS else "failing_commands"
             await self._set_goal(GoalChange(run_id=run_id(), state="paused", reason=reason))
@@ -842,11 +820,9 @@ class RunLoop:
                 start = index
                 break
         prompt = messages[start] if messages else None
-        nudged = (
-            isinstance(prompt, HumanMessage)
-            and (provenance := Provenance.of(prompt)) is not None
-            and provenance.sender
-            == (self.rules.work_state.nudge_sender if self.rules.work_state else None)
+        provenance = Provenance.of(prompt) if isinstance(prompt, HumanMessage) else None
+        nudged = provenance is not None and provenance.sender == (
+            self.rules.work_state.nudge_sender if self.rules.work_state else None
         )
         after = messages[start + 1 :]
         calls = [
@@ -860,14 +836,11 @@ class RunLoop:
         succeeded = any(
             not _reported_failure(message) and message not in failed for message in results
         )
-        # Codex counts words as activity too, but its token budget ends a goal that only
-        # talks; until there is one, only a tool call is progress.
         active = bool(calls)
         return _GoalTurn(
             empty=nudged and not active,
             active=active,
             failing=bool(failed) and not succeeded,
-            succeeded=succeeded,
         )
 
     @staticmethod
@@ -883,6 +856,13 @@ class RunLoop:
                 return list(messages[index + 1 :])
         return list(messages)
 
+    def _wakes(self, message: HumanMessage) -> bool:
+        """An event that woke the thread: not a person, the harness's context, or a guard."""
+        provenance = Provenance.of(message)
+        return provenance is None or (
+            provenance.kind == "system" and provenance.sender not in self._guards
+        )
+
     @staticmethod
     def _request(message: BaseMessage) -> str | None:
         """What a person asked in ``message``; None for any other input."""
@@ -891,7 +871,8 @@ class RunLoop:
         for text in _texts(message.content):
             root = _root(text, "input-message")
             if root is not None and root.get("kind") == "human":
-                return "".join(root.itertext()).strip()
+                body = (root.text or "").strip() or (root.findtext("content") or "").strip()
+                return body or None
         return None
 
     async def _read_goal(self, request: GoalRead) -> Goal | None:

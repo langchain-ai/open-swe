@@ -91,7 +91,6 @@ class UnreadConnectionError(RuntimeError):
         return ToolMessage(content=str(self), tool_call_id=tool_call_id, status="error")
 
 
-# Operations that run a shell command in the sandbox, checked as ``execute`` is.
 _SHELL_OPERATIONS: Final = frozenset({"background_execute"})
 
 

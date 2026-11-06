@@ -242,10 +242,8 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
 
 _QUOTED: Final = re.compile(r"""(?<!-c )(?:'[^']*'|"(?:\\.|[^"\\])*")""")
 _SLEEP: Final = re.compile(r"(?<![\w./-])sleep\s+(\$\w+|\d+(?:\.\d+)?|\.\d+)([smhd]?)\b")
-_LOOP: Final = re.compile(r"\b(?:while|until|for)\b")
+_LOOP: Final = re.compile(r"(?<![\w=-])(?:while|until|for)(?=[\s(])")
 _UNIT_SECONDS: Final = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
-# Shorter pauses, such as for a server to come up or between a few retries, are part
-# of a command's own work.
 _LONGEST_SLEEP_SECONDS: Final = 10
 _LONGEST_POLL_SECONDS: Final = 5
 
@@ -337,7 +335,6 @@ class Run:
         rules = None if loop is None else loop.work_state
         if rules is None or not rules.sleep_refusal or not isinstance(command, str):
             return None
-        # A quoted argument is text, except the script a shell runs with ``-c``.
         unquoted = _QUOTED.sub("", command)
         sleeps = _SLEEP.findall(unquoted)
         if not sleeps:

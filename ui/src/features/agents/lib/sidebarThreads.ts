@@ -286,12 +286,12 @@ export function sidebarRefreshInterval(
     : false
 }
 
-/** What tells a sidebar list that a coordinator it shows gained or lost a worker. */
+/** What tells a sidebar list that a thread it shows gained or lost a worker, its first included. */
 export function taskWorkerTopics(
   threads: ReadonlyArray<AgentThread> = []
 ): Array<InvalidationTopic> {
   return threads
-    .filter((thread) => thread.taskMembership?.role === "coordinator")
+    .filter((thread) => thread.taskMembership?.role !== "worker")
     .map((thread) => invalidationTopic("task-workers", thread.id))
 }
 

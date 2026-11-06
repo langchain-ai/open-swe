@@ -165,6 +165,16 @@ async def publish_review(
             state=state,
             assessment=assessment,
         )
+        if result.get("success") and not result.get("goal_review"):
+            reviewer_thread_id = get_thread_id_from_runtime()
+            await GoalReview.published(
+                reviewer_thread_id,
+                await get_thread_metadata(reviewer_thread_id),
+                owner=cfg.repo.owner,
+                repo=cfg.repo.name,
+                pr_number=pr_number,
+                severity_threshold=severity_threshold,
+            )
         events = ReviewEvents.from_config(cfg)
         if events is not None:
             await events.append(
@@ -365,28 +375,29 @@ async def _publish_review_async(
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
     reviewed_head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
-    metadata = await get_thread_metadata(thread_id)
-    if reviewed_head_sha != head_sha:
-        live_base_sha = metadata.get("review_base_sha")
-        base_sha = live_base_sha if isinstance(live_base_sha, str) else ""
-    head_sha = reviewed_head_sha
-    goal_review = GoalReview.of(metadata)
-    if goal_review is not None:
-        return await goal_review.publish(
+    goal_review = GoalReview.of(await get_thread_metadata(thread_id))
+    if goal_review is not None and (
+        goal_result := await goal_review.publish(
             reviewer_thread_id=thread_id,
             owner=owner,
             repo=repo,
             pr_number=pr_number,
-            head_sha=head_sha,
-            base_sha=base_sha,
+            head_sha=reviewed_head_sha,
             token=token,
             severity_threshold=severity_threshold,
         )
-    if assessment is not None and assessment.head_sha != head_sha:
+    ):
+        return goal_result
+    if assessment is not None and assessment.head_sha != reviewed_head_sha:
         return {
             "success": False,
             "error": "Assessment commit differs from the current review head. Review it again.",
         }
+    if reviewed_head_sha != head_sha:
+        metadata = await get_thread_metadata(thread_id)
+        live_base_sha = metadata.get("review_base_sha")
+        base_sha = live_base_sha if isinstance(live_base_sha, str) else ""
+    head_sha = reviewed_head_sha
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(

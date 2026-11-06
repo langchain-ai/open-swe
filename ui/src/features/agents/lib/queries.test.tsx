@@ -1248,45 +1248,48 @@ describe("sidebar task families", () => {
     ).toEqual([])
   })
 
-  it("finds an idle coordinator's new workers when its task-workers topic is invalidated, without polling", async () => {
+  it("finds an idle thread's first and later workers when its task-workers topic is invalidated, without polling", async () => {
     vi.useFakeTimers()
-    let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
+    let workers: Array<AgentThread> = []
     const listed = vi
       .spyOn(agentsApi, "listThreadsPage")
       .mockImplementation(async () => ({
         ...page,
-        items: [{ ...coordinator, taskWorkers: workers }],
+        items: [
+          workers.length
+            ? { ...coordinator, taskWorkers: workers }
+            : {
+                ...coordinator,
+                taskMembership: undefined,
+                taskWorkers: undefined,
+              },
+        ],
       }))
     const client = testClient()
     const { result } = renderHook(
       () => useSidebarRecents({ repoMode: false }),
       { wrapper: wrapperFor(client) }
     )
-    await vi.waitFor(() =>
-      expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
-    )
-    workers = [...workers, { ...worker, id: "new-worker", status: "running" }]
+    await vi.waitFor(() => expect(result.current.items).toHaveLength(1))
+    const topic = invalidationTopic("task-workers", coordinator.id)
+    const delegate = async (added: AgentThread) => {
+      workers = [...workers, added]
+      await act(() =>
+        client.invalidateQueries({
+          predicate: (query) => queryTopics(query).includes(topic),
+        })
+      )
+      await vi.waitFor(() =>
+        expect(result.current.items[0]?.taskWorkers).toHaveLength(
+          workers.length
+        )
+      )
+    }
+    await delegate({ ...worker, status: "finished" })
     const calls = listed.mock.calls.length
     await act(() => vi.advanceTimersByTimeAsync(60_000))
     expect(listed.mock.calls.length).toBe(calls)
-    const topic = invalidationTopic("task-workers", coordinator.id)
-    console.log(
-      "METAS",
-      JSON.stringify(
-        client
-          .getQueryCache()
-          .getAll()
-          .map((q) => [q.queryKey, q.meta])
-      )
-    )
-    await act(() =>
-      client.invalidateQueries({
-        predicate: (query) => queryTopics(query).includes(topic),
-      })
-    )
-    await vi.waitFor(() =>
-      expect(result.current.items[0]?.taskWorkers).toHaveLength(2)
-    )
+    await delegate({ ...worker, id: "new-worker", status: "running" })
     workers = workers.map((thread) => ({ ...thread, status: "finished" }))
     await act(() => vi.advanceTimersByTimeAsync(2100))
     await vi.waitFor(() =>

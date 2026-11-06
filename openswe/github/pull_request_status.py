@@ -15,11 +15,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
+from openswe.github.branch_config import BranchConfig
 from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
-from openswe.github.required_check_cache import RequiredCheckCache
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +243,7 @@ class OpenPullRequest(BaseModel):
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
     unresolved_threads: int | None = None
+    conversation_resolution_required: bool | None = None
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
@@ -1068,6 +1069,15 @@ class PullRequestClient:
         )
         result.review_required = review_state.review_required
         result.unresolved_threads = review_state.unresolved_threads
+        base = pull.get("base")
+        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
+        config = None
+        if base_ref is not None and (
+            review_state.unresolved_threads or result.merge_state != "clean"
+        ):
+            config = await BranchConfig(self.repo.full_name, base_ref).read(self.repo.github.login)
+            if config is not None:
+                result.conversation_resolution_required = config.requires_conversation_resolution
         if runs is None or statuses is None:
             return result
         failed, _, _ = _normalize_checks(runs, statuses)
@@ -1098,26 +1108,19 @@ class PullRequestClient:
             if runs or statuses
             else "none"
         )
-        base = pull.get("base")
-        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        if base_ref is not None and result.merge_state != "clean":
-            required = await RequiredCheckCache(self.repo.full_name, base_ref).read(
-                self.repo.github.login
+        if config is not None and result.merge_state != "clean":
+            required = config.checks
+            passing_runs = [
+                run
+                for run in runs
+                if run.get("status") == "completed"
+                and run.get("conclusion") in {"success", "neutral", "skipped"}
+            ]
+            passing_statuses = [status for status in statuses if status.get("state") == "success"]
+            result.required_checks_passing = all(
+                check.reported_by(passing_runs, passing_statuses) for check in required
             )
-            if required is not None:
-                passing_runs = [
-                    run
-                    for run in runs
-                    if run.get("status") == "completed"
-                    and run.get("conclusion") in {"success", "neutral", "skipped"}
-                ]
-                passing_statuses = [
-                    status for status in statuses if status.get("state") == "success"
-                ]
-                result.required_checks_passing = all(
-                    check.reported_by(passing_runs, passing_statuses) for check in required
-                )
-                result.missing_checks = unreported_required_checks(required, runs, statuses)
+            result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 
 

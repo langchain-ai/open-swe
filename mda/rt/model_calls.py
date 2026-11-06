@@ -224,7 +224,6 @@ class _RunPromptCaching(AnthropicPromptCachingMiddleware):
         async def untagged_tools(tagged: ModelRequest) -> ModelResponse:
             settings = tagged.model_settings
             if self._breaks_conversation(tagged):
-                # The conversation already ends its cached prefix itself (``ReminderMiddleware``).
                 settings = {k: v for k, v in settings.items() if k != "cache_control"}
             return await handler(tagged.override(tools=request.tools, model_settings=settings))
 

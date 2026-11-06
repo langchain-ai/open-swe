@@ -735,12 +735,15 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     delete_crons.assert_awaited_once_with("thread-1")
 
 
-@pytest.mark.parametrize("launch_fails", [False, True])
-async def test_a_callback_launch_stays_tracked_through_a_reconcile_during_the_launch(
-    launch_fails: bool,
+@pytest.mark.parametrize(
+    ("launch_fails", "status_after_launch"),
+    [(False, "running"), (False, "completed"), (True, "running")],
+)
+async def test_a_callback_launch_is_tracked_exactly_while_it_runs(
+    launch_fails: bool, status_after_launch: str
 ) -> None:
-    """Reconnecting the sandbox to launch reconciles first, before the task exists, which
-    untracks every tracked id it cannot find; the launched task must still be tracked."""
+    """A reconcile during launch untracks the unknown task; a fast task's callback may
+    untrack it before launch returns. Either way it is tracked only while it runs."""
     tracked: set[str] = set()
 
     async def update(
@@ -754,6 +757,8 @@ async def test_a_callback_launch_stays_tracked_through_a_reconcile_during_the_la
         tracked.difference_update(finished)
 
     async def launch(backend: object, action: str, **fields: object) -> dict[str, object]:
+        if action == "status":
+            return {"task_id": fields["task_id"], "status": status_after_launch}
         await update(None, "thread-1", finished=list(tracked))
         if launch_fails:
             raise RuntimeError("active task limit reached")
@@ -774,7 +779,7 @@ async def test_a_callback_launch_stays_tracked_through_a_reconcile_during_the_la
         result = await background_execute("make test")
 
     assert result["success"] is not launch_fails
-    assert bool(tracked) is not launch_fails
+    assert bool(tracked) is (not launch_fails and status_after_launch == "running")
 
 
 async def test_reattach_reconciles_tracked_tasks() -> None:

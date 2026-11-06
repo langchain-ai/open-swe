@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@langchain/macaw-components": "1.3.4",
-    "@langchain/macaw-tokens": "1.3.4",
+    "@langchain/macaw-components": "1.7.2",
+    "@langchain/macaw-tokens": "1.7.2",
     "@openswe/plugin-sdk": "file:../sdk",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

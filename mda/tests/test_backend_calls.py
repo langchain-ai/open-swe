@@ -1550,6 +1550,8 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
         ("for i in 1 2 3; do curl -f localhost:3000 && break; sleep 2; done", True, False),
         ('git commit -m "wait: sleep 30 before retry"', True, False),
         ("bash -c 'until gh pr checks 1; do sleep 30; done'", True, True),
+        ("sleep 5 && kubectl wait --for=condition=Ready pod/web --timeout=120s", True, False),
+        ("for((i=0;i<3;i++)); do sleep 5; done", True, True),
     ],
 )
 async def test_a_goal_mode_execute_that_waits_by_sleeping_is_refused(
