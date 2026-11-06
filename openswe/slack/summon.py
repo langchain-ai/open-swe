@@ -20,7 +20,6 @@ from openswe.webhooks import common
 logger = logging.getLogger(__name__)
 
 SUMMON_REACTION = "robin"
-SUMMON_REACTIONS = frozenset({SUMMON_REACTION, "openswe"})
 _SUMMON_REACTION_SENDER: SystemIdentity = {
     "id": "system:slack-reaction",
     "display_name": "Slack reaction",
@@ -87,7 +86,7 @@ async def process_slack_summon_reaction(
 def _first_summoner(message: dict[str, object], reaction_name: str) -> str:
     reactions = message.get("reactions")
     for reaction in reactions if isinstance(reactions, list) else []:
-        if isinstance(reaction, dict) and reaction.get("name") in SUMMON_REACTIONS:
+        if isinstance(reaction, dict) and reaction.get("name") == SUMMON_REACTION:
             users = reaction.get("users")
             return (
                 str(users[0])

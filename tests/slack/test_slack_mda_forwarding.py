@@ -2284,11 +2284,9 @@ async def test_a_feedback_reaction_is_recorded_as_the_webhook_records_it(
     other.assert_not_awaited()
 
 
-@pytest.mark.parametrize("summon_reaction", ["robin", "openswe"])
 async def test_the_summon_reaction_tags_open_swe_and_any_other_does_nothing(
-    monkeypatch: pytest.MonkeyPatch, summon_reaction: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``:robin:``, and the ``:openswe:`` people still use, tag the agent."""
     from openswe.mda_channels import slack_channel_events  # noqa: PLC0415
 
     summon = AsyncMock()
@@ -2298,8 +2296,9 @@ async def test_the_summon_reaction_tags_open_swe_and_any_other_does_nothing(
     app.include_router(slack_channel_events.router)
 
     for body in (
-        _reaction(summon_reaction),
-        _reaction(summon_reaction, removed=True),
+        _reaction("robin"),
+        _reaction("robin", removed=True),
+        _reaction("openswe"),
         _reaction("tada"),
     ):
         answered = await _post_endpoint(app, body, signed=True, path="/mda/slack/reactions")

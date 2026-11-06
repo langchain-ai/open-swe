@@ -24,7 +24,7 @@ from openswe.slack.feedback import (
     process_slack_reaction_removed,
 )
 from openswe.slack.payloads import SlackEvent
-from openswe.slack.summon import SUMMON_REACTIONS, process_slack_summon_reaction
+from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
 from openswe.webhooks import common
 
 router = APIRouter(prefix="/mda", dependencies=[Depends(require_mda_channel)])
@@ -71,7 +71,7 @@ async def slack_reaction(call: SlackEndpointRequest, background_tasks: Backgroun
             process_slack_reaction_removed if event.get("removed") else process_slack_reaction_added
         )
         background_tasks.add_task(process, raw, delivery_id)
-    elif reaction in SUMMON_REACTIONS and not event.get("removed"):
+    elif reaction == SUMMON_REACTION and not event.get("removed"):
         summon = SlackEvent.parse(raw)
         item = summon.item if summon is not None else None
         if summon is None or item is None or not item.channel:
