@@ -14,13 +14,14 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from runtime_api.provenance import Provenance
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.claude_code.hooks import mirror_thread_id
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
+from openswe.input_messages import input_message_text
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
@@ -550,7 +551,7 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
         return {
             "text": text[:_MAX_DETAIL_MESSAGE_CHARS],
             "truncated": truncated,
-            "sender_id": message_sender_id(content),
+            "sender_id": provenance.sender if (provenance := Provenance.of(message)) else None,
             "timestamp": _message_timestamp(message),
         }
     return None
@@ -601,7 +602,7 @@ def _transcript(state: Any) -> dict[str, Any]:
                 "role": "user" if kind in {"human", "user"} else "assistant",
                 "text": returned_text,
                 "truncated": len(returned_text) < len(text),
-                "sender_id": message_sender_id(content),
+                "sender_id": provenance.sender if (provenance := Provenance.of(message)) else None,
                 "timestamp": _message_timestamp(message),
             }
         )
@@ -634,35 +635,23 @@ async def _latest_state_github_login(state: Mapping[str, object] | None) -> str 
     if not isinstance(messages, list):
         return None
     for message in reversed(messages):
-        if _message_kind(message) not in {"human", "user"}:
+        provenance = Provenance.of(message)
+        if provenance is None or not provenance.human:
             continue
-        content = _message_content(message)
-        if dynamic_context_hash(content) is not None or message_sender_id(content, kind="system"):
-            continue
-        sender_id = message_sender_id(content)
-        if isinstance(sender_id, str) and sender_id.startswith("github:"):
+        sender_id = provenance.sender
+        if sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
             if not login.isdigit():
                 return login or None
-            blocks = content if isinstance(content, list) else [content]
-            for block in blocks:
-                text = _value(block, "text") if isinstance(block, Mapping) else block
-                if not isinstance(text, str):
-                    continue
-                try:
-                    envelope = ElementTree.fromstring(text)
-                except ElementTree.ParseError:
-                    continue
-                if (
-                    envelope.tag == "input-message"
-                    and envelope.get("sender") == sender_id
-                    and envelope.get("surface") in {"web", "automation"}
-                ):
-                    return login
+            if provenance.surface in {"web", "automation"}:
+                return login
             for context_message in reversed(messages):
-                context_content = _message_content(context_message)
-                if dynamic_context_hash(context_content) is None:
+                introduced = Provenance.of(context_message)
+                if introduced is None or introduced.kind != "context":
                     continue
+                if introduced.sender != sender_id:
+                    continue
+                context_content = _message_content(context_message)
                 blocks = context_content if isinstance(context_content, list) else [context_content]
                 for block in blocks:
                     text = _value(block, "text") if isinstance(block, Mapping) else block
@@ -671,12 +660,6 @@ async def _latest_state_github_login(state: Mapping[str, object] | None) -> str 
                     try:
                         context = ElementTree.fromstring(text)
                     except ElementTree.ParseError:
-                        continue
-                    if (
-                        context.tag != "dynamic-context"
-                        or context.get("kind") != "person"
-                        or context.get("id") != sender_id
-                    ):
                         continue
                     for line in (context.text or "").splitlines():
                         field, separator, value = line.partition(":")

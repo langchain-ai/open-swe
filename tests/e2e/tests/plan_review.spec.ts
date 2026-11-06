@@ -141,6 +141,52 @@ test.describe("HTML artifacts", () => {
       "sandbox",
       "allow-scripts allow-downloads",
     );
+    await ownerArtifact
+      .contentFrame()
+      .locator("body")
+      .evaluate((body) => {
+        body.insertAdjacentHTML(
+          "beforeend",
+          '<a href="https://github.com/langchain-ai/open-swe">External directory</a><svg><a href="https://github.com/langchain-ai/open-swe/commits/main"><text x="0" y="20">SVG commits</text></a></svg><button id="raw-popup">Raw popup</button>',
+        );
+        body.querySelector("#raw-popup")!.addEventListener("click", () => {
+          body.setAttribute(
+            "data-popup-blocked",
+            String(window.open("https://evil.example") === null),
+          );
+        });
+      });
+    await ownerArtifact
+      .contentFrame()
+      .getByText("Raw popup", { exact: true })
+      .click();
+    await expect(ownerArtifact.contentFrame().locator("body")).toHaveAttribute(
+      "data-popup-blocked",
+      "true",
+    );
+    await ownerArtifact
+      .contentFrame()
+      .getByText("External directory", { exact: true })
+      .click({ button: "right" });
+    await expect(owner.getByRole("dialog")).toHaveCount(0);
+    await owner.keyboard.press("Escape");
+    for (const name of ["External directory", "SVG commits"]) {
+      await ownerArtifact
+        .contentFrame()
+        .getByText(name, { exact: true })
+        .click();
+      await expect(owner.getByRole("dialog")).toBeVisible();
+      const popupPromise = owner.waitForEvent("popup");
+      await owner
+        .getByRole("button", { name: "Open link", exact: true })
+        .click();
+      const popup = await popupPromise;
+      expect(await popup.evaluate(() => window.opener)).toBeNull();
+      await popup.close();
+      await expect(
+        ownerArtifact.contentFrame().getByText("Add greet() helper"),
+      ).toBeVisible();
+    }
     const embeddedSummaryBox = await owner
       .getByTestId("plan-summary")
       .boundingBox();

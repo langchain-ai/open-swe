@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage, HumanMessage, add_notification_metadata
 from runtime_api.loop import VISIBLE_FROM
+from runtime_api.provenance import Provenance
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
@@ -185,14 +186,6 @@ def _input_message_elements(content: object) -> list[ElementTree.Element]:
     return elements
 
 
-def message_sender_id(content: object, *, kind: MessageKind | None = None) -> str | None:
-    for message in _input_message_elements(content):
-        sender = message.get("sender")
-        if sender and (kind is None or message.get("kind") == kind):
-            return sender
-    return None
-
-
 def _envelope_body(message: ElementTree.Element) -> str:
     """The authored text of an envelope, accepting the stored ``<content>`` shape."""
     return (message.text or "").strip() or (message.findtext("content") or "").strip()
@@ -346,6 +339,7 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     return {
         "role": "user",
         "content": fields.element("dynamic-context", {"kind": kind, "id": entity_id}),
+        "additional_kwargs": Provenance(kind="context", sender=entity_id).stamp(),
     }
 
 
@@ -422,7 +416,16 @@ def _structured_content(
 def human_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
     if context["kind"] != "human":
         raise ValueError("human_input requires kind='human'")
-    return {"role": "user", "content": _structured_content(content, context)}
+    return {
+        "role": "user",
+        "content": _structured_content(content, context),
+        "additional_kwargs": Provenance(
+            kind=context["kind"],
+            sender=context["sender_id"],
+            surface=context["surface"],
+            channel=context.get("channel_id"),
+        ).stamp(),
+    }
 
 
 def system_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
@@ -436,7 +439,12 @@ def system_input(content: str | list[dict[str, Any]], context: InputMessageConte
     return {
         "role": "user",
         "content": structured,
-        "additional_kwargs": message.additional_kwargs,
+        "additional_kwargs": Provenance(
+            kind=context["kind"],
+            sender=context["sender_id"],
+            surface=context["surface"],
+            channel=context.get("channel_id"),
+        ).stamp(message.additional_kwargs),
     }
 
 

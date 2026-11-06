@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from runtime_api.provenance import Provenance
+
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
@@ -260,14 +262,18 @@ class TurnContext:
 
     def messages(self, visible: Collection[str]) -> list[RunMessage]:
         """The blocks the model does not see as they now are, given the ``visible`` context hashes."""
-        blocks = [
-            run_context("environment", self.environment()),
-            run_context("source", self.source_guidance()),
-        ]
+        guidance = {"environment": self.environment(), "source": self.source_guidance()}
         if self.recent_threads:
-            blocks.append(run_context("recent-threads", self.recent_threads))
+            guidance["recent-threads"] = self.recent_threads
+        blocks = {
+            context_id: run_context(context_id, text) for context_id, text in guidance.items()
+        }
         return [
-            {"role": "user", "content": block}
-            for block in blocks
+            {
+                "role": "user",
+                "content": block,
+                "additional_kwargs": Provenance(kind="context", sender=f"run:{context_id}").stamp(),
+            }
+            for context_id, block in blocks.items()
             if dynamic_context_hash(block) not in visible
         ]

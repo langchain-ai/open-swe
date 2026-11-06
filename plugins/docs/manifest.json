@@ -1,0 +1,17 @@
+{
+  "name": "docs",
+  "displayName": "Docs",
+  "version": "0.3.0",
+  "description": "Pages over the Markdown in your repositories: edit together live, comment and suggest, and publish each version as a pull request.",
+  "sidebar": {
+    "label": "Docs",
+    "icon": "file-text"
+  },
+  "permissions": [
+    "storage",
+    "realtime",
+    "github:read",
+    "github:write",
+    "agent"
+  ]
+}

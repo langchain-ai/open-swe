@@ -124,7 +124,7 @@ def _as_http() -> Iterator[None]:
 async def _viewer(session: dict[str, object] = SESSION_DEP) -> User:
     user = await DashboardPrincipal.from_session(session).user()
     if user is None:
-        raise HTTPException(409, "No Open SWE user record for this login yet")
+        raise HTTPException(409, "No Robin user record for this login yet")
     return user
 
 

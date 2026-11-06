@@ -7,7 +7,9 @@ import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
 
+from openswe.agent_api.run_state import as_messages
 from openswe.dashboard.options import available_requested_models
+from openswe.input_messages import human_input
 from openswe.model_request import ModelRequestIntent, infer_requested_model
 from openswe.utils.jev import JevDecision, select_jev_choice
 
@@ -16,6 +18,15 @@ type ResponseHandler = (
     | Callable[[httpx2.Request], Coroutine[None, None, httpx2.Response]]
 )
 type InstallTransport = Callable[[ResponseHandler], None]
+
+
+def _said(text: str) -> HumanMessage:
+    """What a person wrote, as the backend builds it."""
+    [message] = as_messages(
+        [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
+    )
+    assert isinstance(message, HumanMessage)
+    return message
 
 
 @pytest.fixture
@@ -150,7 +161,7 @@ async def test_rejected_credentials_report_all_decisions(
     with caplog.at_level(logging.ERROR):
         assert (
             await infer_requested_model(
-                messages=[HumanMessage("Use Opus with max reasoning effort")],
+                messages=[_said("Use Opus with max reasoning effort")],
                 requested_models=available_requested_models(fable_enabled=False),
                 decision=model_decision,
                 effort_decision=effort_decision,
@@ -203,7 +214,7 @@ async def test_opening_model_and_effort_share_one_request_with_independent_decis
     transport(handle)
     model_decision, effort_decision = JevDecision(), JevDecision()
     intent = await infer_requested_model(
-        messages=[HumanMessage("Use Opus with max reasoning effort")],
+        messages=[_said("Use Opus with max reasoning effort")],
         requested_models=available_requested_models(fable_enabled=False),
         decision=model_decision,
         effort_decision=effort_decision,

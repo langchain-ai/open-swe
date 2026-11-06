@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 import jwt
 import pytest
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from pydantic import JsonValue
@@ -17,6 +18,7 @@ from openswe.agent_api import server
 from openswe.agent_api.agent import AgentKind
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_kinds import RunKind
+from openswe.agent_api.run_state import as_messages
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
     RemoteRun,
@@ -28,6 +30,7 @@ from openswe.agent_api.tokens import (
     verify_runtime_token,
     verify_worker_grant,
 )
+from openswe.input_messages import human_input
 from openswe.sandboxes.tool_runtime import ToolSurface
 
 RUN = RemoteRun(
@@ -36,6 +39,16 @@ RUN = RemoteRun(
     configurable={"repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7},
     expires_at=int(time.time()) + 3600,
 )
+
+
+def _said(text: str, message_id: str | None = None) -> HumanMessage:
+    """What a person wrote, as the backend builds it."""
+    [message] = as_messages(
+        [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
+    )
+    assert isinstance(message, HumanMessage)
+    message.id = message_id or message.id
+    return message
 
 
 class _NeverPlanned(AgentKind):
@@ -132,7 +145,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from langchain_core.messages import HumanMessage, messages_to_dict
+    from langchain_core.messages import messages_to_dict
 
     from openswe.agent_api import run_sandbox
     from openswe.middleware.model_selection import RouteSelection
@@ -149,7 +162,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
     )
     run = RUN.model_copy(update={"assistant_id": "agent"})
-    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+    asked = messages_to_dict([_said("Fix the login", "human-1")])
 
     route = await TokenRun.answer(parts, run, "route_model", {"run_id": "run-1", "humans": asked})
     chosen = await TokenRun.answer(
@@ -188,7 +201,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     what the turn's start records waits for its ``run_started`` report."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from langchain_core.messages import HumanMessage, messages_to_dict
+    from langchain_core.messages import messages_to_dict
     from runtime_api.catalog import RoutingRules
 
     from openswe import server
@@ -239,7 +252,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
             "grant_id": "grant-1",
         }
     )
-    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+    asked = messages_to_dict([_said("Fix the login", "human-1")])
 
     prepared = await TokenRun.answer(
         parts,

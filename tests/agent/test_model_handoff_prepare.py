@@ -13,7 +13,9 @@ from langsmith.run_trees import RunTree
 from runtime_api.catalog import RoutingRules
 
 import openswe.server as server
+from openswe.agent_api.run_state import as_messages
 from openswe.agent_api.tokens import AgentTurnSettings
+from openswe.input_messages import human_input
 from openswe.middleware.model_selection import (
     ModelSelectionState,
     RouteSelection,
@@ -24,6 +26,16 @@ from openswe.model_request import ModelRequestIntent
 from openswe.prompt import SystemPrompt
 from openswe.utils.jev import JevDecision
 from openswe.utils.thread_settings import ThreadSettings
+
+
+def _said(text: str, message_id: str | None = None) -> HumanMessage:
+    """What a person wrote, as the backend builds it."""
+    [message] = as_messages(
+        [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
+    )
+    assert isinstance(message, HumanMessage)
+    message.id = message_id or message.id
+    return message
 
 
 @dataclass
@@ -195,7 +207,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     classify = AsyncMock(return_value=RouteSelection(fresh_route))
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     state: ModelSelectionState = {
-        "messages": [HumanMessage(content="Fix the typo")],
+        "messages": [_said("Fix the typo")],
         "model_route": previous_route,
         "requested_model": "anthropic:claude-opus-5-5",
     }
@@ -245,7 +257,7 @@ async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
         "AsyncClient",
         lambda **kwargs: client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
-    state: PrepareRunState = {"messages": [HumanMessage(content="Fix the typo")]}
+    state: PrepareRunState = {"messages": [_said("Fix the typo")]}
     prepared = await handoff.prepare(state)
     assert "model_route" not in prepared
     assert prepared["selected_model_id"] == "openai:gpt-6.1-sol"

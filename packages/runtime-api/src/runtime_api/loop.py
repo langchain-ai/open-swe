@@ -3,7 +3,7 @@
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: the route a
-task takes, a model's settings, the task a thread belongs to, the incident a run
+task takes, the reminders a person's message calls for, a model's settings, the task a thread belongs to, the incident a run
 investigates, a fresh GitHub proxy token, a reply posted on the model's behalf, and what the end of the run records.
 The transcript and usage hear of the run's start, each reply and tool call, and the
 run's end.
@@ -252,6 +252,18 @@ class Route(BaseModel):
     persist: bool = True
 
 
+class PersonMessage(RunRequest):
+    """The message a person sent that the model has not answered yet."""
+
+    message: dict[str, JsonValue]
+
+
+class Reminders(BaseModel):
+    """Notes the model reads beside the person's latest message, which the person never sees."""
+
+    messages: list[dict[str, JsonValue]] = []
+
+
 class ChosenModel(RunRequest):
     """A model the run calls by id, such as one a person asked for, at an effort."""
 
@@ -341,6 +353,10 @@ BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
 # Classifies the task the conversation asks for; only reads, so it is safe to send again.
 ROUTE_MODEL = Endpoint(
     "route_model", Routed, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+# Classifies a person's message; only reads, so it is safe to send again.
+REMINDERS = Endpoint(
+    "reminders", PersonMessage, Reminders, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_CHOICE = Endpoint(
     "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"

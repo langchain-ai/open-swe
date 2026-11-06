@@ -45,7 +45,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
+          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded, and remind the agent to save a lesson when you sound frustrated."
         />
         <ProfileSwitchRow
           field="experimental_classify"

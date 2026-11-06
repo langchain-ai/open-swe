@@ -51,8 +51,7 @@ interface Runtime {
 
 function runtime(): Runtime {
   const found = (globalThis as Record<string, unknown>)[RUNTIME_GLOBAL]
-  if (!found)
-    throw new Error("Open SWE plugins run only inside the Open SWE web UI")
+  if (!found) throw new Error("Robin plugins run only inside the Robin web UI")
   return found as Runtime
 }
 
@@ -240,7 +239,7 @@ export class PluginHost {
         }
       )
       subscription.catch((error: unknown) =>
-        console.error("Open SWE refused the agent's tools", error)
+        console.error("Robin refused the agent's tools", error)
       )
       const withdraw = () => {
         if (this.withdrawTools !== withdraw) return

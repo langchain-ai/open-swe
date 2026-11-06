@@ -8,7 +8,7 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Final, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
@@ -38,6 +38,7 @@ from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.store.memory import InMemoryStore
+from langgraph_sdk.auth.types import AuthContext, BaseUser, ThreadsCreate, ThreadsRead
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
 from langsmith.sandbox import (
     ResourceCreationError,
@@ -53,6 +54,7 @@ from managed_deepagents import (
     define_deep_agent,
     shared_factory,
 )
+from managed_deepagents import _identity_auth as mda_identity_auth
 from managed_deepagents import _sandbox_proxy as mda_sandbox_proxy
 from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
@@ -460,32 +462,124 @@ def test_thread_sandbox_failures_never_create_a_second_workspace(
     )
 
     with pytest.raises(error):
-        mda_runtime._create_langsmith_sandbox(
-            definition(spec.create, None), scope_key="thread:thread-1"
-        )
+        mda_runtime._create_langsmith_sandbox(definition(spec.create), scope_key="thread:thread-1")
 
     assert len(client.create_sandbox.call_args_list) == (1 if failure == "conflict" else 0)
 
 
-@pytest.mark.parametrize("owner", [None, "coordinator"])
-def test_browser_finds_the_opened_per_thread_sandbox(
-    monkeypatch: pytest.MonkeyPatch, owner: str | None
-) -> None:
+def test_browser_finds_the_opened_per_thread_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
     assert spec is not None
     source = MagicMock()
-    source.sandbox = definition(spec.create, owner)
+    source.sandbox = definition(spec.create)
     source.run_config = None
     source.selection = mda_runtime._SandboxSelection("graph-selection", None)
     backend = mda_runtime._LazyManagedSandboxBackend(source, {"thread_id": "thread-1"})
     opened = MagicMock(spec=SandboxBackendProtocol)
     opened.id = "existing-sandbox"
     entry = mda_runtime._ManagedSandboxEntry(opened, host_name="existing-sandbox")
-    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {f"thread:{owner or 'thread-1'}": entry})
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {"thread:thread-1": entry})
     runtime = MagicMock()
     runtime.backend = backend
 
     assert mda_browser._thread_sandbox(runtime) is opened
+
+
+# The backend's LangSmith key, which starts the runs of threads it owns.
+_BACKEND_CALLER: Final = {"identity": "backend", "permissions": [], "mda_user_id": "ls-backend"}
+
+
+def _channel_caller(user_id: str, conversation: str) -> dict[str, object]:
+    """A caller through MDA's channel ingress, for the Slack conversation that owns its threads."""
+    return {
+        "identity": user_id,
+        "permissions": [],
+        "mda_user_id": user_id,
+        "mda_source_provider": "slack",
+        "mda_source_thread_id": conversation,
+    }
+
+
+def _auth(caller: object, action: Literal["create", "read"]) -> AuthContext:
+    return AuthContext(
+        permissions=[], user=cast(BaseUser, caller), resource="threads", action=action
+    )
+
+
+async def _created_by(caller: object, thread_id: str) -> dict[str, object]:
+    """A thread as MDA records it for the caller that created it."""
+    created: dict[str, object] = {"thread_id": thread_id, "metadata": {}}
+    await mda_identity_auth._scope_threads(_auth(caller, "create"), cast(ThreadsCreate, created))
+    return created
+
+
+@pytest.mark.parametrize("origin", ["dashboard", "slack"])
+@pytest.mark.parametrize("run", ["launched", "follow-up"])
+async def test_a_task_worker_works_in_its_coordinators_sandbox(
+    monkeypatch: pytest.MonkeyPatch, origin: str, run: str
+) -> None:
+    """A task worker is MDA's async subagent of its coordinator, so MDA gives each of its runs
+    the coordinator's sandbox: the run its coordinator launched, and the later ones the backend
+    starts. A Slack coordinator's thread belongs to its conversation, not to a person, and so
+    does the worker thread its run launched, which the backend's later runs act in as that
+    conversation."""
+    coordinator_caller = (
+        _BACKEND_CALLER
+        if origin == "dashboard"
+        else _channel_caller("principal-alice", "T1:C1:1700000000.000100")
+    )
+    threads = {
+        "coordinator": await _created_by(coordinator_caller, "coordinator"),
+        # Launched in process during the coordinator's run, so as its caller.
+        "worker": await _created_by(coordinator_caller, "worker"),
+    }
+    caller: object = coordinator_caller
+    if run == "follow-up" and origin == "slack":
+        worker_owner = cast(dict[str, str], threads["worker"]["metadata"])["owner"]
+        provider, _, conversation = worker_owner.removeprefix("mda:source-thread:").partition(":")
+        assert provider == "slack"
+        caller = _channel_caller("mda:channel", conversation)
+    elif run == "follow-up":
+        caller = _BACKEND_CALLER
+
+    async def read(thread_id: str) -> dict[str, object]:
+        scope = await mda_identity_auth._scope_threads(
+            _auth(caller, "read"), cast(ThreadsRead, {"thread_id": thread_id})
+        )
+        thread = threads[thread_id]
+        metadata = cast(dict[str, object], thread["metadata"])
+        if any(metadata.get(key) != value for key, value in (scope or {}).items()):
+            raise LookupError(thread_id)
+        return thread
+
+    client = MagicMock()
+    client.threads.get = AsyncMock(side_effect=read)
+    monkeypatch.setattr(mda_runtime, "get_client", lambda: client)
+    coordinators = MagicMock(spec=SandboxBackendProtocol)
+    coordinators.id = "coordinator-sandbox"
+    selection = mda_runtime._SandboxSelection("graph-selection", None)
+    coordinator_scope = mda_runtime._thread_scope_key(_thread("coordinator"), selection)
+    monkeypatch.setattr(
+        mda_runtime,
+        "_managed_sandboxes",
+        {coordinator_scope: mda_runtime._ManagedSandboxEntry(coordinators, host_name="box")},
+    )
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    worker_run: ManagedRunConfig = {
+        "configurable": {"thread_id": "worker", "langgraph_auth_user": caller},
+        # The Agent Server copies the thread's metadata, deepagents' parent among it, into each run.
+        "metadata": {"parent_thread_id": "coordinator", "subagent_name": "general-purpose"},
+    }
+    source = MagicMock()
+    source.sandbox = definition(spec.create, "box")
+    source.run_config = worker_run
+    source.selection = selection
+
+    async with mda_runtime.parent_run(worker_run):
+        assert mda_runtime._thread_scope_key(worker_run, selection) == coordinator_scope
+        backend = mda_runtime._LazyManagedSandboxBackend(source, None)
+        assert mda_browser._thread_sandbox(MagicMock(backend=backend)) is coordinators
 
 
 @pytest.mark.parametrize("replaced", [False, True])
@@ -494,7 +588,7 @@ def test_losing_a_thread_sandbox_only_reconnects_to_an_existing_replacement(
 ) -> None:
     spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
     assert spec is not None
-    sandbox = definition(spec.create, None)
+    sandbox = definition(spec.create)
     original = MagicMock(spec=SandboxBackendProtocol)
     original.execute.side_effect = ResourceNotFoundError("sandbox is gone")
     entry = mda_runtime._ManagedSandboxEntry(original, host_name="original", sandbox_id="old-id")
@@ -527,7 +621,7 @@ def test_persisted_sandbox_binding_overrides_another_replicas_canonical_cache(
     spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
     assert spec is not None
     bound_name = "original-legacy-suffix"
-    sandbox = definition(spec.create, None, bound_name)
+    sandbox = definition(spec.create, bound_name)
     stale = MagicMock(spec=SandboxBackendProtocol)
     monkeypatch.setattr(
         mda_runtime,
@@ -568,7 +662,7 @@ async def test_deleted_bound_workspace_recovers_under_its_name_and_reports_loss(
     spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
     assert spec is not None
     name = "original-legacy-suffix"
-    sandbox = definition(spec.create, None, name)
+    sandbox = definition(spec.create, name)
     monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
     client = MagicMock()
     client.get_sandbox.side_effect = (
@@ -615,7 +709,7 @@ async def test_explicit_recreation_can_replace_a_failed_uncached_sandbox(
         if bound
         else mda_runtime._managed_sandbox_name("open-swe-mda-prod", "thread:thread-1")
     )
-    sandbox = definition(spec.create, None, bound_name if bound else None)
+    sandbox = definition(spec.create, bound_name if bound else None)
     monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
     client = MagicMock()
     client.get_sandbox.return_value = MagicMock(status="failed")

@@ -55,7 +55,6 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
-    add_notification_metadata,
     messages_from_dict,
     messages_to_dict,
 )
@@ -91,10 +90,12 @@ from rt.backend import (
     OpenSweBackend,
     Run,
     RunLocal,
+    harness_message,
     human_messages,
     namespace,
     reporting,
     run_call,
+    since_last_reply,
     subagent_of,
 )
 from rt.git_evidence import turn_git
@@ -442,14 +443,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             messages = update.get("messages", [])
             update["messages"] = [
                 *(messages if isinstance(messages, list) else []),
-                add_notification_metadata(
-                    HumanMessage(
-                        id=f"run-guidance:workspace-lost:{invocation}",
-                        content="The sandbox provider confirmed that this thread's bound workspace "
-                        "was deleted. A fresh workspace was created under the same name. "
-                        "Tell the user that local files and unpushed work from the deleted "
-                        "workspace are unavailable; do not claim they were recovered.",
-                    ),
+                harness_message(
+                    "The sandbox provider confirmed that this thread's bound workspace "
+                    "was deleted. A fresh workspace was created under the same name. "
+                    "Tell the user that local files and unpushed work from the deleted "
+                    "workspace are unavailable; do not claim they were recovered.",
+                    message_id=f"run-guidance:workspace-lost:{invocation}",
                     source="run_guidance",
                 ),
             ]
@@ -465,7 +464,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
         return RunStarted(
             run_id=run_id(),
-            humans=human_messages(_since_last_reply(state["messages"])),
+            humans=human_messages(since_last_reply(state["messages"])),
             model_id=chosen("selected_model_id"),
             effort=chosen("selected_effort"),
             model_route=chosen("model_route"),
@@ -714,7 +713,7 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 namespace=inside,
                 response=_json_dicts.validate_python(messages_to_dict(response.result)),
                 # A subagent's own messages are its task, never something a person said.
-                humans=[] if inside else human_messages(_since_last_reply(request.messages)),
+                humans=[] if inside else human_messages(since_last_reply(request.messages)),
                 model_route=route,
                 offloading=_json_object.validate_python(offloading)
                 if isinstance(offloading, Mapping)
@@ -722,14 +721,6 @@ class ReportRepliesMiddleware(AgentMiddleware):
             )
         )
         return response
-
-
-def _since_last_reply(messages: Sequence[object]) -> Sequence[object]:
-    """What the model is handed that it has not answered yet."""
-    for index in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[index], AIMessage):
-            return messages[index + 1 :]
-    return messages
 
 
 async def reported(

@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
+from runtime_api.provenance import Provenance
 
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import (
@@ -85,7 +86,12 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             self.context = await TaskMembership.delegation_for_thread(self.thread_id)
         visible = visible_dynamic_context_hashes(state)
         added: list[RunMessage] = [
-            {"role": "user", "id": f"{prefix}{uuid4()}", "content": content}
+            {
+                "role": "user",
+                "id": f"{prefix}{uuid4()}",
+                "content": content,
+                "additional_kwargs": Provenance.harness("task_context").stamp(),
+            }
             for prefix, content in (
                 ("task-role:", self.instructions),
                 ("task-context:", await self.context_message()),

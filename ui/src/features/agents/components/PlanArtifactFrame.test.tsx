@@ -1,12 +1,16 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PlanArtifactFrame } from "./PlanArtifactFrame"
 import { withArtifactShell } from "@/features/agents/lib/artifactShell"
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe("withArtifactShell", () => {
   it("stamps the viewer theme and injects the policy into an existing head", () => {
@@ -38,11 +42,59 @@ describe("withArtifactShell", () => {
 })
 
 describe("PlanArtifactFrame", () => {
+  it("requires confirmation for untrusted destinations and preserves the displayed address", () => {
+    const port = {
+      onmessage: null as ((event: { data: unknown }) => void) | null,
+      start: vi.fn(),
+      close: vi.fn(),
+      postMessage: vi.fn(),
+    }
+    vi.stubGlobal(
+      "MessageChannel",
+      class {
+        port1 = port
+        port2 = {}
+      }
+    )
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    render(<PlanArtifactFrame html="<h1>Report</h1>" />)
+    fireEvent.load(screen.getByTitle("Artifact"))
+    act(() =>
+      port.onmessage?.({
+        data: { type: "open-external", url: "javascript:alert(1)" },
+      })
+    )
+    expect(screen.queryByRole("dialog")).toBeNull()
+    act(() =>
+      port.onmessage?.({
+        data: { type: "open-external", url: "https://github.com/org/repo" },
+      })
+    )
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "https://github.com/org/repo"
+    )
+    act(() =>
+      port.onmessage?.({
+        data: { type: "open-external", url: "https://evil.example/replaced" },
+      })
+    )
+    expect(screen.getByRole("dialog").textContent).not.toContain("evil.example")
+    expect(open).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Open link" }))
+    expect(open).toHaveBeenCalledWith(
+      "https://github.com/org/repo",
+      "_blank",
+      "noopener,noreferrer"
+    )
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
   it("renders the artifact in a script-enabled sandbox", () => {
     render(<PlanArtifactFrame html="<h1>Plan</h1>" />)
 
     const iframe = screen.getByTitle("Artifact")
-    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-downloads")
+    const sandbox = iframe.getAttribute("sandbox")!.split(" ")
+    expect(sandbox).toEqual(["allow-scripts", "allow-downloads"])
     expect(iframe.getAttribute("srcdoc")).toContain("<h1>Plan</h1>")
     expect(iframe.getAttribute("referrerpolicy")).toBe("no-referrer")
   })

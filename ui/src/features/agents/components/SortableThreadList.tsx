@@ -54,14 +54,7 @@ export function SortableThreadList({
           key={item.key}
           draggable={!disabled && items.length > 1}
           aria-describedby={helpId}
-          className={cn(
-            "relative",
-            draggedId === item.id && "opacity-50",
-            target?.id === item.id &&
-              "before:inset-x-space-2 before:pointer-events-none before:absolute before:h-0.5 before:bg-selected",
-            target?.id === item.id &&
-              (target.after ? "before:bottom-0" : "before:top-0")
-          )}
+          className={cn("relative", draggedId === item.id && "opacity-50")}
           onDragStart={(event) => {
             if (
               disabled ||
@@ -90,6 +83,21 @@ export function SortableThreadList({
               id: item.id,
               after: event.clientY >= bounds.top + bounds.height / 2,
             })
+          }}
+          onDragLeave={(event) => {
+            if (event.relatedTarget instanceof Node) {
+              if (event.currentTarget.contains(event.relatedTarget)) return
+            } else {
+              const bounds = event.currentTarget.getBoundingClientRect()
+              if (
+                event.clientX >= bounds.left &&
+                event.clientX < bounds.right &&
+                event.clientY >= bounds.top &&
+                event.clientY < bounds.bottom
+              )
+                return
+            }
+            setTarget(null)
           }}
           onDrop={(event) => {
             if (!draggedId || !target || target.id !== item.id || disabled)
@@ -121,6 +129,18 @@ export function SortableThreadList({
           }}
         >
           {renderRow(item)}
+          {target?.id === item.id && !disabled && (
+            <div
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute inset-x-0 z-floating-bar mx-space-2 flex h-0 items-center",
+                target.after ? "bottom-0" : "top-0"
+              )}
+            >
+              <span className="size-2 shrink-0 rounded-full border-2 border-brand bg-surface-level-2" />
+              <span className="h-0.5 flex-1 rounded-full bg-brand" />
+            </div>
+          )}
         </div>
       ))}
     </>
