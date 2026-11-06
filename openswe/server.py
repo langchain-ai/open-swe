@@ -550,22 +550,13 @@ async def _thread_participants(
     sender_timezone: str = "",
     sender_slack_user_id: str = "",
 ) -> list[ThreadParticipant]:
-    """Everyone in the thread, each with the settings the agent acts under for them.
-
-    The sender is keyed by the id their message envelope carries, so the turn's
-    envelope resolves to their block even when no person row exists. Without a
-    GitHub account they have no commit identity, and the surface's name for them
-    is all anyone knows.
-    """
+    """Everyone in the thread, each with the settings the agent acts under for them."""
     identities = await _thread_participant_identities(thread_id)
-    resolved_sender = sender or (
-        CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
-        if sender_display_name
-        else CollaboratorIdentity(
-            display_name=OPEN_SWE_BOT_NAME,
-            commit_name=OPEN_SWE_BOT_NAME,
-            commit_email=OPEN_SWE_BOT_EMAIL,
-        )
+    bot_identity = not sender_display_name or sender_person_id.startswith("system:slack-bot-")
+    resolved_sender = sender or CollaboratorIdentity(
+        display_name=sender_display_name or OPEN_SWE_BOT_NAME,
+        commit_name=OPEN_SWE_BOT_NAME if bot_identity else "",
+        commit_email=OPEN_SWE_BOT_EMAIL if bot_identity else "",
     )
     others = [
         identity
