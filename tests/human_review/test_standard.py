@@ -33,50 +33,6 @@ from tests.conftest import FakeUserRecords, serve_threads_from
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
-@pytest.mark.parametrize("enabled", [None, False, True])
-async def test_review_backlink_respects_requester_preference_and_deduplicates(
-    user_records: FakeUserRecords, enabled: bool | None
-) -> None:
-    if enabled is not None:
-        user_records.seed("profile", "ada", {"github_review_request_comments": enabled})
-    user_records.seed("profile", "author", {"github_review_request_comments": True})
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
-    request = HumanReviewRequest(
-        pull_request_id=pr.id,
-        head_sha="abc",
-        kind="standard",
-        slack_channel_id="C1",
-        slack_thread_ts="1.0",
-        slack_message_ts="2.0",
-        run_config={"github_login": "ada"},
-    )
-    request.pull_request = pr
-    pull = AsyncMock()
-    pull.issue_comments.side_effect = [
-        [],
-        [{"body": f"<!-- open-swe-review-request:{request.id} -->"}],
-    ]
-    with (
-        patch("openswe.human_review.lifecycle.PullRequestClient.as_app") as app,
-        patch(
-            "openswe.human_review.lifecycle.get_slack_permalink",
-            AsyncMock(return_value="https://slack.example.com/review"),
-        ),
-    ):
-        app.return_value.__aenter__.return_value = pull
-        await ReviewCard(request).link_on_github()
-        request.slack_message_ts = "3.0"
-        await ReviewCard(request).link_on_github()
-    if not enabled:
-        pull.comment.assert_not_awaited()
-        pull.issue_comments.assert_not_awaited()
-        return
-    pull.comment.assert_awaited_once_with(
-        f"Review requested in [Slack](https://slack.example.com/review).\n\n"
-        f"<!-- open-swe-review-request:{request.id} -->"
-    )
-
-
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
 async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
     from openswe.human_review.people import Outcome, Participant
@@ -1096,7 +1052,6 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_permalink", AsyncMock(return_value="")),
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
-        patch.object(ReviewCard, "link_on_github", AsyncMock()),
         patch.object(
             standard.SupplementaryReviews,
             "policies",

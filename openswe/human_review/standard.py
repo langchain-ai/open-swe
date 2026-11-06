@@ -574,7 +574,6 @@ async def _request_review(
         raise
     request.slack_message_ts = message_ts
     request = await request.save()
-    await ReviewCard(request).link_on_github()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
     refusal = ""

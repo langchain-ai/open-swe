@@ -110,7 +110,7 @@ async def test_dashboard_selects_review_workflow(
     target = SlackChannel(id="C1", name="reviews")
     github = GitHubClient.connect(token="token")
     app_github = GitHubClient.connect(token="token")
-    for method in ("link_on_github", "broadcast_configured", "remove_superseded"):
+    for method in ("broadcast_configured", "remove_superseded"):
         monkeypatch.setattr(ReviewCard, method, AsyncMock())
     monkeypatch.setattr(ReviewCard, "prompt_author_ready", AsyncMock(return_value=""))
     monkeypatch.setattr(

@@ -410,7 +410,6 @@ class ExpeditedReviewNomination:
         except BaseException:
             await self.rollback(approval, displaced)
             raise
-        await card.link_on_github()
         await card.broadcast_configured()
         await card.remove_superseded()
         readiness_warning = await card.prompt_author_ready()

@@ -337,7 +337,6 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  github_review_request_comments?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean
@@ -360,7 +359,6 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  github_review_request_comments?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   goal_mode?: boolean

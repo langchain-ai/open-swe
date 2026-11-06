@@ -86,7 +86,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         {
             "auto_fix_ci": False,
             "auto_human_review_enabled": False,
-            "github_review_request_comments": True,
             "default_workspace": "  NEW  ",
         }
     )
@@ -96,7 +95,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "updated": {
             "auto_fix_ci": False,
             "auto_human_review_enabled": False,
-            "github_review_request_comments": True,
             "default_workspace": "new",
         },
     }
@@ -106,7 +104,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     assert saved["auto_fix_ci"] is False
     participant = (await read_user_settings())["participants"][0]
     assert participant["profile"]["auto_human_review_enabled"] is False
-    assert participant["profile"]["github_review_request_comments"] is True
     assert user_records.get("profile", "bob") == {"draft_prs": True}
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
     saved_prefs = user_records.get("dashboard_preferences", "Alice")
@@ -314,7 +311,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "profile": {
                 **ordinary,
                 "auto_human_review_enabled": True,
-                "github_review_request_comments": False,
                 "concierge_mode": False,
                 "personal_kitchen_channel_id": "",
                 "pr_failure_reactions": False,
