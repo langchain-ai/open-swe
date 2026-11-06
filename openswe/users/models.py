@@ -41,6 +41,7 @@ from openswe.users.authorization import (
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
+from openswe.utils.search import FuzzySearch
 
 if TYPE_CHECKING:
     from openswe.dashboard.langsmith_login import LangSmithAccount
@@ -426,15 +427,16 @@ class User(Base):
         """One page of people with sign-in identities, oldest first, with the total count."""
         query = select(cls).where(cls.identities.any())
         if search := search.strip():
+            fuzzy = FuzzySearch(search)
             query = query.where(
                 or_(
-                    cls.display_name.icontains(search, autoescape=True),
+                    fuzzy.condition(cls.display_name),
                     cls.identities.any(
                         or_(
-                            UserIdentity.login.icontains(search, autoescape=True),
-                            UserIdentity.email.icontains(search, autoescape=True),
+                            fuzzy.condition(UserIdentity.login),
+                            fuzzy.condition(UserIdentity.email),
                             (UserIdentity.provider == "slack")
-                            & UserIdentity.external_id.icontains(search, autoescape=True),
+                            & fuzzy.condition(UserIdentity.external_id),
                         )
                     ),
                 )

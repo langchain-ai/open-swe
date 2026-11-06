@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -59,13 +60,6 @@ function ShortcutHint({ shortcut }: { shortcut: string }) {
   return <Kbd className="ml-auto">{label}</Kbd>
 }
 
-function commandMatches(command: AppCommand, query: string): boolean {
-  const haystack = [command.label, ...(command.aliases ?? [])]
-    .join(" ")
-    .toLowerCase()
-  return haystack.includes(query.toLowerCase())
-}
-
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
@@ -76,13 +70,13 @@ export function buildPaletteResults(
   const searchQuery = actionsOnly
     ? normalizedQuery.slice(1).trim()
     : normalizedQuery
-  const commandResults: Array<CommandResult> = commands
-    .filter(
-      (command) =>
-        command.run &&
-        command.showInPalette !== false &&
-        (!searchQuery || commandMatches(command, searchQuery))
+  const commandResults: Array<CommandResult> = new FuzzySearch(searchQuery)
+    .rank(
+      commands,
+      (command) => command.label,
+      (command) => command.aliases?.join(" ") ?? ""
     )
+    .filter((command) => command.run && command.showInPalette !== false)
     .map((command) => ({
       id: `command:${command.id}`,
       kind: "command",

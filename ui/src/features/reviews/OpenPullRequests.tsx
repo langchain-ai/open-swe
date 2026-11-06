@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -165,10 +166,10 @@ export function OpenPullRequests({
     )
     .filter(
       (pr) =>
-        `${pr.repo} #${pr.number} ${pr.title}`
-          .toLowerCase()
-          .includes(search.trim().toLowerCase()) ||
-        descriptionMatches.has(pullRequestKey(pr).toLowerCase())
+        new FuzzySearch(search).matches(
+          `${pr.repo} #${pr.number} ${pr.title}`,
+          pr.title
+        ) || descriptionMatches.has(pullRequestKey(pr).toLowerCase())
     )
   // A status filter can only be applied to rows whose details have arrived, so
   // it costs a detail read for every row rather than only the ones on screen.

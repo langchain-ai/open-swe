@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { Badge } from "@langchain/macaw-components/Badge"
 import {
   CheckIcon,
@@ -80,7 +81,7 @@ export function ProjectSelector({
   const selected = projects.find((project) => project.id === selectedId)
   const needle = query.trim().toLowerCase()
   const matches = needle
-    ? projects.filter((project) => project.name.toLowerCase().includes(needle))
+    ? new FuzzySearch(needle).rank(projects, (project) => project.name)
     : projects
   const creatable =
     needle && !projects.some((project) => project.name.toLowerCase() === needle)

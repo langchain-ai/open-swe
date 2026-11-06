@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
@@ -89,7 +90,7 @@ function RepositoriesOwnerPage() {
   const search = searchPosition.owner === owner ? searchPosition.search : ""
   const query = search.trim().toLowerCase()
   const filteredRepos = query
-    ? ownerRepos.filter((r) => r.full_name.toLowerCase().includes(query))
+    ? new FuzzySearch(query).rank(ownerRepos, (repo) => repo.full_name)
     : ownerRepos
 
   const pageKey = `${owner}:${query}`

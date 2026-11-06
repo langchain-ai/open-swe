@@ -387,6 +387,96 @@ describe("ChatComposer people autocomplete", () => {
 })
 
 describe("ChatComposer skill autocomplete", () => {
+  it("sends a trailing shell variable unless its fuzzy suggestion was explicitly chosen", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [
+        {
+          name: "patch-notes",
+          description: "Write release notes",
+          instructions: "",
+        },
+      ],
+      restoreDraft: { key: 1, text: "check $PATH", images: [] },
+    })
+    await screen.findByRole("option", { name: /patch-notes/ })
+    fireEvent.keyDown(screen.getByRole("textbox"), {
+      key: "Enter",
+      code: "Enter",
+    })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "check $PATH" }),
+        expect.anything()
+      )
+    )
+  })
+
+  it("accepts a fuzzy suggestion with arrow navigation then Enter", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [
+        {
+          name: "patch-notes",
+          description: "Write release notes",
+          instructions: "",
+        },
+      ],
+      restoreDraft: { key: 1, text: "check $PATH", images: [] },
+    })
+    await screen.findByRole("option", { name: /patch-notes/ })
+    const editor = screen.getByRole("textbox")
+    fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" })
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+    await waitFor(() => expect(editor.textContent).toContain("/patch-notes"))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("ranks command names ahead of descriptions and tolerates typos", () => {
+    const skills = [
+      {
+        name: "review",
+        description: "Review a pull request",
+        instructions: "",
+      },
+      {
+        name: "model-audit",
+        description: "Inspect configuration",
+        instructions: "",
+      },
+      { name: "unrelated", description: "Pick a model", instructions: "" },
+    ]
+    const trigger = {
+      kind: "slash-command" as const,
+      query: "MODEL",
+      rangeStart: 0,
+      rangeEnd: 6,
+    }
+    expect(
+      buildCommandItems(trigger, [], skills)
+        .slice(0, 3)
+        .map((item) => item.label)
+    ).toEqual(["/model", "/model-audit", "/unrelated"])
+    expect(
+      buildCommandItems({ ...trigger, query: "reviw" }, [], skills)[0]?.label
+    ).toBe("/review")
+    expect(
+      buildCommandItems({ ...trigger, query: "audit" }, [], skills)[0]?.label
+    ).toBe("/model-audit")
+    expect(
+      buildCommandItems(
+        { ...trigger, query: "configuration", kind: "skill-command" },
+        [],
+        skills
+      )[0]?.label
+    ).toBe("/model-audit")
+    expect(
+      buildCommandItems({ ...trigger, query: "zzzzzz" }, [], skills)
+    ).toEqual([])
+  })
+
   it("omits the model command when no model picker is available", () => {
     const items = buildCommandItems(
       {

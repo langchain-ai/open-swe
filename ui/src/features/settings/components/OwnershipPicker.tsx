@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   MagnifyingGlassRegularIcon,
   WarningRegularIcon,
@@ -75,12 +76,7 @@ export interface OwnershipPickerProps {
 }
 
 function matchesSearch(item: PickerItem, search: string): boolean {
-  const needle = search.trim().toLowerCase()
-  if (!needle) return true
-  return (
-    item.label.toLowerCase().includes(needle) ||
-    item.id.toLowerCase().includes(needle)
-  )
+  return new FuzzySearch(search).matches(item.label, item.id)
 }
 
 /**

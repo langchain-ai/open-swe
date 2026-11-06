@@ -210,6 +210,7 @@ describe("finding in the changes", () => {
     ])
     expect(findEntry(entries, findTarget(seven[0]!))).toBe(second)
     expect(findMatches(entries, "TWO")[0]).toMatchObject({ line: 2 })
+    expect(findMatches(entries, "sevn")).toEqual(seven)
     expect(
       findMatches(buildEntries([split], walkthrough, "files"), "src/a")
     ).toEqual([{ kind: "file", path: split.path }])

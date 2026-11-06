@@ -239,12 +239,22 @@ async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagina
     )
     assert [row.number for row in next_page.pull_requests] == [3]
     assert not next_page.has_more
+    await PullRequest(owner="lc", repo="repo", number=4, title="Widgtes").save()
+    assert [
+        row.number for row in await PullRequest.search("widget", repositories=["lc/repo"], offset=2)
+    ] == []
+    assert [
+        row.number for row in await PullRequest.search("widgtes", repositories=["lc/repo"])
+    ] == [4]
 
     body_match.body = ""
     await body_match.save()
     assert [row.number for row in await PullRequest.search("widget", repositories=["LC/REPO"])] == [
         2
     ]
+    assert [
+        row.number for row in await PullRequest.search("widgtes", repositories=["lc/repo"])
+    ] == [4]
     assert await PullRequest.search("widget", repositories=[]) == []
     assert await PullRequest.search("   ", repositories=["lc/repo"]) == []
 

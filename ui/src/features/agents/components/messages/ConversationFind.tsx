@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { Input } from "@langchain/macaw-components/Input"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
@@ -49,15 +50,19 @@ class ConversationSearch {
       blocks.at(-1)?.push(node)
       previousBlock = block
     }
-    const pattern = new RegExp(
-      query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "giu"
+    const search = new FuzzySearch(query)
+    const hasExact = blocks.some((nodes) =>
+      nodes
+        .map((node) => node.data)
+        .join("")
+        .toLowerCase()
+        .includes(query.toLowerCase())
     )
     for (const nodes of blocks) {
       const text = nodes.map((node) => node.data).join("")
-      for (const match of text.matchAll(pattern)) {
-        const at = match.index
-        const length = match[0].length
+      if (hasExact && !text.toLowerCase().includes(query.toLowerCase()))
+        continue
+      for (const { start: at, length } of search.ranges(text)) {
         const range = new Range()
         let offset = 0
         for (const node of nodes) {

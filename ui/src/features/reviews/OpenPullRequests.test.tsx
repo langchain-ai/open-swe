@@ -699,6 +699,38 @@ describe("My PRs", () => {
     expect(api.openPullRequests).toHaveBeenCalledTimes(2)
   })
 
+  it("finds a pull request by its combined repository and number", async () => {
+    mount()
+    await screen.findByText("Change 1")
+    fireEvent.change(
+      screen.getByPlaceholderText("Search title, description, or PR number…"),
+      {
+        target: { value: "acme/app #1" },
+      }
+    )
+    await waitFor(() => expect(titles()).toEqual(["Change 1"]))
+  })
+
+  it("finds short typoed titles without a stored search result", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(2, { repo: "langchain-ai/langchainplus", title: "Fix typo" }),
+      ],
+    })
+    mount()
+    await screen.findByText("Fix typo")
+    fireEvent.change(
+      screen.getByPlaceholderText("Search title, description, or PR number…"),
+      { target: { value: "fiz typo" } }
+    )
+    await waitFor(() => {
+      const rows = within(section()).getAllByRole("listitem")
+      expect(rows).toHaveLength(1)
+      expect(within(rows[0]!).getByText("Fix typo")).toBeTruthy()
+    })
+  })
+
   it("shows no PRs and offers a repository filter when the search times out", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,

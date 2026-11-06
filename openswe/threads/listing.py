@@ -51,6 +51,7 @@ from openswe.threads.summary import (
 from openswe.transcript.subagents import attach_subagents
 from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
+from openswe.utils.search import FuzzySearch
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
 from openswe.walkthrough.record import Walkthrough
@@ -283,8 +284,8 @@ def _search_matches(values: Sequence[object], query: str) -> bool:
             if isinstance(value, str)
             for actual in [parse_github_pr_url(value)]
         )
-    needle = query.lower()
-    return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
+    search = FuzzySearch(query)
+    return any(isinstance(value, (str, int)) and search.matches(str(value)) for value in values)
 
 
 def _metadata_matches_filters(
