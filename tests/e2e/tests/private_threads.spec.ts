@@ -129,8 +129,19 @@ test("private threads require owner confirmation to expose the entire thread", a
       const denied = await page.request.get(
         `/dashboard/api/threads/${threadId}`,
       );
-      expect(denied.status()).toBe(404);
+      expect(denied.status()).toBe(403);
+      expect((await denied.json()).detail).toContain(
+        "Ask @alice to share it with the workspace",
+      );
     }
+    await page.goto(`/agents/${createdId}`);
+    await expect(page.getByRole("alert")).toContainText(
+      "This thread is private",
+    );
+    await expect(page.getByRole("alert")).toContainText("Ask @alice");
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(
+      0,
+    );
     const forbidden = await page.request.post(
       `/dashboard/api/threads/${createdId}/share-to-workspace`,
       { headers: { origin: new URL(page.url()).origin } },

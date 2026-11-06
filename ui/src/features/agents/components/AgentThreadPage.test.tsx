@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AgentThreadPage } from "./AgentThreadPage"
 import { useAgentThread } from "@/features/agents/lib/queries"
+import { AgentsApiError } from "@/features/agents/lib/api"
 
 vi.mock("@/features/agents/components/AgentThreadView", () => ({
   AgentThreadView: () => null,
@@ -48,6 +49,26 @@ describe("AgentThreadPage", () => {
       "Request failed (503)"
     )
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+  })
+
+  it("explains private access and names whom to ask instead of suggesting retries", () => {
+    vi.mocked(useAgentThread).mockReturnValue({
+      ...threadQuery,
+      data: undefined,
+      isError: true,
+      error: new AgentsApiError(
+        403,
+        "This thread is private. Ask @alice to share it with the workspace using the thread's visibility menu."
+      ),
+    } as never)
+
+    render(<AgentThreadPage threadId="thread-1" />)
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "This thread is private"
+    )
+    expect(screen.getByRole("alert").textContent).toContain("Ask @alice")
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull()
   })
 
   it("uses the active thread title as the document title", () => {
