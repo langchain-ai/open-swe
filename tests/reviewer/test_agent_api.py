@@ -1268,11 +1268,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert all(RUN.granted(spec.name, spec.grant) for spec in listed.tools)
     # The run's search and code mode reach what its catalog leaves out, by its token.
     found = ToolMatches.model_validate(
-        await TokenRun.answer(
-            parts, started_run, "search_tools", {"query": "mcp search", "limit": 1}
-        )
+        await TokenRun.answer(parts, started_run, "search_tools", {"query": "mcp search"})
     )
-    [match] = found.matches
+    match = found.matches[0]
     assert (match.name, match.code_name) == ("mcp_search", "mcpSearch")
     expected = {
         "connection_name": "lmt",
@@ -1305,7 +1303,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert kept.digest == started.settings.tools
     assert all(tool.grant is None for tool in kept.tools)
     index = ToolIndex(kept.tools, kept.excluded)
-    assert [ToolIndex.match(tool) for tool in index.search("mcp search", 1)] == found.matches
+    assert [ToolIndex.match(tool) for tool in index.search("mcp search")] == found.matches
     resolved = index.resolve("mcpSearch")
     assert resolved is not None and resolved.name == "mcp_search"
     assert index.resolve("load_integration_tools") is None
@@ -1344,12 +1342,12 @@ async def test_a_kept_tool_set_is_read_from_postgres_once_per_digest() -> None:
         with pytest.raises(ToolSetNotKeptError):
             await ToolSet.kept("0" * 64)
         assert reads == 3
-    assert [tool.name for tool in first.search("look it up", 5)] == ["lookup"]
+    assert [tool.name for tool in first.search("look it up")] == ["lookup"]
     assert await purge_tool_sets() == 0
     tool_sets._read.clear()
 
 
-def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
+def test_search_tools_ranks_name_matches_above_long_descriptions() -> None:
     from runtime_api.catalog import ToolSpec
 
     from openswe.agent_api.tool_sets import ToolSet
@@ -1362,25 +1360,38 @@ def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
             code_name=code_name,
         )
 
+    # An integration's main tool is the one with the longest description.
+    notion_search = (
+        "Search Notion pages and databases, or look up a user by name or email. "
+        + "Keep filters nested, use page size, and prefer the default relevance order. " * 20
+    )
     tools = ToolSet(
         [
             tool("searchDatadogLogs", "Search raw Datadog log entries.", "searchDatadogLogs"),
             tool("get_datadog_metric", "Query metrics from Datadog.", "getDatadogMetric"),
             tool("save_issue", "Create or update a Linear issue.", "saveIssue"),
             tool("slack_reply", "Reply in Slack.", None),
+            tool("mcp_notion_notion-search", notion_search, "mcpNotionNotionSearch"),
+            tool(
+                "mcp_notion_notion-search-sessions",
+                "Search past agent sessions by topic.",
+                "mcpNotionNotionSearchSessions",
+            ),
+            tool(
+                "mcp_notion_notion-search-agents",
+                "Search agents by name or description.",
+                "mcpNotionNotionSearchAgents",
+            ),
         ]
     )
 
-    matches = tools.search("datadog logs", 2)
-
-    assert [spec.name for spec in matches] == ["searchDatadogLogs", "get_datadog_metric"]
-    assert tools.search("kubernetes", 5) == []
-    # Scored as the per-query BM25 scores them, whose documents it counts only once.
-    from runtime_api.tool_search import _document, _tokens, bm25
-
-    scores = bm25(_tokens("datadog logs"), [_document(tool) for tool in tools.tools])
-    ranked = sorted(zip(scores, tools.tools, strict=True), key=lambda pair: -pair[0])
-    assert [tool.name for score, tool in ranked if score > 0][:2] == [spec.name for spec in matches]
+    assert [spec.name for spec in tools.search("datadog logs")][:2] == [
+        "searchDatadogLogs",
+        "get_datadog_metric",
+    ]
+    assert tools.search("notion search")[0].name == "mcp_notion_notion-search"
+    assert tools.search("mcpNotionNotionSearch")[0].name == "mcp_notion_notion-search"
+    assert tools.search("kubernetes") == []
     assert tools.resolve("saveIssue") == tools.resolve("save_issue") is not None
 
 

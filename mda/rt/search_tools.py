@@ -66,12 +66,12 @@ async def resolve_tool(backend: OpenSweBackend, name: str) -> ToolSpec | None:
 def search_tools_tool(backend: OpenSweBackend, description: str | None = None) -> BaseTool:
     """``search_tools`` over every tool the run may call."""
 
-    async def search_tools(query: str, limit: int = 5) -> list[dict[str, JsonValue]]:
+    async def search_tools(query: str) -> list[dict[str, JsonValue]]:
         index = await run_tool_index(backend)
         if index is not None:
-            found = [ToolIndex.match(tool) for tool in index.search(query, limit)]
+            found = [ToolIndex.match(tool) for tool in index.search(query)]
         else:
-            request = ToolSearch(run_id=run_id(), query=query, limit=limit)
+            request = ToolSearch(run_id=run_id(), query=query)
             found = (await call(backend, SEARCH, request)).matches
         return [match.model_dump(mode="json") for match in found]
 

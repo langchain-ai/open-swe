@@ -640,7 +640,7 @@ class TokenRun:
 
     async def search_tools(self, request: ToolSearch) -> ToolMatches:
         """The run's tools that best match what the model looks for."""
-        matches = (await self._tool_set()).search(request.query, request.limit)
+        matches = (await self._tool_set()).search(request.query)
         return ToolMatches(matches=[ToolIndex.match(tool) for tool in matches])
 
     async def resolve_tool(self, request: ToolLookup) -> ResolvedTool:

@@ -149,9 +149,9 @@ class ToolSet:
         wanted = set(names)
         return [tool for tool in self.tools if tool.name in wanted]
 
-    def search(self, query: str, limit: int) -> list[ToolSpec]:
-        """The tools that best match ``query``, ranked by BM25 over name, description and parameters."""
-        return self._index.search(query, limit)
+    def search(self, query: str) -> list[ToolSpec]:
+        """The tools that best match ``query``, as ``ToolIndex.search`` ranks them."""
+        return self._index.search(query)
 
     def resolve(self, name: str) -> ToolSpec | None:
         """The tool a run calls as ``name``: its own name, or ``tools.<name>`` from code mode."""

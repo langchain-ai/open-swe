@@ -24,7 +24,7 @@ from runtime_api.catalog import SEARCH_TOOLS, ToolSpec
 from runtime_api.endpoint import QUICK_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
-_MAX_RESULTS: Final = 20
+_RESULTS: Final = 10
 _WORD: Final = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 
 
@@ -32,15 +32,10 @@ def _tokens(text: str) -> list[str]:
     return [word.casefold() for word in _WORD.findall(text)]
 
 
-def _document(tool: ToolSpec) -> list[str]:
+def _text(tool: ToolSpec) -> list[str]:
     properties = tool.parameters.get("properties")
     parameters = " ".join(properties) if isinstance(properties, dict) else ""
-    # A match on the name says more than one buried in a long description.
-    return [
-        *_tokens(tool.name) * 3,
-        *_tokens(tool.description),
-        *_tokens(parameters),
-    ]
+    return [*_tokens(tool.description), *_tokens(parameters)]
 
 
 class _Bm25:
@@ -73,13 +68,6 @@ class _Bm25:
         return scores
 
 
-def bm25(
-    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
-) -> list[float]:
-    """Okapi BM25 score of each document for ``query``."""
-    return _Bm25(documents, k1, b).scores(query)
-
-
 class ToolIndex:
     """A run's tools as ``search_tools`` and code mode reach them: all but those the
     graph excludes, which the model calls neither from code nor after a search.
@@ -91,7 +79,10 @@ class ToolIndex:
         kept_out = set(excluded)
         searchable = [tool for tool in tools if tool.name not in kept_out]
         self._candidates = [tool for tool in searchable if tool.name != SEARCH_TOOLS]
-        self._scoring = _Bm25([_document(tool) for tool in self._candidates])
+        # Ranked apart: in one text, a long description dilutes a match on the name, and
+        # an integration's main tool has the longest description.
+        self._names = _Bm25([_tokens(tool.name) for tool in self._candidates])
+        self._texts = _Bm25([_text(tool) for tool in self._candidates])
         # The first tool called by each name: its own, or ``tools.<name>`` from code mode.
         self._by_name: dict[str, ToolSpec] = {}
         for tool in searchable:
@@ -99,14 +90,22 @@ class ToolIndex:
             if tool.code_name is not None:
                 self._by_name.setdefault(tool.code_name, tool)
 
-    def search(self, query: str, limit: int) -> list[ToolSpec]:
-        """The tools that best match ``query``, ranked by BM25 over name, description and parameters."""
-        scores = self._scoring.scores(_tokens(query))
-        best = sorted(
-            (pair for pair in zip(self._candidates, scores, strict=True) if pair[1] > 0),
-            key=lambda pair: -pair[1],
+    def search(self, query: str) -> list[ToolSpec]:
+        """The tools that best match ``query``: the one it names exactly, then those whose
+        name matches, then those whose description or parameter names do, each by BM25."""
+        terms = _tokens(query)
+        names = self._names.scores(terms)
+        texts = self._texts.scores(terms)
+        named = self.resolve(query.strip())
+        ranked = sorted(
+            (
+                (tool is not named, -name, -text, tool.name, tool)
+                for tool, name, text in zip(self._candidates, names, texts, strict=True)
+                if name > 0 or text > 0 or tool is named
+            ),
+            key=lambda ranking: ranking[:4],
         )
-        return [tool for tool, _ in best[: max(1, min(limit, _MAX_RESULTS))]]
+        return [ranking[-1] for ranking in ranked[:_RESULTS]]
 
     def resolve(self, name: str) -> ToolSpec | None:
         """The tool a run calls as ``name``: its own name, or ``tools.<name>`` from code mode."""
@@ -125,7 +124,6 @@ class ToolIndex:
 
 class ToolSearch(RunRequest):
     query: str
-    limit: int = 5
 
 
 class ToolMatch(BaseModel):
