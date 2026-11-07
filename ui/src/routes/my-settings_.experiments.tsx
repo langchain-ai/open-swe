@@ -18,12 +18,17 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <StreamPreference />
+        <ProfileSwitchRow
+          field="experimental_live_activity"
+          label="Live activity"
+          description="While Robin works, its folded activity and its Slack thread show its latest thoughts and tool calls, up to ten lines, instead of a single status line."
+        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
           field="concierge_mode"
           label="Concierge mode"
-          description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
+          description="Your whole DM with Robin becomes one private thread it always answers in, instead of a new thread per message."
         />
         <ProfileSwitchRow
           field="pr_failure_reactions"
@@ -35,12 +40,22 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="goal_mode"
           label="Goal mode"
-          description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
+          description="Robin keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Robin review with the obvious findings fixed, and a walkthrough of the latest version."
+        />
+        <ProfileSwitchRow
+          field="experimental_conditional_approval"
+          label="Conditional approval"
+          description="For pull requests you author, let Robin request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."
         />
         <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
+          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded, and remind the agent to save a lesson when you sound frustrated."
+        />
+        <ProfileSwitchRow
+          field="experimental_classify"
+          label="Classify tool"
+          description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"

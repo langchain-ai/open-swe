@@ -1,6 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
-import { memo, useEffect, useMemo } from "react"
+import { memo, useEffect, useMemo, useRef } from "react"
+import { ConversationFind } from "./ConversationFind"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -45,7 +46,7 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm text-primary shadow-sm"
+            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-user-message px-space-3 py-space-2 text-sm text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
             data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
@@ -112,6 +113,7 @@ export const Messages = memo(function MessagesComponent({
   isStreaming,
   streamIsLoading,
   isThinking,
+  isWaitingForDelegatedWork = false,
   settingUpSandbox,
   isOffloading = false,
   reconnectLabel = null,
@@ -136,8 +138,9 @@ export const Messages = memo(function MessagesComponent({
     scrollToBottom,
     pinMessage,
     capturePrependAnchor,
-  } = useTranscriptScroll({ scrollKey, messages, isStreaming })
+  } = useTranscriptScroll({ scrollKey, messages, isStreaming, loadEarlier })
 
+  const transcriptRef = useRef<HTMLDivElement>(null)
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
@@ -186,7 +189,13 @@ export const Messages = memo(function MessagesComponent({
   return (
     <TooltipProvider delayDuration={250}>
       <div className="relative min-h-0 min-w-0 flex-1">
+        <ConversationFind
+          key={scrollKey ?? threadId}
+          root={transcriptRef}
+          hasEarlier={Boolean(loadEarlier)}
+        />
         <div
+          data-transcript-scroll
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
@@ -221,34 +230,45 @@ export const Messages = memo(function MessagesComponent({
               </Button>
             )}
             {visibleMessages.length === 0 && emptyState}
-            {visibleMessages.map((message, index) => {
-              const isLastMessage = index === visibleMessages.length - 1
-              const messageIsStreaming = isStreaming && isLastMessage
-              const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+            <div ref={transcriptRef}>
+              {visibleMessages.map((message, index) => {
+                const isLastMessage = index === visibleMessages.length - 1
+                const messageIsStreaming = isStreaming && isLastMessage
+                const messageIsMarkdownLive =
+                  message.id === liveMarkdownMessageId
 
-              if (
-                message.author === "user" ||
-                message.structuredSenderKind === "system"
-              ) {
-                return <UserMessage key={message.id} message={message} />
-              }
+                if (
+                  message.author === "user" ||
+                  message.structuredSenderKind === "system"
+                ) {
+                  return (
+                    <UserMessage
+                      key={message.id}
+                      message={message}
+                      threadId={threadId}
+                    />
+                  )
+                }
 
-              return (
-                <AgentTurn
-                  key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming && !isOffloading}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  repoPath={repoPath}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  costUsd={costsByTurn.get(message.id)}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
-                />
-              )
-            })}
+                return (
+                  <AgentTurn
+                    key={message.id}
+                    message={message}
+                    isStreaming={messageIsStreaming && !isOffloading}
+                    isMarkdownLive={messageIsMarkdownLive}
+                    repoPath={repoPath}
+                    activityLabel={
+                      messageIsStreaming ? activityLabel : undefined
+                    }
+                    costUsd={costsByTurn.get(message.id)}
+                    onApprove={onApprove}
+                    onReject={onReject}
+                    onAutoApprove={onAutoApprove}
+                    onOpenFile={onOpenFile}
+                  />
+                )
+              })}
+            </div>
             <ReviewChatActions messages={visibleMessages} />
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
@@ -264,6 +284,7 @@ export const Messages = memo(function MessagesComponent({
               isActive={
                 !!reconnectLabel ||
                 isOffloading ||
+                isWaitingForDelegatedWork ||
                 (!!(isThinking || streamIsLoading || isStreaming) &&
                   !(
                     isStreaming &&
@@ -276,7 +297,11 @@ export const Messages = memo(function MessagesComponent({
               }
               label={
                 reconnectLabel ??
-                (isOffloading ? "Offloading conversation..." : activityLabel)
+                (isOffloading
+                  ? "Offloading conversation..."
+                  : isWaitingForDelegatedWork
+                    ? "Waiting for delegated work…"
+                    : activityLabel)
               }
               since={workingSince}
             />

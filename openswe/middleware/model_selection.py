@@ -7,48 +7,35 @@ from langchain.agents.middleware.types import AgentState, OmitFromOutput
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
+from runtime_api.catalog import ROUTES, RouteName, kept_route
+from runtime_api.provenance import Provenance
 
-from openswe.input_messages import input_message_text, message_sender_id
+from openswe.input_messages import input_message_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.utils.jev import JevDecision, select_jev_choice
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["fast", "balanced", "performance"]
-SelectedRoute = Route | Literal["default"]
+SelectedRoute = RouteName
 PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
 
 
 def _latest_human_task(messages: Sequence[object]) -> str:
-    """The user's own request, skipping injected context envelopes.
-
-    Context blocks (sender metadata, dynamic context) are appended as
-    ``HumanMessage``s after the real input, so the newest ``HumanMessage`` is
-    usually machine-authored. Only ``kind="human"`` envelopes carry a request.
-    """
-    plain = ""
+    """What a person last wrote; context and system messages around it are skipped."""
     for message in reversed(messages):
-        if not isinstance(message, HumanMessage):
-            continue
-        content = message.content
-        if message_sender_id(content, kind="human") is not None:
-            if authored := input_message_text(content):
-                return authored
-            continue
-        text = message.text
-        if plain or not isinstance(text, str) or "<dynamic-context" in text:
-            continue
-        if "<input-message" not in text:
-            plain = text
-    return plain
+        if (
+            isinstance(message, HumanMessage)
+            and (provenance := Provenance.of(message)) is not None
+            and provenance.human
+            and (authored := input_message_text(message.content))
+        ):
+            return authored
+    return ""
 
 
-ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
-
-
-def _route_criteria() -> dict[Route, str]:
+def _route_criteria() -> dict[RouteName, str]:
     return {route: prompt(f"model-selection/{route}") for route in ROUTES}
 
 
@@ -83,10 +70,6 @@ class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
-
-
-def normalize_route(route: PersistedRoute) -> SelectedRoute:
-    return "fast" if route == "fast_alt" else route
 
 
 def _emit_routed_model(route_model_ids: Mapping[str, str], route: SelectedRoute) -> None:
@@ -131,8 +114,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return RouteSelection("default")
         if self._routing_mode is None:
             return RouteSelection("default")
-        if model_route := state.get("model_route"):
-            return RouteSelection(normalize_route(model_route))
+        if model_route := kept_route(state.get("model_route")):
+            return RouteSelection(model_route)
         if self._routing_mode == "fast":
             return RouteSelection("fast")
         return await classify_route(state.get("messages", []))

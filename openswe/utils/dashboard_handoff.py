@@ -35,7 +35,8 @@ class PassageReply(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source: Literal["conversation", "terminal", "file"]
+    source: Literal["conversation", "terminal", "file", "pull_request"]
+    part: str | None = Field(default=None, max_length=1_000)
     file: str | None = Field(default=None, max_length=1_000)
     lines: str | None = Field(default=None, max_length=40, pattern=r"^\d+(-\d+)?$")
     before: str = Field(default="", max_length=_CONTEXT_LIMIT)
@@ -47,6 +48,7 @@ class PassageReply(BaseModel):
         """The reply as the model reads it, source first and the comment last."""
         return {
             "source": self.source,
+            "part": self.part,
             "file": self.file,
             "lines": self.lines,
             "before": self.before,

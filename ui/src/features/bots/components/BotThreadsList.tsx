@@ -168,7 +168,7 @@ export function BotThreadsList({
               <EmptyState
                 icon={RobotIcon}
                 title="No bot threads yet"
-                description="They appear here once an allowed bot mentions Open SWE in Slack."
+                description="They appear here once an allowed bot mentions Robin in Slack."
                 className="rounded-xl border border-dashed border-default"
               />
             ) : (

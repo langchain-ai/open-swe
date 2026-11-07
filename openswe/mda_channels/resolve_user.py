@@ -40,7 +40,7 @@ class AppUser(TypedDict):
 
 @router.post("/resolve-user")
 async def resolve_user(call: ResolveUserEndpointRequest) -> AppUser | None:
-    """The Open SWE user a channel's verified sender is, or ``None`` for MDA's default."""
+    """The Robin user a channel's verified sender is, or ``None`` for MDA's default."""
     actor = call.get("actor")
     if actor is None:
         # The channel couldn't verify who sent it; the channel's principal runs it.

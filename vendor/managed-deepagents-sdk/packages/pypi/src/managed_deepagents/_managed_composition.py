@@ -89,6 +89,26 @@ def snapshot_mcp_selection(value: object) -> tuple[McpServersDefinition, ...]:
     return tuple(definitions)
 
 
+def snapshot_subagent_mcp_selections(subagents: Sequence[object]) -> Sequence[object]:
+    """Validate and copy each declarative subagent's `mcp` selection."""
+    if not any(isinstance(spec, Mapping) and "mcp" in spec for spec in subagents):
+        return subagents
+    copied: list[object] = []
+    for spec in subagents:
+        if isinstance(spec, Mapping) and "mcp" in spec:
+            if {"runnable", "graph_id", "url"} & spec.keys():
+                raise TypeError('subagent "mcp" requires a declarative subagent')
+            if spec.get("async") is not True and spec.get("mode") == "fork":
+                raise TypeError(
+                    'subagent "mcp" is not supported on a sync "mode": "fork" subagent, '
+                    "which inherits this agent's MCP credential middleware"
+                )
+            mcp = spec["mcp"]
+            spec = {**spec, "mcp": None if mcp is None else snapshot_mcp_selection(mcp)}  # noqa: PLW2901
+        copied.append(spec)
+    return copied
+
+
 def snapshot_memory_selection(value: object) -> MemoryDefinition:
     """Validate and copy a memory definition selected for a run."""
     if not isinstance(value, MemoryDefinition):
@@ -250,6 +270,9 @@ def snapshot_managed_composition(config: Mapping[str, object]) -> dict[str, obje
         raise TypeError("instructions must be a string or None")
     if "mcp" in copied:
         copied["mcp"] = None if copied["mcp"] is None else snapshot_mcp_selection(copied["mcp"])
+    subagents = copied.get("subagents")
+    if isinstance(subagents, Sequence) and not isinstance(subagents, (str, bytes, bytearray)):
+        copied["subagents"] = snapshot_subagent_mcp_selections(subagents)
     if "memory" in copied:
         copied["memory"] = (
             None if copied["memory"] is None else snapshot_memory_selection(copied["memory"])

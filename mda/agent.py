@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Final, Self, cast
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import SubAgent
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, configure_trace_policy
 from langchain_core.language_models import BaseChatModel
 from managed_deepagents import (
     DeepAgentDefinition,
@@ -65,7 +65,7 @@ from rt.middleware import (
 from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
-from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from rt.run_prompt import ReminderMiddleware, RunPromptMiddleware, ThreadPromptMiddleware
 from rt.run_tools import (
     BackendTools,
     RunCodeInterpreter,
@@ -77,12 +77,18 @@ from rt.run_tools import (
     subagent_prompt,
 )
 from rt.skills import RunSkillsMiddleware, SkillFiles
+from rt.slack_move import SlackMoveMiddleware
 from rt.task_retry import task_retry
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 from runtime_api.catalog import Catalog, ModelSpec
 
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
+
+# Middleware that sets no trace policy of its own, such as the SDK's channel middleware,
+# would otherwise trace every model request's full payload on each wrapper span.
+configure_trace_policy(MIDDLEWARE_TRACE_POLICY)
 
 # What a graph built for no run's models, such as a read's, is declared with.
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
@@ -91,7 +97,7 @@ _MODEL_CALL_LIMIT: Final = 5_000
 # A worker's system prompt starts as this agent's; each run's follows it.
 _INSTRUCTIONS: Final = Path(__file__).with_name("instructions.md").read_text()
 _WORKER_DESCRIPTION: Final = (
-    "An Open SWE task worker: a full agent of its own, sharing this thread's sandbox, "
+    "A Robin task worker: a full agent of its own, sharing this thread's sandbox, "
     "that works on one assignment in the background and reports back as a task message."
 )
 # The subagent each graph delegates to with ``task``; its description, prompt and
@@ -207,6 +213,7 @@ def _code_mode(
         subagents=False,
         mode="turn",
         backend_tools=backend_tools,
+        listed_in_messages=True,
     )
 
 
@@ -271,6 +278,8 @@ def _parts(graph: Graph) -> _Parts:
             *reports,
             files,
             task_retry(),
+            # A Slack conversation's move goes through MDA, before the backend's tool would.
+            SlackMoveMiddleware(backend),
             RunToolsMiddleware(toolsets, backend_tools=backend_tools),
             _code_mode(graph, toolsets, files, backend_tools),
             DescribedToolsMiddleware(backend),
@@ -282,6 +291,7 @@ def _parts(graph: Graph) -> _Parts:
             RunPromptMiddleware(),
             skills,
             ThreadPromptMiddleware(),
+            ReminderMiddleware(),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             *model_call_guards(),
         ],
@@ -320,13 +330,12 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
     }
     return define_deep_agent(
         name="open-swe",
-        replicate_traces=False,
         model=inputs.agent_model(),
         context_schema=RunContext,
         # The thread's sandbox, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
-        # same sandbox. Which sandbox, and whether a run has one, is the run's catalog's: a
-        # worker's catalog is its coordinator's, so it shares the coordinator's sandbox.
+        # same sandbox. Whether a run has one, and its options, are the run's catalog's; a
+        # worker, MDA's async subagent of its coordinator, shares the coordinator's sandbox.
         sandbox=parts.sandbox,
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],

@@ -3,8 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { desktopExperience } from "@/lib/experience"
-import { AppCommandPalette } from "./AppCommandPalette"
+import { AppCommandPalette, buildPaletteResults } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
@@ -14,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   cloudThread: {
     id: "cloud-1",
     title: "Cloud result",
-    experience: "agent_workspace",
   } as AgentThread,
 }))
 
@@ -99,7 +97,6 @@ describe("AppCommandPalette", () => {
       await screen.findByRole("option", { name: "Cloud result" })
     ).toBeTruthy()
 
-    desktopExperience.write("alice", "coding")
     fireEvent.change(input, {
       target: {
         value:
@@ -124,4 +121,10 @@ describe("AppCommandPalette", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+})
+
+it("finds typoed app commands", () => {
+  expect(
+    buildPaletteResults(commands, [], "> settngs").map((result) => result.id)
+  ).toContain("command:settings")
 })

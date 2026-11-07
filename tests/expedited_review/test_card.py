@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -127,8 +128,34 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
     assert "`src/app.py`  +1 −1" in texts
     assert texts[-2:] == [
         "*Tests (not shown)*\n`tests/test_app.py`  +5 −0",
-        "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
+        "*Robin judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
         "_Generated constants_: `src/app.py` 1 hunk +12 −0\n"
         "_Logging config_: `src/app.py` 1 hunk +3 −0\n"
         "_Release notes_: `CHANGELOG.md` +30 −0",
     ]
+
+
+def test_send_controls_are_buttons_trigger_server_forwards() -> None:
+    """No select: Trigger Server forwards none; "Other channel…" opens its picker itself."""
+    from openswe.expedited_review.card import _send_controls  # noqa: PLC0415
+    from openswe.slack.app_modals import VALUE_LIMIT  # noqa: PLC0415
+
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    approval = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="expedited", slack_channel_id="C1"
+    )
+    choices = [{"id": "C1", "name": "kitchen"}, {"id": "C2", "name": "reviews"}]
+
+    [block] = _send_controls(approval, choices)  # type: ignore[arg-type]
+
+    broadcast, other = block["elements"]
+    assert broadcast["type"] == other["type"] == "button"
+    assert "url" not in broadcast and "url" not in other
+    assert other["action_id"] == f"mda_modal::expedited_review_channel:{approval.id}"
+    assert len(other["value"]) <= VALUE_LIMIT
+    view = json.loads(other["value"])
+    assert {"callback_id", "private_metadata"}.isdisjoint(view)
+    [picker] = view["blocks"]
+    # Required: Trigger Server answers Slack, so the backend can't send errors back.
+    assert picker["element"]["type"] == "conversations_select"
+    assert not picker.get("optional")

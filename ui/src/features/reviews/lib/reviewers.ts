@@ -48,3 +48,14 @@ export function withSubmittedReview(
   ]
   return { ...status, reviewers, reviewDecision: reviewDecision(reviewers) }
 }
+
+/** Whether a To Review row still waits on `login`; an open GitHub request outlasts an earlier change request. */
+export function awaitsViewer(row: OpenPullRequest, login: string): boolean {
+  if (row.state !== "open") return false
+  if (row.assignment === "draft") return row.draft !== false
+  const ready = row.draft !== true
+  const review = standingReview(row, login)
+  if (row.assignment === "requested") return ready && review !== "approved"
+  if (row.assignment === "speculative" && !ready) return false
+  return review !== "approved" && review !== "changes_requested"
+}

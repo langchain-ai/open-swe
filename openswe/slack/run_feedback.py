@@ -14,7 +14,6 @@ from openswe.slack.payloads import (
 )
 from openswe.slack.records import lookup_slack_run_mapping
 from openswe.utils.langsmith import create_langsmith_feedback
-from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,6 @@ async def process_feedback(interaction: SlackInteraction, action: SlackBlockActi
         user_id = interaction.user.id
         if selection is None or not (channel_id and message_ts and user_id):
             return
-        client = langgraph_client()
         mapping = await lookup_slack_run_mapping(channel_id, message_ts)
         if (
             mapping is None
@@ -47,7 +45,7 @@ async def process_feedback(interaction: SlackInteraction, action: SlackBlockActi
             return
         key = f"slack_reply:{channel_id}:{user_id}:{message_ts}"
         async with slack_thread_mutation_lock(
-            client, channel_id, message_ts, purpose=f"run_feedback:{user_id}"
+            channel_id, message_ts, purpose=f"run_feedback:{user_id}"
         ):
             saved = await create_langsmith_feedback(
                 selection.run_id,

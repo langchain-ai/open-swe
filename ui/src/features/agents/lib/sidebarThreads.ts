@@ -1,3 +1,7 @@
+import {
+  invalidationTopic,
+  type InvalidationTopic,
+} from "@/lib/invalidations/topics"
 import type {
   AgentSource,
   AgentStatus,
@@ -28,6 +32,7 @@ export interface SidebarThreadItem {
   /** Subagents the thread spawned, listed as sub-threads under its row. */
   subagents?: Array<AgentSubagentSummary>
   taskWorkers?: Array<AgentThread>
+  waitingForDelegatedWork?: boolean
   thread: AgentThread
 }
 
@@ -106,6 +111,7 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
     reviewPage: thread.reviewPage,
     subagents: thread.subagents,
     taskWorkers: thread.taskWorkers,
+    waitingForDelegatedWork: thread.waitingForDelegatedWork,
     thread,
   }
 }
@@ -180,41 +186,42 @@ export function sortSidebarThreads(
   return [...threads].sort(mode === "created" ? byCreation : byRecency)
 }
 
-export interface SidebarDayGroup {
-  key: string
+export interface SidebarAgeGroup {
+  key: "today" | "yesterday" | "older"
   label: string
   threads: Array<SidebarThreadItem>
 }
 
-function dayLabel(day: Date, now: Date): string {
-  const today = new Date(now).setHours(0, 0, 0, 0)
-  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
-  if (day.getTime() === today) return "Today"
-  if (day.getTime() === yesterday) return "Yesterday"
-  return day.toLocaleDateString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: day.getFullYear() === now.getFullYear() ? undefined : "numeric",
-  })
-}
-
-/** Buckets threads by the local day they were last updated, newest first, each day ordered by creation. */
-export function groupSidebarThreadsByDay(
+/** Buckets threads into Today, Yesterday and Older by creation date, newest first. */
+export function groupSidebarThreadsByAge(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
-): Array<SidebarDayGroup> {
-  const days = new Map<number, Array<SidebarThreadItem>>()
-  for (const thread of threads) {
-    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
-    days.set(day, [...(days.get(day) ?? []), thread])
+): Array<SidebarAgeGroup> {
+  const today = new Date(now).setHours(0, 0, 0, 0)
+  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
+  const buckets: Record<SidebarAgeGroup["key"], Array<SidebarThreadItem>> = {
+    today: [],
+    yesterday: [],
+    older: [],
   }
-  return [...days.entries()]
-    .sort(([left], [right]) => right - left)
-    .map(([day, items]) => ({
-      key: String(day),
-      label: dayLabel(new Date(day), now),
-      threads: items.sort(byCreation),
+  for (const thread of threads) {
+    const day = new Date(thread.createdAt).setHours(0, 0, 0, 0)
+    buckets[
+      day >= today ? "today" : day >= yesterday ? "yesterday" : "older"
+    ].push(thread)
+  }
+  return (
+    [
+      ["today", "Today"],
+      ["yesterday", "Yesterday"],
+      ["older", "Older"],
+    ] as const
+  )
+    .filter(([key]) => buckets[key].length > 0)
+    .map(([key, label]) => ({
+      key,
+      label,
+      threads: buckets[key].sort(byCreation),
     }))
 }
 
@@ -272,15 +279,20 @@ export function sidebarItemContains(
 export function sidebarRefreshInterval(
   threads: ReadonlyArray<AgentThread> = []
 ): number | false {
-  if (
-    threads.some((thread) =>
-      threadFamily(thread).some((member) => member.status === "running")
-    )
+  return threads.some((thread) =>
+    threadFamily(thread).some((member) => member.status === "running")
   )
-    return 2000
-  return threads.some((thread) => thread.taskMembership?.role === "coordinator")
-    ? 30_000
+    ? 2000
     : false
+}
+
+/** What tells a sidebar list that a thread it shows gained or lost a worker, its first included. */
+export function taskWorkerTopics(
+  threads: ReadonlyArray<AgentThread> = []
+): Array<InvalidationTopic> {
+  return threads
+    .filter((thread) => thread.taskMembership?.role !== "worker")
+    .map((thread) => invalidationTopic("task-workers", thread.id))
 }
 
 export function pinnedThreadShortcuts(

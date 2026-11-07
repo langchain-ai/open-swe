@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal
 
 from langgraph.config import get_config
@@ -65,6 +65,25 @@ class RunThread:
     thread: ManagedThread
     #: The binding the origin channel posts to; ``None`` without an origin.
     origin: ChannelBinding | None = None
+    #: The conversations the run handed its thread to (``post(..., hand_off=True)``),
+    #: latest last, shared by every view of the run's thread.
+    handed_off: list[ChannelBinding] = field(default_factory=list, compare=False, repr=False)
+
+    def moved(self) -> RunThread:
+        """The run's thread where it is now: at the conversation it was last handed to.
+
+        Its answer, a decision it waits on and later posts go there.
+        """
+        if not self.handed_off:
+            return self
+        binding = self.handed_off[-1]
+        sender = self.thread.origin.sender if self.thread.origin is not None else None
+        origin = ThreadOrigin(channel=runtime_channel(binding), sender=sender)
+        return RunThread(
+            thread=replace(self.thread, origin=origin),
+            origin=binding,
+            handed_off=self.handed_off,
+        )
 
 
 #: The run's thread, set by ``ManagedCompiledAgent`` for each step of a run.
@@ -116,7 +135,7 @@ def current_run_thread(runtime: object, configurable: Mapping[str, object] | Non
     """The run's thread: the one its graph set, else read from what ``runtime`` carries."""
     current = _current_thread.get()
     if current is not None:
-        return current
+        return current.moved()
     return build_run_thread(
         thread_id=(configurable or {}).get("thread_id"),
         live=resolve_channel_binding(getattr(runtime, "context", None), configurable),

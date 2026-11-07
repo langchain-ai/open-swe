@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from openswe.github import webhook as github_webhooks
+from openswe.review.approvals import ApprovalPolicy
+from openswe.review.assessment_feedback import PublishedAssessment
 
 pytestmark = pytest.mark.usefixtures("no_local_threads")
 
@@ -97,6 +99,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
         ("dry_run", None, False),
         ("dry_run", "Policy", False),
         ("approve", None, False),
+        ("approve", "Policy", False),
     ],
 )
 async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
@@ -104,21 +107,41 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
     policy: str | None,
     storage_fails: bool,
 ) -> None:
-    payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
+    payload = _push_payload(ref="refs/heads/feat-x", after="b" * 40)
     pr = {
         "number": 7,
         "html_url": "https://github.com/lc/repo/pull/7",
         "title": "T",
-        "head": {"sha": "newsha", "ref": "feat-x"},
+        "head": {"sha": "b" * 40, "ref": "feat-x"},
         "base": {"sha": "basesha", "ref": "main"},
     }
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     set_metadata = AsyncMock()
+    assessment = PublishedAssessment(
+        review_id=19,
+        owner="lc",
+        repo="repo",
+        pr_number=7,
+        head_sha="a" * 40,
+        risk_score=3,
+        decision="needs_human_review",
+        explanation="Needs human judgment.",
+    )
+    saved_assessments: list[PublishedAssessment] = []
 
     with (
+        patch("openswe.github.webhook.postgres.configured", return_value=True),
+        patch.object(PublishedAssessment, "latest", AsyncMock(return_value=assessment)),
+        patch.object(
+            PublishedAssessment, "save", autospec=True, side_effect=saved_assessments.append
+        ),
+        patch("openswe.github.webhook.Walkthrough.carry_forward", AsyncMock()),
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
-        patch("openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value=policy)),
+        patch(
+            "openswe.github.webhook.approval_policy_for_review",
+            AsyncMock(return_value=ApprovalPolicy(approvals_md=policy) if policy else None),
+        ),
         patch(
             "openswe.github.webhook.PullRequest.link_review",
             AsyncMock(side_effect=RuntimeError("Storage unavailable") if storage_fails else None),
@@ -144,13 +167,17 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
             return_value={
                 "kind": "reviewer",
                 "watch": True,
-                "last_reviewed_sha": "oldsha",
+                "last_reviewed_sha": "a" * 40,
+                "last_reviewed_base_sha": "previous-parent",
             },
         ),
         patch(
             "openswe.webhooks.common._fetch_compare_diff",
             new_callable=AsyncMock,
-            side_effect=["same diff", "same diff"],
+            side_effect=[
+                "diff --git a/f b/f\nindex 111..222 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+child\n",
+                "diff --git a/f b/f\nindex 333..444 100644\n--- a/f\n+++ b/f\n@@ -21 +21 @@\n-old\n+child\n",
+            ],
         ),
         patch("openswe.webhooks.common.set_reviewer_thread_metadata", new=set_metadata),
         patch(
@@ -176,17 +203,21 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
 
     completion.assert_awaited_once_with(
         reviewer_thread_id=github_webhooks.reviewer_thread_id("lc", "repo", 7),
-        head_sha="newsha",
+        head_sha="b" * 40,
     )
     fake_client.runs.create.assert_not_called()
     set_metadata.assert_awaited_once()
     assert set_metadata.await_args is not None
-    assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "newsha"
+    assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "b" * 40
+    assert set_metadata.await_args.kwargs["last_reviewed_base_sha"] == "basesha"
+    assert saved_assessments[0].head_sha == "b" * 40
+    assert saved_assessments[0].decision == "needs_human_review"
+    assert saved_assessments[0].approved is False
     # Even without a re-review, a settled check lands on the new head so the
     # review stays visible after the head moves.
     create_check.assert_awaited_once()
     assert create_check.await_args is not None
-    assert create_check.await_args.kwargs["head_sha"] == "newsha"
+    assert create_check.await_args.kwargs["head_sha"] == "b" * 40
     complete_check.assert_awaited_once()
     assert complete_check.await_args is not None
     assert complete_check.await_args.kwargs["check_run_id"] == 42
@@ -201,12 +232,12 @@ async def test_head_update_triggers_re_review_run_when_watching(
     unchanged_diff: bool,
     approval_mode: str,
 ) -> None:
-    payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
+    payload = _push_payload(ref="refs/heads/feat-x", after="b" * 40)
     pr = {
         "number": 7,
         "html_url": "https://github.com/lc/repo/pull/7",
         "title": "T",
-        "head": {"sha": "newsha", "ref": "feat-x", "repo": {"id": 456 if fork else 123}},
+        "head": {"sha": "b" * 40, "ref": "feat-x", "repo": {"id": 456 if fork else 123}},
         "base": {"sha": "basesha", "ref": "main"},
     }
     payload["repository"]["id"] = 123
@@ -217,10 +248,24 @@ async def test_head_update_triggers_re_review_run_when_watching(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
 
+    assessment = PublishedAssessment(
+        review_id=19,
+        owner="lc",
+        repo="repo",
+        pr_number=7,
+        head_sha="a" * 40,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Approved documentation changes.",
+        approved=True,
+    )
     with (
+        patch("openswe.github.webhook.postgres.configured", return_value=True),
+        patch.object(PublishedAssessment, "latest", AsyncMock(return_value=assessment)),
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
         patch(
-            "openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value="Policy")
+            "openswe.github.webhook.approval_policy_for_review",
+            AsyncMock(return_value=ApprovalPolicy(approvals_md="Policy")),
         ),
         patch("openswe.webhooks.common.enforce_public_repo_org_gate", AsyncMock(return_value=None)),
         patch(
@@ -249,7 +294,7 @@ async def test_head_update_triggers_re_review_run_when_watching(
             return_value={
                 "kind": "reviewer",
                 "watch": True,
-                "last_reviewed_sha": "oldsha",
+                "last_reviewed_sha": "a" * 40,
             },
         ),
         patch(
@@ -284,8 +329,8 @@ async def test_head_update_triggers_re_review_run_when_watching(
     assert args[1] == "reviewer"
     configurable = kwargs["config"]["configurable"]
     assert configurable["re_review"] is True
-    assert configurable["last_reviewed_sha"] == "oldsha"
-    assert configurable["head_sha"] == "newsha"
+    assert configurable["last_reviewed_sha"] == "a" * 40
+    assert configurable["head_sha"] == "b" * 40
     assert configurable["repo"] == {"owner": "lc", "name": "repo"}
     if fork:
         fetch_pr.assert_not_awaited()
@@ -296,12 +341,12 @@ async def test_head_update_triggers_re_review_run_when_watching(
         for c in set_meta.await_args_list
         if c.kwargs.get("head_sha") is not None
     ]
-    assert "newsha" in head_sha_writes
+    assert "b" * 40 in head_sha_writes
     # A fresh check run is created on the new head SHA (GitHub only shows
     # checks on the current head), and its id is persisted for settling.
     create_check.assert_awaited_once()
     assert create_check.await_args is not None
-    assert create_check.await_args.kwargs["head_sha"] == "newsha"
+    assert create_check.await_args.kwargs["head_sha"] == "b" * 40
     check_id_writes = [
         c.kwargs.get("extra", {}).get("review_check_run_id")
         for c in set_meta.await_args_list
@@ -588,3 +633,66 @@ async def test_pr_reopened_re_enables_watch() -> None:
     ):
         await github_webhooks.process_github_pr_close(_pr_close_payload(action="reopened"))
     assert captured and captured[0][1]["watch"] is True
+
+
+@pytest.mark.parametrize(
+    "base_ref,previous_base,new_line,unchanged",
+    [
+        ("parent", "parent-before-force-push", "+child change", True),
+        ("main", "main-before-rebase", "+child change", True),
+        ("parent", "parent-before-force-push", "+different change", False),
+        ("main", "", "+child change", True),
+    ],
+)
+async def test_rebased_patch_comparison(
+    base_ref: str, previous_base: str, new_line: str, unchanged: bool
+) -> None:
+    common = github_webhooks.common
+    old_diff = (
+        "diff --git a/file.py b/file.py\nindex 1111111..2222222 100644\n"
+        "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@ def child():\n-old\n+child change\n"
+    )
+    new_diff = (
+        "diff --git a/file.py b/file.py\nindex 3333333..4444444 100644\n"
+        f"--- a/file.py\n+++ b/file.py\n@@ -21 +21 @@ def child():\n-old\n{new_line}\n"
+    )
+    with patch.object(
+        common, "_fetch_compare_diff", AsyncMock(side_effect=[old_diff, new_diff])
+    ) as fetch:
+        result = await common.is_pr_diff_unchanged_since_last_review(
+            {"owner": "lc", "name": "repo"},
+            base_ref=base_ref,
+            last_reviewed_base_sha=previous_base,
+            base_sha="current-base",
+            last_reviewed_sha="old-head",
+            head_sha="new-head",
+            token="t",
+        )
+    assert result is unchanged
+    assert [c.args[1:3] for c in fetch.await_args_list] == [
+        (previous_base or base_ref, "old-head"),
+        ("current-base", "new-head"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "old_blob,new_blob,unchanged",
+    [("a" * 40, "a" * 40, True), ("a" * 40, "b" * 40, False), ("aaaaaaa", "aaaaaaa", False)],
+)
+async def test_binary_patch_comparison(old_blob: str, new_blob: str, unchanged: bool) -> None:
+    diffs = [
+        f"diff --git a/image b/image\nindex {'0' * 40}..{blob} 100644\nBinary files a/image and b/image differ\n"
+        for blob in (old_blob, new_blob)
+    ]
+    common = github_webhooks.common
+    with patch.object(common, "_fetch_compare_diff", AsyncMock(side_effect=diffs)):
+        assert (
+            await common.is_pr_diff_unchanged_since_last_review(
+                {"owner": "lc", "name": "repo"},
+                base_ref="main",
+                last_reviewed_sha="old",
+                head_sha="new",
+                token="t",
+            )
+            is unchanged
+        )

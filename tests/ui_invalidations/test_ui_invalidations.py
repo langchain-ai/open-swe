@@ -2,16 +2,30 @@ import asyncio
 import json
 from contextlib import aclosing
 from types import SimpleNamespace
+from uuid import uuid7
 
 import pytest
 from sqlalchemy import text
 
 from openswe.database import postgres
 from openswe.database.notifications import LISTENER
+from openswe.plugins.records import DocumentScope
 from openswe.ui_invalidations import Topic, outbox
 from openswe.ui_invalidations.hub import HUB
 from openswe.ui_invalidations.routes import _stream
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+
+
+def test_a_plugins_document_topics_can_always_be_subscribed_to() -> None:
+    # The longest names GitHub allows, and the "_" a repository and a collection may hold:
+    # one malformed topic fails the whole subscription.
+    plugin = uuid7()
+    for scope in (
+        DocumentScope(repository=f"{'o' * 39}/{'r_' * 50}"),
+        DocumentScope(user_id=uuid7()),
+    ):
+        key = scope.topic_key(plugin, f"my_{'c' * 61}")
+        assert Topic.well_formed(Topic.PLUGIN_DOCUMENTS.keyed(key))
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:

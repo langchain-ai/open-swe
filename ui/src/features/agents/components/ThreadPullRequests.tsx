@@ -36,7 +36,7 @@ export type ThreadFix = (
   scope: ThreadFixScope
 ) => Promise<void> | void
 
-const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
+export const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
   draft: "bg-surface-level-2 text-secondary",
   open: "bg-success text-success-secondary",
   merged: "bg-purple text-purple",
@@ -63,7 +63,7 @@ function relativeAge(value: string | null): string {
   return `${Math.floor(elapsedMonths / 12)}y ago`
 }
 
-function pullRequestState(
+export function pullRequestState(
   pullRequest: AgentPullRequest,
   health: AgentPullRequestHealth | undefined
 ): AgentPullRequest["state"] {
@@ -86,7 +86,7 @@ function hasActionableIssues(
   )
 }
 
-function pullRequestTone(
+export function pullRequestTone(
   pullRequest: AgentPullRequest,
   health: AgentPullRequestHealth | undefined
 ): string {
@@ -299,10 +299,12 @@ export function PullRequestHoverCard({
   pullRequest,
   health,
   healthUnavailable,
+  showHealth = true,
 }: {
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
+  showHealth?: boolean
 }) {
   const age = relativeAge(pullRequest.createdAt)
   const state = pullRequestState(pullRequest, health)
@@ -364,7 +366,9 @@ export function PullRequestHoverCard({
           </span>
         </span>
       </div>
-      <HealthDetails health={health} unavailable={healthUnavailable} />
+      {showHealth && (
+        <HealthDetails health={health} unavailable={healthUnavailable} />
+      )}
     </div>
   )
 }

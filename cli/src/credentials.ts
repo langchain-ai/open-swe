@@ -21,7 +21,7 @@ export class CredentialError extends Error {
  */
 export interface Credential {
   readonly machine: boolean
-  /** What kind of credential this is and where it came from, for `oswe auth status`. */
+  /** What kind of credential this is and where it came from, for `robin auth status`. */
   readonly source: string
   /** What to tell the user when the server answers 401. */
   readonly rejected: string
@@ -40,7 +40,7 @@ export interface StoredSession {
  */
 export class SessionCredential implements Credential {
   readonly machine = false
-  readonly rejected = "your session expired — run `oswe login` again"
+  readonly rejected = "your session expired — run `robin login` again"
 
   constructor(
     private readonly session: string,

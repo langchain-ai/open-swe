@@ -62,7 +62,7 @@ async def _slack_origin(cfg: RunConfig) -> GuideOrigin:
         )
         raise GuideStartError("Cannot verify thread credential scope") from exc
     active = await get_active_slack_thread(
-        client, cfg.thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+        cfg.thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
     if not active:
         raise GuideStartError("Current Slack location is unavailable")
@@ -83,7 +83,7 @@ async def _mcp_caller_origin(login: str) -> GuideOrigin:
     user = await User.for_login("github", login)
     if user is None or not user.slack_user_id:
         raise GuideStartError(
-            "Your Slack account is not linked to Open SWE. "
+            "Your Slack account is not linked to Robin. "
             + settings_hint("Connect Slack under Connections", "/my-settings/connections")
         )
     return GuideOrigin(

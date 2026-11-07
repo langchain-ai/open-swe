@@ -6,6 +6,7 @@ import type { SelectedLineRange } from "@pierre/diffs"
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds } from "@/features/reviews/lib/lineRange"
 import {
@@ -17,6 +18,7 @@ import { findEntry, isRenderable, type DiffEntry } from "./diffEntries"
 
 export type RailTab = "chat" | "discussion" | "history"
 export type DiffOrder = "files" | "guide"
+export type NavigatorLayout = "tabs" | "stacked"
 
 export type DiffTarget =
   | { kind: "top" }
@@ -45,6 +47,8 @@ export type PageEvent = "showFindings" | "showOpenConversations"
 interface Preferences {
   /** Whether the file list sits beside the diff, where there is room for it. */
   navigatorOpen: boolean
+  /** Whether the file list shows the walkthrough or the tree behind tabs, or both stacked. */
+  navigatorLayout: NavigatorLayout
   order: DiffOrder
   diffStyle: DiffStyle
 }
@@ -96,6 +100,8 @@ interface VisitState {
   chatDraft: { key: number; text: string } | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
+  /** Replies to passages of the page, waiting for the chat composer to take them. */
+  chatReplies: ReadonlyArray<PassageReply>
   /** Events not yet taken by the part of the page they're for. */
   events: ReadonlySet<PageEvent>
   entryOrder: ReadonlyArray<DiffEntry>
@@ -123,6 +129,7 @@ interface ReviewPageActions {
   setRailOpen: (open: boolean) => void
   toggleNavigator: () => void
   setNavigatorOverlay: (open: boolean) => void
+  toggleNavigatorLayout: () => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
@@ -148,6 +155,10 @@ interface ReviewPageActions {
   askInChat: (text: string) => void
   sendInChat: (text: string) => void
   clearChatQuestion: () => void
+  /** Hands a reply to a passage of the page to the chat composer. */
+  replyInChat: (reply: PassageReply) => void
+  /** Takes the oldest waiting reply off the queue; whether `reply` was it. */
+  takeChatReply: (reply: PassageReply) => boolean
   attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>) => void
   removeChatExcerpt: (index: number) => void
   clearChatExcerpts: () => void
@@ -175,6 +186,7 @@ interface ReviewPageActions {
 const ORDER_KEY = "open-swe.review.view"
 const DIFF_STYLE_KEY = "open-swe.review.diffStyle"
 const NAVIGATOR_KEY = "open-swe.review.navigator"
+const NAVIGATOR_LAYOUT_KEY = "open-swe.review.navigatorLayout"
 /** Wide enough for the file list, the diff and the chat side by side. */
 export const NAVIGATOR_INLINE_QUERY = "(min-width: 1360px)"
 
@@ -255,6 +267,8 @@ export function isPassed(
 function storedPreferences(): Preferences {
   return {
     navigatorOpen: readPreference(NAVIGATOR_KEY) !== "closed",
+    navigatorLayout:
+      readPreference(NAVIGATOR_LAYOUT_KEY) === "stacked" ? "stacked" : "tabs",
     // A walkthrough, when one exists, is the default reading order.
     order: readPreference(ORDER_KEY) === "files" ? "files" : "guide",
     diffStyle: readPreference(DIFF_STYLE_KEY) === "split" ? "split" : "unified",
@@ -299,6 +313,7 @@ function freshVisit(): VisitState {
     jump: null,
     chatDraft: undefined,
     chatQuestion: undefined,
+    chatReplies: [],
     events: new Set(),
     entryOrder: [],
     fileFilter: "",
@@ -371,6 +386,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
 
   return {
     navigatorOpen: true,
+    navigatorLayout: "tabs",
     order: "files",
     diffStyle: "unified",
     ...freshHead(null, null),
@@ -404,6 +420,12 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ navigatorOpen })
     },
     setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
+    toggleNavigatorLayout: () => {
+      const navigatorLayout =
+        get().navigatorLayout === "stacked" ? "tabs" : "stacked"
+      writePreference(NAVIGATOR_LAYOUT_KEY, navigatorLayout)
+      set({ navigatorLayout })
+    },
     openReview: (verdict = "COMMENT") =>
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
@@ -508,6 +530,16 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       get().focusChat()
     },
     clearChatQuestion: () => set({ chatQuestion: undefined }),
+    replyInChat: (reply) => {
+      set({ chatReplies: [...get().chatReplies, reply] })
+      get().focusChat()
+    },
+    takeChatReply: (reply) => {
+      const [oldest, ...rest] = get().chatReplies
+      if (oldest !== reply) return false
+      set({ chatReplies: rest })
+      return true
+    },
     attachToChat: (excerpts) => {
       const known = new Set(get().chatExcerpts.map(excerptKey))
       set({

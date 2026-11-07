@@ -611,11 +611,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             weight="medium"
             className="mb-space-3 block"
           >
-            Ask Open SWE
+            Ask Robin
           </Text>
           <Textarea
             id="incidents-question"
-            aria-label="Ask Open SWE"
+            aria-label="Ask Robin"
             variant="plain"
             size="md"
             rows={4}

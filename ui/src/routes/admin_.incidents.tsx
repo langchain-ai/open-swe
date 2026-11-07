@@ -10,7 +10,7 @@ export const Route = createFileRoute("/admin_/incidents")({
     <SettingsPage
       adminOnly
       title="Incidents"
-      description="How Open SWE responds to incidents."
+      description="How Robin responds to incidents."
     >
       <IncidentSettings />
     </SettingsPage>

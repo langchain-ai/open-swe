@@ -39,6 +39,9 @@ async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
                     "required_status_checks": [
                         {"context": "e2e", "integration_id": -1},
                         {"context": github_ci.REVIEW_CHECK_RUN_NAME},
+                        {"context": "Open SWE Review"},
+                        {"context": "Robin Auto-fix"},
+                        {"context": "Open SWE Auto-fix"},
                     ]
                 },
             },

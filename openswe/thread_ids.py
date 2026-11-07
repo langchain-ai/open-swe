@@ -13,6 +13,7 @@ __all__ = [
     "mda_successor_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
+    "review_shadow_thread_id",
     "reviewer_thread_id",
     "slack_thread_id",
     "thread_id_from_branch",
@@ -36,6 +37,10 @@ def review_scout_thread_id(owner: str, repo: str, pr_number: int) -> str:
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/review-scout")
 
 
+def review_shadow_thread_id(owner: str, repo: str, pr_number: int) -> str:
+    return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/reviewer-shadow")
+
+
 def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:
     """Agent thread for a PR that Open SWE did not branch, keyed by the PR itself."""
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}")
@@ -44,6 +49,13 @@ def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:
 def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> str:
     """The one chat a user has about a PR. Per-user: chats are not shared."""
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}")
+
+
+def plugin_chat_thread_id(
+    installation: str, user_id: str, name: str, repository: str | None
+) -> str:
+    """One person's chat under ``name`` beside a plugin install, optionally about a repository."""
+    return _url_uuid(f"plugin/{installation}/chat/{user_id}/{repository or ''}/{name}")
 
 
 def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> str:

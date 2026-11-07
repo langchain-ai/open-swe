@@ -454,3 +454,59 @@ async def test_a_named_author_cannot_borrow_a_pinned_thread(
         thread_metadata.pop("owner_login")
         monkeypatch.setattr("openswe.run_config.get_config", lambda: config(login="alice"))
         assert await opr._resolve_pr_author_token("bob") == ("bot-token", "bot")
+
+
+@pytest.mark.parametrize("visibility", ["public", "private"])
+@pytest.mark.parametrize("author", [None, "alice"])
+@pytest.mark.parametrize("provider", ["github", "langsmith"])
+async def test_ask_channel_prs_use_bot_without_borrowing_reporter_credentials(
+    monkeypatch, thread_metadata, credentials, visibility, author, provider
+):
+    opr = importlib.import_module("openswe.tools.open_pull_request")
+    thread_metadata.update(
+        visibility=visibility,
+        participant_logins=["alice"],
+        source_context={"slack_thread": {"channel_id": "CASK", "thread_ts": "1.0"}},
+    )
+    run_config = config(source="slack")
+    run_config["configurable"]["auth_provider"] = provider
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
+    )
+    if provider == "langsmith":
+        with pytest.raises(PermissionError, match="no GitHub repository access"):
+            await opr._resolve_pr_author_token(author)
+        credentials.assert_not_awaited()
+        return
+    expected = ("personal-token", "user")
+    assert await opr._resolve_pr_author_token(author) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("background", [False, True])
+@pytest.mark.parametrize("owner_type", ["user", "system"])
+async def test_ask_preflight_uses_requester_or_verified_continuation_participant(
+    monkeypatch, thread_metadata, credentials, background, owner_type
+):
+    opr = importlib.import_module("openswe.tools.open_pull_request")
+    thread_metadata.update(
+        owner_type=owner_type,
+        participant_logins=["alice", "bob"],
+        source_context={"slack_thread": {"channel_id": "CASK", "thread_ts": "1.0"}},
+    )
+    run_config = config(source="slack", login="alice")
+    run_config["configurable"]["background_task_completion"] = background
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    assert await opr._resolve_pr_author_token("bob") == (
+        "bob-token" if background else "alice-token",
+        "user",
+    )
+    if background:
+        with pytest.raises(credential_scope.PrAuthorNotAParticipant):
+            await opr._resolve_pr_author_token("mallory")
+        with pytest.raises(RuntimeError, match="named thread participant"):
+            await opr._resolve_pr_author_token()

@@ -1,4 +1,6 @@
 import { parseSqlResult } from "../chat/SqlResultTable"
+import { Thought } from "./thought"
+import { routedMessageHref } from "./timeline/workEntry"
 import {
   parseManagedToolsCard,
   type ManagedToolsCardOffer,
@@ -49,6 +51,7 @@ export type RenderItem =
     }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "routed-message-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "worker-launch-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
@@ -57,6 +60,7 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "managed-tools-item",
   "iframe-item",
   "worker-launch-item",
+  "routed-message-item",
   "image-item",
 ])
 
@@ -132,6 +136,105 @@ export function collapsedWorkItems(
   includeUnfinished = false
 ): Array<RenderItem> {
   return items.flatMap((item) => attentionItems(item, includeUnfinished))
+}
+
+/** One entry of a live work tail: a thought's latest passage, or a tool call. */
+export type WorkTailEntry =
+  | {
+      kind: "reasoning"
+      key: string
+      heading: string | null
+      body: string
+      lines: number
+    }
+  | { kind: "tool"; key: string; chunk: ToolExecutionChunk; lines: 1 }
+
+/**
+ * The most recent stretch of a live run within a fixed budget of lines, so a
+ * folded run shows what it is doing without its full log. A tool call takes
+ * one line; a thought takes its heading and up to three lines of its latest
+ * paragraph. Calls waiting on approval are left out: the fold shows those in
+ * full. The Slack live message (`openswe/slack/live_activity.py`) selects by
+ * the same rules.
+ */
+export class WorkTail {
+  static readonly MAX_LINES = 10
+  static readonly THOUGHT_LINES = 3
+  /** A conservative line width for estimating how far a passage wraps. */
+  static readonly CHARS_PER_LINE = 80
+
+  /** Oldest first: the newest entries that fit the budget together. */
+  readonly entries: Array<WorkTailEntry>
+  /** The entry just before `entries`, sliding out as the next one comes in. */
+  readonly previous: WorkTailEntry | null
+
+  constructor(items: Array<RenderItem>) {
+    const all = items.flatMap(WorkTail.entriesOf)
+    let used = 0
+    let first = all.length
+    while (first > 0 && used + all[first - 1]!.lines <= WorkTail.MAX_LINES) {
+      first -= 1
+      used += all[first]!.lines
+    }
+    this.entries = all.slice(first)
+    this.previous = all[first - 1] ?? null
+  }
+
+  private static entriesOf(this: void, item: RenderItem): Array<WorkTailEntry> {
+    switch (item.type) {
+      case "reasoning-item": {
+        if (item.chunk.kind !== "reasoning") return []
+        const { heading, body } = new Thought(item.chunk.text).passage
+        if (!heading && !body) return []
+        const bodyLines = Math.min(
+          WorkTail.THOUGHT_LINES,
+          Math.ceil(body.length / WorkTail.CHARS_PER_LINE)
+        )
+        return [
+          {
+            kind: "reasoning",
+            key: item.key,
+            heading,
+            body,
+            lines: (heading ? 1 : 0) + bodyLines,
+          },
+        ]
+      }
+      case "explored-group":
+      case "subagent-group":
+        return WorkTail.toolEntries(item.key, item.chunks)
+      case "code-item":
+        return WorkTail.toolEntries(
+          item.key,
+          item.chunk.calls?.length ? item.chunk.calls : [item.chunk]
+        )
+      case "edit-item":
+      case "shell-item":
+      case "sql-item":
+      case "tool-item":
+        return WorkTail.toolEntries(item.key, [item.chunk])
+      default:
+        return []
+    }
+  }
+
+  private static toolEntries(
+    itemKey: string,
+    chunks: Array<ToolExecutionChunk>
+  ): Array<WorkTailEntry> {
+    return chunks.flatMap((chunk, index) =>
+      chunk.status === "pending"
+        ? []
+        : [
+            {
+              kind: "tool" as const,
+              key: chunk.toolCallId || `${itemKey}-${index}`,
+              chunk,
+              lines: 1 as const,
+            },
+          ]
+    )
+  }
 }
 
 export function countWorkActions(items: Array<RenderItem>): number {
@@ -264,6 +367,15 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (routedMessageHref(chunk)) {
+        flushGroups()
+        items.push({
+          type: "routed-message-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
       if (chunk.toolName === "start_async_task") {
         flushGroups()
         items.push({

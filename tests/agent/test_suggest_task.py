@@ -110,9 +110,12 @@ class TestSuggestedTasks:
         async with transaction() as conn:
             assert await conn.scalar(text("SELECT count(*) FROM suggested_task")) == 0
 
-    @pytest.mark.parametrize("repo", ["acme/origin", "acme/other"])
+    @pytest.mark.parametrize(
+        ("repo", "review_shadow"),
+        [("acme/origin", False), ("acme/origin", True), ("acme/other", False)],
+    )
     async def test_webhook_sender_without_oauth_can_only_suggest_for_current_repo(
-        self, monkeypatch: pytest.MonkeyPatch, repo: str
+        self, monkeypatch: pytest.MonkeyPatch, repo: str, review_shadow: bool
     ) -> None:
         await WORKSPACES.create(WorkspaceCreate(name="Origin", repos=["acme/origin"]), "alice")
         await index.create("review-thread", runtime="mda")
@@ -127,6 +130,7 @@ class TestSuggestedTasks:
                     "github_login": "webhook-sender",
                     "repo": {"owner": "acme", "name": "origin"},
                     "pr_number": 7,
+                    "review_shadow": review_shadow,
                 }
             ),
         )
@@ -142,7 +146,8 @@ class TestSuggestedTasks:
             count = await conn.scalar(text("SELECT count(*) FROM suggested_task"))
         if repo == "acme/origin":
             assert result["success"] is True
-            assert count == 1
+            # A shadow review records nothing anyone on the pull request would see.
+            assert count == (0 if review_shadow else 1)
         else:
             assert result == {"success": False, "error": "no OAuth"}
             assert count == 0

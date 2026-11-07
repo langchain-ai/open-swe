@@ -19,7 +19,9 @@ import {
   collapsedWorkItems,
   countWorkActions,
   segmentTurn,
+  WorkTail,
 } from "../renderItems"
+import { LiveWorkTail } from "./LiveWorkTail"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
@@ -43,6 +45,7 @@ import {
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
+import { useProfile } from "@/lib/profile"
 import { formatElapsed } from "@/lib/utils"
 
 /**
@@ -250,6 +253,7 @@ export function AgentTurn({
   activityLabel?: string
   costUsd?: number
 } & ApprovalCallbacks) {
+  const liveActivity = useProfile().data?.experimental_live_activity ?? false
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
     [message.chunks, message.id]
@@ -446,6 +450,7 @@ export function AgentTurn({
       case "sql-item":
         return <SqlResultItem key={item.key} chunk={item.chunk} />
 
+      case "routed-message-item":
       case "tool-item":
         return (
           <ToolWorkEntry
@@ -500,13 +505,22 @@ export function AgentTurn({
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />
+        {live && !expanded && liveActivity && (
+          <LiveWorkTail
+            tail={new WorkTail(segment.items)}
+            repoPath={repoPath}
+          />
+        )}
         {visible.map(renderItem)}
       </Fragment>
     )
   }
 
   return (
-    <div className="group/turn my-space-2 min-w-0 space-y-space-2">
+    <div
+      className="group/turn my-space-2 min-w-0 space-y-space-2"
+      data-message-id={message.id}
+    >
       {segments.map((segment, index) =>
         segment.type === "reply"
           ? renderItem(segment.item)

@@ -8,13 +8,17 @@ LangGraph cron entries.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
-from typing import Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from pydantic import ConfigDict, StringConstraints, with_config
 from typing_extensions import TypedDict
 
-from managed_deepagents._channels.types import normalize_channel_destination
+from managed_deepagents._channels.types import SlackChannelTarget, normalize_channel_destination
+
+if TYPE_CHECKING:
+    from managed_deepagents._channels.types import ChannelTarget
 
 JsonValue = object
 _NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -31,7 +35,13 @@ class ScheduleThreadPersistent(TypedDict):
     id: str
 
 
-ScheduleThreadConfig = ScheduleThreadEphemeral | ScheduleThreadPersistent
+ThreadConfig = ScheduleThreadEphemeral | ScheduleThreadPersistent
+"""A run's thread: ``{"mode": "ephemeral"}`` (the mode may be left out) for a
+fresh thread, or ``{"mode": "persistent", "id": "<uuid>"}`` for the thread with
+that id. A schedule's ``thread`` and a channel handler's run both take it."""
+
+ScheduleThreadConfig = ThreadConfig
+"""Deprecated: use ``ThreadConfig``."""
 
 
 @with_config(ConfigDict(extra="forbid"))
@@ -60,6 +70,12 @@ class ScheduleDeliveryTargetRequired(TypedDict):
 
 @with_config(ConfigDict(extra="forbid"))
 class ScheduleDeliveryTarget(ScheduleDeliveryTargetRequired, total=False):
+    """Where a schedule's run posts its answer, as MDA stores it.
+
+    Deprecated as ``define_schedule``'s ``deliver_to``: use ``auto_post`` with a
+    ``ChannelTarget``.
+    """
+
     auto_post: bool
 
 
@@ -71,7 +87,7 @@ class ScheduleConfig(ScheduleConfigRequired, total=False):
     timezone: str
     prompt: str
     input: JsonValue
-    thread: ScheduleThreadConfig
+    thread: ThreadConfig
     deliver_to: ScheduleDeliveryTarget
     context: dict[str, JsonValue]
 
@@ -81,6 +97,7 @@ __all__ = [
     "ScheduleDefinition",
     "ScheduleDeliveryTarget",
     "ScheduleThreadConfig",
+    "ThreadConfig",
     "define_schedule",
 ]
 
@@ -105,11 +122,19 @@ def define_schedule(
     timezone: str | None = None,
     prompt: str | None = None,
     input: JsonValue | None = None,
-    thread: ScheduleThreadConfig | None = None,
+    thread: ThreadConfig | None = None,
+    auto_post: Literal[False] | ChannelTarget | Mapping[str, object] | None = None,
     deliver_to: ScheduleDeliveryTarget | None = None,
     context: Mapping[str, JsonValue] | None = None,
 ) -> ScheduleDefinition:
-    """Declare a managed schedule that MDA provisions as a LangGraph cron."""
+    """Declare a managed schedule that MDA provisions as a LangGraph cron.
+
+    ``auto_post`` is where the run posts its final answer: a ``ChannelTarget``,
+    such as a ``SlackChannelTarget`` or, in a schedule file deploy reads, its literal
+    ``{"provider": "slack", "conversation_id": ...}``, or ``False`` (the default) for nowhere. A
+    schedule has no conversation to answer in, so ``True`` isn't taken. Only
+    Slack targets, for now. ``deliver_to`` is its deprecated form.
+    """
 
     if not isinstance(cron, str) or len(cron.strip().split()) != _CRON_FIELD_COUNT:
         raise ValueError(
@@ -125,7 +150,12 @@ def define_schedule(
 
     _validate_thread(thread)
     if deliver_to is not None:
+        warnings.warn(_DELIVER_TO_DEPRECATION, FutureWarning, stacklevel=2)
+        if auto_post is not None:
+            raise ValueError(_BOTH_DELIVERIES)
         _validate_deliver_to(deliver_to)
+    elif auto_post is not None:
+        deliver_to = _deliver_to_of(auto_post)
     if context is not None and not isinstance(context, Mapping):
         raise ValueError("define_schedule(...) requires `context` to be a mapping when provided.")
 
@@ -144,7 +174,7 @@ def define_schedule(
     return ScheduleDefinition(config)
 
 
-def _validate_thread(thread: ScheduleThreadConfig | object | None) -> None:
+def _validate_thread(thread: ThreadConfig | object | None) -> None:
     if thread is None:
         return
     if not isinstance(thread, dict):
@@ -157,6 +187,66 @@ def _validate_thread(thread: ScheduleThreadConfig | object | None) -> None:
     thread_id = thread.get("id")
     if mode == "persistent" and (not isinstance(thread_id, str) or not thread_id.strip()):
         raise ValueError("define_schedule(...) requires `thread['id']` for persistent schedules.")
+
+
+_DELIVER_TO_DEPRECATION = (
+    "define_schedule(deliver_to=...) is deprecated; use auto_post with a channel target, "
+    'such as auto_post={"provider": "slack", "conversation_id": "C123"}.'
+)
+_BOTH_DELIVERIES = "define_schedule(...) takes `auto_post` or `deliver_to`, not both."
+_SCHEDULE_TARGETS = (
+    "define_schedule(...) requires `auto_post` to be False or a Slack target for now."
+)
+
+
+def _slack_target_of(fields: Mapping[str, object]) -> SlackChannelTarget | None:
+    """A ``{"provider": "slack", "conversation_id", "thread_ts"?, "channel"?}`` literal."""
+    known = {"provider", "conversation_id", "thread_ts", "channel"}
+    if fields.get("provider") != "slack" or not set(fields) <= known:
+        return None
+    try:
+        return SlackChannelTarget(
+            conversation_id=cast("str", fields.get("conversation_id")),
+            thread_ts=cast("str | None", fields.get("thread_ts")),
+            channel=cast("str | None", fields.get("channel")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _deliver_to_of(auto_post: object) -> ScheduleDeliveryTarget | None:
+    """``auto_post`` as the ``deliver_to`` MDA stores, which deploy reads; ``False`` is none.
+
+    Only Slack schedules post their answer, for now.
+    """
+    if auto_post is False:
+        return None
+    if isinstance(auto_post, Mapping):
+        # The literal a schedule file writes, since deploy reads schedules statically.
+        auto_post = _slack_target_of(auto_post)
+    if not isinstance(auto_post, SlackChannelTarget):
+        raise ValueError(_SCHEDULE_TARGETS)
+    channel = auto_post.channel or auto_post.provider
+    thread_ts = auto_post.thread_ts
+    ids = (channel, auto_post.conversation_id, "x" if thread_ts is None else thread_ts)
+    if not all(isinstance(value, str) and value.strip() for value in ids):
+        raise ValueError(_SCHEDULE_TARGETS)
+    to = cast(
+        "ScheduleChannelDestination",
+        {"type": "provider_conversation", "conversation_id": auto_post.conversation_id}
+        if auto_post.thread_ts is None
+        else {
+            "type": "provider_thread",
+            "conversation_id": auto_post.conversation_id,
+            "thread_id": auto_post.thread_ts,
+        },
+    )
+    deliver_to: ScheduleDeliveryTarget = {"channel": channel.strip(), "to": to}
+    try:
+        _validate_deliver_to(deliver_to)
+    except ValueError:
+        raise ValueError(_SCHEDULE_TARGETS) from None
+    return deliver_to
 
 
 def _validate_deliver_to(deliver_to: ScheduleDeliveryTarget | object) -> None:

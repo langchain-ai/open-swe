@@ -7,11 +7,18 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from openswe.slack import retry
+from openswe.slack import retry, workflow_approval
 from openswe.slack import routes as slack_routes
 from openswe.slack.blocks import option_actions
 from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 from tests.conftest import MemoryEventClaims
+
+
+@pytest.fixture(autouse=True)
+def _backend_acts_on_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These drive the backend's own handling of a click, which ``act_on_slack_click``
+    runs for each click MDA's Slack channel hands it."""
+    monkeypatch.setattr(slack_routes, "_answered_here", lambda _interaction: True)
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -157,7 +164,6 @@ async def test_option_interaction_schedules_update_only_for_authorized_actor(
     update = AsyncMock()
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )
@@ -213,7 +219,6 @@ async def test_next_in_a_review_guide_counts_only_for_its_reader(
     advance = AsyncMock()
     guide = SimpleNamespace(is_reader=AsyncMock(return_value=reader))
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(slack_routes.common, "is_code_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
@@ -271,7 +276,6 @@ async def test_code_channel_view_action_routes_to_channel_session(
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(slack_routes.common, "is_code_channel", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )
@@ -317,7 +321,6 @@ async def test_code_channel_external_select_returns_registered_suggestions(
     options = [{"text": {"type": "plain_text", "text": "open-swe"}, "value": "open-swe"}]
     get_suggestions = AsyncMock(return_value=options)
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(slack_routes.common, "get_block_suggestions", get_suggestions)
 
     result = await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())
@@ -397,6 +400,7 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     assert request.turn_context == ("" if message_ts else retry.prompt("runs/slack-retry").strip())
     assert request.event_ts != message_ts
     assert request.original_message_ts == message_ts
+    assert request.source_message_ts == message_ts
     assert request.explicit_request
     assert request.code_channel == (thread_ts == "0" and channel_id.startswith("C"))
     assert request.concierge_mode == (channel_id.startswith("D") and thread_ts == "0")
@@ -404,3 +408,131 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
         "status"
     ) == "ignored"
     process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("location", "identity", "state", "approved"),
+    [
+        ("coordinator", "owner", "pending", True),
+        ("legacy", "owner", "pending", True),
+        ("dm", "owner", "pending", True),
+        ("dm-reject", "owner", "pending", False),
+        ("unrelated", "owner", "pending", False),
+        ("unmapped", "owner", "pending", False),
+        ("wrong-dm", "owner", "pending", False),
+        ("coordinator", "other", "pending", False),
+        ("coordinator", "unlinked", "pending", False),
+        ("bot", "owner", "pending", False),
+        ("coordinator", "owner", "approved", False),
+        ("coordinator", "owner", "rejected", False),
+    ],
+)
+async def test_workflow_approval_requires_owner_and_authorized_card_location(
+    monkeypatch: pytest.MonkeyPatch,
+    location: str,
+    identity: str,
+    state: str,
+    approved: bool,
+) -> None:
+    payload = _option_payload()
+    is_dm = location in {"dm", "dm-reject", "wrong-dm"}
+    target = "coordinator" if location == "legacy" else "worker"
+    button = {
+        "type": "workflow_push_approval",
+        "action": "reject" if location == "dm-reject" else "approve",
+        "fingerprint": "fp",
+    }
+    if location != "legacy":
+        button["thread_id"] = target
+    payload["actions"][0]["value"] = json.dumps(button)
+    metadata = {"source": "slack", "owner_login": "owner", "visibility": "private"}
+    if location == "bot":
+        metadata["trigger_kind"] = "slack_bot"
+    decide = AsyncMock(return_value=({"status": "approved" if approved else "rejected"}, True))
+    dispatch = AsyncMock()
+    confirm = AsyncMock()
+    note = AsyncMock()
+    update = AsyncMock()
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(
+            return_value=SlackChannelContext(
+                is_im=is_dm, is_ext_shared=False, is_pending_ext_shared=False
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_approval.User, "concierge_mode_for_slack", AsyncMock(return_value=is_dm)
+    )
+    monkeypatch.setattr(
+        workflow_approval.User,
+        "login_for_slack",
+        AsyncMock(return_value=None if identity == "unlinked" else identity),
+    )
+    monkeypatch.setattr(
+        workflow_approval,
+        "lookup_slack_thread_id",
+        AsyncMock(
+            return_value=None
+            if location == "unmapped"
+            else "unrelated"
+            if location == "unrelated"
+            else "coordinator"
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_approval, "fetch_thread_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(
+        workflow_approval,
+        "open_dm",
+        AsyncMock(return_value="wrong" if location == "wrong-dm" else "C1"),
+    )
+    monkeypatch.setattr(
+        workflow_approval.TaskMembership,
+        "context_for_thread",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                task=SimpleNamespace(
+                    coordinator_thread_id=None if location == "unmapped" else "coordinator"
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_approval,
+        "get_workflow_push_approvals",
+        AsyncMock(return_value={"fp": {"status": state}}),
+    )
+    monkeypatch.setattr(workflow_approval, "decide_workflow_push_approval", decide)
+    monkeypatch.setattr(workflow_approval, "dispatch_followup", dispatch)
+    monkeypatch.setattr(workflow_approval, "post_slack_ephemeral_message", confirm)
+    monkeypatch.setattr(workflow_approval, "note_for_concierge", note)
+    monkeypatch.setattr(workflow_approval, "update_slack_message", update)
+    background = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(_request(payload), background)
+    await background()
+
+    accepted = approved or location == "dm-reject"
+    assert result["status"] == ("accepted" if accepted else "ignored")
+    if not accepted:
+        decide.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        update.assert_not_awaited()
+        return
+    decide.assert_awaited_once_with(target, "fp", approved=approved, actor="owner")
+    assert confirm.await_args.args[:2] == ("C1", "U1")
+    if is_dm:
+        note.assert_awaited_once()
+    if approved:
+        assert dispatch.await_args.args[:2] == (target, metadata)
+        assert dispatch.await_args.kwargs == {
+            "github_login": "owner",
+            "multitask_strategy": "enqueue",
+        }
+    else:
+        dispatch.assert_not_awaited()

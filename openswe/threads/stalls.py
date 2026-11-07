@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Final, Self
 
 from pydantic import JsonValue
+from runtime_api.models import MODEL_CALL_BUDGET
 
 from openswe import event_claims
 from openswe.completion import handle_run_completion
@@ -24,8 +25,9 @@ from openswe.transcript.turns import last_run_activity
 
 logger = logging.getLogger(__name__)
 
-# Twice the longest a healthy run goes quiet: a model call's three 900s attempts.
-STALLED_AFTER: Final = timedelta(minutes=90)
+# Twice the longest a healthy run goes quiet: one model call, its retries across the
+# fallback model included, which MDA ends within ``MODEL_CALL_BUDGET``.
+STALLED_AFTER: Final = 2 * MODEL_CALL_BUDGET
 _CLAIM_SCOPE: Final = "stalled_run"
 _CLAIM_TTL: Final = timedelta(days=2)
 _ERROR: Final[dict[str, JsonValue]] = {

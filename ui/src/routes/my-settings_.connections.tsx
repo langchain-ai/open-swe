@@ -15,7 +15,7 @@ function ConnectionsPage() {
   return (
     <SettingsPage
       title="Connections"
-      description="Accounts and tools Open SWE can use on your behalf in your private threads."
+      description="Accounts and tools Robin can use on your behalf in your private threads."
     >
       {(user) => (
         <>

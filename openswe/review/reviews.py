@@ -388,16 +388,31 @@ def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _check_run_views(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "name": run.get("name") or "",
-            "status": run.get("status") or "",
-            "conclusion": run.get("conclusion"),
-            "url": run.get("html_url"),
-        }
-        for run in runs
-    ]
+class ReviewCheck(BaseModel):
+    """A check run on the pull request's head, as the review page lists it."""
+
+    name: str
+    status: str
+    conclusion: str | None
+    url: str | None
+
+    @classmethod
+    async def on_head(cls, pull: PullRequestClient) -> list[Self]:
+        """The checks on ``pull``'s head; none when GitHub cannot list them.
+
+        Read apart from the review page's detail: a busy branch's check runs take
+        several slow pages, which held the whole page back.
+        """
+        runs = await or_none(pull.repo.check_runs(await pull.head_sha()))
+        return [
+            cls(
+                name=run.get("name") or "",
+                status=run.get("status") or "",
+                conclusion=run.get("conclusion"),
+                url=run.get("html_url"),
+            )
+            for run in runs or []
+        ]
 
 
 async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
@@ -694,26 +709,31 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     """
     async with GitHubClient.as_app(owner, repo) as github:
         repository = github.repo(owner, repo)
-        pr_payload = await repository.pull_request(pr_number).pull(rendered_body=True)
+        pr_payload, thread = await asyncio.gather(
+            repository.pull_request(pr_number).pull(rendered_body=True),
+            _reviewer_thread_for(owner, repo, pr_number),
+        )
         details = _serialize_pr_details(pr_payload)
         details["description_pull_requests"] = DescriptionReferences(
             pr_payload.get("body_html") or ""
         ).pull_request_numbers(owner, repo)
 
-        thread = await _reviewer_thread_for(owner, repo, pr_number)
-        stored = (await _thread_findings([thread])).get(thread["thread_id"], []) if thread else []
-        if thread:
-            stored = await reconcile_linked_findings(
-                thread["thread_id"], repository.pull_request(pr_number), findings=stored
-            )
+        stored_by_thread, target = await asyncio.gather(
+            _thread_findings([thread] if thread else []),
+            _scout_target(owner, repo, pr_number, pr_payload),
+        )
+        stored = stored_by_thread.get(thread["thread_id"], []) if thread else []
         summary = _thread_review_summary(thread, stored) if thread else None
         metadata = thread_metadata(thread) if thread else {}
         if not summary:
             summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
 
         head_sha = details["head_sha"] or summary["head_sha"]
-        runs = await or_none(repository.check_runs(head_sha)) if head_sha else None
-    checks = _check_run_views(runs or [])
+        if thread:
+            stored = await reconcile_linked_findings(
+                thread["thread_id"], repository.pull_request(pr_number), findings=stored
+            )
+            summary = _thread_review_summary(thread, stored) or summary
 
     findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(
@@ -727,7 +747,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    target = await _scout_target(owner, repo, pr_number, pr_payload)
     walkthrough = await target.walkthrough() if target else None
     walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
     walkthrough_error = (
@@ -755,7 +774,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
             await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
         ),
         "pr": details,
-        "checks": checks,
         "findings": findings,
         "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
         "walkthrough_running": walkthrough_running,

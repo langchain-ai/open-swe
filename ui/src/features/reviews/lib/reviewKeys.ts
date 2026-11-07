@@ -15,6 +15,8 @@ export const reviewKeys = {
     ["review", owner, repo, number] as const,
   diff: ({ owner, repo, number }: PullRequestRef) =>
     ["reviewDiff", owner, repo, number] as const,
+  checks: ({ owner, repo, number }: PullRequestRef) =>
+    ["review-checks", owner, repo, number] as const,
   conversation: ({ owner, repo, number }: PullRequestRef) =>
     ["review-conversation", owner, repo, number] as const,
   history: ({ owner, repo, number }: PullRequestRef) =>

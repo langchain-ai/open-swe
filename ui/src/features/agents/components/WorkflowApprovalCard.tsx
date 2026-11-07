@@ -88,8 +88,8 @@ export function WorkflowApprovalCard({
                 </Text>
                 <p className="mt-space-1 text-sm text-secondary">
                   {inherited
-                    ? `This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Open SWE did not author these workflow changes.`
-                    : `Open SWE is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`}
+                    ? `This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Robin did not author these workflow changes.`
+                    : `Robin is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`}
                 </p>
               </div>
             </div>
@@ -124,7 +124,7 @@ export function WorkflowApprovalCard({
                 </p>
                 <p className="mt-0.5 text-xs text-secondary">
                   Workflow files control CI jobs and may access repository
-                  secrets. Open SWE pauses before pushing any workflow change.
+                  secrets. Robin pauses before pushing any workflow change.
                 </p>
               </div>
             </div>

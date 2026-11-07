@@ -166,7 +166,7 @@ function ExclusionsSection({
   return (
     <section className="space-y-space-3">
       <Text as="h3" variant="h5" weight="medium" color="primary">
-        Excluded under .open-swe/APPROVALS.md
+        Excluded under .open-swe/auto-approve-rules/
       </Text>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-space-5 gap-y-space-3 text-xs">
         {(
@@ -174,7 +174,7 @@ function ExclusionsSection({
             ["Pull request ID", exclusions.pull_request_id ?? "Not stored"],
             ["Base SHA", exclusions.base_sha],
             ["Head SHA", exclusions.head_sha],
-            ["APPROVALS.md SHA-256", exclusions.approvals_md_sha256],
+            ["Auto-approve rules SHA-256", exclusions.approvals_md_sha256],
           ] as const
         ).map(([label, value]) => (
           <div key={label} className="contents">

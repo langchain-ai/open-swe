@@ -5,6 +5,7 @@ import {
   collapsedWorkItems,
   countWorkActions,
   segmentTurn,
+  WorkTail,
 } from "./renderItems"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -217,5 +218,55 @@ describe("buildRenderItems", () => {
       { kind: "text", text: "Done" },
     ])
     expect(countWorkActions(items)).toBe(3)
+  })
+})
+
+describe("WorkTail", () => {
+  const tool = (
+    toolCallId: string,
+    status: ToolExecutionChunk["status"] = "completed"
+  ): ToolExecutionChunk => ({
+    kind: "tool-execution",
+    toolCallId,
+    title: "read_file",
+    toolKind: "read",
+    status,
+  })
+  const summary = (tail: WorkTail) =>
+    tail.entries.map((entry) =>
+      entry.kind === "tool"
+        ? entry.chunk.toolCallId
+        : [entry.heading, entry.body, entry.lines]
+    )
+
+  it("keeps the newest work that fits ten lines and leaves approvals to the fold", () => {
+    const tail = new WorkTail(
+      buildRenderItems([
+        tool("read-0"),
+        { kind: "reasoning", text: "Looking around" },
+        ...Array.from({ length: 5 }, (_, index) => tool(`read-${index + 1}`)),
+        {
+          kind: "reasoning",
+          text: `**Checking the write path**\n\nAn old paragraph.\n\n${"Now I'm reading the queue store. ".repeat(12)}`,
+        },
+        tool("approve-1", "pending"),
+        tool("read-7", "in_progress"),
+      ])
+    )
+
+    expect(summary(tail)).toEqual([
+      "read-1",
+      "read-2",
+      "read-3",
+      "read-4",
+      "read-5",
+      [
+        "Checking the write path",
+        "Now I'm reading the queue store. ".repeat(12).trim(),
+        4,
+      ],
+      "read-7",
+    ])
+    expect(tail.previous).toMatchObject({ kind: "reasoning", lines: 1 })
   })
 })

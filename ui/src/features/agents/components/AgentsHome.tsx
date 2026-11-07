@@ -1,7 +1,13 @@
 import { AgentChatEmptyState } from "@/features/agents/components/AgentChatEmptyState"
-import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { cn } from "@/lib/utils"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -13,6 +19,7 @@ import {
   pickComposerRepo,
   pickComposerWorkspace,
 } from "@/features/agents/lib/composerWorkspace"
+import { composerRepoSelection } from "@/features/agents/lib/composerRepoSelection"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -36,7 +43,10 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
+import {
+  localThreadKeys,
+  useLocalThreads,
+} from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { agentsApi } from "@/features/agents/lib/api"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -46,9 +56,14 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { useProjects } from "@/features/projects/lib/projects"
+import { CreateProjectDialog } from "@/features/projects/components/CreateProjectDialog"
+import { useFolderProject } from "@/features/projects/lib/desktopFolders"
 import { api } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
+import { productAnalytics } from "@/lib/analytics"
 import {
   requestNotificationPermission,
   setNotificationsPref,
@@ -71,15 +86,17 @@ interface PendingCloudSubmit {
 }
 
 export function AgentsHome({
+  initialProject,
   initialRepo,
   initialLocalRepo,
   initialNoRepo,
 }: {
+  /** A project the composer starts in, as from a sidebar folder's compose button. */
+  initialProject?: string
   initialRepo?: string
   initialLocalRepo?: string
   initialNoRepo?: boolean
 }) {
-  const agentWorkspace = useAgentWorkspace()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -117,6 +134,14 @@ export function AgentsHome({
     null
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
+  const { projects } = useProjects({ enabled: cloudEnabled })
+  const folderProject = useFolderProject()
+  const localThreads = useLocalThreads()
+  const [projectId, setProjectId] = useState<string | null>(
+    initialProject ?? null
+  )
+  // A project brings its workspace and repository; picking a repository leaves it.
+  const selectedProject = projects.find((project) => project.id === projectId)
   const [submitted, setSubmitted] = useState<{
     draft: CreateAgentThreadVariables
     sentAt: number
@@ -131,9 +156,18 @@ export function AgentsHome({
   )
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  // Without a project, the agent works in a task folder of its own; older
+  // desktop builds can't make one, so a project stays required there.
+  const taskWorkspaces =
+    typeof window !== "undefined" &&
+    window.openSweDesktop?.taskWorkspaces === true
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
-    initialLocalRepo ? "local" : initialRepo || initialNoRepo ? "cloud" : null
+    initialLocalRepo
+      ? "local"
+      : initialRepo || initialNoRepo || initialProject
+        ? "cloud"
+        : null
   )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
@@ -173,13 +207,33 @@ export function AgentsHome({
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
+  const userId = session.data?.user_id ?? ""
+  const rememberedRepo = useSyncExternalStore(
+    composerRepoSelection.subscribe,
+    () => composerRepoSelection.read(userId),
+    () => undefined
+  )
+  const restoredRepo =
+    rememberedRepo === null
+      ? null
+      : reposQuery.data?.repositories.find(
+          (candidate) =>
+            candidate.full_name.toLowerCase() === rememberedRepo?.toLowerCase()
+        )?.full_name
+  // A project without a repository works without one, like "No project".
+  const repoSelection =
+    repoOverride !== undefined
+      ? repoOverride
+      : selectedProject
+        ? selectedProject.repo_full_name
+        : restoredRepo
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the workspace preferring a
   // repository named from outside (a link or the profile default), else the
   // user's default, then the instance default.
   const preferredWorkspace = pickComposerWorkspace({
-    override: workspaceOverride,
+    override: workspaceOverride ?? selectedProject?.workspace ?? null,
     repoWorkspace: null,
     userDefault: preferences.data?.default_workspace,
     instanceDefault: defaultWorkspaceSlug,
@@ -189,16 +243,14 @@ export function AgentsHome({
     ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
     : undefined
   const namedRepo = (
-    agentWorkspace && repoOverride === undefined
-      ? null
-      : repoOverride === undefined
-        ? personalWorkspaceRepo
-          ? null
-          : userDefaultRepo
-        : repoOverride
+    repoSelection === undefined
+      ? personalWorkspaceRepo
+        ? null
+        : userDefaultRepo
+      : repoSelection
   )?.toLowerCase()
   const selectedWorkspace = pickComposerWorkspace({
-    override: workspaceOverride,
+    override: workspaceOverride ?? selectedProject?.workspace ?? null,
     repoWorkspace: namedRepo
       ? (workspaces.find((workspace) =>
           workspace.repos.some((r) => r.toLowerCase() === namedRepo)
@@ -213,8 +265,12 @@ export function AgentsHome({
   // Memoized: a fresh array fed straight into the pick below reads as a
   // mutation to the React Compiler and costs the component its optimization.
   const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
-  const repo = pickComposerRepo({
-    override: agentWorkspace ? (repoOverride ?? null) : repoOverride,
+  // Working in a repository needs GitHub; until it is linked the picker asks
+  // for it, and runs go to a task folder whatever was remembered or linked.
+  const gitHubLinkUser =
+    session.data && !hasLinkedGitHub(session.data) ? session.data : undefined
+  const pickedRepo = pickComposerRepo({
+    override: repoSelection,
     userDefault: userDefaultRepo,
     userWorkspaceDefault: selectedWorkspace
       ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
@@ -224,11 +280,21 @@ export function AgentsHome({
         ?.default_repo ?? null,
     offered: workspaceRepos,
   })
+  const repo = gitHubLinkUser ? null : pickedRepo
   const selectWorkspace = (slug: string | null) => {
     setWorkspaceOverride(slug)
   }
+  const selectProject = (next: string | null) => {
+    setProjectId(next)
+    // The new project's own workspace and repository apply again.
+    setWorkspaceOverride(null)
+    setRepoOverride(undefined)
+  }
+  // The name typed in the picker, while the create dialog is open.
+  const [creatingProject, setCreatingProject] = useState<string | null>(null)
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
+    composerRepoSelection.write(userId, value)
     // Picking from the list pins the workspace it was offered under, so the
     // pick cannot drag the composer into whichever workspace owns it.
     if (!workspaceOverride) setWorkspaceOverride(selectedWorkspace)
@@ -258,13 +324,7 @@ export function AgentsHome({
   }, [panelCollapsed, pendingThreadId])
 
   useEffect(() => {
-    if (
-      !isDesktop ||
-      !localReposLoaded ||
-      profileQuery.isPending ||
-      agentWorkspace
-    )
-      return
+    if (!isDesktop || !localReposLoaded || profileQuery.isPending) return
     const stored =
       window.localStorage.getItem(LAST_LOCAL_REPO_KEY) ??
       window.localStorage.getItem(LEGACY_LAST_LOCAL_REPO_KEY)
@@ -272,13 +332,15 @@ export function AgentsHome({
       (checkout) => checkout.cwd === localRepoPath || checkout.cwd === stored
     )
     // oxlint-disable-next-line react/set-state-in-effect
-    setLocalRepoPath(selected?.cwd ?? localRepos[0]?.cwd ?? null)
+    setLocalRepoPath(
+      selected?.cwd ?? (taskWorkspaces ? null : (localRepos[0]?.cwd ?? null))
+    )
   }, [
     isDesktop,
     localRepoPath,
     localRepos,
     localReposLoaded,
-    agentWorkspace,
+    taskWorkspaces,
     profileQuery.isPending,
   ])
 
@@ -302,6 +364,7 @@ export function AgentsHome({
       )
       setLocalRepoBranches(branches)
     }
+    return result?.branches ?? []
   }, [])
 
   const selectedLocalRef = localRepoBranches.find(
@@ -460,33 +523,22 @@ export function AgentsHome({
     resetPendingSubmit()
   }
 
-  const handleSubmit = ({ text: prompt, images }: ComposerSubmission) => {
+  const handleSubmit = async ({ text: prompt, images }: ComposerSubmission) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
-    if (
-      agentWorkspace &&
-      profileQuery.data?.agent_workspace_tasks_supported !== true
-    ) {
-      setLocalError(
-        "The connected backend needs an update before it can start Work chats."
-      )
-      return
-    }
     const desktop = window.openSweDesktop
     const localCheckout =
       runTarget === "local"
         ? localRepos.find((candidate) => candidate.cwd === localRepoPath)
         : undefined
     const localRun = runTarget === "local"
-    if (localRun && (!desktop || (!localCheckout && !agentWorkspace))) {
+    if (localRun && !desktop) {
       setLocalError("Choose or add a repository from This Mac before sending.")
       return
     }
-    if (localRun && !localCheckout && !desktop?.taskWorkspaces) {
-      setLocalError(
-        "Update Open SWE Desktop to start without selecting a folder."
-      )
+    if (localRun && !localCheckout && !taskWorkspaces) {
+      setLocalError("Update Robin Desktop to start without a project.")
       return
     }
     // Minted here so the seeded thread, the graph's HumanMessage and the
@@ -509,8 +561,7 @@ export function AgentsHome({
           client_message_id: messageId,
           repo,
           visibility,
-          repo_explicitly_none:
-            repoOverride === null || (agentWorkspace && !repo),
+          repo_explicitly_none: !repo,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
         }
@@ -520,19 +571,24 @@ export function AgentsHome({
 
     const configurable: Record<string, unknown> =
       modelConfigurable(activeSelection)
-    configurable.experience = agentWorkspace ? "agent_workspace" : "coding"
     if (localRun) {
       if (localCheckout)
         window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
       configurable.thread_type = "private"
     } else {
       if (repo) configurable.repo = repo
-      if (repoOverride === null || (agentWorkspace && !repo))
-        configurable.repo_explicitly_none = true
+      if (!repo) configurable.repo_explicitly_none = true
       configurable.thread_type =
         visibility === "private" ? "private" : "workspace"
       if (selectedWorkspace) configurable.workspace = selectedWorkspace
     }
+    // A This Mac thread is filed in its folder's project, linked first if the
+    // folder is new.
+    const runProjectId =
+      localRun && localCheckout
+        ? await folderProject(localCheckout, localThreads.data)
+        : selectedProject?.id
+    if (runProjectId) configurable.project_id = runProjectId
 
     const threadId = crypto.randomUUID()
     const pending: PendingCloudSubmit = { threadId, stopRequested: false }
@@ -542,14 +598,16 @@ export function AgentsHome({
       let prepared = false
       try {
         if (localRun && desktop) {
-          await refreshLocalRepoBranch()
+          // Fresh refs, not this render's: a folder whose branches had not loaded
+          // yet would otherwise skip the chosen worktree and run in the checkout.
+          const branches = await refreshLocalRepoBranch()
           const local = await desktop.prepareLocalThread({
             threadId,
             cwd: localCheckout?.cwd,
-            taskWorkspace: agentWorkspace,
+            taskWorkspace: true,
             workspaceMode:
-              localCheckout && (!agentWorkspace || localRepoBranches.length)
-                ? localWorkspaceMode
+              localCheckout && branches.length
+                ? localWorkspaceModeRef.current
                 : "local",
             baseBranch: localRepoBranch,
           })
@@ -557,11 +615,7 @@ export function AgentsHome({
           // Awaited so the thread route already knows it is This Mac's.
           await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
-          if (
-            local.repo &&
-            !agentWorkspace &&
-            session.data?.auth_provider !== "langsmith"
-          )
+          if (local.repo && session.data && hasLinkedGitHub(session.data))
             configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }
@@ -588,15 +642,22 @@ export function AgentsHome({
           setLocalError(
             error instanceof Error
               ? error.message
-              : "Could not start the Open SWE agent"
+              : "Could not start the Robin agent"
           )
         }
         return
       }
+      productAnalytics.track(
+        "agents_thread_created",
+        {
+          run_target: localRun ? "local" : "cloud",
+          has_attachments: images.length > 0,
+        },
+        session.data?.user_id ?? null
+      )
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
       const thread: AgentThread = {
-        experience: agentWorkspace ? "agent_workspace" : "coding",
         ...optimisticThread(threadId, draft, {
           recorded: session.data?.transcript_recording === true,
           owner: session.data,
@@ -605,6 +666,7 @@ export function AgentsHome({
         // So the seeded thread already reads as This Mac, not Cloud, until
         // the server's record replaces it.
         ...(localRun ? { sandboxBridgeClient: "desktop" as const } : {}),
+        projectId: runProjectId ?? null,
       }
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       seedAgentThreadLists(queryClient, thread)
@@ -640,9 +702,7 @@ export function AgentsHome({
   return (
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {session.data && !routePending && !agentWorkspace && (
-          <OnboardingDialog />
-        )}
+        {session.data && !routePending && <OnboardingDialog />}
         <AgentThreadHeader
           title={optimisticDraftThread?.title}
           target={runTarget === "local" ? "This Mac" : "Cloud"}
@@ -655,8 +715,7 @@ export function AgentsHome({
         <div
           className={cn(
             "flex min-h-0 flex-1 flex-col",
-            agentWorkspace &&
-              !optimisticDraftThread &&
+            !optimisticDraftThread &&
               "justify-center overflow-y-auto py-space-6"
           )}
         >
@@ -676,6 +735,11 @@ export function AgentsHome({
               </Banner>
             )}
             <AgentPromptBar
+              draftKey={
+                session.data?.user_id
+                  ? `${session.data.user_id}:new`
+                  : undefined
+              }
               activeRun={
                 optimisticDraftThread
                   ? { threadId: pendingThreadId ?? "", running: true }
@@ -683,11 +747,7 @@ export function AgentsHome({
               }
               autoFocus
               compact
-              placeholder={
-                agentWorkspace
-                  ? "Describe a task or ask a question…"
-                  : "Do anything"
-              }
+              placeholder="Describe a task or ask a question…"
               onSubmit={handleSubmit}
               onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
               disabled={Boolean(submittedDraft)}
@@ -698,6 +758,7 @@ export function AgentsHome({
               repos={workspaceRepos}
               selectedRepo={repo}
               onRepoChange={optimisticDraftThread ? undefined : selectRepo}
+              gitHubLinkUser={gitHubLinkUser}
               runTarget={runTarget}
               onRunTargetChange={
                 !optimisticDraftThread && isDesktop && cloudEnabled
@@ -709,9 +770,11 @@ export function AgentsHome({
               selectedLocalRepoBranch={localRepoBranch}
               localRepoBranches={localRepoBranches}
               onSelectLocalRepo={handleSelectLocalRepo}
-              onUseTaskFolder={
-                agentWorkspace && !optimisticDraftThread
+              onClearLocalRepo={
+                !optimisticDraftThread && taskWorkspaces
                   ? () => {
+                      window.localStorage.removeItem(LAST_LOCAL_REPO_KEY)
+                      window.localStorage.removeItem(LEGACY_LAST_LOCAL_REPO_KEY)
                       setLocalRepoPath(null)
                       setLocalRepoBranch(null)
                       setLocalRepoBranches([])
@@ -730,6 +793,14 @@ export function AgentsHome({
                 selectedLocalRef?.worktreePath ? "Worktree" : undefined
               }
               onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
+              projects={projects}
+              selectedProjectId={selectedProject?.id ?? null}
+              onProjectChange={
+                !optimisticDraftThread && cloudEnabled
+                  ? selectProject
+                  : undefined
+              }
+              onCreateProject={setCreatingProject}
               workspaceOptions={workspaces}
               selectedWorkspace={selectedWorkspace}
               onWorkspaceChange={
@@ -742,6 +813,17 @@ export function AgentsHome({
           </AgentComposerDock>
         </div>
       </div>
+      {creatingProject !== null && (
+        <CreateProjectDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setCreatingProject(null)
+          }}
+          initialName={creatingProject}
+          workspace={selectedWorkspace}
+          onCreated={(project) => selectProject(project.id)}
+        />
+      )}
       {localRepo ? (
         <LocalRepoRightPanel
           scopeId={localRepo.scopeId}

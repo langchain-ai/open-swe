@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 
@@ -24,6 +25,15 @@ class PendingCredential(TypedDict, total=False):
     provider: str
 
 
+#: Tool metadata key naming the credential a tool needs before its first call.
+CONNECT_ON_USE_METADATA = "mda_connect_on_use"
+
+
+class ConnectOnUse(TypedDict):
+    server: str
+    credential: PendingCredential
+
+
 class CredentialAuthorizationRequiredInterrupt(TypedDict):
     """Interrupt payload when the caller has not granted one or more connections."""
 
@@ -41,12 +51,54 @@ class _UserConnectionGrant:
 
 InterruptFn = Callable[[CredentialAuthorizationRequiredInterrupt], None]
 
+DEFAULT_AUTHORIZATION_MESSAGE = "Connect the following integrations to continue."
+
+
+class ToolCredentialRequiredError(Exception):
+    """A tool call was refused until the caller connects its credentials.
+
+    ``credentials`` is empty when the refusal carried no link to connect from.
+    """
+
+    def __init__(self, provider: str, credentials: Sequence[PendingCredential]) -> None:
+        super().__init__(f"{provider} is not connected")
+        self.provider = provider
+        self.credentials = list(credentials)
+
+
+def credential_authorization_interrupt(
+    credentials: Sequence[PendingCredential],
+    message: str = DEFAULT_AUTHORIZATION_MESSAGE,
+) -> CredentialAuthorizationRequiredInterrupt:
+    """The interrupt payload that asks the caller to connect ``credentials``."""
+    return {
+        "type": "credential_authorization_required",
+        "message": message,
+        "credentials": list(credentials),
+    }
+
+
+_defer_interrupts: ContextVar[bool] = ContextVar("mda_defer_credential_interrupts", default=False)
+
+
+class CredentialAuthorizationDeferredError(Exception):
+    """Missing credentials raised instead of interrupting, for the caller to merge."""
+
+    def __init__(self, credentials: Sequence[PendingCredential]) -> None:
+        super().__init__([credential.get("slug") for credential in credentials])
+        self.credentials = list(credentials)
+
+
+def defer_credential_interrupts() -> None:
+    """Raise ``CredentialAuthorizationDeferredError`` instead of interrupting in this context."""
+    _defer_interrupts.set(True)
+
 
 def raise_credential_authorization_required(
     credentials: Sequence[PendingCredential],
     *,
     interrupt: InterruptFn | None = None,
-    message: str = "Connect the following integrations to continue.",
+    message: str = DEFAULT_AUTHORIZATION_MESSAGE,
 ) -> None:
     """Interrupt once with the given missing credentials, then raise.
 
@@ -55,12 +107,9 @@ def raise_credential_authorization_required(
     """
     if not credentials:
         raise ValueError("credentials must be non-empty")
-    payload: CredentialAuthorizationRequiredInterrupt = {
-        "type": "credential_authorization_required",
-        "message": message,
-        "credentials": list(credentials),
-    }
-    (interrupt or _interrupt)(payload)
+    if _defer_interrupts.get():
+        raise CredentialAuthorizationDeferredError(credentials)
+    (interrupt or _interrupt)(credential_authorization_interrupt(credentials, message))
     raise CredentialAuthorizationRequiredError(
         [str(credential["slug"]) for credential in credentials]
     )
@@ -127,9 +176,15 @@ def _interrupt(payload: CredentialAuthorizationRequiredInterrupt) -> None:
 
 
 __all__ = [
+    "CONNECT_ON_USE_METADATA",
+    "ConnectOnUse",
+    "CredentialAuthorizationDeferredError",
     "CredentialAuthorizationRequiredInterrupt",
     "PendingCredential",
+    "ToolCredentialRequiredError",
     "collect_pending_user_connection_credentials",
+    "credential_authorization_interrupt",
+    "defer_credential_interrupts",
     "raise_credential_authorization_required",
     "resolve_user_connection_grants",
 ]

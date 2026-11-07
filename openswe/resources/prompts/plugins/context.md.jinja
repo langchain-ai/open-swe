@@ -1,0 +1,14 @@
+{% if instructions %}
+<untrusted_plugin_instructions>
+How the plugin beside this chat describes its tools.
+
+{{ instructions | e }}
+</untrusted_plugin_instructions>
+{% endif %}
+{% if context %}
+<untrusted_plugin_context>
+What the person has open in the plugin beside this chat, as the plugin reports it at the moment they sent their next message.
+
+{{ context | e }}
+</untrusted_plugin_context>
+{% endif %}

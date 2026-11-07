@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   CaretRightIcon,
   MagnifyingGlassRegularIcon,
@@ -85,10 +86,10 @@ export function AllowedSlackBotsSection({
 
   const pending = add.isPending
   const unavailable = pending || bots.isPending || bots.isError
-  const matches = directory.data?.filter((bot) =>
-    `${bot.name} ${bot.bot_id} ${bot.user_id}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase())
+  const matches = new FuzzySearch(search).rank(
+    directory.data ?? [],
+    (bot) => bot.name,
+    (bot) => `${bot.bot_id} ${bot.user_id}`
   )
   const allow = (id: string) => {
     if (!id || unavailable) return
@@ -106,7 +107,7 @@ export function AllowedSlackBotsSection({
             Enabled bots
           </h3>
           <p className="text-xs/relaxed text-secondary">
-            Let trusted Slack bots start a task by mentioning Open SWE.
+            Let trusted Slack bots start a task by mentioning Robin.
           </p>
         </div>
         <Popover
@@ -364,11 +365,11 @@ export function AllowedSlackBotsSection({
             : ""}
         </span>
         <span className="flex items-center gap-space-2">
-          <RobotIcon size={13} weight="regular" /> Runs as Open SWE
+          <RobotIcon size={13} weight="regular" /> Runs as Robin
         </span>
       </div>
       <p className="mt-space-2 text-xs/relaxed text-secondary">
-        Uses the Open SWE GitHub App’s repository access. Bots can only continue
+        Uses the Robin GitHub App’s repository access. Bots can only continue
         tasks they started.
       </p>
     </div>

@@ -22,17 +22,20 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, TypeAdapter
 
 CONFLICT_LIMIT = 10
-PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
-FIX_PROMPT_PATH = Path(".github/prompts/fix_preview_typecheck.md")
+# Where Open SWE sits in the repository this runs in: "" when it is the root, a
+# subdirectory when it lives in a monorepo. Git state stays at the repository root.
+PROJECT_DIR = os.environ.get("PREVIEW_PROJECT_DIR", "").strip("/")
+PROMPT_PATH = Path(PROJECT_DIR, ".github/prompts/resolve_preview_conflict.md")
+FIX_PROMPT_PATH = Path(PROJECT_DIR, ".github/prompts/fix_preview_typecheck.md")
 FIXUP_MESSAGE = "preview: fix typecheck errors (oswe)"
 FORCE_MESSAGE = "preview: force deployment"
 WORKFLOWS_MESSAGE = "preview: keep the published workflows"
 # GitHub refuses a push by the workflow's token that changes anything here.
 WORKFLOWS = ".github/workflows"
-TYPECHECK_IMAGE = "node:24-bookworm-slim"
+TYPECHECK_IMAGE = "node:26-bookworm-slim"
 TYPECHECK_SCRIPT = (
-    "corepack pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
-    " && corepack pnpm --filter open-swe-dashboard run typecheck"
+    "npx --yes pnpm@11.22.0 install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
+    " && npx --yes pnpm@11.22.0 --filter open-swe-dashboard run typecheck"
 )
 TYPECHECK_OUTPUT_LIMIT = 20_000
 FAILED_REF = "refs/preview-failed"
@@ -384,7 +387,8 @@ async def typecheck() -> str | None:
         archive = Path(scratch) / "tree.tar"
         source = Path(scratch) / "src"
         source.mkdir()
-        await git("archive", "--format=tar", "-o", str(archive), "HEAD")
+        tree = f"HEAD:{PROJECT_DIR}" if PROJECT_DIR else "HEAD"
+        await git("archive", "--format=tar", "-o", str(archive), tree)
         await run("tar", "-xf", str(archive), "-C", str(source))
         result = await run(
             "docker",
@@ -394,10 +398,6 @@ async def typecheck() -> str | None:
             f"{os.getuid()}:{os.getgid()}",
             "-e",
             "HOME=/tmp",
-            "-e",
-            "COREPACK_HOME=/tmp/corepack",
-            "-e",
-            "COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
             "-v",
             f"{source}:/src",
             "-w",

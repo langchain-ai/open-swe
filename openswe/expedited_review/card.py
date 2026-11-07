@@ -4,26 +4,31 @@ import json
 
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
+from openswe.slack.app_modals import modal_button
 from openswe.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
+    ModalView,
     actions,
     button,
     code_block,
     context,
+    conversation_input,
     divider,
     escape,
     image,
-    option,
+    modal,
     section,
-    static_select,
 )
 
 BUTTON_TYPE = "expedited_review"
 SEND_BLOCK_ID = "expedited_review_send"
 CHANNEL_SELECT_ACTION = "expedited_review_channel"
 OTHER_CHANNEL = "other"
+CHANNEL_MODAL = "expedited_review_channel"
+PICKER_BLOCK = "channel"
+PICKER_ACTION = "channel"
 
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
@@ -44,6 +49,11 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     pr = approval.pull_request
     label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
+    if approval.approval_condition:
+        blocks.append(section(f"*Approval condition:* {escape(approval.approval_condition)}"))
+        blocks.append(
+            context(f"Already covered by auto-approval: {escape(approval.auto_approved)}")
+        )
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
@@ -58,6 +68,7 @@ def _diff_sections(
         *_overflow_note(shown),
         *_diffstat("Tests", "test files", diff.tests),
         *_diffstat("Generated", "generated files", diff.generated),
+        *_condition_summary(diff),
         *_excluded_summary(diff),
     ]
     if diff_image_id:
@@ -103,17 +114,48 @@ def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
+def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
+    """The diffstat of what the condition covers, which the card never draws."""
+    if not diff.by_condition:
+        return []
+    stats: dict[str, list[int]] = {}
+    for entry in diff.by_condition:
+        counts = stats.setdefault(entry["path"], [0, 0])
+        counts[0] += entry["additions"]
+        counts[1] += entry["deletions"]
+    added = sum(counts[0] for counts in stats.values())
+    deleted = sum(counts[1] for counts in stats.values())
+    heading = (
+        f"*Covered by the condition above (not shown):* {len(stats)} "
+        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Robin's review "
+        "would approve these subject to human approval of the stated condition.\n"
+    )
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for path, (plus, minus) in list(stats.items())[:_MAX_FILE_SECTIONS]:
+        line = f"`{escape(path)}`  +{plus} −{minus}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    if len(lines) < len(stats):
+        lines.append(f"{len(stats) - len(lines)} more files on GitHub.")
+    return [context(heading + "\n".join(lines))]
+
+
 def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
-    """One line per APPROVALS.md guideline the agent cited, naming the files it covers."""
-    if not diff.excluded:
+    """One line per auto-approve rule the agent cited, naming the files it covers."""
+    if not diff.by_guideline:
         return []
     stats: dict[str, dict[str, list[int]]] = {}
-    for entry in diff.excluded:
+    for entry in diff.by_guideline:
         counts = stats.setdefault(entry["guideline"], {}).setdefault(entry["path"], [0, 0, 0])
         counts[0] += 1
         counts[1] += entry["additions"]
         counts[2] += entry["deletions"]
-    heading = "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
+    heading = (
+        "*Robin judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
+    )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
     for guideline, paths in stats.items():
@@ -144,35 +186,41 @@ def _vote_buttons(approval: HumanReviewRequest) -> list[ButtonElement]:
     return [approve, _dismiss_button(approval)]
 
 
+def channel_picker(private_metadata: str | None = None) -> ModalView:
+    """The modal that picks another channel to send the card to."""
+    return modal(
+        callback_id=CHANNEL_MODAL,
+        title="Send expedited review",
+        blocks=[
+            conversation_input(
+                block_id=PICKER_BLOCK, label="Channel", action_id=PICKER_ACTION, include=["public"]
+            )
+        ],
+        submit="Send",
+        close="Cancel",
+        private_metadata=private_metadata,
+    )
+
+
 def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -> list[Block]:
-    """Send the card to its own channel or another one; offered once, while it awaits a vote."""
+    """Send the card to its first channel or another one; offered once, while it awaits a vote.
+
+    Plain buttons: Trigger Server forwards no select's change.
+    """
     if not choices or approval.sent_elsewhere:
         return []
-    configured_only = len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id
-    other = button(
-        "Other channel…",
-        action_id="open_swe_option_select_other",
-        value=_button_value("other", approval),
+    broadcast = button(
+        f"Broadcast in #{choices[0]['name']}",
+        action_id="open_swe_option_select_broadcast",
+        value=_button_value("broadcast", approval),
     )
-    if len(choices) == 1:
-        broadcast = button(
-            f"Broadcast in #{choices[0]['name']}",
-            action_id="open_swe_option_select_broadcast",
-            value=_button_value("broadcast", approval),
-        )
-        return [actions(broadcast, *([] if configured_only else [other]), block_id=SEND_BLOCK_ID)]
-    options = [option(f"#{choice['name']}", choice["id"]) for choice in choices]
-    picker = static_select(
-        action_id=CHANNEL_SELECT_ACTION,
-        options=[*options, option("Other…", f"{OTHER_CHANNEL}:{approval.id}")],
-        initial=options[0],
+    if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
+        # The configured channel is the only place it may go.
+        return [actions(broadcast, block_id=SEND_BLOCK_ID)]
+    other = modal_button(
+        "Other channel…", name=CHANNEL_MODAL, id=str(approval.id), view=channel_picker()
     )
-    send = button(
-        "Broadcast",
-        action_id="open_swe_option_select_send",
-        value=_button_value("send", approval),
-    )
-    return [actions(picker, send, block_id=SEND_BLOCK_ID)]
+    return [actions(broadcast, other, block_id=SEND_BLOCK_ID)]
 
 
 def _ready_button(approval: HumanReviewRequest) -> ButtonElement:

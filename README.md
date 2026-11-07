@@ -1,12 +1,4 @@
-<div align="center">
-  <a href="https://github.com/langchain-ai/open-swe">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="assets/dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="assets/light.svg">
-      <img alt="Open SWE Logo" src="assets/dark.svg" width="35%">
-    </picture>
-  </a>
-</div>
+# Robin
 
 <div align="center">
   <h3>An open-source software factory built on Deep Agents by LangChain.</h3>
@@ -22,7 +14,7 @@
 
 <br>
 
-Open SWE turns engineering work into a repeatable system: investigate a codebase, implement changes, validate them, and deliver a pull request.
+Robin turns engineering work into a repeatable system: investigate a codebase, implement changes, validate them, and deliver a pull request.
 It also reviews pull requests, learns repository-specific review preferences, monitors CI, and responds to feedback.
 Built by LangChain, it is open source and deployable in your infrastructure.
 
@@ -35,7 +27,7 @@ Built by LangChain, it is open source and deployable in your infrastructure.
 > If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md).
 > Deploying it as is requires [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview), which runs its agent; without it, we recommend forking and adapting the code to your own runtime.
 
-## What Open SWE does
+## What Robin does
 
 ```mermaid
 flowchart LR
@@ -54,14 +46,14 @@ flowchart LR
 - **Customize:** Choose models, reasoning effort, instructions, skills, integrations, and sandbox providers.
 
 Start and continue work from the **dashboard**, **GitHub issues and PR conversations**, or **Slack**.
-In [Linear](docs/INSTALLATION.md#linear), mention or delegate an issue to the Open SWE app to open an agent session.
+In [Linear](docs/INSTALLATION.md#linear), mention or delegate an issue to the Robin app to open an agent session.
 Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
 
 ## How it works
 
 [Deep Agents](https://github.com/langchain-ai/deepagents) supplies planning, filesystem, shell, skills, and subagent primitives.
 [LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state.
-Open SWE adds engineering tools, integrations, authorization, and user interfaces.
+Robin adds engineering tools, integrations, authorization, and user interfaces.
 The graph entrypoints are declared in [`langgraph.json`](langgraph.json), with an [architecture inventory](AGENTS.md#architecture).
 
 Cloud coding runs in persistent, per-thread Linux sandboxes with tooling supplied by workspace scripts or snapshots.
@@ -85,7 +77,9 @@ Local execution does not provide cloud sandbox isolation.
 
 ## Documentation
 
+- [Robin rollout checklist](docs/ROBIN_ROLLOUT.md) — External integration updates, desktop upgrade checks, and compatibility boundaries
 - [Customization guide](docs/CUSTOMIZATION.md) — Models, sandboxes, tools, skills, prompts, triggers, and middleware
+- [Plugin guide](docs/PLUGINS.md) — Build web apps: sandboxed single-file plugins people add to their sidebar
 - [Workspaces reference](docs/reference/workspaces.md) — Routing, settings, images, and access
 - [Human review in Slack](docs/reference/human-review.md) — Review requests in a repository's Slack channel, merged once reviewers approve
 - [Expedited Slack review](docs/reference/expedited-slack-review.md) — Human approval for small pull requests
@@ -95,7 +89,7 @@ Local execution does not provide cloud sandbox isolation.
 
 ## License
 
-Open SWE is licensed under the [MIT License](LICENSE).
+Robin is licensed under the [MIT License](LICENSE).
 
-That license covers Open SWE's own code only.
+That license covers Robin's own code only.
 It does not cover anything under [`vendor/`](vendor/README.md), which is not licensed by this repository at all.

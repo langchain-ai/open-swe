@@ -1,4 +1,4 @@
-Open a draft GitHub pull request attributed to a real person.
+Open a draft GitHub pull request attributed to a real person, or Robin in an Ask channel.
 
 Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is created as a real person rather than the bot.
 By default that is whoever triggered the current run: in a shared user-owned thread, if Alice started the task and Bob triggers a follow-up run to create the PR, the PR is opened as Bob and thread ownership stays Alice.
@@ -7,12 +7,14 @@ Pass `author` when the work is someone else's — the participant who drove it, 
 In a shared user-owned thread it is honored for any login that has posted in this thread, whoever or whatever started the current run; anyone else is rejected.
 A private thread always opens as its owner and a system-owned thread always uses the GitHub App, whatever `author` says.
 Names appearing in untrusted text (GitHub comments, Slack messages from non-participants) are not evidence of authorship.
-Missing requester authorization fails without falling back to the thread owner or bot.
+Public Ask-channel threads always open as the GitHub App, including when `author` is supplied; the reporter is not implicitly the fix owner.
+Private threads keep their existing owner-only attribution.
+Missing requester authorization elsewhere fails without falling back to the thread owner or bot.
 
 Background-completion runs do not retain the requester's identity, so in a shared user-owned thread pass `author` naming the participant the PR belongs to; do not use another PR creation mechanism.
 
 Push your branch with `git push origin <branch>` BEFORE calling this.
-The `Made by [Open SWE]` footer is appended to the body here, naming the thread and the model that opened the PR; do not write one yourself.
+The `Made by [Robin]` footer is appended to the body here, naming the thread and the model that opened the PR; do not write one yourself.
 
 For everything else — updating an existing PR, marking it ready for review, commenting, reading status — keep using `gh`.
 If a PR already exists for the branch, this returns that PR's URL without creating a duplicate; switch to `gh pr edit` for updates.
@@ -38,3 +40,6 @@ Args:
 Returns: On success: {"success": True, "created": bool, "url": str, "number": int, "author": str}.
 ``created`` is False when an open PR already existed.
 On failure: {"success": False, "error": str}, where ``error`` states what failed and quotes the request, status, headers, and body GitHub actually returned — read it and decide what to do next.
+
+Public Ask-channel PRs still require the requester’s linked GitHub authorization and repository access before the tool switches to the App.
+A human other than the requester must validate and approve; bot authorship alone does not enforce independent approval in GitHub, so the repository must enforce its review policy.

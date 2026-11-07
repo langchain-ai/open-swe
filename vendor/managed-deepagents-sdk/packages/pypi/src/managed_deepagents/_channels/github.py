@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 from urllib.parse import quote
@@ -18,25 +20,33 @@ from managed_deepagents._channels.github_connections import (
     GITHUB_TOKEN_SLUG,
     github_app_connection_slug,
 )
-from managed_deepagents._channels.github_events import github_event
+from managed_deepagents._channels.github_events import github_event, github_installation_event
 from managed_deepagents._channels.github_schema import (
+    INSTALLATION_EVENT_KEYS,
     SUPPORTED_EVENT_KEYS,
+    GitHubInstallationEventKey,
     github_identifier_adapter,
     github_receipt_adapter,
 )
 from managed_deepagents._channels.github_types import (
+    GitHubAccount,
     GitHubAppOptions,
     GitHubChannelThread,
     GitHubEndpointFields,
     GitHubEvent,
-    GitHubEventCallback,
+    GitHubEventResult,
     GitHubHandlers,
+    GitHubInstallationEvent,
     GitHubRepository,
     GitHubSender,
     SupportedEventKey,
 )
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
-from managed_deepagents._channels.http.endpoint import is_endpoint_handler
+from managed_deepagents._channels.http.endpoint import (
+    EndpointForwarder,
+    is_event_endpoint,
+)
+from managed_deepagents._channels.http.input_state import input_state_reader
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventReceived,
@@ -53,7 +63,9 @@ from managed_deepagents._channels.http.provider import (
 )
 from managed_deepagents._channels.http.studio import interrupted_notice, pending_decision
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.reply import ChannelReplyResult
 from managed_deepagents._channels.resolve_user import checked_resolve_user
+from managed_deepagents._channels.run_input import starts_on_conversation
 from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import set_log_attributes
 
@@ -72,6 +84,12 @@ if TYPE_CHECKING:
 
 _MAX_SAFE_INTEGER = 9007199254740991
 
+_Handler = Callable[
+    ["GitHubEvent | GitHubInstallationEvent", GitHubChannelThread],
+    "GitHubEventResult | Awaitable[GitHubEventResult]",
+]
+"""A handler of the channel's: a repository event's or an installation event's."""
+
 
 def github_channel(
     *,
@@ -81,6 +99,9 @@ def github_channel(
     on_finish: EventFinished[GitHubEvent, GitHubChannelThread] | None = None,
     on_received: EventReceived[GitHubEvent, GitHubChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
+    include_own_events: bool = False,
+    ignore_bots: bool = False,
+    forward_to: Sequence[EventEndpoint] | None = None,
 ) -> HttpChannel:
     """Options for ``channels.github(...)``: App scope and event handlers that start runs.
 
@@ -92,9 +113,12 @@ def github_channel(
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
-            message, or state), or ``None`` to skip. While a thread waits on an
-            interrupt, events start nothing and the issue or pull request is
-            told to continue it in LangSmith Studio. A handler may also be an
+            message, or state), or ``None`` to skip. MDA answers GitHub before it
+            asks the handler, so a handler may take longer than GitHub waits; one
+            that raises starts nothing, and its error is logged. While a thread waits on an
+            interrupt, a run for that thread doesn't start and the issue or
+            pull request is told to continue it in LangSmith Studio; runs on
+            other threads still start. A handler may also be an
             endpoint, a URL or an ``httpx.Request`` carrying headers: MDA POSTs it
             the event and its thread, and starts the run it answers with.
         app: App ``mda deploy`` creates; permissions and repository allowlist.
@@ -104,7 +128,7 @@ def github_channel(
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing. Events on a
             conversation that waits on an interrupt start nothing either way.
-        on_finish: A delivery of a handled event is done, once, with the
+        on_finish: A delivery of a handled repository event is done, once, with the
             event, its thread, the run it started and how that run ended, as
             LangGraph names it, and the decisions the thread waits on. A
             delivery that started no run, such as one whose handler returned
@@ -112,13 +136,42 @@ def github_channel(
             as the comment that a decision is pending, in the background;
             failures are logged. See ``http_channel``'s ``on_finish`` for its
             limits.
-        on_received: A delivery of a handled event reached its thread, once,
+        ignore_bots: Ignore issues, comments, pull requests and reviews
+            written by other apps and bots, such as Dependabot, so automations
+            don't trigger each other, as ``channels.linear`` and
+            ``channels.slack`` do. ``False`` by default, so other bots still
+            start runs. CI events (``check_run``, ``check_suite``,
+            ``workflow_run``, ``status``), ``push`` and ``merge_group`` reach
+            their handlers whoever sent them. The App's own activity is always
+            ignored, unless ``include_own_events``.
+        on_received: A delivery of a handled repository event reached its thread, once,
             with the event and its thread, before MDA reads the thread or asks
             the handler: the moment to acknowledge it, such as with a 👀
             reaction. It fires even when the thread then waits on an
             interrupt, or the handler declines, so apply your own filters,
             such as a mention check. In the background, before ``on_finish``;
             failures are logged and don't stop the run.
+        include_own_events: Also hand handlers the events the channel's own
+            App caused, such as a push or a pull request the agent made with
+            the App's token, with ``event.from_app`` set. Off by default, so
+            the agent's own activity starts nothing. A handler that answers
+            comments or reviews skips ``event.from_app``, or the agent answers
+            itself.
+        forward_to: Services of yours that get every verified delivery but
+            ``ping``, as GitHub sent it, whether or not a handler takes it: a
+            URL or an ``httpx.Request`` carrying headers, such as an API key.
+            MDA POSTs each the raw body with GitHub's own headers, its
+            signature among them, and the request's headers, signed when the
+            deployment has ``MDA_SERVICE_SECRET`` with the webhook ID
+            ``msg_<deliveryId>_forward``. All at once, before anything else
+            reads the delivery, within 8 seconds. GitHub is answered only
+            after every one answered 2xx; any other answer, a redirect, a
+            timeout or a network error answers GitHub HTTP 502 and starts
+            nothing: GitHub shows the delivery failed, and redelivering it from
+            the App's settings or its API forwards and handles it again (GitHub
+            doesn't send it again on its own). Adds no
+            App permission or webhook event: they get what the App is
+            subscribed to.
 
     Example::
 
@@ -128,13 +181,14 @@ def github_channel(
             },
         )
     """
-    handlers: Mapping[str, GitHubEventCallback] = resolve_endpoints(
+    handlers: Mapping[str, _Handler] = resolve_endpoints(
         "GitHub",
         # By key; the channel calls each only with its own key's events.
-        cast("Mapping[str, GitHubEventCallback | EventEndpoint]", on_event or {}),
+        cast("Mapping[str, _Handler | EventEndpoint]", on_event or {}),
         _endpoint_fields,
     )
-    check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS)
+    check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS | INSTALLATION_EVENT_KEYS)
+    forwarders = _forwarders(forward_to)
     app_setup = github_app_setup(handlers, app)
     repositories = frozenset(app_setup["repositories"]) if "repositories" in app_setup else None
 
@@ -142,33 +196,76 @@ def github_channel(
         return channel_name(channel)
 
     async def parse(ctx: HttpChannelRequest) -> HttpChannelParseResult:
-        return await _parse(ctx, handlers, name(), repositories)
+        return await _parse(
+            ctx,
+            handlers,
+            name(),
+            repositories,
+            include_own_events,
+            forwarders,
+            ignore_bots=ignore_bots,
+        )
 
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
-    ) -> ChannelRunResult | None:
+    ) -> ChannelRunResult | ChannelReplyResult | None:
         return await _handler_input(
             handlers,
             raw_event,
-            GitHubChannelThread(id=message["thread_id"], channel=ChannelName(name=name())),
+            GitHubChannelThread(
+                id=message["thread_id"],
+                channel=ChannelName(name=name()),
+                _get_state=input_state_reader(),
+            ),
+        )
+
+    # Deliveries whose handler was asked while their thread waited: a run it
+    # put on that thread is what found it waiting, so the notice needn't ask again.
+    asked_interrupted: set[str] = set()
+
+    async def interrupted_input(
+        message: HttpChannelInboundMessage, raw_event: JsonValue | None
+    ) -> ChannelRunResult | ChannelReplyResult | None:
+        delivery_id = _delivery_id(raw_event)
+        if delivery_id is not None:
+            asked_interrupted.add(delivery_id)
+        return await _handler_input(
+            handlers,
+            raw_event,
+            GitHubChannelThread(
+                id=message["thread_id"],
+                channel=ChannelName(name=name()),
+                interrupted=True,
+                _get_state=input_state_reader(),
+            ),
         )
 
     async def notify_interrupted(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
         """Tell the issue or pull request that a new event found its thread waiting on a decision.
 
         A run that stops on interrupts posts its own notice as it ends. Only
-        for an event its handler would act on, so the handler's filters,
-        such as trusted senders or mentions, decide who gets a notice. The
-        handler knows it is only asked, so it can skip side effects.
+        for an event its handler would start a run on the thread for, so the
+        handler's filters, such as trusted senders or mentions, decide who
+        gets a notice. A handler asked once its thread waited already said so;
+        any other is asked here, knowing it is only asked, so it can skip side
+        effects.
         """
+        delivery_id = _delivery_id(delivery.get("raw_event"))
+        asked = delivery_id in asked_interrupted
+        asked_interrupted.discard(delivery_id or "")
         pending = pending_decision(delivery)
         if pending is None:
             return
-        thread = GitHubChannelThread(
-            id=delivery["thread_id"], channel=ChannelName(name=name()), interrupted=True
-        )
-        if await _handler_input(handlers, delivery.get("raw_event"), thread) is None:
-            return
+        if not asked:
+            thread = GitHubChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name()), interrupted=True
+            )
+            result = await _handler_input(handlers, delivery.get("raw_event"), thread)
+            # A reply would start nothing either, so the handler wouldn't act on it.
+            if isinstance(result, ChannelReplyResult) or not starts_on_conversation(
+                result, delivery["thread_id"]
+            ):
+                return
         await _post_interrupted_notice(target, delivery, pending)
 
     channel = http_channel(
@@ -194,6 +291,7 @@ def github_channel(
         multitask_strategy=multitask_strategy,
     )
     channel.paused_notice = _post_paused_notice
+    channel.interrupted_input = interrupted_input
     # Deploy provides the App's token at this name.
     channel.agent_connections = [GITHUB_TOKEN_SLUG]
     channel.resolve_user = checked_resolve_user("channels.github", resolve_user)
@@ -206,9 +304,20 @@ async def _post_paused_notice(target: JsonValue, delivery: HttpDelivery) -> None
     await _post_interrupted_notice(target, delivery, "interrupted")
 
 
-def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
+def _endpoint_fields(event: GitHubEvent | GitHubInstallationEvent) -> GitHubEndpointFields:
     """The fields of a GitHub event its endpoints are sent beside key, delivery ID
     and payload: the one place they're listed, as TypeScript's ``ENDPOINT_EVENT_FIELDS``."""
+    if isinstance(event, GitHubInstallationEvent):
+        return {
+            "action": event.action,
+            "account": {"id": event.account.id, "login": event.account.login},
+            "sender": {
+                "id": event.sender.id,
+                "login": event.sender.login,
+                "type": event.sender.type,
+            },
+            "actor": endpoint_actor(event.actor),
+        }
     fields: GitHubEndpointFields = {
         "repository": {
             "id": event.repository.id,
@@ -224,6 +333,7 @@ def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
         },
         "actor": endpoint_actor(event.actor),
         "mentions": list(event.mentions),
+        "fromApp": event.from_app,
     }
     if event.action is not None:
         fields["action"] = event.action
@@ -281,6 +391,71 @@ async def _verify(ctx: HttpChannelRequest) -> bool:
     return verify_hmac_sha256(secret, ctx.raw_body, signature[7:])
 
 
+_FORWARD_TIMEOUT_SECONDS = 8.0
+"""How long forwarding a delivery may take, every target at once: GitHub gives
+up on a delivery after 10 seconds."""
+_FORWARDED_HEADER_PREFIXES = ("x-github-", "x-hub-")
+"""GitHub's own headers, which a forwarded delivery keeps unchanged, with its
+``Content-Type``: those GitHub sends today and any it adds later."""
+
+
+def _forwarded_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """The delivery's headers a forwarded copy keeps; never the request's others."""
+    return {
+        name: value
+        for name, value in headers.items()
+        if (lowered := name.lower()) == "content-type"
+        or lowered.startswith(_FORWARDED_HEADER_PREFIXES)
+    }
+
+
+def _forwarders(forward_to: Sequence[EventEndpoint] | None) -> tuple[EndpointForwarder, ...]:
+    """The services ``forward_to`` names; a bad one raises when the channel is declared."""
+    if forward_to is None:
+        return ()
+    if isinstance(forward_to, str | bytes | httpx.Request) or not isinstance(forward_to, Sequence):
+        raise TypeError("GitHub forward_to must be a list of URLs or httpx.Requests")
+    forwarders: list[EndpointForwarder] = []
+    for index, target in enumerate(cast("Sequence[object]", forward_to)):
+        label = f"GitHub forward_to[{index}]"
+        if not is_event_endpoint(target):
+            raise TypeError(f"{label} must be a URL or an httpx.Request")
+        forwarders.append(EndpointForwarder(target, label))
+    return tuple(forwarders)
+
+
+async def _forward(ctx: HttpChannelRequest, forwarders: Sequence[EndpointForwarder]) -> bool:
+    """Forward a verified delivery to every service ``forward_to`` names; whether each took it.
+
+    Not a ping, which MDA answers unverified. A delivery without GitHub's
+    headers isn't forwarded either: its receipt refuses it.
+    """
+    headers = ctx.request.headers
+    event = headers.get("x-github-event", "")
+    delivery_id = headers.get("x-github-delivery", "")
+    if not forwarders or event == "ping" or not event.strip() or not delivery_id.strip():
+        return True
+    sent = _forwarded_headers(headers)
+    failures = await asyncio.gather(
+        *(
+            forwarder.forward(
+                f"msg_{delivery_id}_forward", ctx.raw_body, sent, _FORWARD_TIMEOUT_SECONDS
+            )
+            for forwarder in forwarders
+        )
+    )
+    for forwarder, failure in zip(forwarders, failures, strict=True):
+        if failure is not None:
+            # Only the target's host and the kind of failure: never headers or bodies.
+            logger.error(
+                "GitHub delivery %s was not forwarded to %s: %s",
+                _delivery_label(delivery_id),
+                forwarder.host,
+                failure,
+            )
+    return all(failure is None for failure in failures)
+
+
 def _sender_user_id(sender: GitHubSender) -> str:
     """Who the run acts for.
 
@@ -292,13 +467,39 @@ def _sender_user_id(sender: GitHubSender) -> str:
     return f"github:{sender.id}" if sender.type == "User" else "mda:channel"
 
 
+#: Events a person or a bot writes, which ``ignore_bots`` skips from bots.
+_AUTHORED_EVENTS = frozenset(
+    {
+        "issues",
+        "issue_comment",
+        "pull_request",
+        "pull_request_review",
+        "pull_request_review_comment",
+    }
+)
+
+
 async def _parse(
     ctx: HttpChannelRequest,
-    handlers: Mapping[str, GitHubEventCallback],
+    handlers: Mapping[str, _Handler],
     channel_name: str,
     repositories: frozenset[str] | None,
+    include_own_events: bool,
+    forwarders: Sequence[EndpointForwarder] = (),
+    *,
+    ignore_bots: bool = False,
 ) -> HttpChannelParseResult:
     json_response = import_module("starlette.responses").JSONResponse
+
+    # Every verified delivery reaches the services it is forwarded to before
+    # anything reads it, so they get events no handler takes or MDA doesn't
+    # type. One that didn't reach them all starts nothing, and GitHub shows it
+    # failed, so it can be redelivered; GitHub doesn't send it again on its own.
+    if not await _forward(ctx, forwarders):
+        return {
+            "type": "ignore",
+            "response": json_response({"error": "delivery forwarding failed"}, status_code=502),
+        }
 
     envelope = github_receipt_adapter.validate_python(
         {
@@ -321,13 +522,23 @@ async def _parse(
     if handlers.get(key) is None:
         return {"type": "ignore", "response": response}
 
-    parsed_event = github_event(key, record, envelope["delivery_id"])
+    parsed_event: GitHubEvent | GitHubInstallationEvent
+    if key in INSTALLATION_EVENT_KEYS:
+        # About the whole installation, so a channel limited to repositories gets it too.
+        parsed_event = github_installation_event(
+            cast("GitHubInstallationEventKey", key), record, envelope["delivery_id"]
+        )
+    else:
+        parsed_event = github_event(key, record, envelope["delivery_id"])
+        # Events from repositories the channel is not limited to start nothing.
+        if (
+            repositories is not None
+            and parsed_event.repository.full_name.lower() not in repositories
+        ):
+            return {"type": "ignore", "response": response}
 
-    # Events from repositories the channel is not limited to start nothing.
-    if repositories is not None and parsed_event.repository.full_name.lower() not in repositories:
-        return {"type": "ignore", "response": response}
-
-    # Ignore the App's own activity to avoid triggering ourselves.
+    # The App's own activity starts nothing unless the channel asks for it, so
+    # the agent doesn't trigger itself.
     configured_bot_id = await _github_app_value("GH_APP_BOT_ID", "bot-id") or ""
     if not re.fullmatch(r"[1-9][0-9]*", configured_bot_id):
         raise TypeError(
@@ -335,6 +546,13 @@ async def _parse(
         )
     bot_id = github_identifier_adapter.validate_python(int(configured_bot_id), strict=True)
     if parsed_event.sender.id == bot_id:
+        # An installation event is a person's, never the App's own.
+        if not include_own_events or not isinstance(parsed_event, GitHubEvent):
+            return {"type": "ignore", "response": response}
+        parsed_event = replace(parsed_event, from_app=True)
+    # Another bot's issue, comment, pull request or review, unless the channel
+    # takes them. CI and push events come from bots as a rule.
+    elif ignore_bots and parsed_event.sender.type == "Bot" and event in _AUTHORED_EVENTS:
         return {"type": "ignore", "response": response}
 
     # Preserve the original event even if a callback modifies its argument.
@@ -344,13 +562,15 @@ async def _parse(
     # conversation. Other events get their own thread, keyed by the delivery so
     # a redelivery still finds the run it started.
     delivery_id = envelope["delivery_id"]
-    number = _conversation_number(parsed_event)
+    number = _conversation_number(parsed_event) if isinstance(parsed_event, GitHubEvent) else None
     thread_id = channel_thread_id(
         channel_name,
-        f"delivery/{delivery_id}" if number is None else f"{parsed_event.repository.id}/{number}",
+        f"delivery/{delivery_id}"
+        if number is None or not isinstance(parsed_event, GitHubEvent)
+        else f"{parsed_event.repository.id}/{number}",
     )
     target: dict[str, JsonValue] | None = None
-    if number is not None:
+    if number is not None and isinstance(parsed_event, GitHubEvent):
         target = {"repository": parsed_event.repository.full_name, "number": number}
     # What the run starts with is decided once MDA knows the thread takes a new
     # turn.
@@ -360,9 +580,8 @@ async def _parse(
         "target": target,
         "delivery_key": delivery_id,
     }
-    # An endpoint may take longer to answer than GitHub waits.
-    if is_endpoint_handler(handlers.get(key)):
-        message["background"] = True
+    # A handler may take longer to decide than GitHub waits, so GitHub hears first.
+    message["background"] = True
     return {
         "type": "message",
         "message": message,
@@ -373,24 +592,34 @@ async def _parse(
 
 
 async def _handler_input(
-    handlers: Mapping[str, GitHubEventCallback],
+    handlers: Mapping[str, _Handler],
     raw_event: JsonValue | None,
     thread: GitHubChannelThread,
-) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips or fails."""
-    event = _event(raw_event)
+) -> ChannelRunResult | ChannelReplyResult | None:
+    """What the event's handler starts a run with, or the reply MDA posts instead;
+    ``None`` when it skips or fails."""
+    event = _event(raw_event) or _installation_event(raw_event)
     handler = None if event is None else handlers.get(event.key)
     if event is None or handler is None:
         return None
     outcome = await run_event_handler(
         "GitHub", event.key, event.delivery_id, lambda: handler(event, thread)
     )
-    return outcome.input
+    return outcome.reply if outcome.reply is not None else outcome.input
+
+
+def _delivery_id(raw_event: JsonValue | None) -> str | None:
+    delivery_id = raw_event.get("delivery_id") if isinstance(raw_event, Mapping) else None
+    return delivery_id if isinstance(delivery_id, str) else None
 
 
 def _event(raw_event: JsonValue | None) -> GitHubEvent | None:
-    """The parsed event a delivery carries, as callbacks may change it."""
-    if not isinstance(raw_event, Mapping):
+    """The parsed repository event a delivery carries, as callbacks may change it.
+
+    ``None`` for an installation event, so ``on_received`` and ``on_finish`` get
+    only repository events.
+    """
+    if not isinstance(raw_event, Mapping) or raw_event.get("key") in INSTALLATION_EVENT_KEYS:
         return None
     raw = cast("Mapping[str, object]", copy.deepcopy(dict(raw_event)))
     try:
@@ -404,6 +633,27 @@ def _event(raw_event: JsonValue | None) -> GitHubEvent | None:
             sender=GitHubSender(**cast("dict[str, Any]", raw["sender"])),
             payload=cast("Any", raw["payload"]),
             mentions=tuple(cast("list[str]", raw.get("mentions", ()))),
+            from_app=raw.get("from_app") is True,
+        )
+    except (KeyError, TypeError):
+        return None
+
+
+def _installation_event(raw_event: JsonValue | None) -> GitHubInstallationEvent | None:
+    """The parsed installation event a delivery carries, as callbacks may change it."""
+    if not isinstance(raw_event, Mapping) or raw_event.get("key") not in INSTALLATION_EVENT_KEYS:
+        return None
+    raw = cast("Mapping[str, object]", copy.deepcopy(dict(raw_event)))
+    try:
+        return GitHubInstallationEvent(
+            key=cast("GitHubInstallationEventKey", raw["key"]),
+            name=cast("str", raw["name"]),
+            action=cast("str", raw["action"]),
+            delivery_id=cast("str", raw["delivery_id"]),
+            installation_id=cast("int", raw["installation_id"]),
+            account=GitHubAccount(**cast("dict[str, Any]", raw["account"])),
+            sender=GitHubSender(**cast("dict[str, Any]", raw["sender"])),
+            payload=cast("Any", raw["payload"]),
         )
     except (KeyError, TypeError):
         return None

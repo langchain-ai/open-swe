@@ -56,6 +56,7 @@ async def test_user_search_filters_before_pagination_without_duplicate_identitie
         ("EXAMPLE.COM", first),
         ("u_first", first),
         ("%_", second),
+        ("complte", second),
     ):
         users, total = await User.page(offset=0, limit=10, search=search)
         assert total == 1

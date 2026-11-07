@@ -35,7 +35,7 @@ from openswe.github.sandbox_access import (
     SandboxGitHubAccess,
     workspace_token,
 )
-from openswe.review.findings import REVIEWER_THREAD_KIND
+from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
@@ -157,10 +157,15 @@ async def _proxy_token(
     workspace_slug: str | None,
     repositories: Sequence[str] | None,
     permissions: PermissionMap | None,
+    *,
+    force_refresh: bool = False,
 ) -> SandboxGitHubAccess:
     async with aphase(thread_id, "sandbox.proxy_token"):
         return await workspace_token(
-            workspace_slug, repositories=repositories, permissions=permissions
+            workspace_slug,
+            repositories=repositories,
+            permissions=permissions,
+            force_refresh=force_refresh,
         )
 
 
@@ -270,6 +275,7 @@ async def refresh_thread_github_proxy(
     workspace_slug: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     github_proxy_permissions: PermissionMap | None = None,
+    force_refresh: bool = False,
 ) -> datetime | None:
     """Give the thread's sandbox a freshly minted GitHub token; when it expires, if the backend
     writes its proxy.
@@ -297,7 +303,9 @@ async def refresh_thread_github_proxy(
     )
     if _mda_writes_proxy(metadata, repositories, permissions):
         return None
-    access = await _proxy_token(thread_id, workspace_slug, repositories, permissions)
+    access = await _proxy_token(
+        thread_id, workspace_slug, repositories, permissions, force_refresh=force_refresh
+    )
     base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
         await _configure_proxy(
@@ -590,7 +598,7 @@ async def _thread_proxy_scope(
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
 ) -> tuple[Sequence[str] | None, PermissionMap | None]:
-    if metadata.get("kind") in {REVIEWER_THREAD_KIND, "review-scout"}:
+    if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND, "review-scout"}:
         permissions = READ_ONLY_REVIEW_PERMISSIONS
         reviewed_pr = metadata.get("pr")
         owner = reviewed_pr.get("owner") if isinstance(reviewed_pr, dict) else None

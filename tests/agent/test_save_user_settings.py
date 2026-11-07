@@ -83,7 +83,11 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
     result = await save_user_settings(
-        {"auto_fix_ci": False, "auto_human_review_enabled": False, "default_workspace": "  NEW  "}
+        {
+            "auto_fix_ci": False,
+            "auto_human_review_enabled": False,
+            "default_workspace": "  NEW  ",
+        }
     )
     assert result == {
         "ok": True,
@@ -308,9 +312,12 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 **ordinary,
                 "auto_human_review_enabled": True,
                 "concierge_mode": False,
+                "personal_kitchen_channel_id": "",
                 "pr_failure_reactions": False,
                 "goal_mode": False,
+                "experimental_classify": False,
                 "experimental_memory": False,
+                "experimental_conditional_approval": False,
             },
             "preferences": {
                 "default_workspace": "mine",

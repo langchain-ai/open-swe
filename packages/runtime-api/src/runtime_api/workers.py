@@ -36,6 +36,9 @@ class Worker(BaseModel):
     """The worker registered under the coordinator's task, as its tool call answers it."""
 
     worker: dict[str, JsonValue]
+    # The context of the task the coordinator's thread belongs to, which its run tells
+    # the model from here on: its first worker made it the task's.
+    task_context: str | None = None
 
 
 class Adopt(BaseModel):

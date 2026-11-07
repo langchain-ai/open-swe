@@ -12,6 +12,7 @@ and renders their state back as a user-facing UI.
 
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import sys
@@ -21,6 +22,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
+from types import ModuleType
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
@@ -54,6 +56,7 @@ from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
     JSONResponse,
+    PlainTextResponse,
     RedirectResponse,
     Response,
 )
@@ -71,16 +74,20 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
     },
 }
 
+_SLACK_USERS["W123BOB"] = _SLACK_USERS["U_BOB"]
+_SLACK_USERS["W123ALICE"] = _SLACK_USERS["U_ALICE"]
+
 from langgraph_sdk import get_client  # noqa: E402
 from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from openswe.slack import mda_forwarding  # noqa: E402
 from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
-GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
+MDA_SERVICE_SECRET = os.environ["MDA_SERVICE_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -91,6 +98,20 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 # webhook dedupes against is persisted — so event ids need a per-process salt or
 # a rerun's mentions look like redeliveries of the previous run's.
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
+
+_FORWARD_TO_TRIGGER_SERVER = mda_forwarding.forward_to_trigger_server
+
+
+async def _clicks_stay_here(url: str, *args: Any, **kwargs: Any) -> None:
+    """No Trigger Server knows this Slack app, so it refuses every click the backend
+    forwards, and the backend acts on it after all; anything else goes as before."""
+    if url != mda_forwarding.TRIGGER_INTERACTIVITY_URL:
+        await _FORWARD_TO_TRIGGER_SERVER(url, *args, **kwargs)
+    elif (on_refused := kwargs.get("on_refused")) is not None:
+        await on_refused()
+
+
+mda_forwarding.forward_to_trigger_server = _clicks_stay_here
 
 fakes.seed_bare_remotes()
 
@@ -109,12 +130,14 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 # --- control + Slack compose (the test driver) -----------------------------
 # Where the inbox spec holds its run: the fake model waits on it, the spec releases it.
 INBOX_GATE = {"waiting": False, "released": False}
+GOAL_CHECK = {"released": False}
 
 
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
     INBOX_GATE.update(waiting=False, released=False)
+    GOAL_CHECK.update(released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -395,7 +418,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
 
 @app.post("/control/github-event")
 async def control_github_event(request: Request) -> JSONResponse:
-    """Deliver a signed GitHub webhook to the real ``/webhooks/github`` route.
+    """Deliver a GitHub event as MDA's GitHub channel does, to the backend's channel API.
 
     The mirror of ``/mock/slack/action`` for the other side: CI and review
     events arrive asynchronously in production, and the only faithful way to
@@ -406,10 +429,8 @@ async def control_github_event(request: Request) -> JSONResponse:
     payload = body.get("payload")
     if not event or not isinstance(payload, dict):
         raise HTTPException(400, "An event name and payload object are required")
-    response = await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
     return JSONResponse(
-        {"status_code": response.status_code, "body": response.json()},
-        status_code=response.status_code,
+        await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
     )
 
 
@@ -437,6 +458,20 @@ async def control_inbox_gate(waiting: bool = False) -> JSONResponse:
 async def control_release_inbox_gate() -> JSONResponse:
     INBOX_GATE["released"] = True
     return JSONResponse(INBOX_GATE)
+
+
+@app.get("/control/goal-check")
+async def control_goal_check() -> PlainTextResponse:
+    """The condition a Goal mode spec's monitor checks: failing until the spec passes it."""
+    if not GOAL_CHECK["released"]:
+        return PlainTextResponse("not yet", status_code=503)
+    return PlainTextResponse("GOAL_CHECK_PASSED")
+
+
+@app.post("/control/goal-check")
+async def control_pass_goal_check() -> JSONResponse:
+    GOAL_CHECK["released"] = True
+    return JSONResponse(GOAL_CHECK)
 
 
 @app.post("/control/monitors/sync")
@@ -666,6 +701,10 @@ async def _seed_test_user_mappings() -> None:
         await signed_in.link(
             "slack", user["slack_id"], login=user["login"], email=user["email"], team_id="T_E2E"
         )
+    for login, slack_id in (("bob", "W123BOB"), ("alice", "W123ALICE")):
+        person = await User.for_login("github", login)
+        if person is not None:
+            await person.link("slack", slack_id, login=login, team_id="T_E2E")
     _MAPPINGS_SEEDED = True
 
 
@@ -690,21 +729,28 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
         return await client.post("/webhooks/slack", content=raw, headers=headers)
 
 
+def _github_channel() -> ModuleType:
+    """``tests/github_channel.py``: delivers as MDA's GitHub channel does."""
+    path = Path(__file__).parents[1] / "github_channel.py"
+    spec = importlib.util.spec_from_file_location("e2e_github_channel", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 async def _deliver_github_event(
     event: str, payload: dict[str, Any], delivery: str = ""
-) -> httpx2.Response:
-    """POST a signed GitHub webhook delivery to the real /webhooks/github route."""
-    raw = json.dumps(payload).encode()
-    signature = hmac.new(GITHUB_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
-    headers = {
-        "Content-Type": "application/json",
-        "X-GitHub-Event": event,
-        "X-GitHub-Delivery": delivery or str(uuid.uuid7()),
-        "X-Hub-Signature-256": f"sha256={signature}",
+) -> dict[str, Any]:
+    """Deliver a GitHub event as MDA's GitHub channel does, to the real channel API."""
+    delivered = await _github_channel().deliver_as_mda(
+        app, event, payload, secret=MDA_SERVICE_SECRET, delivery_id=delivery or None
+    )
+    return {
+        "work": list(delivered.work),
+        "issue_run": delivered.issue_run.model_dump(mode="json") if delivered.issue_run else None,
     }
-    transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
-        return await client.post("/webhooks/github", content=raw, headers=headers)
 
 
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
@@ -862,6 +908,47 @@ async def _signed_in(login: str, email: str) -> User:
     return await User.sign_in("github", github_id, login=login, email=email)
 
 
+@app.post("/control/notifications")
+async def control_notification(request: Request) -> JSONResponse:
+    from openswe.notifications.service import AppNotification
+
+    body = await request.json()
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", body.get("recipient", "bob"))
+    if user is None:
+        raise HTTPException(404)
+    await AppNotification.send(
+        user,
+        key=body["key"],
+        title=body["title"],
+        body="Open the conversation.",
+        url=body.get("url", "/agents"),
+        fallback_text=body["title"],
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/control/notifications/fallback")
+async def control_notification_fallback() -> JSONResponse:
+    from uuid import UUID
+
+    from sqlalchemy import text
+
+    from openswe.database import postgres
+    from openswe.notifications.service import JOB_KIND, AppNotification
+
+    async with postgres.transaction() as conn:
+        due = (
+            await conn.execute(
+                text("DELETE FROM job WHERE kind = :kind RETURNING payload"), {"kind": JOB_KIND}
+            )
+        ).scalars()
+        payloads = list(due)
+    for payload in payloads:
+        await AppNotification.deliver_fallback(UUID(payload["recipient_id"]), payload["key"])
+    return JSONResponse({"ok": True})
+
+
 @app.post("/control/login")
 async def control_login(request: Request) -> JSONResponse:
     """Simulate a signed-in dashboard user by minting the real session cookie."""
@@ -917,6 +1004,10 @@ async def mock_github_login(redirect_to: str = "") -> Response:
     intact, then hand off to the fake GitHub simulator so Playwright exercises a
     browser login flow instead of test code pre-minting a session cookie.
     """
+    if os.environ.get("E2E_OAUTH"):
+        return RedirectResponse(
+            "/dashboard/api/auth/langsmith/login?" + urlencode({"redirect_to": redirect_to}), 302
+        )
     ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
     return RedirectResponse(f"/fake-gh/login/oauth/authorize?redirect_to={quote(dest)}", 302)
@@ -934,17 +1025,17 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
             for u in TEST_USERS
         )
         return HTMLResponse(
-            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Open SWE</title>
+            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Robin</title>
             <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
             <main data-testid="fake-github-login">
-              <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
+              <h1 style="font-size:1.1rem">Authorize Robin</h1>
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
-                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Open SWE</button>
+                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Robin</button>
               </form>
             </main>
             </body>"""
@@ -965,6 +1056,49 @@ for _i, _route in enumerate(app.router.routes):
     if getattr(_route, "endpoint", None) is mock_github_login:
         app.router.routes.insert(0, app.router.routes.pop(_i))
         break
+
+
+if os.environ.get("E2E_OAUTH"):
+    from cryptography.fernet import Fernet
+    from oauth_fakes import OAuthProviders
+
+    from openswe.dashboard import auth_routes, github_link
+
+    oauth_providers = OAuthProviders(BASE_URL)
+    oauth_providers.install(app)
+    os.environ["LANGSMITH_CONNECTION_URL"] = oauth_providers.issuer
+    os.environ["LANGSMITH_OAUTH_CLIENT_ID"] = "e2e-langsmith"
+    os.environ["LANGSMITH_OAUTH_CLIENT_SECRET"] = "e2e-langsmith-secret"
+    os.environ["LANGSMITH_ENDPOINT"] = oauth_providers.issuer
+    os.environ["LANGSMITH_API_KEY"] = "e2e-deployment-key"
+    os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+    os.environ["GITHUB_APP_CLIENT_ID"] = "e2e-github"
+    auth_routes.GITHUB_AUTHORIZE_URL = BASE_URL + "/fake-gh/link/authorize"
+    github_link.exchange_code = oauth_providers.exchange_github
+    github_link.fetch_github_user = oauth_providers.github_user
+
+
+@app.post("/control/account-recovery-thread")
+async def control_account_recovery_thread() -> JSONResponse:
+    from openswe.threads import index
+
+    login = "account-recovery-" + uuid.uuid4().hex
+    email = login + "@example.com"
+    os.environ["ALLOWED_GITHUB_USERS"] += "," + login
+    user = await _signed_in(login, email)
+    thread = await index.create(
+        str(uuid.uuid4()),
+        runtime="local",
+        metadata={
+            "title": "Account recovery history",
+            "owner_login": login,
+            "owner_user_id": str(user.id),
+            "visibility": "private",
+            "source": "dashboard",
+            "graph_id": "agent",
+        },
+    )
+    return JSONResponse({"thread_id": thread.thread_id, "login": login, "email": email})
 
 
 @app.post("/control/logout")
@@ -1286,6 +1420,7 @@ def gh_search_issues(
             or reviewer.lower() in {login.lower() for login in pull["requested_reviewers"]}
         )
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
+        and ("draft:true" not in terms or pull["draft"])
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
     ]
     field = "created_at" if sort == "created" else "updated_at"
@@ -1655,6 +1790,21 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
         return JSONResponse({"data": {"updatePullRequestReviewComment": payload}})
     owner = variables.get("owner")
     repo = variables.get("repo")
+    expression = variables.get("expression")
+    if "...on Tree" in query and isinstance(expression, str):
+        ref, _, path = expression.partition(":")
+        files = fakes.files_in_dir(str(owner), str(repo), path, ref)
+        tree = (
+            None
+            if files is None
+            else {
+                "entries": [
+                    {"path": name, "type": "blob", "object": {"text": text}}
+                    for name, text in files.items()
+                ]
+            }
+        )
+        return JSONResponse({"data": {"repository": {"object": tree}}})
     number = variables.get("number")
     if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
         return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
@@ -1786,6 +1936,7 @@ async def slack_delete_message(request: Request) -> JSONResponse:
 async def slack_conversations_open(request: Request) -> JSONResponse:
     body = await _slack_form(request)
     user = str(body.get("users") or "")
+    user = {"W123BOB": "U_BOB", "W123ALICE": "U_ALICE"}.get(user, user)
     return _ok({"channel": {"id": f"D_{user.removeprefix('U_')}"}})
 
 
@@ -1848,6 +1999,23 @@ async def mock_slack_ephemerals() -> JSONResponse:
 async def slack_reactions_add(request: Request) -> JSONResponse:
     await request.body()
     return _ok()
+
+
+@app.get("/fake-slack/users.list")
+async def slack_users_list() -> JSONResponse:
+    return _ok(
+        {
+            "members": [
+                {
+                    "id": user_id,
+                    "name": info["name"],
+                    "profile": {"display_name": info["real_name"], "real_name": info["real_name"]},
+                }
+                for user_id, info in _SLACK_USERS.items()
+                if "_" not in user_id
+            ]
+        }
+    )
 
 
 @app.get("/fake-slack/users.info")

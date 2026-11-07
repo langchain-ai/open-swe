@@ -5,15 +5,11 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk import get_client
-
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.github.thread_token import resolve_thread_github_token
-from openswe.linear.notifications import post_linear_notification
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
-    LANGGRAPH_URL,
     SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
     get_active_slack_thread,
@@ -50,7 +46,7 @@ def sandbox_unreachable_message(
     which = f" ({', '.join(identifiers)})" if identifiers else ""
     if reason:
         return warning(
-            f"Open SWE could not open this thread's sandbox{which}: `{reason.replace('`', "'")}`. "
+            f"Robin could not open this thread's sandbox{which}: `{reason.replace('`', "'")}`. "
             "Retrigger this thread to try again."
         )
     if handed_to_mda:
@@ -60,8 +56,8 @@ def sandbox_unreachable_message(
             "anything that was not pushed. Retrigger this thread to continue."
         )
     return warning(
-        f"This thread's sandbox{which} stopped responding, and Open SWE can't tell "
-        "whether it will come back. Open SWE will not start a replacement on its "
+        f"This thread's sandbox{which} stopped responding, and Robin can't tell "
+        "whether it will come back. Robin will not start a replacement on its "
         "own: a new sandbox is empty, so swapping one in would throw away anything "
         "not yet committed and pushed while still looking like a recovery. "
         "Retrigger this thread to try the same sandbox again, or start a new thread "
@@ -79,7 +75,6 @@ def extract_sandbox_id(text: str) -> str | None:
 
 async def get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
@@ -142,10 +137,6 @@ async def post_sandbox_unreachable_notification(
         else:
             await post_slack_thread_reply(channel_id, thread_ts, message, notice=notice)
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
-        return
-
-    if cfg.linear_issue and cfg.linear_issue.id:
-        await post_linear_notification(cfg.linear_issue.id, message)
         return
 
     github_target = _get_github_target(cfg)

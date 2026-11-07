@@ -15,18 +15,20 @@ from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from langgraph_sdk import get_client
 
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS, get_sandbox_backend
 from openswe.slack.client import (
-    LANGGRAPH_URL,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
 from openswe.slack.tools.reply import build_workflow_approval_blocks
+from openswe.slack.workflow_approval_cards import (
+    propagate_workflow_approval,
+    workflow_approval_message,
+)
 from openswe.threads.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,
@@ -89,6 +91,48 @@ class ParsedGitPush:
                 args.append("--force-if-includes")
         args.extend([self.remote, f"{head_sha}:refs/heads/{self.remote_branch}"])
         return _git_command(repo_dir, " ".join(shlex.quote(arg) for arg in args))
+
+    async def workflows_match_remote_default(
+        self, backend: SandboxBackendProtocol, root: str, head: str, files: list[str]
+    ) -> bool:
+        """Check workflows against the remote default, rejecting rewritten push destinations."""
+        rewrites = await _run_git(
+            backend,
+            root,
+            "config --get-regexp "
+            + shlex.quote(rf"^(remote\.{self.remote}\.pushurl|url\..*\.(push)?insteadof)$"),
+        )
+        if rewrites.ok or rewrites.output:
+            return False
+        urls = await _run_git(
+            backend, root, f"config --get-all {shlex.quote(f'remote.{self.remote}.url')}"
+        )
+        if not urls.ok or len(urls.output.splitlines()) != 1:
+            return False
+        remote_head = await _run_git(
+            backend, root, f"ls-remote --symref {shlex.quote(self.remote)} HEAD"
+        )
+        if not remote_head.ok:
+            return False
+        default_sha = next(
+            (
+                parts[0]
+                for line in remote_head.output.splitlines()
+                if len(parts := line.split()) == 2
+                and parts[1] == "HEAD"
+                and _GIT_OBJECT_ID.fullmatch(parts[0])
+            ),
+            None,
+        )
+        if default_sha is None:
+            return False
+        quoted_files = " ".join(shlex.quote(name) for name in files)
+        same = await _run_git(
+            backend,
+            root,
+            f"diff --quiet {shlex.quote(default_sha)} {shlex.quote(head)} -- {quoted_files}",
+        )
+        return same.ok
 
 
 @dataclass(frozen=True)
@@ -253,7 +297,7 @@ def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
         "error_type": "WorkflowPushMustStandAlone",
         "error": (
             "This command pushes as part of a longer command, and that push could carry "
-            "GitHub workflow file changes, so Open SWE cannot show the thread owner what it "
+            "GitHub workflow file changes, so Robin cannot show the thread owner what it "
             "pushes. Nothing ran. Commit first, then run the push on its own (for example "
             "`git -C <repo> push -u origin <branch>`); workflow changes then go to the "
             "thread owner for approval."
@@ -269,7 +313,7 @@ def _unsupported_push_message(request: ToolCallRequest) -> ToolMessage:
         "status": "error",
         "error_type": "WorkflowPushUnsupportedFlags",
         "error": (
-            "Open SWE cannot inspect this standalone git push. Nothing ran. Use "
+            "Robin cannot inspect this standalone git push. Nothing ran. Use "
             "`git [-C <repo>] push [options] origin <branch-or-refspec>` with optional "
             "-u/--set-upstream, --force-with-lease[=<ref>[:<sha>]], --force-if-includes, "
             "-f, or --force, targeting the current branch."
@@ -585,6 +629,8 @@ async def _workflow_change_for_push(
         return parsed.inspection_failed()
     if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
         return parsed.inspection_failed()
+    if await parsed.workflows_match_remote_default(backend, root, head, files):
+        return None
 
     diff = await _run_git(
         backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows"
@@ -648,7 +694,7 @@ def _blocked_message(
         "error_type": "WorkflowPushApprovalRequired",
         "error": (
             "This git push includes GitHub workflow file changes and requires human "
-            "approval before Open SWE can push it. Retry the same standalone git push "
+            "approval before Robin can push it. Retry the same standalone git push "
             "after the thread owner approves the workflow diff in Slack or the web UI."
         ),
         "workflow_approval_status": status,
@@ -678,60 +724,33 @@ def _override_execute_command(request: ToolCallRequest, command: str) -> ToolCal
     return request.override(tool_call=cast(ToolCall, {**dict(tool_call), "args": args}))
 
 
-def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None = None) -> str:
-    files = "\n".join(f"• `{path}`" for path in change.files[:10])
-    if len(change.files) > 10:
-        files += f"\n• …and {len(change.files) - 10} more"
-    repo = change.repo or "the repository"
-    branch = change.branch or "the current branch"
-    stats = change.diff_stats
-    web_review = f"\n\n*Review diff:* <{approval_url}|Open in Web>" if approval_url else ""
-    if change.inherited_from:
-        headline = "*Confirm workflow changes inherited from the base branch*"
-        source = (
-            f"This branch now includes {len(change.files)} GitHub Actions files from merging "
-            f"`{change.inherited_from}`. Open SWE did not author these workflow changes."
-        )
-    else:
-        headline = "*Confirm GitHub Actions workflow changes*"
-        source = f"Open SWE is ready to push workflow changes in `{repo}` on `{branch}`."
-    return (
-        f"{headline}\n{source}\n\n"
-        "*Why confirmation is required:* Workflow files control CI jobs and may access "
-        "repository secrets.\n\n"
-        f"*Files:*\n{files}\n\n"
-        f"*Diff stat:* {stats.get('files', len(change.files))} files, "
-        f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}{web_review}\n\n"
-        "Approval covers this workflow diff on branches in this thread and repository. "
-        "Different workflow diffs and lease-protected pushes require separate approval."
-    )
-
-
 async def _post_slack_approval_if_needed(
     request: ToolCallRequest, change: WorkflowPushChange, record: Mapping[str, Any]
 ) -> None:
-    if record.get("notified") is True:
+    if record.get("notified") is True or record.get("status") != "pending":
         return
     cfg = _configurable(request)
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if not active:
+        thread_id = _thread_id(request)
+        if thread_id and await propagate_workflow_approval(thread_id, record):
+            await mark_workflow_push_notified(thread_id, change.fingerprint)
         return
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return
-    message = _approval_slack_message(
-        change, _approval_url(_thread_id(request), change.fingerprint)
-    )
+    message = workflow_approval_message(cfg.thread_id or "", record)
     await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
         message,
-        blocks=build_workflow_approval_blocks(message, change.fingerprint),
+        blocks=build_workflow_approval_blocks(
+            message, change.fingerprint, thread_id=_thread_id(request)
+        ),
         agent_thread_id=cfg.thread_id,
     )
     thread_id = _thread_id(request)

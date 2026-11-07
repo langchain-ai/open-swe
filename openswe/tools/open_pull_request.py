@@ -17,6 +17,7 @@ from openswe.agent_api.git_metadata import record_pr_target
 from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
+    GitHubCredentialScope,
     PrAuthorNotAParticipant,
     pr_author_login,
     private_credential_login,
@@ -43,7 +44,7 @@ from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.threads.summary import upsert_pull_request_record
 from openswe.transcript.mirror import mirror_thread_metadata
-from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
+from openswe.utils.authorship import PR_ATTRIBUTION_TEXTS, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import create_langsmith_thread_feedback
@@ -184,9 +185,38 @@ def _github_response_summary(resp: httpx2.Response | None) -> str:
     return " " + ". ".join(parts) + "."
 
 
-def _effective_draft(draft: bool) -> bool:
-    preference = _configurable().draft_prs
-    return preference if preference is not None else draft
+class DraftPreference:
+    def __init__(self, draft: bool) -> None:
+        cfg = _configurable()
+        self.fallback = cfg.draft_prs if cfg.draft_prs is not None else draft
+        self.login = cfg.github_login or ""
+        self.lookup: asyncio.Task[bool] | None = None
+
+    async def __aenter__(self) -> DraftPreference:
+        if self.login:
+            self.lookup = asyncio.create_task(self.refresh())
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        if self.lookup is not None:
+            self.lookup.cancel()
+
+    async def refresh(self) -> bool:
+        from openswe.dashboard.profiles import PROFILES
+
+        try:
+            profile = await PROFILES.get(self.login)
+            preference = profile.get("draft_prs") if profile else None
+            return preference if isinstance(preference, bool) else self.fallback
+        except Exception:
+            logger.exception("Could not refresh PR draft preference")
+            return self.fallback
+
+    @property
+    def value(self) -> bool:
+        if self.lookup is not None and self.lookup.done() and not self.lookup.cancelled():
+            return self.lookup.result()
+        return self.fallback
 
 
 def _configurable() -> RunConfig:
@@ -311,7 +341,7 @@ def _access_failure_payload(
         http_status=http_status,
         reason=reason,
         likely_cause=(
-            "the Open SWE GitHub App or PR author token is not installed on, granted access "
+            "the Robin GitHub App or PR author token is not installed on, granted access "
             "to, or able to see this repository or one of the PR branches"
         ),
         branch_pushed=branch_pushed,
@@ -876,7 +906,6 @@ async def _record_pr_telemetry(
                     exc_info=True,
                 )
             active = await get_active_slack_thread(
-                get_client(),
                 thread_id,
                 cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
@@ -946,7 +975,6 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
 
     if cfg.source == "slack":
         active = await get_active_slack_thread(
-            get_client(),
             cfg.thread_id,
             cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
@@ -1044,7 +1072,10 @@ async def _maybe_append_references(
         if not lines:
             return body
         references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
-        footer_start = body.find(PR_ATTRIBUTION_TEXT)
+        footer_start = min(
+            (start for text in PR_ATTRIBUTION_TEXTS if (start := body.find(text)) >= 0),
+            default=-1,
+        )
         if footer_start < 0:
             return f"{body.rstrip()}\n\n{references}"
         before_footer = body[:footer_start].rstrip()
@@ -1069,6 +1100,9 @@ async def _open_pull_request(
     author: str | None = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    ask_channel = await GitHubCredentialScope.is_public_ask()
+    if ask_channel and not RunConfig.from_runtime().background_task_completion:
+        author = None
     try:
         token, kind = await _resolve_pr_author_token(author)
     except PrAuthorNotAParticipant as exc:
@@ -1085,6 +1119,8 @@ async def _open_pull_request(
             branch_pushed=None,
             failed_step="resolve_pr_author_token",
         )
+    if ask_channel and kind != "user":
+        raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "slack", None)
     if not token:
         return _failure_payload(
             code="no_github_token",
@@ -1100,7 +1136,10 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
+    async with (
+        DraftPreference(draft) as preference,
+        httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client,
+    ):
         if (
             kind == "user"
             and await private_credential_login() is None
@@ -1129,11 +1168,47 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
+        if kind == "user" and ask_channel:
+            requester = await pr_author_login(author)
+            token = await get_github_app_installation_token()
+            kind = "bot"
+            if not token:
+                return _failure_payload(
+                    code="no_github_token",
+                    owner=owner,
+                    repo=repo,
+                    head=head,
+                    base=base,
+                    token_kind=kind,
+                    http_status=None,
+                    reason="No GitHub App token was available for the Ask-channel PR",
+                    likely_cause="the GitHub App is not configured",
+                    branch_pushed=True,
+                    failed_step="resolve_pr_author_token",
+                )
+            preflight_failure = await _preflight_pr_access(
+                client=client,
+                token=token,
+                token_kind=kind,
+                author=None,
+                owner=owner,
+                repo=repo,
+                head=head,
+                base=base,
+            )
+            if preflight_failure is not None:
+                return preflight_failure
+            body += (
+                f"\n\nRequested by @{requester} via an Ask channel. "
+                "A human other than the requester must validate and approve this change. "
+                "Bot authorship does not enforce that separation in GitHub; "
+                "repository branch protection and review policy must enforce it."
+            )
         body = await _stamp_attribution_footer(
             await _maybe_append_references(client, token, owner, repo, body),
             state,
         )
-        draft = _effective_draft(draft)
+        draft = True if ask_channel else preference.value
         payload = {
             "title": title,
             "head": head,
@@ -1280,7 +1355,9 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
 
 
 @audit_tool()
-async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
+async def link_pull_request(
+    pr_url: str, resolves_thread: bool = False, author: str | None = None
+) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread and is_concierge_thread(
@@ -1293,7 +1370,10 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
     ref = parse_github_pr_url(pr_url)
     if ref is None:
         return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
-    token, kind = await _resolve_pr_author_token()
+    try:
+        token, kind = await _resolve_pr_author_token(author)
+    except PrAuthorNotAParticipant as exc:
+        return {"success": False, "error": str(exc)}
     if not token:
         return {"success": False, "error": "No GitHub token was available to read the PR"}
     async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
