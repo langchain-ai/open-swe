@@ -199,12 +199,7 @@ def assert_thread_readable(
 
 
 def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
-    """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
-
-    A thread a Slack bot started is steered from its Slack thread only, so the
-    dashboard keeps it read-only for everyone, admins included, and so does a
-    mirrored Claude Code session.
-    """
+    """Authorize dashboard actions other than bot-thread workflow push decisions."""
     if thread_source(metadata) == CLAUDE_CODE_SOURCE and thread_is_readable(metadata, login):
         raise HTTPException(403, MIRRORED_SESSION_READ_ONLY)
     if not thread_is_promptable(metadata, login):

@@ -54,7 +54,10 @@ def workflow_approval_message(thread_id: str, record: Mapping[str, object]) -> s
         "*Why confirmation is required:* Workflows control CI jobs and may access repository secrets.\n\n"
         f"{listed}\n\n*Diff stat:* {stats.get('files', len(paths))} files, "
         f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}{review}\n\n"
-        "Only the implementation thread's owner can approve. Approval covers this workflow "
+        "In bot-started Slack threads, the linked human requester (or, when none is recorded, "
+        "a linked human participant) can approve. Otherwise Slack approval requires the "
+        "implementation thread's owner; web approval follows the thread's access rules. "
+        "Approval covers this workflow "
         "diff on branches in this thread and repository. Different workflow diffs and "
         "lease-protected pushes require separate approval."
     )

@@ -423,32 +423,57 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
         ("wrong-dm", "owner", "pending", False),
         ("coordinator", "other", "pending", False),
         ("coordinator", "unlinked", "pending", False),
-        ("bot", "owner", "pending", False),
+        ("bot", "owner", "pending", True),
+        ("bot-reject", "owner", "pending", False),
+        ("bot", "other", "pending", False),
+        ("bot", "unlinked", "pending", False),
+        ("bot-unrelated", "owner", "pending", False),
         ("coordinator", "owner", "approved", False),
         ("coordinator", "owner", "rejected", False),
     ],
 )
+@pytest.mark.parametrize("visibility", ["public", "private"])
 async def test_workflow_approval_requires_owner_and_authorized_card_location(
     monkeypatch: pytest.MonkeyPatch,
     location: str,
     identity: str,
     state: str,
     approved: bool,
+    visibility: str,
 ) -> None:
     payload = _option_payload()
     is_dm = location in {"dm", "dm-reject", "wrong-dm"}
     target = "coordinator" if location == "legacy" else "worker"
     button = {
         "type": "workflow_push_approval",
-        "action": "reject" if location == "dm-reject" else "approve",
+        "action": "reject" if location in {"dm-reject", "bot-reject"} else "approve",
         "fingerprint": "fp",
     }
     if location != "legacy":
         button["thread_id"] = target
     payload["actions"][0]["value"] = json.dumps(button)
-    metadata = {"source": "slack", "owner_login": "owner", "visibility": "private"}
-    if location == "bot":
+    metadata = {"source": "slack", "owner_login": "owner", "visibility": visibility}
+    if location.startswith("bot"):
+        from openswe.slack import client as slack_client
+
+        metadata.pop("owner_login")
         metadata["trigger_kind"] = "slack_bot"
+        metadata["visibility"] = "public"
+        metadata["source_context"] = {"slack_thread": {"channel_id": "C1", "thread_ts": "1"}}
+        monkeypatch.setattr(
+            workflow_approval.User,
+            "for_login",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    id="person",
+                    github_login=identity,
+                    slack_user_id="U1" if identity == "owner" else "U2",
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            slack_client, "fetch_slack_thread_messages", AsyncMock(return_value=[{"user": "U1"}])
+        )
     decide = AsyncMock(return_value=({"status": "approved" if approved else "rejected"}, True))
     dispatch = AsyncMock()
     confirm = AsyncMock()
@@ -479,7 +504,7 @@ async def test_workflow_approval_requires_owner_and_authorized_card_location(
             return_value=None
             if location == "unmapped"
             else "unrelated"
-            if location == "unrelated"
+            if location in {"unrelated", "bot-unrelated"}
             else "coordinator"
         ),
     )
@@ -517,7 +542,7 @@ async def test_workflow_approval_requires_owner_and_authorized_card_location(
     result = await slack_routes.slack_interactivity(_request(payload), background)
     await background()
 
-    accepted = approved or location == "dm-reject"
+    accepted = approved or location in {"dm-reject", "bot-reject"}
     assert result["status"] == ("accepted" if accepted else "ignored")
     if not accepted:
         decide.assert_not_awaited()

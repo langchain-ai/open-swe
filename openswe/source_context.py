@@ -116,6 +116,37 @@ class SourceContext(BaseModel):
             return cls()
         return cls.parse(metadata.get("source_context"))
 
+    async def assert_workflow_push_approver(self, login: str) -> None:
+        """Authorize a linked human participant to decide a bot thread's workflow push."""
+        from fastapi import HTTPException
+
+        from openswe.slack.client import fetch_slack_thread_messages
+        from openswe.users import User
+        from openswe.utils.thread_participants import slack_participant_ids
+
+        user = await User.for_login("github", login)
+        thread = self.slack_thread
+        if (
+            user is None
+            or not user.github_login
+            or not user.slack_user_id
+            or thread is None
+            or not thread.location
+        ):
+            raise HTTPException(
+                403, "A linked human participant must answer this workflow approval."
+            )
+        if thread.team_id and user.slack_team_id != thread.team_id:
+            raise HTTPException(403, "You are not a participant in this Slack thread.")
+        messages = await fetch_slack_thread_messages(*thread.location, complete=True)
+        participants = slack_participant_ids(messages)
+        if user.slack_user_id not in participants:
+            raise HTTPException(403, "You are not a participant in this Slack thread.")
+        if thread.triggering_user_id in participants:
+            requester = await User.for_identity("slack", thread.triggering_user_id)
+            if requester is not None and requester.github_login and requester.id != user.id:
+                raise HTTPException(403, "Only the requester can answer this workflow approval.")
+
     def dump(self) -> dict[str, Any]:
         """The JSON value to store, preserving exactly the keys that were set."""
         return self.model_dump(mode="json", exclude_unset=True)
