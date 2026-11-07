@@ -28,6 +28,8 @@ from openswe.agent_api.tokens import verify_runtime_token
 from openswe.github import channel
 from openswe.github import webhook as github_webhooks
 from openswe.mda_channels import api, github_deliveries
+from openswe.threads import index
+from openswe.threads.index import IndexedThread
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
 from tests.conftest import register_github_logins
@@ -123,6 +125,7 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     )
     monkeypatch.setattr(webhook_common, "AGENT_VERSION_METADATA", {"LANGSMITH_AGENT_VERSION": "v1"})
     stub_mda_runtime(monkeypatch)
+    monkeypatch.setattr(index, "get", AsyncMock(return_value=None))
     return prepare
 
 
@@ -435,6 +438,30 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     webhook = "https://backend.example/webhooks/run-complete?token=t"
     monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", webhook)
 
+    classification: dict[str, JsonValue] = {
+        "trigger_kind": "user",
+        "origin": "github",
+        "source": "github",
+        "owner_type": "user",
+        "thread_category": "issue",
+        "owner_login": "ada",
+    }
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        index,
+        "get",
+        AsyncMock(
+            return_value=IndexedThread(
+                thread_id=str(THREAD),
+                runtime="mda",
+                metadata=classification,
+                status="idle",
+                created_at=now,
+                updated_at=now,
+            )
+        ),
+    )
+
     delivered = await _deliver(app, event, payload)
 
     assert delivered.issue_run is not None and delivered.issue_run.starts
@@ -462,6 +489,7 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     metadata = mda_starts({"input": ISSUE_RUN_INPUT, **run.model_dump()})["metadata"]
     assert metadata == run.metadata
     assert metadata["channel"] == "github"
+    assert classification.items() <= metadata.items()
     assert metadata["github_delivery"] == "delivery-1"
     assert metadata["LANGSMITH_AGENT_VERSION"] == "v1"
     assert "invocation_id" in metadata

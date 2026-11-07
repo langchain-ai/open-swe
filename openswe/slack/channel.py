@@ -631,10 +631,12 @@ async def _prepare_run(
     if request.move_thread:
         _mark_move(prepared.input, request.move_channel_id)
 
+    indexed = await index.get(thread_id)
     run_config = await prepare_durable_run(
         "agent",
         {"configurable": prepared.configurable},
         {
+            **(indexed.run_classification() if indexed else {}),
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: mda_forwarding.CHANNEL,
             "slack_trigger_ts": prepared.trigger_ts,
@@ -642,7 +644,6 @@ async def _prepare_run(
         },
         source="slack",
     )
-    indexed = await index.get(thread_id)
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id,
         {
