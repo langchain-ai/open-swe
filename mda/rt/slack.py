@@ -238,9 +238,8 @@ def _kind(
     dm: bool,
     bot: bool,
 ) -> Kind | None:
-    """Which kind of turn a message addressed to Open SWE starts, or ``None`` when the
-    backend answers it, as for a conversation it holds."""
-    started = message.subtype in _STARTED_SUBTYPES
+    """The turn kind to start, or ``None`` when the backend holds the conversation."""
+    started = message.subtype in _STARTED_SUBTYPES or (bot and message.subtype == "bot_message")
     command = message.explicit_mention and not (dm or bot) and started
     if command and parsed.action is SlackAction.BY_THE_WAY:
         return "by_the_way"

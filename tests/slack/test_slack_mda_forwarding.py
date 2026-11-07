@@ -1011,12 +1011,16 @@ async def test_an_edit_of_a_message_that_started_a_turn_is_not_claimed_as_one(
     assert all(call.args[0] != "slack_turn" for call in claim.await_args_list)
 
 
+@pytest.mark.parametrize("subtype", ["", "bot_message"])
 async def test_an_allowed_bots_turn_links_no_account_and_no_person_owns_it(
     monkeypatch: pytest.MonkeyPatch,
+    subtype: str,
 ) -> None:
     prepare = _prepared(monkeypatch, prompt=_PROMPT)
 
-    await _start(_start_app(monkeypatch), user_id="UBOT", bot_id="B1", bot_app_id="A2")
+    await _start(
+        _start_app(monkeypatch), user_id="UBOT", bot_id="B1", bot_app_id="A2", subtype=subtype
+    )
 
     cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
