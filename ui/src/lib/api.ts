@@ -251,6 +251,8 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** The organizations this Open SWE serves (`ALLOWED_GITHUB_ORGS`), lowercase. */
+  base_orgs?: Array<string>
   /** Mirrors the user's preference: what Enter does while a run is live. */
   follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */
@@ -326,6 +328,7 @@ export interface OptionsPayload {
 
 export interface Profile {
   experimental_background_callbacks?: boolean | null
+  experimental_live_activity?: boolean | null
   login?: string
   email?: string
   default_repo?: string | null
@@ -343,11 +346,13 @@ export interface Profile {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
   updated_at?: string
 }
 
 export interface ProfileUpdate {
   experimental_background_callbacks?: boolean | null
+  experimental_live_activity?: boolean | null
   default_repo?: string | null
   workspace_default_repos?: Record<string, string>
   base_branch?: string | null
@@ -363,6 +368,7 @@ export interface ProfileUpdate {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
 }
 
 export interface SlackBotOption {
@@ -845,6 +851,7 @@ export interface WorkspaceOption {
   slack_channel_ids: Array<string>
   /** Bound channels where untagged messages start and continue threads. */
   kitchen_channel_ids: Array<string>
+  ask_channel_ids?: Array<string>
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -893,6 +900,7 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
 }
@@ -914,6 +922,7 @@ export interface WorkspaceUpdate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
   vcpus?: number | null
@@ -937,6 +946,7 @@ export interface WorkspaceRecord {
   repos: Array<string>
   slack_channel_ids: Array<string>
   kitchen_channel_ids: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -1101,6 +1111,7 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  conversationResolutionRequired: boolean | null
   // Why it is on the To Review list: Open SWE assigned it, may assign it once
   // its review goes unclaimed, or it was linked in a Slack thread naming you.
   assignment?:
@@ -1262,7 +1273,6 @@ export interface ReviewDetail extends Omit<
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
-  checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
@@ -1946,7 +1956,8 @@ export const api = {
   ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
-    method: MergeMethod
+    method: MergeMethod,
+    resolveConversations = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
@@ -1955,6 +1966,7 @@ export const api = {
       ...(pr.ci === "pending" && pr.mergeState === "blocked"
         ? { auto_merge: true }
         : {}),
+      ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -2058,6 +2070,10 @@ export const api = {
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
+    ),
+  getReviewChecks: (owner: string, repo: string, number: number) =>
+    request<Array<ReviewCheckRun>>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/checks`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(

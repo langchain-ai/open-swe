@@ -34,7 +34,6 @@ from collections.abc import (
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from functools import partial
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, cast
@@ -87,10 +86,12 @@ from managed_deepagents._channels.binding import resolve_channel_provider
 from managed_deepagents._channels.messaging_registry import register_channel_messaging
 from managed_deepagents._connector import (
     Connector,
+    ConnectorToolList,
     SandboxMode,
     collect_connectors,
     has_sandbox_connectors,
     load_connector_tools,
+    load_tools_by_connector,
     requirements_from_connectors,
     run_connector_sandbox_hooks,
 )
@@ -322,12 +323,8 @@ _SANDBOX_DIGEST_LENGTH = 12
 
 #: Host sandbox-name limit.
 _MAX_SANDBOX_NAME_LENGTH = 63
-_SANDBOX_FALLBACK_SUFFIX_LENGTH = 9
 _MAX_PRIMARY_DEPLOYMENT_COMPONENT_LENGTH = (
     _MAX_SANDBOX_NAME_LENGTH - len(_SANDBOX_NAME_SEPARATOR) - _SANDBOX_DIGEST_LENGTH
-)
-_MAX_FALLBACK_DEPLOYMENT_COMPONENT_LENGTH = (
-    _MAX_PRIMARY_DEPLOYMENT_COMPONENT_LENGTH - _SANDBOX_FALLBACK_SUFFIX_LENGTH
 )
 _SANDBOX_DEPLOYMENT_DIGEST_LENGTH = 8
 
@@ -1339,15 +1336,27 @@ def _compile_managed_agent(
     # Connectors: run each connector's ``tools`` hook and append the results to
     # the authored tools. Connector tools keep identity injection, but do not
     # receive the authored runtime backend API.
-    if connectors and not skip_factory_inspection_tools:
-        tools_value = merged.get("tools")
-        authored_tools = (
-            list(cast("Iterable[object]", tools_value)) if tools_value is not None else []
+    tools_by_connector = (
+        timing.measure("connectors", lambda: load_tools_by_connector(connectors))
+        if connectors and not skip_factory_inspection_tools
+        else []
+    )
+    authored_tools = list(cast("Iterable[DeepAgentTool]", merged.get("tools") or ()))
+    tools_by_connector = [
+        (connector, wrap_tools_with_managed_runtime(tools) if identity is not None else tools)
+        for connector, tools in tools_by_connector
+    ]
+    if tools_by_connector:
+        merged["tools"] = authored_tools + [
+            tool for _, tools in tools_by_connector for tool in tools
+        ]
+    if merged.get("subagents") is not None:
+        merged["subagents"] = _scope_subagent_mcp_tools(
+            cast("Sequence[object]", merged["subagents"]),
+            connectors or [],
+            authored_tools,
+            tools_by_connector,
         )
-        connector_tools = timing.measure("connectors", lambda: load_connector_tools(connectors))
-        if identity is not None:
-            connector_tools = wrap_tools_with_managed_runtime(connector_tools)
-        merged["tools"] = authored_tools + connector_tools
 
     # Managed prompt behavior surrounds authored middleware in the same order as TS.
     _append_channel_response_format_middleware(merged)
@@ -1398,6 +1407,38 @@ def _compile_managed_agent(
         subagent_role=subagent_role,
         browser_declared=browser is not None,
     )
+
+
+def _scope_subagent_mcp_tools(
+    subagents: Sequence[object],
+    connectors: Sequence[Connector],
+    authored_tools: list[DeepAgentTool],
+    tools_by_connector: list[tuple[Connector, ConnectorToolList]],
+) -> Sequence[object]:
+    """Give each sync subagent with `mcp` only the tools of the MCP servers it selects."""
+    if not any(isinstance(spec, Mapping) and "mcp" in spec for spec in subagents):
+        return subagents
+    loaded = {id(c) for c in connectors if c.kind == "mcp_servers"}
+    non_mcp = [tool for c, tools in tools_by_connector if c.kind != "mcp_servers" for tool in tools]
+    scoped: list[object] = []
+    for spec in subagents:
+        if not isinstance(spec, Mapping) or "mcp" not in spec:
+            scoped.append(spec)
+            continue
+        selected = {id(definition) for definition in spec["mcp"] or ()}
+        if not selected <= loaded:
+            msg = f"subagent {spec.get('name')!r} selects an MCP server this agent does not load"
+            raise ValueError(msg)
+        own = (
+            list(cast("Iterable[DeepAgentTool]", spec["tools"]))
+            if "tools" in spec
+            else authored_tools + non_mcp
+        )
+        mcp_tools = [tool for c, tools in tools_by_connector if id(c) in selected for tool in tools]
+        scoped.append(
+            {key: value for key, value in spec.items() if key != "mcp"} | {"tools": own + mcp_tools}
+        )
+    return scoped
 
 
 def _count(value: object) -> int:
@@ -2094,7 +2135,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if self._resolved_backend is not None:
             return self._resolved_backend
         try:
-            key = _sandbox_scope_key(self._sandbox(), self._config(), self._source.selection)
+            key = _thread_scope_key(self._config(), self._source.selection)
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
         with _managed_sandbox_lock:
@@ -2112,7 +2153,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if resolved:
             return str(resolved)
         try:
-            scope = _sandbox_scope_key(self._sandbox(), self._config(), self._source.selection)
+            scope = _thread_scope_key(self._config(), self._source.selection)
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
@@ -2290,7 +2331,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if not manages_proxy(sandbox.options):
             return
         config = self._config()
-        key = _sandbox_scope_key(sandbox, config, self._source.selection)
+        key = _thread_scope_key(config, self._source.selection)
         await self._source.proxy_config_sync.sync(
             sandbox,
             _peek_managed_host_name(key),
@@ -2339,9 +2380,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             and _parent_sandbox_scope(config, source.selection) is not None
         ):
             return
-        previous_name = _peek_managed_host_name(
-            _sandbox_scope_key(sandbox, config, source.selection)
-        )
+        previous_name = _peek_managed_host_name(_thread_scope_key(config, source.selection))
         try:
             recovered = _recover_managed_sandbox(
                 sandbox,
@@ -2488,7 +2527,7 @@ def _resolve_managed_sandbox(
     CLI wiring can refresh without re-cloning. Provisioning (``setup.sh``)
     happens at deploy bake, not here.
     """
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     thread_key = _thread_sync_key(config)
     has_sandbox = has_sandbox_connectors(connectors)
 
@@ -2578,7 +2617,7 @@ def _claim_managed_sandbox(
     The box boots while the run does other work; ``_resolve_managed_sandbox`` waits for
     it, and runs the connectors' hooks, on its first use.
     """
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     bound_name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
     with _managed_sandbox_lock:
         entry = _bound(_managed_sandboxes.get(key), bound_name)
@@ -2629,7 +2668,7 @@ def _recover_managed_sandbox(
 
     from managed_deepagents.sandbox import is_per_thread  # noqa: PLC0415
 
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2690,7 +2729,7 @@ def _replace_managed_sandbox(
     """
     from managed_deepagents.sandbox import SandboxReplacement  # noqa: PLC0415
 
-    key = _sandbox_scope_key(sandbox, config, selection)
+    key = _thread_scope_key(config, selection)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2889,21 +2928,6 @@ def _canonical_sandbox_value(  # noqa: C901, PLR0911, PLR0912 - exhaustive type 
         finally:
             ancestors.remove(identity)
     raise TypeError("sandbox options contain an unsupported value")
-
-
-def _sandbox_scope_key(
-    sandbox: SandboxDefinition,
-    config: ManagedRunConfig | None,
-    selection: _SandboxSelection | None = None,
-) -> str:
-    """The process-level reuse key: the owning thread's when the box names one."""
-    from managed_deepagents.sandbox import owning_thread  # noqa: PLC0415
-
-    thread_id = owning_thread(sandbox.options)
-    scope_config: ManagedRunConfig | None = (
-        {"configurable": {"thread_id": thread_id}} if thread_id else config
-    )
-    return _thread_scope_key(scope_config, selection)
 
 
 def _thread_scope_key(
@@ -3134,15 +3158,6 @@ def _send_create_fields(client: LangSmithSandboxClient, fields: Mapping[str, obj
     http.post = post_with_fields
 
 
-def _managed_sandbox_fallback_name(deployment: str, scope_key: str) -> str:
-    base = _managed_sandbox_name_with_deployment_limit(
-        deployment,
-        scope_key,
-        _MAX_FALLBACK_DEPLOYMENT_COMPONENT_LENGTH,
-    )
-    return f"{base}-{secrets.token_hex(4)}"
-
-
 def _managed_sandbox_name_with_deployment_limit(
     deployment: str,
     scope_key: str,
@@ -3164,9 +3179,11 @@ def _sandbox_deployment_component(deployment: str, max_length: int) -> str:
 def _fetch_sandbox(
     client: LangSmithSandboxClient, name: str, *, preserve_existing: bool = False
 ) -> Sandbox | None:
-    """Look up a box, preserving a thread's work when its service is unreachable."""
-    from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
+    """Look up a sandbox by name; ``None`` only when LangSmith confirms it is not there.
 
+    Any other failure (a timeout, a 5xx) fails the open: the sandbox may still
+    exist, and creating beside it would give the thread a second, empty one.
+    """
     get_sandbox = getattr(client, "get_sandbox", None)
     if not callable(get_sandbox):
         if preserve_existing:
@@ -3174,16 +3191,12 @@ def _fetch_sandbox(
         return None
     try:
         return _await_if_needed(get_sandbox(name))
-    except ResourceNotFoundError:
-        return None
     except Exception as error:
+        if _is_sandbox_not_found_error(error):
+            return None
         if preserve_existing:
             raise
-        logger.warning(
-            "Could not look up sandbox",
-            attributes={"sandbox_name": name, "error_type": type(error).__name__},
-        )
-        return None
+        raise RuntimeError(f"Could not look up sandbox {name!r}; retry the run: {error}") from error
 
 
 def _restart_sandbox(
@@ -3192,30 +3205,30 @@ def _restart_sandbox(
     stopped: Sandbox,
     *,
     preserve_existing: bool = False,
-) -> Sandbox | None:
-    """Start a stopped sandbox so it can be adopted; ``None`` when that fails."""
+) -> Sandbox:
+    """Start a stopped sandbox so it can be adopted; raises when that fails."""
     start_sandbox = getattr(client, "start_sandbox", None)
     if not callable(start_sandbox):
-        if preserve_existing:
-            raise RuntimeError(f"The sandbox client cannot restart existing sandbox {name!r}")
-        return None
+        raise RuntimeError(f"Sandbox {name!r} is stopped and this client cannot start it")
     try:
         # Some SDK versions return nothing on success; it is the same sandbox.
         return _await_if_needed(start_sandbox(name)) or stopped
     except Exception as error:
         if preserve_existing:
             raise
-        logger.warning(
-            "Could not restart sandbox",
-            attributes={"sandbox_name": name, "error_type": type(error).__name__},
-        )
-        return None
+        raise RuntimeError(
+            f"Could not start stopped sandbox {name!r}; retry the run: {error}"
+        ) from error
 
 
 def _adopt_sandbox(
     client: LangSmithSandboxClient, name: str, *, preserve_existing: bool = False
 ) -> Sandbox | None:
-    """Adopt an existing box, failing closed when the thread must keep its work."""
+    """Return the existing sandbox for ``name`` when usable, else ``None``.
+
+    ``None`` means nothing usable holds the name. A lookup or restart failure
+    raises instead, so the open never creates a second sandbox for the thread.
+    """
     existing = _fetch_sandbox(client, name, preserve_existing=preserve_existing)
     if existing is None:
         return None
@@ -3246,7 +3259,6 @@ def _resolve_sandbox_instance(
     client: LangSmithSandboxClient,
     create_kwargs: dict[str, object],
     name: str | None,
-    fallback_name: Callable[[], str] | None = None,
     adopt_aliases: Iterable[str] = (),
     *,
     preserve_existing: bool = False,
@@ -3259,6 +3271,10 @@ def _resolve_sandbox_instance(
 
     ``adopt_aliases`` are 0.9.0 and 0.5.x names for this thread: reconnect a box that
     already exists, never create under the old formula.
+
+    Only a confirmed not-found lookup permits a create, and the create never falls
+    back to another name: a second sandbox would hold none of the thread's work,
+    and replicas could each cache a different one.
 
     Returns the sandbox and whether it was adopted rather than created.
     """
@@ -3284,20 +3300,21 @@ def _resolve_sandbox_instance(
     except Exception as error:
         if not _is_sandbox_name_conflict(error):
             raise
-        # Either a concurrent container won the create race, or an unusable
-        # sandbox (failed, mid-delete) still holds the name. Never adopt a name
-        # we just invalidated — fall through to a unique suffix instead.
-        if not _sandbox_name_blocked(name):
-            winner = _adopt_sandbox(client, name, preserve_existing=preserve_existing)
-            if winner is not None:
-                return winner, True
-        if preserve_existing:
-            raise
-        # Keep the deployment prefix so teardown still finds this sandbox.
-        unique = fallback_name() if fallback_name is not None else f"{name}-{secrets.token_hex(4)}"
-        created = _await_if_needed(create_sandbox(name=unique, **create_kwargs))
-        _unblock_sandbox_name(name)
-        return created, False
+        # Either a concurrent container won the create race (its sandbox may
+        # still be provisioning), or an unusable sandbox (failed, mid-delete)
+        # still holds the name. Never adopt a name we just invalidated.
+        winner = (
+            None
+            if _sandbox_name_blocked(name)
+            else _adopt_sandbox(client, name, preserve_existing=preserve_existing)
+        )
+        if winner is None:
+            if preserve_existing:
+                raise
+            raise RuntimeError(
+                f"Sandbox name {name!r} is held by a sandbox that cannot be used; retry the run"
+            ) from error
+        return winner, True
 
 
 def _create_replacement_sandbox(
@@ -3403,7 +3420,6 @@ def _claim_langsmith_sandbox(
         BoundSandboxMissingError,
         declared_create_fields,
         is_per_thread,
-        owning_thread,
     )
 
     create_kwargs = _sandbox_create_kwargs(sandbox, selection)
@@ -3414,17 +3430,11 @@ def _claim_langsmith_sandbox(
     deployment = _managed_deployment_name()
     if not deployment:
         lookup_names = []
-    elif owning_thread(sandbox.options):
-        # Names from before this option never named a box kept this way.
-        lookup_names = [_managed_sandbox_name(deployment, scope_key)]
     else:
         lookup_names = _managed_sandbox_lookup_names(
             deployment, scope_key, sandbox, config, selection
         )
     sandbox_name = recovery_name or (lookup_names[0] if lookup_names else None)
-    fallback_name: Callable[[], str] | None = None
-    if deployment:
-        fallback_name = partial(_managed_sandbox_fallback_name, deployment, scope_key)
     if existing_sandbox is not None:
         langsmith_sandbox, adopted = existing_sandbox, True
     elif recovery_name:
@@ -3445,7 +3455,6 @@ def _claim_langsmith_sandbox(
             client,
             create_kwargs,
             sandbox_name,
-            fallback_name,
             lookup_names[1:],
             preserve_existing=is_per_thread(sandbox.options),
         )

@@ -13,22 +13,22 @@ from starlette.routing import Route
 from openswe.agent_api import server as agent_api_server
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
+from openswe.api.public_origin import PublicOriginMiddleware
 from openswe.api.request_ids import add_request_ids
 from openswe.api.tracing import add_trace_resource_names, configure_datadog_environment
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
-from openswe.github.channel import router as github_channel_router
-from openswe.github.routes import router as github_webhook_router
-from openswe.linear.channel import router as linear_channel_router
 from openswe.mcp import server as agent_mcp_server
+from openswe.mda_channels.api import router as mda_channel_api_router
+from openswe.mda_channels.github_deliveries import router as mda_github_deliveries_router
 from openswe.mda_channels.resolve_user import router as mda_resolve_user_router
+from openswe.mda_channels.slack_channel_events import router as mda_slack_channel_events_router
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.short_links.routes import router as short_link_router
-from openswe.slack.channel import router as slack_channel_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.router import ThreadRouter
@@ -56,10 +56,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
     from openswe.dashboard.oauth import validate_github_login_allowlist
+    from openswe.dashboard.options import validate_local_dev_llm_config
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.jobs.kinds import start_jobs
+    from openswe.plugins.rooms import ROOMS as PLUGIN_ROOMS
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.slack.http import validate_slack_startup_config
@@ -67,7 +69,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
-    from openswe.utils.model import validate_local_dev_llm_config
 
     pin_single_event_loop()
     validate_github_login_allowlist()
@@ -105,6 +106,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # liveness ticks; what goes quiet is a bridge driven from another replica.
         logger.warning("Sandbox bridge listener startup failed", exc_info=True)
     try:
+        await PLUGIN_ROOMS.start()
+    except Exception:  # noqa: BLE001
+        # Rooms stop being live: members see each other's edits when they reload.
+        logger.warning("Plugin room listener startup failed", exc_info=True)
+    try:
         await HUB.start()
     except Exception:  # noqa: BLE001
         # Dashboard pages still load and refetch on their own actions; what
@@ -123,12 +129,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
             stack.enter_context(watch_for_stalls())
             if AGENT_MCP is not None:
-                await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
+                for mcp_app in AGENT_MCP.apps:
+                    await stack.enter_async_context(mcp_app.lifespan(mcp_app))
             yield
     finally:
         await JOB_WORKER.stop()
         await HUB.stop()
         await bridge_listener.stop()
+        await PLUGIN_ROOMS.stop()
         await transcript_listener.stop()
         await LISTENER.stop()
         await stop_worker()
@@ -165,6 +173,8 @@ def create_app() -> FastAPI:
     app.add_middleware(ThreadRouter)
     # Starlette leaves `text/event-stream` and already-encoded responses alone.
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
+    # Wraps every route and the MCP mount, so they see which domain the request used.
+    app.add_middleware(PublicOriginMiddleware)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
@@ -173,13 +183,12 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
-    app.include_router(linear_channel_router)
+    app.include_router(mda_channel_api_router)
     app.include_router(mda_resolve_user_router)
+    app.include_router(mda_slack_channel_events_router)
+    app.include_router(mda_github_deliveries_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
-    app.include_router(github_webhook_router)
-    app.include_router(github_channel_router)
-    app.include_router(slack_channel_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(short_link_router)
@@ -190,7 +199,7 @@ def create_app() -> FastAPI:
         Route(agent_api_server.API_PATH, agent_api_server.API, methods=["POST"])
     )
     if AGENT_MCP is not None:
-        app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server
+        app.state.fastmcp_server = AGENT_MCP.apps[0].state.fastmcp_server
         app.router.routes.extend(AGENT_MCP.root_routes)
         app.mount(agent_mcp_server.PREFIX, AGENT_MCP.app)
     mount_dashboard_ui(app)

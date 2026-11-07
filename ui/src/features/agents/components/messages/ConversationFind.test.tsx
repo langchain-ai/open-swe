@@ -64,10 +64,15 @@ describe("ConversationFind", () => {
       screen.getByRole("button", { name: "Find in conversation (⌘F / Ctrl+F)" })
     )
     const input = screen.getByRole("textbox", { name: "Find in conversation" })
-    for (const value of ["ynext", "ob", "clipped"]) {
+    for (const value of ["ob", "clipped"]) {
       fireEvent.change(input, { target: { value } })
       await waitFor(() => expect(screen.getByText("No results")).toBeTruthy())
     }
+    fireEvent.change(input, { target: { value: "ynext" } })
+    await waitFor(() => expect(screen.getByText("1 of 1")).toBeTruthy())
+    expect(
+      [...highlights.get("conversation-find")!].map((range) => range.toString())
+    ).toEqual(["Next"])
     fireEvent.change(input, { target: { value: "a [literal]" } })
     await waitFor(() => expect(screen.getByText("1 of 1")).toBeTruthy())
     expect(

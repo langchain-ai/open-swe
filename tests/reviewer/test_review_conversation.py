@@ -151,7 +151,8 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
                                 "isOutdated": False,
                                 "comments": {"nodes": [{"fullDatabaseId": "21"}]},
                             }
-                        ]
+                        ],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "next"},
                     }
                 }
             }
@@ -160,6 +161,32 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/graphql":
+            payload = json.loads(request.content)
+            assert "comments(first: 1)" in payload["query"]
+            assert "body" not in payload["query"]
+            if payload["variables"]["cursor"] == "next":
+                return httpx2.Response(
+                    200,
+                    json={
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": [
+                                            {
+                                                "id": "PRRT_23",
+                                                "isResolved": False,
+                                                "isOutdated": True,
+                                                "comments": {"nodes": [{"fullDatabaseId": "23"}]},
+                                            }
+                                        ],
+                                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                    }
+                                }
+                            }
+                        }
+                    },
+                )
             return httpx2.Response(200, json=thread_states)
         page = request.url.params["page"]
         match request.url.path:
@@ -210,7 +237,7 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
     assert author is not None and (author.login, author.bot) == ("carol", False)
     assert (outdated.id, outdated.node_id, outdated.resolved, outdated.outdated) == (
         23,
-        None,
+        "PRRT_23",
         False,
         True,
     )

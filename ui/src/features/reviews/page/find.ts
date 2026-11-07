@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import type { ReviewDiffFile } from "@/lib/api"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import { entryShows, type DiffEntry } from "./diffEntries"
@@ -56,25 +57,33 @@ export function findMatches(
 ): Array<FindMatch> {
   if (!query.trim()) return []
   const needle = query.toLowerCase()
+  const search = new FuzzySearch(needle)
   const matches: Array<FindMatch> = []
+  const exact: Array<FindMatch> = []
   const seenFiles = new Set<string>()
   const seenLines = new Set<string>()
   for (const entry of entries) {
     const { path } = entry.file
     if (!seenFiles.has(path)) {
       seenFiles.add(path)
-      if (path.toLowerCase().includes(needle))
-        matches.push({ kind: "file", path })
+      if (search.matches(path)) {
+        const match: FindMatch = { kind: "file", path }
+        matches.push(match)
+        if (path.toLowerCase().includes(needle)) exact.push(match)
+      }
     }
     for (const { line, side, text } of linesOf(entry.file)) {
       const key = `${path}:${side}:${line}`
       if (seenLines.has(key) || !entryShows(entry, path, line, side)) continue
       seenLines.add(key)
-      if (text.toLowerCase().includes(needle))
-        matches.push({ kind: "line", path, line, side })
+      if (search.ranges(text).length) {
+        const match: FindMatch = { kind: "line", path, line, side }
+        matches.push(match)
+        if (text.toLowerCase().includes(needle)) exact.push(match)
+      }
     }
   }
-  return matches
+  return exact.length ? exact : matches
 }
 
 export function findTarget(

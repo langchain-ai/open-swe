@@ -1,4 +1,6 @@
 const MAX_LABEL_LENGTH = 200
+/** Comfortably more than three lines of preview, which is all a passage shows. */
+const MAX_PASSAGE_LENGTH = 600
 
 const HEADING_LINE = /^\s*(?:#{1,6}\s+(.+?)|\*\*([^*]+)\*\*|__([^_]+)__)\s*$/
 
@@ -16,6 +18,30 @@ export class Thought {
   get preview(): string {
     const firstLine = this.text.split("\n").find((line) => line.trim()) ?? ""
     return Thought.plain(firstLine.replace(/^\s*#+\s*/, ""))
+  }
+
+  /**
+   * What the model is on now: its latest heading, and the last paragraph it
+   * wrote under that heading as one plain-text run, so a short preview follows
+   * the thought as it streams.
+   */
+  get passage(): { heading: string | null; body: string } {
+    const heading = this.heading
+    const start = heading
+      ? this.lines
+          .slice(0, -1)
+          .findLastIndex((line) => HEADING_LINE.test(line)) + 1
+      : 0
+    const paragraphs = this.lines
+      .slice(start)
+      .join("\n")
+      .split(/\n\s*\n/)
+      .filter((paragraph) => paragraph.trim())
+    const body = (paragraphs.at(-1) ?? "")
+      .split("\n")
+      .map((line) => line.replace(/^\s*(?:#+|[-*]|\d+\.)\s+/, ""))
+      .join(" ")
+    return { heading, body: Thought.plain(body, MAX_PASSAGE_LENGTH) }
   }
 
   /** The latest heading the model gave its thought, once that line has fully streamed. */
@@ -55,11 +81,11 @@ export class Thought {
   }
 
   /** Markdown markers stripped; underscores are emphasis only at a word edge, inside a name they are the name. */
-  private static plain(line: string): string {
+  private static plain(line: string, maxLength = MAX_LABEL_LENGTH): string {
     return line
       .replace(/[*`]/g, "")
       .replace(/(^|\W)_+|_+(?=\W|$)/g, "$1")
       .trim()
-      .slice(0, MAX_LABEL_LENGTH)
+      .slice(0, maxLength)
   }
 }

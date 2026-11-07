@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from urllib.parse import quote
 
 import httpx2
@@ -18,6 +19,7 @@ from openswe.config import ENV
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 from openswe.run_config import RunConfig
+from openswe.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +31,14 @@ GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
 # within this window of expiring so chat/review requests don't pay a fresh
 # JWT-sign + GitHub round-trip every message. The margin stays above the proxy's
 # 5-minute refresh window (``github_proxy.PROXY_TOKEN_REFRESH_WINDOW``) so a
-# near-expiry proxy refresh still mints a genuinely fresh token.
+# near-expiry proxy refresh still mints a genuinely fresh token. A caller that
+# keeps the token for longer asks for more with ``min_lifetime``.
 _TOKEN_CACHE_MARGIN = timedelta(minutes=10)
 PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]
 ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 
-# scope key -> (token, expires_at, good_until). In-process only; never persisted.
+# scope key -> (token, expires_at, parsed expiry). In-process only; never persisted.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
 
 
@@ -74,14 +77,17 @@ def _parse_expiry(expires_at: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | None:
+def _cached_token(
+    key: ScopeKey, *, now: datetime, min_lifetime: timedelta
+) -> tuple[str, str | None] | None:
     cached = _TOKEN_CACHE.get(key)
     if cached is None:
         return None
-    token, expires_at, good_until = cached
-    if now < good_until:
+    token, expires_at, expires = cached
+    if now + min_lifetime < expires:
         return token, expires_at
-    _TOKEN_CACHE.pop(key, None)
+    if now + _TOKEN_CACHE_MARGIN >= expires:
+        _TOKEN_CACHE.pop(key, None)
     return None
 
 
@@ -112,24 +118,64 @@ async def get_github_app_installation_id_for_org(org: str) -> int | None:
         return None
 
 
-async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int | None:
-    """Resolve the GitHub App installation that can access a repository."""
-    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
-        return None
-    try:
+class RepoInstallations:
+    """Which App installation covers each repository, kept for a while in this process.
+
+    Every ``GitHubClient.as_app(owner, repo)`` asks, so each lookup used to cost a GitHub
+    round trip. A reinstall moves a repository to a new installation: installation
+    webhooks forget every kept answer, and ``as_app`` forgets one whose token fails.
+    """
+
+    TTL_SECONDS = 600
+    CACHE_KEY = "github-app-installation:{}/{}"
+
+    def __init__(self) -> None:
+        self._keys: set[str] = set()
+
+    async def lookup(self, owner: str, repo: str) -> int | None:
+        if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
+            return None
+        owner, repo = owner.strip(), repo.strip()
+        key = self.CACHE_KEY.format(owner.lower(), repo.lower())
+        self._keys.add(key)
+        try:
+            return await ttl_cache.cached(
+                key, self.TTL_SECONDS, partial(self._ask_github, owner, repo), serve_stale=False
+            )
+        except Exception:
+            logger.warning(
+                "Failed to resolve GitHub App installation",
+                extra={"owner": owner, "repo": repo},
+                exc_info=True,
+            )
+            return None
+
+    async def forget(self, owner: str, repo: str) -> None:
+        ttl_cache.invalidate(self.CACHE_KEY.format(owner.strip().lower(), repo.strip().lower()))
+
+    async def forget_all(self) -> None:
+        for key in self._keys:
+            ttl_cache.invalidate(key)
+        self._keys.clear()
+
+    @staticmethod
+    async def _ask_github(owner: str, repo: str) -> int:
         async with github_sdk(_app_auth()) as client:
             response = await client.rest(GITHUB_API_VERSION).apps.async_get_repo_installation(
-                quote(owner.strip(), safe=""), quote(repo.strip(), safe="")
+                quote(owner, safe=""), quote(repo, safe="")
             )
         installation_id = response.json().get("id")
-        return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
-    except Exception:
-        logger.warning(
-            "Failed to resolve GitHub App installation",
-            extra={"owner": owner, "repo": repo},
-            exc_info=True,
-        )
-        return None
+        if not isinstance(installation_id, int) or installation_id <= 0:
+            raise ValueError("GitHub answered without an installation id")
+        return installation_id
+
+
+REPO_INSTALLATIONS = RepoInstallations()
+
+
+async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int | None:
+    """Resolve the GitHub App installation that can access a repository."""
+    return await REPO_INSTALLATIONS.lookup(owner, repo)
 
 
 async def get_github_app_installation_token(
@@ -168,8 +214,13 @@ async def get_github_app_installation_token_with_expiry(
     permissions: PermissionMap | None = None,
     log_errors: bool = True,
     raise_errors: bool = False,
+    min_lifetime: timedelta = _TOKEN_CACHE_MARGIN,
+    force_refresh: bool = False,
 ) -> tuple[str | None, str | None]:
-    """Exchange the GitHub App JWT for an installation access token and its expiry."""
+    """Exchange the GitHub App JWT for an installation access token and its expiry.
+
+    A cached token is returned only while it has more than ``min_lifetime`` left.
+    """
     try:
         cfg = RunConfig.from_runtime()
     except RuntimeError:
@@ -196,9 +247,11 @@ async def get_github_app_installation_token_with_expiry(
 
     key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
     now = datetime.now(UTC)
-    cached = _cached_token(key, now=now)
-    if cached is not None:
-        return cached
+    previous = _TOKEN_CACHE.get(key)
+    if not force_refresh:
+        cached = _cached_token(key, now=now, min_lifetime=min_lifetime)
+        if cached is not None:
+            return cached
 
     body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
     if repository_ids:
@@ -218,8 +271,12 @@ async def get_github_app_installation_token_with_expiry(
             data = response.json()
             token, expires_at = data.get("token"), data.get("expires_at")
             parsed = _parse_expiry(expires_at)
+            if _TOKEN_CACHE.get(key) is not previous:
+                newer = _cached_token(key, now=datetime.now(UTC), min_lifetime=min_lifetime)
+                if newer is not None:
+                    return newer
             if isinstance(token, str) and token and parsed is not None:
-                _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
+                _TOKEN_CACHE[key] = (token, expires_at, parsed)
             return token, expires_at
     except Exception as exc:
         if log_errors:

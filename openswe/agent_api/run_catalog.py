@@ -25,6 +25,7 @@ from runtime_api.catalog import (
     SubagentSpec,
     ToolSpec,
 )
+from runtime_api.models import model_spec
 
 from openswe.agent_api.connections import operation_connections
 from openswe.agent_api.git_metadata import trace_actor
@@ -34,12 +35,11 @@ from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings, RemoteRun, RunSettings
 from openswe.agent_api.tool_sets import ToolSet
-from openswe.dashboard.options import model_supports_images
+from openswe.config import ENV
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.incidents.runtime import INCIDENT_SOURCE
 from openswe.prompts import common_prompt, prompt
 from openswe.run_config import RunConfig
-from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
 from openswe.sandboxes.tool_runtime import EXCLUDED_TOOLS, ModelChoice, ToolSurface
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
@@ -47,10 +47,9 @@ from openswe.server import (
     code_name,
     code_only,
     direct_and_from_code,
-    fallback_model_choice,
+    runtime_runs,
 )
 from openswe.threads.access import agent_version_metadata
-from openswe.utils.model import provider_model_kwargs
 
 # MDA's own deep agent runs subagents and code.
 _SYNC_SUBAGENT_TOOL: Final = "task"
@@ -73,31 +72,6 @@ _DESCRIBED_TOOLS: Final = ("eval",)
 _FILE_TOOLS: Final = frozenset(DEEP_AGENT_TOOL_NAMES) - _MDA_TOOLS
 
 _json_object = TypeAdapter(dict[str, JsonValue])
-
-
-def model_spec(model_id: str, kwargs: Mapping[str, object]) -> ModelSpec:
-    """``model_id`` as the runtime calls it: whether it reads images, and its fallback."""
-    fallback = fallback_model_choice(model_id)
-    return ModelSpec(
-        model_id=model_id,
-        kwargs=_json_object.validate_python(dict(kwargs)),
-        reads_images=model_supports_images(model_id),
-        fallback=None
-        if fallback is None
-        else ModelSpec(
-            model_id=fallback.model_id,
-            kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-            reads_images=model_supports_images(fallback.model_id),
-        ),
-    )
-
-
-def chosen_model(model_id: str, effort: object) -> ModelSpec:
-    """A model the run calls by id, such as one a person asked for, at ``effort``."""
-    kwargs = provider_model_kwargs(
-        model_id, effort if isinstance(effort, str) else None, max_tokens=DEFAULT_LLM_MAX_TOKENS
-    )
-    return model_spec(model_id, kwargs)
 
 
 @dataclass(frozen=True)
@@ -132,7 +106,7 @@ class RunCatalog:
         """What MDA builds the run from, and the settings its calls read."""
         tools, catalog = await asyncio.gather(self.tool_set().keep(), self.granted())
         settings = self.settings().model_copy(update={"tools": tools})
-        return RunStart(catalog=catalog, settings=settings)
+        return RunStart(catalog=catalog.model_copy(update={"tool_set": tools}), settings=settings)
 
     def _backend_tools(self) -> dict[str, BaseTool]:
         return {name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS}
@@ -145,13 +119,22 @@ class RunCatalog:
         return _ASYNC_TASK_TOOLS
 
     def _excluded(self) -> frozenset[str]:
-        return frozenset(
-            ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
-            | self._unoffered_delegation_tools()
+        return (
+            frozenset(
+                ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
+                | self._unoffered_delegation_tools()
+            )
+            - self.surface.disabled()
         )
 
     def _specs(self) -> list[ToolSpec]:
-        tools = self._backend_tools()
+        surface = self.surface
+        tools = {
+            **{name: surface.always_offered[name] for name in surface.disabled()},
+            **self._backend_tools(),
+        }
+        # A bridged client's own tool of the same name is the client's to run.
+        clients = {spec.name for spec in RunConfig.from_config(self.config).client_tools}
         return [
             ToolSpec(
                 name=described.name,
@@ -161,7 +144,9 @@ class RunCatalog:
                 reads_all=injections.reads_all,
                 code_name=code_name(described.name),
                 seconds=call_seconds(described.name),
-                connections=operation_connections(described.name, self.config),
+                connections=(connections := operation_connections(described.name, self.config)),
+                runtime_runs=described.name not in clients
+                and runtime_runs(described.name, connections),
             )
             for described in self.surface.catalog()
             if described.name in tools
@@ -176,8 +161,10 @@ class RunCatalog:
         if models is None:
             raise RuntimeError("Starting the run picked no models")
 
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional()
+
         def spec(choice: ModelChoice) -> ModelSpec:
-            return model_spec(choice.model_id, choice.kwargs)
+            return model_spec(choice.model_id, choice.kwargs, fallback_model_id=fallback_model_id)
 
         return RunModels(
             model=spec(models.main),
@@ -185,11 +172,13 @@ class RunCatalog:
             use_gateway=models.use_gateway,
             routes={route: spec(choice) for route, choice in models.routes.items()},
             vision=None if models.vision is None else spec(models.vision),
+            fallback_model_id=fallback_model_id,
         )
 
     def build(self) -> Catalog:
         surface = self.surface
-        tools = self._backend_tools()
+        disabled = surface.disabled()
+        tools = {**dict.fromkeys(disabled), **self._backend_tools()}
         excluded = self._excluded()
         # Called from MDA's code mode, never offered to the model as schemas.
         from_code_only = {
@@ -224,6 +213,7 @@ class RunCatalog:
             code_only=sorted(from_code_only - withheld),
             # Offered to the model, and callable from MDA's code mode too.
             also_from_code=sorted(name for name in from_code if direct_and_from_code(name)),
+            disabled=sorted(disabled),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(
                 backend_paths=list(surface.backend_paths),
@@ -234,7 +224,12 @@ class RunCatalog:
             worker_webhook=COMPLETION_WEBHOOK_URL if surface.delegates else None,
             skill_sources=list(surface.skill_sources),
             inbox=surface.inbox,
-            loop=surface.loop.model_copy(update={"deployment_prompt": common_prompt()}),
+            loop=surface.loop.model_copy(
+                update={
+                    "deployment_prompt": common_prompt(),
+                    "hidden_tools": sorted(set(surface.loop.hidden_tools) - disabled),
+                }
+            ),
             search_tools=searches,
             search_tools_description=prompt(f"tools/{SEARCH_TOOLS}") if searches else None,
             model_call_limit=surface.model_call_limit,
@@ -253,7 +248,13 @@ class RunCatalog:
                 "trace_metadata": {**trace_actor(self.config), **agent_version_metadata()},
                 "sandbox": spec,
                 "operations": [
-                    operation.model_copy(update={"grant": self.run.grant(operation.name)})
+                    operation.model_copy(
+                        update={
+                            "grant": None
+                            if operation.name in catalog.disabled
+                            else self.run.grant(operation.name)
+                        }
+                    )
                     for operation in catalog.operations
                 ],
             }
@@ -274,4 +275,5 @@ class RunCatalog:
             slack_thread=_json_object.validate_python(slack_thread)
             if cfg.source == INCIDENT_SOURCE and isinstance(slack_thread, Mapping)
             else None,
+            disabled_tools=sorted(self.surface.disabled()),
         )

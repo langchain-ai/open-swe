@@ -81,10 +81,9 @@ On Apple Silicon Macs running macOS Ventura or later, you can install with Homeb
 brew install --cask langchain-ai/tap/open-swe-desktop
 ```
 
-This installs the desktop app and links the legacy `oswe` command onto your `PATH`.
-The app also bundles `robin`; both commands share configuration and credentials.
+This installs Robin and links the `robin` and `oswe` commands onto your `PATH`; both share configuration and credentials.
 The CLI updates with the app.
-If you installed the cask before it linked `oswe`, run `brew reinstall --cask open-swe-desktop` once to get the link (a plain `brew upgrade` skips auto-updating casks).
+If you installed the cask before 0.3.13, run `brew reinstall --cask open-swe-desktop` once to switch to `Robin.app` and get the `robin` link (a plain `brew upgrade` skips auto-updating casks).
 
 To build and install from source, install Git, Node.js 26, and [Bun](https://bun.com/docs/installation), clone this repository, then run this from its root:
 
@@ -113,6 +112,8 @@ make web
 ```
 
 `pnpm run dev:desktop` is equivalent to `make desktop`.
+Both build `ui/` first and run the app on that build through `OPEN_SWE_DESKTOP_UI_ARCHIVE`, so the window shows this checkout's UI rather than the one the backend publishes.
+After changing `ui/`, rerun `make desktop`, or rebuild the UI and use View → Reload.
 The desktop app connects to the backend at `http://localhost:2024`, which runs "This Mac" threads too; the bridge needs that backend's PostgreSQL.
 
 The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile for existing sessions, projects, task folders, caches, and instance locks.

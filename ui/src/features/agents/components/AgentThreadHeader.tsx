@@ -33,6 +33,7 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import {
   useContinueThreadPrivately,
   useDeleteAgentThread,
+  useSetAgentThreadViewed,
   usePinAgentThread,
   useResolveAgentThread,
   useShareThreadWithWorkspace,
@@ -118,6 +119,7 @@ export function AgentThreadHeader({
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
+  const setViewed = useSetAgentThreadViewed()
   const continuePrivately = useContinueThreadPrivately()
   const shareWithWorkspace = useShareThreadWithWorkspace()
   const session = useSession()
@@ -212,6 +214,9 @@ export function AgentThreadHeader({
           pinThread.mutate({ threadId: current.id, pinned: !pinned })
         }
       }}
+      onToggleViewed={() =>
+        setViewed.mutate({ threadId: current.id, viewed: !current.viewed })
+      }
       onToggleArchived={() => {
         if (!resolveThread.isPending) {
           resolveThread.mutate({ threadId: current.id, resolved: !archived })

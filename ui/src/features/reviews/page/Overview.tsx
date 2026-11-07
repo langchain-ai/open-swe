@@ -6,6 +6,7 @@ import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Textarea } from "@langchain/macaw-components/Textarea"
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import { api, reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -97,7 +98,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
               className="ml-auto size-3 -rotate-90 group-open/requested:rotate-0"
             />
           </summary>
-          <div className="mt-space-1">
+          <div className="mt-space-1" data-reply-part="requested behavior">
             <HumanInputText summary={detail.walkthrough.human_input} />
           </div>
         </details>
@@ -280,9 +281,12 @@ function Description({
             <Button
               size="sm"
               disabled={draft === body || update.isPending}
+              aria-label="Save description"
+              aria-keyshortcuts="Meta+Enter Control+Enter"
               onClick={save}
             >
               Save description
+              <SubmitShortcut />
             </Button>
           </div>
         </div>
@@ -290,6 +294,7 @@ function Description({
       <div
         hidden={draft !== null}
         ref={ref}
+        data-reply-part="description"
         className={cn(
           "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
           clamped && "overflow-hidden"

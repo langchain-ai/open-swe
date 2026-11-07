@@ -29,7 +29,8 @@ type Session = dict[str, Any]
 type Connection = AsyncConnection | AsyncSession
 type KeysAuthorizer = Callable[[Session, set[str]], Awaitable[set[str]]]
 
-_WELL_FORMED = re.compile(r"^[a-z][a-z-]*(?:/[A-Za-z0-9._:@-]+)*$")
+# Keys carry GitHub names, and a repository's may hold "_".
+_WELL_FORMED = re.compile(r"^[a-z][a-z-]*(?:/[\w.:@-]+)*$", re.ASCII)
 _MAX_LENGTH = 200
 
 
@@ -109,6 +110,13 @@ class Topic(BaseTopic):
     THREAD_BACKGROUND_WORK: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the sandbox commands and monitors running for that thread."""
 
+    THREAD_GOALS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: where that thread's Goal mode work stands."""
+
+    TASK_WORKERS: ClassVar[KeyedTopic[str]]
+    """Keyed by coordinator thread id: the workers its task delegated to, as the
+    sidebar nests them beneath it."""
+
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
@@ -116,6 +124,17 @@ class Topic(BaseTopic):
 
     SLACK_CHANNELS: ClassVar[Topic]
     """The Slack channel directory, after each walk over Slack."""
+
+    PLUGIN_CHAT_CALLS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the calls that thread's agent made to the tools of the plugin it chats beside."""
+
+    APP_PREVIEWS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the build of an app that thread's agent is previewing."""
+
+    PLUGIN_DOCUMENTS: ClassVar[KeyedTopic[str]]
+    """Keyed: one plugin's collection in one scope, ``<digest>/<owner>/<repo>`` for documents
+    shared through a repository and ``<digest>/user/<user id>`` for one person's, the digest
+    folding the plugin and collection together (``DocumentScope.topic_key``)."""
 
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
@@ -211,6 +230,27 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     }
 
 
+async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[str]:
+    # Imported on use: most of the app imports this module, which stays light.
+    from openswe.dashboard.oauth import session_user_id
+    from openswe.users.models import User
+
+    # A key is "<digest>/<scope>"; the scope is "user/<id>" or "owner/repo".
+    scopes = {key: parts[1] for key in keys if len(parts := key.split("/", 1)) == 2}
+    user = await User.for_session(session_user_id(session), session["sub"]) if scopes else None
+    if user is None:
+        return set()
+    readable = {key for key, scope in scopes.items() if scope == f"user/{user.id}"}
+    repositories = sorted({s for s in scopes.values() if not s.startswith("user/")})
+    try:
+        allowed = await asyncio.gather(*(user.can_read_repository(repo) for repo in repositories))
+    except Exception:
+        logger.warning("Could not check repositories for plugin invalidations", exc_info=True)
+        return readable
+    visible = {repo for repo, ok in zip(repositories, allowed, strict=True) if ok}
+    return readable | {key for key, scope in scopes.items() if scope in visible}
+
+
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     # Thread summaries import this module.
     from openswe.threads.summary import thread_is_readable
@@ -247,8 +287,13 @@ Topic.THREAD_BROWSERS = KeyedTopic("thread-browsers", authorize_keys=_readable_t
 Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
+Topic.THREAD_GOALS = KeyedTopic("thread-goals", authorize_keys=_readable_threads)
+Topic.TASK_WORKERS = KeyedTopic("task-workers", authorize_keys=_readable_threads)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
 Topic.SLACK_CHANNELS = Topic("slack-channels")
+Topic.PLUGIN_DOCUMENTS = KeyedTopic("plugin-documents", authorize_keys=_readable_plugin_documents)
+Topic.APP_PREVIEWS = KeyedTopic("app-previews", authorize_keys=_readable_threads)
+Topic.PLUGIN_CHAT_CALLS = KeyedTopic("plugin-chat-calls", authorize_keys=_readable_threads)
 
 
 class RecipientTopic(KeyedTopic[str]):

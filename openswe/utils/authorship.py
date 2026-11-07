@@ -104,6 +104,8 @@ class ThreadParticipant:
     instructions: str = ""
     # What the person asked their runs to remember (``remember``), newest first.
     memories: tuple[str, ...] = ()
+    # When to ``recall`` the memories the curator's triggers hold back, in place of them.
+    memory_triggers: tuple[str, ...] = ()
     email: str = ""
     timezone: str = ""
     linked: bool = False
@@ -131,6 +133,8 @@ class ThreadParticipant:
             person["standing_instructions"] = self.instructions.strip()
         if self.memories:
             person["personal_memories"] = "\n".join(f"- {memory}" for memory in self.memories)
+        if self.memory_triggers:
+            person["memory_triggers"] = "\n".join(f"- {line}" for line in self.memory_triggers)
         return person
 
 

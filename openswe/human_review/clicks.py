@@ -7,8 +7,11 @@ from uuid import UUID
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.slack.client import post_slack_ephemeral_message, slack_thread_mutation_lock
-from openswe.utils.thread_ops import langgraph_client
+from openswe.slack.client import (
+    post_slack_ephemeral_message,
+    respond_to_slack_interaction,
+    slack_thread_mutation_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +24,20 @@ async def answer_click(
     slack_user_id: str,
     handle: Callable[[HumanReviewRequest], Awaitable[Outcome]],
     ephemeral: bool = True,
+    response_url: str = "",
 ) -> Outcome:
     """Load the card's request, run ``handle`` under the thread's lock, and answer.
 
-    The answer is ephemeral unless the caller shows it on the clicked message itself.
+    The answer is ephemeral, through the click's ``response_url`` where it has one,
+    unless the caller shows it on the clicked message itself.
     """
+
+    async def tell(message: str) -> bool:
+        if response_url:
+            body = {"response_type": "ephemeral", "replace_original": False, "text": message}
+            return await respond_to_slack_interaction(response_url, body)
+        return await post_slack_ephemeral_message(channel_id, slack_user_id, message, thread_ts)
+
     try:
         request = await HumanReviewRequest.get(UUID(request_id))
     except ValueError:
@@ -37,13 +49,13 @@ async def answer_click(
         )
         gone = Outcome("That review request no longer exists.")
         if ephemeral:
-            await post_slack_ephemeral_message(channel_id, slack_user_id, gone.message, thread_ts)
+            await tell(gone.message)
         return gone
     # A card's copy in another channel shares its thread's lock.
     lock_channel, lock_ts = request.slack_location or (channel_id, thread_ts)
     try:
         async with slack_thread_mutation_lock(
-            langgraph_client(), lock_channel, lock_ts, purpose=f"human-review:{request_id}"
+            lock_channel, lock_ts, purpose=f"human-review:{request_id}"
         ):
             # Another click may have changed the request while this one waited for the lock.
             current = await HumanReviewRequest.get(request.id)
@@ -76,13 +88,7 @@ async def answer_click(
         and await ReviewCard(request).refresh_author_dm(None)
     ):
         return outcome
-    if (
-        ephemeral
-        and outcome.message
-        and not await post_slack_ephemeral_message(
-            channel_id, slack_user_id, outcome.message, thread_ts
-        )
-    ):
+    if ephemeral and outcome.message and not await tell(outcome.message):
         logger.warning(
             "Could not answer a human review click",
             extra={"request_id": request_id, "slack_user": slack_user_id},

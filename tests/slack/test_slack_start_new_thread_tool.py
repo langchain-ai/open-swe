@@ -156,6 +156,9 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
         "cached_workspace_settings",
         AsyncMock(return_value=WorkspaceSettings({"fable_enabled": False})),
     )
+    # The parent conversation is the backend's unless a test says MDA's channel holds it.
+    monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "holds", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "claim_breakout", AsyncMock())
 
 
 @pytest.mark.parametrize("failure", [None, "fetch"])
@@ -239,6 +242,93 @@ async def test_breakout_queues_source_thread_files_best_effort(
         assert "## Slack File Attachments" not in content
         assert sandbox_path not in content
         assert pending == {}
+
+
+def _breakout_without_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[str], AsyncMock, dict[str, Any]]:
+    """A breakout's Slack posts and records, faked: the order of its records, its run, and
+    what it wrote to the new thread."""
+    order: list[str] = []
+
+    async def bind(channel_id: str, thread_ts: str, thread_id: str) -> str:
+        order.append("bind")
+        return thread_id
+
+    async def claim(thread_id: str, *, owner_login: str | None = None) -> None:
+        order.append(f"claim:{owner_login}")
+
+    async def dispatch(*args: object, **kwargs: object) -> dict[str, str]:
+        order.append("dispatch")
+        return {"run_id": "run-123"}
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient(captured))
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1700000000.000001"}),
+    )
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value="1700000002.0"),
+    )
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", bind)
+    monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "claim_breakout", claim)
+    monkeypatch.setattr(slack_breakout_tool, "allow_solo_thread_followup", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
+    run = AsyncMock(side_effect=dispatch)
+    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", run)
+    return order, run, captured
+
+
+@pytest.mark.parametrize("held_by_mda", [True, False])
+async def test_a_breakout_of_an_mda_conversation_is_mda_s_too(
+    monkeypatch: pytest.MonkeyPatch, held_by_mda: bool
+) -> None:
+    """The new Slack thread's replies reach MDA's Slack channel alone once Slack sends its
+    events there, so a conversation the channel holds breaks out into one it holds too."""
+    order, _, captured = _breakout_without_files(monkeypatch)
+    holds = AsyncMock(return_value=held_by_mda)
+    monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "holds", holds)
+
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Investigate", "Investigate the follow-up.", destination="C1"
+    )
+
+    assert result["success"] is True
+    holds.assert_awaited_once_with("parent-thread")
+    # Claimed once the Slack thread names it and before its first run starts.
+    assert order == (["bind", "claim:alice", "dispatch"] if held_by_mda else ["bind", "dispatch"])
+    metadata = captured["thread_update"]["metadata"]
+    assert metadata["visibility"] == "public"
+    if held_by_mda:
+        # The visibility the claim held back is the parent's, settled.
+        assert metadata[slack_breakout_tool.PROVISIONAL_VISIBILITY_KEY] is None
+    else:
+        assert slack_breakout_tool.PROVISIONAL_VISIBILITY_KEY not in metadata
+
+
+async def test_a_breakout_mda_cant_open_starts_no_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, run, _ = _breakout_without_files(monkeypatch)
+    monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "holds", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_breakout_tool.mda_forwarding,
+        "claim_breakout",
+        AsyncMock(side_effect=slack_breakout_tool.ChannelThreadError("no secret")),
+    )
+
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Investigate", "Investigate the follow-up.", destination="C1"
+    )
+
+    assert result == {"success": False, "error": "Could not open the new thread; try again."}
+    run.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -462,7 +552,6 @@ async def test_slack_breakout_thread_success(
     assert result["success"] is True
     if not target.startswith("D"):
         assert await solo_threads.allow_solo_thread_followup(
-            fake_client,
             channel_id=target,
             thread_ts=new_ts,
             message_ts="1700000001.0",
@@ -600,6 +689,9 @@ async def test_breakout_preserves_requester_and_credential_scope(
         background_task_completion=background,
     )
     saved_slack = dict(config["configurable"]["slack_thread"])
+    monkeypatch.setattr(
+        "openswe.credential_scope.WORKSPACES.is_ask_channel", AsyncMock(return_value=False)
+    )
     monkeypatch.setattr(
         slack_breakout_tool.User,
         "for_login",

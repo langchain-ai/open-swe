@@ -10,6 +10,7 @@ import pytest
 from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
+from tests.conftest import serve_runs_from
 
 dispatch = importlib.import_module("openswe.dispatch")
 
@@ -114,12 +115,12 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
 
     async def by_identity(provider: str, external_id: str) -> SimpleNamespace | None:
         if (provider, external_id) in {("slack", "U123"), ("github", "2001")}:
-            return SimpleNamespace(id=user_id, github_login="mason-gh")
+            return SimpleNamespace(id=user_id, github_login="mason-gh", email="mason@example.com")
         return None
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
         return (
-            SimpleNamespace(id=user_id, github_login="mason-gh")
+            SimpleNamespace(id=user_id, github_login="mason-gh", email="mason@example.com")
             if (provider, login) == ("github", "mason-gh")
             else None
         )
@@ -145,6 +146,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         created = client.runs.created[-1]
         assert created["metadata"]["user_id"] == str(user_id)
         assert created["config"]["metadata"]["user_id"] == str(user_id)
+        assert created["metadata"]["user_email"] == "mason@example.com"
         assert created["metadata"]["ls_repo_provider"] == "github"
         assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
         # Attributed to the person, but a run the backend starts acts as no one.
@@ -174,6 +176,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         config={"configurable": {"slack_thread": {"triggering_user_id": "unknown"}}},
         metadata={
             "user_id": str(user_id),
+            "user_email": "previous@example.com",
             ACTING_USER_KEY: str(user_id),
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
@@ -183,6 +186,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     )
     unknown = client.runs.created[-1]["metadata"]
     assert "user_id" not in unknown
+    assert "user_email" not in unknown
     # Only the backend says whom a run acts as, never its caller.
     assert ACTING_USER_KEY not in unknown
     assert "ls_attribution_identifier" not in unknown
@@ -272,7 +276,7 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
     user = await User.sign_in("github", "2001", login="mason-gh")
     await user.link("slack", "U123", team_id="T1")
 
-    run_input = await dispatch._dispatch_input(
+    run_input = await dispatch.dispatch_input(
         "hello",
         "slack",
         {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
@@ -291,6 +295,7 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
     client.threads.get.return_value = {
         "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(
@@ -318,6 +323,7 @@ async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
             "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
         }
     }
+    serve_runs_from(monkeypatch, client)
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(

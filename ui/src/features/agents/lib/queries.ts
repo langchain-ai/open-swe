@@ -1,6 +1,7 @@
 import {
   mergeTaskFamily,
   sidebarRefreshInterval,
+  taskWorkerTopics,
   threadFamily,
 } from "./sidebarThreads"
 import {
@@ -64,6 +65,7 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  goal: (threadId: string) => ["agent-threads", threadId, "goal"] as const,
   backgroundOutput: (threadId: string, taskId: string) =>
     ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
@@ -330,58 +332,38 @@ export function restoreAgentThreadQueries(
   }
 }
 
-/**
- * Clear a thread's unread dot the instant its row is clicked. The detail GET
- * that navigation triggers is what actually marks the thread viewed
- * server-side; this only stops the dot from lingering for that round trip.
- */
 export function markAgentThreadViewed(
   queryClient: QueryClient,
   threadId: string
 ): void {
-  const view = (thread: AgentThread): AgentThread =>
-    thread.id === threadId && !thread.viewed
-      ? { ...thread, viewed: true, viewedAt: Date.now() }
-      : thread.taskWorkers
-        ? { ...thread, taskWorkers: thread.taskWorkers.map(view) }
-        : thread
-  const viewList = (threads: Array<AgentThread>) => threads.map(view)
-
-  // Patched as already-stale: the detail GET is what marks the thread viewed
-  // server-side, and a plain setQueryData would stamp this fresh under the
-  // detail query's staleTime — suppressing that fetch, so the next list refetch
-  // would serve `viewed: false` right back and the dot would return.
-  queryClient.setQueryData<AgentThread>(
-    agentThreadKeys.detail(threadId),
-    (prev) => (prev ? view(prev) : prev),
-    { updatedAt: 0 }
-  )
-  queryClient.setQueryData<AgentThread>(
-    agentThreadKeys.sidebarActive(threadId),
-    (prev) => (prev ? view(prev) : prev)
-  )
-  queryClient.setQueriesData<Array<AgentThread>>(
-    { queryKey: agentThreadKeys.pinned },
-    (prev) => (prev ? viewList(prev) : prev)
-  )
-  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
-    { queryKey: ["agent-threads", "lists", "infinite-pages"] },
-    (prev) =>
-      prev && {
-        ...prev,
-        pages: prev.pages.map((page) => ({
-          ...page,
-          items: viewList(page.items),
-        })),
-      }
-  )
-  queryClient.setQueriesData<ThreadsPage>(
-    { queryKey: ["agent-threads", "lists", "page"] },
-    (prev) => prev && { ...prev, items: viewList(prev.items) }
-  )
+  patchAgentThread(queryClient, threadId, {
+    viewed: true,
+    viewedAt: Date.now(),
+  })
 }
 
-/** A review has no thread detail GET to mark it read, so it posts its own. */
+export function useSetAgentThreadViewed() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: ["agent-thread-read-state"],
+    mutationFn: (vars: { threadId: string; viewed: boolean }) =>
+      agentsApi.setThreadViewed(vars.threadId, vars.viewed),
+    meta: { errorTitle: "Couldn't update thread read state" },
+    onMutate: (vars) =>
+      beginAgentThreadUpdate(queryClient, vars.threadId, () =>
+        patchAgentThread(queryClient, vars.threadId, {
+          viewed: vars.viewed,
+          viewedAt: vars.viewed ? Date.now() : null,
+        })
+      ),
+    onError: (_error, _vars, context) => {
+      if (context) restoreAgentThreadQueries(queryClient, context)
+    },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
+/** Review pages record views through their own endpoint. */
 export function markReviewViewed(
   queryClient: QueryClient,
   review: ReviewPageRef,
@@ -702,6 +684,10 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (query) => sidebarRefreshInterval(query.state.data),
+    meta: {
+      invalidatedBy: (data) =>
+        taskWorkerTopics(data as Array<AgentThread> | undefined),
+    },
   })
 }
 
@@ -753,12 +739,17 @@ function useFetchedSidebarThread(
 ): AgentThread | undefined {
   return useQuery({
     queryKey: agentThreadKeys.sidebarActive(threadId ?? ""),
-    queryFn: () => agentsApi.getThread(threadId!, { markViewed: false }),
+    queryFn: () => agentsApi.getThread(threadId!),
     enabled: enabled && Boolean(threadId),
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
       sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
+    meta: {
+      invalidatedBy: threadId
+        ? [invalidationTopic("task-workers", threadId)]
+        : [],
+    },
     retry: false,
   }).data
 }
@@ -957,7 +948,7 @@ function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
   })
 }
 
-export function useAgentThread(threadId: string) {
+export function useAgentThread(threadId: string, active = true) {
   const queryClient = useQueryClient()
   const query = useQuery({
     ...agentThreadDetailOptions(threadId, queryClient),
@@ -975,6 +966,46 @@ export function useAgentThread(threadId: string) {
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
+
+  const { mutate: setViewed } = useSetAgentThreadViewed()
+  const readVisit = useRef<{
+    threadId: string
+    status: string
+    runId?: string | null
+  } | null>(null)
+  useEffect(() => {
+    const readVisibleThread = () => {
+      const thread = query.data
+      if (!active) {
+        readVisit.current = null
+        return
+      }
+      if (!thread || document.visibilityState === "hidden") return
+      const previous = readVisit.current
+      readVisit.current = {
+        threadId,
+        status: thread.status,
+        runId: thread.latestRunId,
+      }
+      const opened = previous?.threadId !== threadId
+      const completed =
+        previous?.status === "running" && thread.status !== "running"
+      if (
+        (opened ||
+          completed ||
+          (Boolean(thread.latestRunId) &&
+            previous?.runId !== thread.latestRunId)) &&
+        thread.status !== "running" &&
+        !thread.viewed
+      ) {
+        setViewed({ threadId, viewed: true })
+      }
+    }
+    readVisibleThread()
+    document.addEventListener("visibilitychange", readVisibleThread)
+    return () =>
+      document.removeEventListener("visibilitychange", readVisibleThread)
+  }, [threadId, query.data, setViewed, active])
 
   const isRunning = query.data?.status === "running"
   const { refetch } = query
@@ -1084,6 +1115,15 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
+  })
+}
+
+export function useAgentThreadGoal(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.goal(threadId),
+    queryFn: () => agentsApi.getThreadGoal(threadId),
+    enabled: Boolean(threadId),
+    meta: { invalidatedBy: [invalidationTopic("thread-goals", threadId)] },
   })
 }
 
@@ -1694,6 +1734,14 @@ export function useInfiniteThreadsPages(
     queryKey,
     queryFn: ({ pageParam }) =>
       agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    meta: {
+      invalidatedBy: (data) =>
+        taskWorkerTopics(
+          (data as InfiniteData<ThreadsPage> | undefined)?.pages.flatMap(
+            (page) => page.items
+          )
+        ),
+    },
     initialPageParam: 0,
     getNextPageParam: (page) =>
       page.hasMore ? page.offset + page.items.length : undefined,
@@ -1800,6 +1848,12 @@ export function useThreadsPage(
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     enabled: options.enabled,
+    meta: {
+      invalidatedBy: (data) =>
+        options.pollWhileRunning
+          ? taskWorkerTopics((data as ThreadsPage | undefined)?.items)
+          : [],
+    },
     refetchInterval: (query) =>
       options.pollWhileRunning
         ? sidebarRefreshInterval(query.state.data?.items)

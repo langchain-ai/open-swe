@@ -1,8 +1,10 @@
 """Open SWE's middleware around each model call, run here as the catalog's ``LoopRules`` say.
 
 Before each call it ends the run where a rule says to, adds the thread's task
-context, keeps the sandbox's GitHub proxy fresh, picks the call's route and model, and
-assembles its system prompt and tool list. After an answer that calls no tool, it
+context and the reminders a person's new message calls for, keeps the sandbox's
+GitHub proxy fresh, picks the call's route and model, and assembles its system
+prompt and tool list. A thread's route is classified here, once, alongside the run's
+preparation (``rt.routing``). After an answer that calls no tool, it
 asks again for the reply or CLI result the run owes. When the run ends, it asks
 for the graph's own end-of-run work and reports the end, neither of which the run
 waits for.
@@ -17,6 +19,7 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -27,53 +30,66 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     ToolMessage,
-    add_notification_metadata,
+    messages_from_dict,
     messages_to_dict,
 )
 from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    JOINED_TASK_CONTEXT,
     CliResultRules,
     LoopRules,
-    ModelSpec,
+    Nudging,
     ReplyRules,
     RunModels,
+    TaskContext,
     WorkStateRules,
+    kept_route,
 )
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
+    GOAL,
     INCIDENT_CONTEXT,
-    MODEL_CHOICE,
     REFRESH_GITHUB_PROXY,
+    REMINDERS,
     REPLY_ON_BEHALF,
-    ROUTE_MODEL,
     RUN_ENDED,
+    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
-    TASK_CONTEXT,
     BeforeModel,
-    ChosenModel,
     GitHubProxyRefreshed,
+    Goal,
+    GoalChange,
+    GoalRead,
     ModelCall,
+    PersonMessage,
     PhaseResult,
     Prepared,
+    RefreshGitHubProxy,
     ReplyOnBehalf,
-    Route,
     Routed,
     RunEnded,
     ScoutPlanEnd,
-    TaskContext,
 )
+from runtime_api.model_errors import is_model_failure_reply
+from runtime_api.models import model_for
 from runtime_api.operations import RunRequest
+from runtime_api.provenance import Provenance
 
 from rt.backend import (
+    BackendCallError,
     OpenSweBackend,
     RunLocal,
+    harness_message,
     human_messages,
+    namespace,
     run_call,
+    since_last_reply,
 )
+from rt.routing import Route, RouteClassifier
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -81,6 +97,12 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
+_GOAL_SEEN: Final = "goal_seen_ms"
+_GOAL: Final = "goal"
+_STALLED_TURNS: Final = 3
+_EMPTY_TURNS: Final = "goal_empty_turns"
+_FAILING_TURNS: Final = "goal_failing_turns"
+_FAILED_COMMAND: Final = "[Command failed with exit code"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
@@ -97,6 +119,10 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 _ROLE: Final = "task-role:"
 # Starts the id of the message holding what the backend worked out for this run.
 _RUN_CONTEXT: Final = "run-context:"
+# Starts the id of the message holding an incident run's instructions for its next call.
+_INCIDENT: Final = "incident-context:"
+# Held state: the person's message the backend last read for reminders, read once each.
+_REMINDED_FOR: Final = "reminded_for"
 
 
 def content_text(content: object) -> str:
@@ -127,19 +153,6 @@ def _root(text: str, tag: str) -> ElementTree.Element | None:
     return root if root.tag == tag else None
 
 
-def _dynamic_context(message: BaseMessage) -> bool:
-    """A block that introduces who or what the conversation's messages come from."""
-    return any(_root(text, "dynamic-context") is not None for text in _texts(message.content))
-
-
-def _system_sender(message: BaseMessage) -> str | None:
-    for text in _texts(message.content):
-        root = _root(text, "input-message")
-        if root is not None and root.get("kind") == "system":
-            return root.get("sender")
-    return None
-
-
 def _reported_failure(message: ToolMessage) -> bool:
     if message.status == "error":
         return True
@@ -159,7 +172,7 @@ def _messages(state: Mapping[str, object]) -> list[AnyMessage]:
     return list(messages) if isinstance(messages, list) else []
 
 
-def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
+def visible_messages(state: Mapping[str, object]) -> list[AnyMessage]:
     """The messages the model still sees: summarization drops those before its cutoff."""
     listed = _messages(state)
     event = state.get(_SUMMARIZATION_EVENT)
@@ -167,12 +180,21 @@ def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
     return listed[cutoff:] if isinstance(cutoff, int) and cutoff >= 0 else listed
 
 
-def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
+def latest_with_id(messages: Sequence[BaseMessage], prefix: str) -> str | None:
     """The text of the last of ``messages`` whose id starts with ``prefix``."""
     for message in reversed(messages):
         if isinstance(message.id, str) and message.id.startswith(prefix):
             return content_text(message.content)
     return None
+
+
+@dataclass(frozen=True)
+class _GoalTurn:
+    """What a Goal mode turn did, as Codex counts it toward blocking the goal."""
+
+    empty: bool
+    active: bool
+    failing: bool
 
 
 class _RunGuidance:
@@ -228,10 +250,6 @@ def _moment(value: object) -> datetime | None:
         return None
 
 
-def _normalized(route: str) -> str:
-    return "fast" if route == "fast_alt" else route
-
-
 class _Turn:
     """What happened since the last thing a person said."""
 
@@ -239,10 +257,11 @@ class _Turn:
         self.messages = list(messages)
         for index in range(len(self.messages) - 1, -1, -1):
             message = self.messages[index]
-            if (
-                isinstance(message, HumanMessage)
-                and not _dynamic_context(message)
-                and _system_sender(message) not in guards
+            provenance = Provenance.of(message)
+            if isinstance(message, HumanMessage) and (
+                provenance is None
+                or provenance.human
+                or (provenance.kind == "system" and provenance.sender not in guards)
             ):
                 self.messages = self.messages[index + 1 :]
                 break
@@ -274,27 +293,22 @@ class _Turn:
 
 
 class Asked:
-    """The task context and GitHub token refresh a model call waits on, asked for at once."""
+    """The GitHub token refresh a model call waits on, asked for alongside the inbox."""
 
-    def __init__(
-        self, context: Awaitable[TaskContext], proxy: Awaitable[dict[str, JsonValue]]
-    ) -> None:
-        self._context = asyncio.ensure_future(context)
+    def __init__(self, proxy: Awaitable[dict[str, JsonValue]]) -> None:
         self._proxy = asyncio.ensure_future(proxy)
         self._answered = False
 
-    async def answers(self) -> tuple[TaskContext, dict[str, JsonValue]]:
+    async def answers(self) -> dict[str, JsonValue]:
         self._answered = True
-        return await self._context, await self._proxy
+        return await self._proxy
 
     async def close(self) -> None:
         """Stop what is still asked; what failed unread is logged."""
-        asked = (self._context, self._proxy)
-        for task in asked:
-            task.cancel()
-        for result in await asyncio.gather(*asked, return_exceptions=True):
-            if not self._answered and isinstance(result, Exception):
-                logger.warning("A call before the model call failed unread", exc_info=result)
+        self._proxy.cancel()
+        [result] = await asyncio.gather(self._proxy, return_exceptions=True)
+        if not self._answered and isinstance(result, Exception):
+            logger.warning("A call before the model call failed unread", exc_info=result)
 
 
 class RunLoop:
@@ -302,9 +316,8 @@ class RunLoop:
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        # Models each run calls by id, such as one a person asked for, as the backend sets them.
-        self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
         self._guidance = RunLocal(_RunGuidance)
+        self._classifier = RouteClassifier()
 
     @property
     def rules(self) -> LoopRules:
@@ -319,7 +332,8 @@ class RunLoop:
     def starting(self) -> dict[str, JsonValue]:
         """The held state a turn starts from: nothing asked again yet, and answers going
         where the turn was asked from."""
-        update: dict[str, JsonValue] = {}
+        # A task joined in an earlier run is in this run's catalog.
+        update: dict[str, JsonValue] = {JOINED_TASK_CONTEXT: None}
         if self.rules.reply is not None:
             update.update(reply_surface=self.rules.reply.surface, reply_nudges=0)
         if self.rules.cli_result is not None:
@@ -336,7 +350,7 @@ class RunLoop:
         held = _held(state)
         if self._stops(held):
             return None
-        return Asked(self._task_context(), self._github_proxy(held))
+        return Asked(self._github_proxy(held))
 
     def _stops(self, held: Mapping[str, object]) -> bool:
         return any(held.get(key) for key in self.rules.stop_when)
@@ -348,62 +362,95 @@ class RunLoop:
         if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
         if asked is None:
-            asked = Asked(self._task_context(), self._github_proxy(held))
+            asked = Asked(self._github_proxy(held))
         try:
-            context, update = await asked.answers()
+            update = await asked.answers()
         finally:
             await asked.close()
+        stopped, reminder, objective = await self._goal(state, held, update)
+        if stopped:
+            return BeforeModel(update=update, jump_to="end")
+        context = self._task_context(held)
         messages = _messages(state)
-        visible = _visible(state)
+        visible = visible_messages(state)
         guidance = self._guidance.get(self._backend.run)
         visible_guidance = guidance.latest(visible)
         added: list[BaseMessage] = [
-            add_notification_metadata(
-                HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}"), source="run_guidance"
+            harness_message(
+                text,
+                message_id=f"run-guidance:{uuid.uuid4()}",
+                source="run_guidance",
+                provenance=Provenance(kind="context", sender=f"run:{key}"),
             )
             for key, text in guidance.latest(messages).items()
-            if key != "task-role" and text != visible_guidance.get(key)
+            if key not in {"task-role", _GOAL} and text != visible_guidance.get(key)
         ]
-        if context.instructions and context.instructions != _latest(visible, _ROLE):
+        if objective is not None and objective != visible_guidance.get(_GOAL):
             added.append(
-                add_notification_metadata(
-                    HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"),
-                    source="task_context",
+                harness_message(
+                    objective,
+                    message_id=f"goal:{uuid.uuid4()}",
+                    source="goal",
+                    provenance=Provenance(kind="context", sender="run:goal"),
                 )
             )
-        run_context = _latest(messages, _RUN_CONTEXT)
-        if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
+        if context.instructions and context.instructions != latest_with_id(visible, _ROLE):
             added.append(
-                add_notification_metadata(
-                    HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"),
-                    source="run_context",
+                harness_message(
+                    context.instructions,
+                    message_id=f"{_ROLE}{uuid.uuid4()}",
+                    source="task_context",
+                    provenance=Provenance(kind="context", sender="run:task-role"),
+                )
+            )
+        run_context = latest_with_id(messages, _RUN_CONTEXT)
+        if run_context is not None and run_context != latest_with_id(visible, _RUN_CONTEXT):
+            added.append(
+                harness_message(
+                    run_context, message_id=f"{_RUN_CONTEXT}{uuid.uuid4()}", source="run_context"
                 )
             )
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in visible
         ):
             added.append(
-                add_notification_metadata(
-                    HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"),
+                harness_message(
+                    context.message,
+                    message_id=f"task-context:{uuid.uuid4()}",
                     source="task_context",
                 )
             )
-        route = await self._route(held, [*visible, *added])
-        if route is not None:
-            if route.persist:
-                update["model_route"] = route.route
-            else:
-                update["model_route_attempted_for"] = run_id()
-        current = {**held, **update}
-        model = await self._model_for(current)
-        system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         if self.rules.incident:
+            # In a message, not the system prompt: they change from call to call, and a
+            # changed system prompt misses the provider's cache for the whole conversation.
             incident = await call(
                 self._backend,
                 INCIDENT_CONTEXT,
                 Routed(run_id=run_id(), humans=human_messages(messages)),
             )
-            system_prompt = f"{system_prompt}\n\n{incident.instructions}"
+            if incident.instructions and incident.instructions != latest_with_id(
+                visible, _INCIDENT
+            ):
+                added.append(
+                    harness_message(
+                        incident.instructions,
+                        message_id=f"{_INCIDENT}{uuid.uuid4()}",
+                        source="incident_context",
+                        provenance=Provenance(kind="context", sender="run:incident"),
+                    )
+                )
+        route, (reminded, reminders) = await asyncio.gather(
+            self._route(held, [*visible, *added]), self._reminders(held, messages)
+        )
+        update.update(reminded)
+        added.extend(reminders)
+        if route is not None:
+            update.update(self._kept(route))
+        current = {**held, **update}
+        model = None if self._models is None else model_for(self._models, current)
+        system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
+        if self.rules.client_prompt:
+            system_prompt = f"{system_prompt}\n\n{self.rules.client_prompt}"
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
@@ -418,6 +465,7 @@ class RunLoop:
                 else self._models.vision,
                 fallback=None if model is None else model.fallback,
                 use_gateway=self._models is not None and self._models.use_gateway,
+                reminder=reminder,
             ),
         )
 
@@ -446,7 +494,9 @@ class RunLoop:
         if due is not None and now < due:
             return {}
         try:
-            refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+            refreshed = await call(
+                self._backend, REFRESH_GITHUB_PROXY, RefreshGitHubProxy(run_id=run_id())
+            )
         except Exception:
             logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
@@ -458,65 +508,127 @@ class RunLoop:
             return {}
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
-    async def _task_context(self) -> TaskContext:
-        if not self.rules.task_coordination:
-            return TaskContext()
-        return await call(self._backend, TASK_CONTEXT, RunRequest(run_id=run_id()))
+    def _task_context(self, held: Mapping[str, object]) -> TaskContext:
+        """The thread's role and task: the catalog's, or the task it joined since."""
+        context = self.rules.task_context or TaskContext()
+        joined = held.get(JOINED_TASK_CONTEXT)
+        if isinstance(joined, str) and joined:
+            return context.model_copy(update={"message": joined})
+        return context
+
+    def classify_ahead(self, state: Mapping[str, object]) -> asyncio.Task[Route] | None:
+        """Start classifying the turn's route while the run prepares, where the thread's
+        held state leaves its route to the classifier."""
+        if not self._classifies(_held(state)):
+            return None
+        return asyncio.ensure_future(self._classifier.classify(_messages(state)))
+
+    def _classifies(self, held: Mapping[str, object]) -> bool:
+        rules = self.rules.routing
+        requested = held.get("requested_model")
+        return (
+            rules is not None
+            and rules.mode == "auto"
+            and not (isinstance(requested, str) and requested)
+            and kept_route(held.get("model_route")) is None
+            and held.get("model_route_attempted_for") != run_id()
+        )
+
+    async def routed(
+        self,
+        held: Mapping[str, object],
+        messages: Sequence[BaseMessage],
+        classifying: asyncio.Task[Route] | None,
+    ) -> dict[str, JsonValue]:
+        """The held state the turn's route sets as the run starts, the routed model's id and
+        effort with it: the turn's start reports them, and its replies are signed with them.
+
+        ``held`` is the state the run's preparation left, which may have changed what
+        ``classify_ahead`` saw: a classification it no longer needs is stopped.
+        """
+        try:
+            route = await self._route(held, messages, classifying)
+        finally:
+            if classifying is not None:
+                classifying.cancel()
+        if route is None:
+            return {}
+        update = self._kept(route)
+        rules = self.rules.routing
+        model_id = rules.route_model_ids.get(route.route) if rules is not None else None
+        if rules is not None and route.route != "default" and model_id:
+            update.update(
+                selected_model_id=model_id, selected_effort=rules.route_efforts.get(route.route)
+            )
+        return update
+
+    @staticmethod
+    def _kept(route: Route) -> dict[str, JsonValue]:
+        """The route for the thread's later runs, or else for this run alone."""
+        if route.persist:
+            return {"model_route": route.route}
+        return {"model_route_attempted_for": run_id()}
 
     async def _route(
-        self, held: Mapping[str, object], messages: Sequence[BaseMessage]
+        self,
+        held: Mapping[str, object],
+        messages: Sequence[BaseMessage],
+        classifying: Awaitable[Route] | None = None,
     ) -> Route | None:
         """The route and whether it should be kept beyond this run."""
         rules = self.rules.routing
         if rules is None:
             return None
         requested = held.get("requested_model")
-        stored = held.get("model_route")
+        stored = kept_route(held.get("model_route"))
         persist = True
         if isinstance(requested, str) and requested:
             route = "default"
         elif rules.mode is None:
             route = "default"
-        elif isinstance(stored, str) and stored:
-            route = _normalized(stored)
+        elif stored is not None:
+            route = stored
         elif rules.mode == "fast":
             route = "fast"
         elif held.get("model_route_attempted_for") == run_id():
             return None
         else:
-            asked = Routed(run_id=run_id(), humans=human_messages(messages))
-            routed = await call(self._backend, ROUTE_MODEL, asked)
-            route, persist = routed.route, routed.persist
+            classified = await (classifying or self._classifier.classify(messages))
+            route, persist = classified.route, classified.persist
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
         return Route(route=route, persist=persist)
 
-    async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
-        key = (model_id, effort if isinstance(effort, str) else None)
-        chosen = self._chosen.get(self._backend.run)
-        if key not in chosen:
-            choice = ChosenModel(run_id=run_id(), model_id=key[0], effort=key[1])
-            chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
-        return chosen[key]
-
-    async def _model_for(self, held: Mapping[str, object]) -> ModelSpec | None:
-        """The run's own model, a route's, or the one a person asked for."""
-        requested = held.get("requested_model")
-        if isinstance(requested, str) and requested:
-            return await self._chosen_model(requested, held.get("requested_effort"))
-        models = self._models
-        if models is None:
-            return None
-        route = held.get("model_route")
-        routed = models.routes.get(_normalized(route)) if isinstance(route, str) else None
-        if routed is not None and route != "default":
-            return routed
-        selected = held.get("selected_model_id")
-        if isinstance(selected, str) and selected and selected != models.model.model_id:
-            return await self._chosen_model(selected, held.get("selected_effort"))
-        return models.model
+    async def _reminders(
+        self, held: Mapping[str, object], messages: Sequence[BaseMessage]
+    ) -> tuple[dict[str, JsonValue], list[BaseMessage]]:
+        """The reminders a person's message the model has not answered calls for, asked once
+        per message, and the held state that records it was asked."""
+        if not self.rules.reminders or namespace():
+            return {}, []
+        pending = since_last_reply(messages)
+        person = next(
+            (
+                message
+                for message in reversed(pending)
+                if (provenance := Provenance.of(message)) is not None and provenance.human
+            ),
+            None,
+        )
+        if person is None or (person.id is not None and held.get(_REMINDED_FOR) == person.id):
+            return {}, []
+        reminded: dict[str, JsonValue] = {_REMINDED_FOR: person.id} if person.id else {}
+        asked = PersonMessage(
+            run_id=run_id(), message=_json_dicts.validate_python(messages_to_dict([person]))[0]
+        )
+        try:
+            found = await call(self._backend, REMINDERS, asked)
+        except Exception:
+            logger.warning("Could not read a person's message for reminders", exc_info=True)
+            return reminded, []
+        return reminded, messages_from_dict(found.messages)
 
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
         """The prompt every thread shares, the part its workspace's threads share, and the
@@ -566,29 +678,37 @@ class RunLoop:
             return PhaseResult()
         held = _held(state)
         update: dict[str, JsonValue] = {}
+        if is_model_failure_reply(last):
+            # Asking the model again would wait out the same outage or refusal: what was
+            # written for it is the run's answer.
+            if self.rules.reply is not None and held.get("reply_surface") == "slack":
+                await self._reply_on_behalf(state, content_text(last.content))
+            return PhaseResult(update={"reply_nudges": 0, "cli_result_nudges": 0})
         if self.rules.cli_result is not None:
             asked = self._cli_result(self.rules.cli_result, state, held, update)
             if asked is not None:
                 return asked
         if self.rules.work_state is not None:
-            asked = self._work_state(self.rules.work_state, state, held, update)
+            asked = await self._work_state(self.rules.work_state, state, held, update)
             if asked is not None:
                 return asked
         if self.rules.reply is not None:
             return await self._reply(self.rules.reply, state, held, update)
         return PhaseResult(update=update)
 
-    def _nudge(
-        self, texts: Sequence[str], state: Mapping[str, object]
-    ) -> list[dict[str, JsonValue]]:
-        seen = {content_text(message.content) for message in _visible(state)}
+    def _nudge(self, rules: Nudging, state: Mapping[str, object]) -> list[dict[str, JsonValue]]:
+        seen = {content_text(message.content) for message in visible_messages(state)}
         added = [
-            add_notification_metadata(
-                HumanMessage(content=text, id=str(uuid.uuid4())), source="run_nudge"
+            harness_message(
+                text, message_id=str(uuid.uuid4()), source="run_nudge", provenance=provenance
             )
-            for text in texts
+            for text, provenance in rules.asked
             # An introduction the model still sees is not made twice.
-            if not (text in seen and _dynamic_context(HumanMessage(content=text)))
+            if not (
+                text in seen
+                and (stamped := provenance or Provenance.of(HumanMessage(content=text)))
+                and stamped.kind == "context"
+            )
         ]
         return _json_dicts.validate_python(messages_to_dict(added))
 
@@ -619,41 +739,187 @@ class RunLoop:
             return None
         return PhaseResult(
             update={**update, "cli_result_nudges": asked + 1},
-            messages=self._nudge(rules.nudge, state),
+            messages=self._nudge(rules, state),
             jump_to="model",
         )
 
-    def _work_state(
+    async def _goal(
+        self, state: Mapping[str, object], held: Mapping[str, object], update: dict[str, JsonValue]
+    ) -> tuple[bool, str | None, str | None]:
+        """Move the thread's goal for what this model call answers: whether the run stops
+        here, what to remind the model of, and the goal's objective to keep in view.
+
+        A person's message puts the goal back to work, starting it from their request;
+        so does a wait waking the thread, unless the person stopped it, when the run
+        ends without a model call. While the goal waits on its person, each input after
+        the one that reported it carries a reminder of what for.
+        """
+        rules = self.rules.work_state
+        if rules is None:
+            return False, None, None
+        goal = await self._read_goal(GoalRead(run_id=run_id()))
+        if goal is None:
+            return False, None, None
+        inputs = self._inputs(_messages(state))
+        requests = [text for message in inputs if (text := self._request(message)) is not None]
+        woken = not requests and any(
+            isinstance(message, HumanMessage) and self._wakes(message) for message in inputs
+        )
+        if woken and goal.state == "paused" and goal.reason in {"stopped", "requested"}:
+            return True, None, goal.objective
+        if (
+            goal.state is None
+            or (requests and goal.state != "working")
+            or (woken and goal.state in {"waiting", "paused"})
+        ):
+            started = goal.state is None
+            await self._set_goal(
+                GoalChange(
+                    run_id=run_id(),
+                    state="working",
+                    request="\n\n".join(requests) if started and requests else None,
+                )
+            )
+            if started:
+                goal = await self._read_goal(GoalRead(run_id=run_id())) or goal
+            return False, None, goal.objective
+        if goal.state != "waiting_on_user":
+            return False, None, goal.objective
+        seen = held.get(_GOAL_SEEN)
+        update[_GOAL_SEEN] = goal.updated_at_ms
+        if seen != goal.updated_at_ms:
+            return False, None, goal.objective
+        return (
+            False,
+            "\n\n".join(text for text in (rules.reminder, goal.ask) if text),
+            goal.objective,
+        )
+
+    async def _work_state(
         self,
         rules: WorkStateRules,
         state: Mapping[str, object],
         held: Mapping[str, object],
         update: dict[str, JsonValue],
     ) -> PhaseResult | None:
-        """Send the model back to work until it says it is blocked or complete, or waits."""
-        turn = _Turn(_messages(state), self._guards)
-        call_ids = {
-            str(tool_call.get("id"))
-            for tool_call in turn.calls()
-            if tool_call.get("name") in {rules.tool, *rules.waits}
-        }
-        if turn.succeeded(call_ids):
-            update["work_state_nudges"] = 0
+        """Send the model back to work until the thread's goal rests: waiting on its person,
+        paused, or on something that wakes the thread again.
+
+        The backend reads what will wake the thread from where each wait lives, so a wait
+        counts however the model started it, code mode included, and whenever. As Codex
+        blocks a goal, three turns in a row the model was sent back for that did nothing,
+        or three in a row that ran only failing commands, pause it instead.
+        """
+        goal = await self._read_goal(GoalRead(run_id=run_id(), waits=True))
+        if goal is None or goal.state in {None, "waiting_on_user", "paused"} or goal.waits:
+            update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
+            if goal is not None and goal.waits and goal.state in {"working", "waiting"}:
+                await self._set_goal(GoalChange(run_id=run_id(), state="waiting"))
             return None
-        nudges = held.get("work_state_nudges")
-        asked = nudges if isinstance(nudges, int) else 0
-        if asked >= rules.max_nudges:
-            logger.warning(
-                "Run ended without a work state after every nudge",
-                extra={"work_state_tool": rules.tool, "work_state_attempts": asked},
-            )
-            update["work_state_nudges"] = 0
+        turn = self._last_turn(_messages(state))
+        empty = self._counted(held, _EMPTY_TURNS, turn.empty, reset=turn.active)
+        failing = self._counted(held, _FAILING_TURNS, turn.failing, reset=not turn.failing)
+        update.update({_EMPTY_TURNS: empty, _FAILING_TURNS: failing})
+        if empty >= _STALLED_TURNS or failing >= _STALLED_TURNS:
+            reason = "no_progress" if empty >= _STALLED_TURNS else "failing_commands"
+            await self._set_goal(GoalChange(run_id=run_id(), state="paused", reason=reason))
+            update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
             return None
         return PhaseResult(
-            update={**update, "work_state_nudges": asked + 1},
-            messages=self._nudge(rules.nudge, state),
+            update=update,
+            messages=self._nudge(rules, state),
             jump_to="model",
         )
+
+    @staticmethod
+    def _counted(held: Mapping[str, object], key: str, counts: bool, *, reset: bool) -> int:
+        """A run of turns: one more when this turn ``counts``, none after one that ``reset``s."""
+        if reset:
+            return 0
+        so_far = held.get(key)
+        so_far = so_far if isinstance(so_far, int) else 0
+        return so_far + 1 if counts else so_far
+
+    def _last_turn(self, messages: Sequence[AnyMessage]) -> _GoalTurn:
+        """What the model did since it was last prompted, by a person, an event or a nudge."""
+        start = 0
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], HumanMessage):
+                start = index
+                break
+        prompt = messages[start] if messages else None
+        provenance = Provenance.of(prompt) if isinstance(prompt, HumanMessage) else None
+        nudged = provenance is not None and provenance.sender == (
+            self.rules.work_state.nudge_sender if self.rules.work_state else None
+        )
+        after = messages[start + 1 :]
+        calls = [
+            call
+            for message in after
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls
+        ]
+        results = [message for message in after if isinstance(message, ToolMessage)]
+        failed = [message for message in results if self._failed_command(message)]
+        succeeded = any(
+            not _reported_failure(message) and message not in failed for message in results
+        )
+        active = bool(calls)
+        return _GoalTurn(
+            empty=nudged and not active,
+            active=active,
+            failing=bool(failed) and not succeeded,
+        )
+
+    @staticmethod
+    def _failed_command(message: ToolMessage) -> bool:
+        """An ``execute`` that ran its command and exited non-zero."""
+        return message.name == "execute" and _FAILED_COMMAND in content_text(message.content)
+
+    @staticmethod
+    def _inputs(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+        """What came in since the model last answered."""
+        for index in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[index], AIMessage):
+                return list(messages[index + 1 :])
+        return list(messages)
+
+    def _wakes(self, message: HumanMessage) -> bool:
+        """An event that woke the thread: not a person, the harness's context, or a guard."""
+        provenance = Provenance.of(message)
+        return provenance is None or (
+            provenance.kind == "system" and provenance.sender not in self._guards
+        )
+
+    @staticmethod
+    def _request(message: BaseMessage) -> str | None:
+        """What a person asked in ``message``; None for any other input."""
+        if not isinstance(message, HumanMessage):
+            return None
+        for text in _texts(message.content):
+            root = _root(text, "input-message")
+            if root is not None and root.get("kind") == "human":
+                body = (root.text or "").strip() or (root.findtext("content") or "").strip()
+                return body or None
+        return None
+
+    async def _read_goal(self, request: GoalRead) -> Goal | None:
+        """The thread's goal; None when the backend cannot say, which never holds the run."""
+        try:
+            return await call(self._backend, GOAL, request)
+        except BackendCallError:
+            logger.warning("Could not read the thread's goal", exc_info=True)
+            return None
+
+    async def _set_goal(self, change: GoalChange) -> None:
+        try:
+            await call(self._backend, SET_GOAL, change)
+        except BackendCallError:
+            logger.warning(
+                "Could not move the thread's goal",
+                extra={"goal_state": change.state},
+                exc_info=True,
+            )
 
     async def _reply(
         self,
@@ -672,16 +938,19 @@ class RunLoop:
         if asked < rules.max_nudges:
             return PhaseResult(
                 update={**update, "reply_nudges": asked + 1},
-                messages=self._nudge(rules.nudge, state),
+                messages=self._nudge(rules, state),
                 jump_to="model",
             )
         # Silence is the one outcome the person cannot recover from.
-        if text := turn.last_answer():
-            reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
-            await call(self._backend, REPLY_ON_BEHALF, reply)
-        else:
-            logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
+        await self._reply_on_behalf(state, turn.last_answer())
         return PhaseResult(update={**update, "reply_nudges": 0})
+
+    async def _reply_on_behalf(self, state: Mapping[str, object], text: str) -> None:
+        if not text:
+            logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
+            return
+        reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
+        await call(self._backend, REPLY_ON_BEHALF, reply)
 
     @staticmethod
     def _replied(rules: ReplyRules, turn: _Turn) -> bool:

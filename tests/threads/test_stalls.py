@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import JsonValue
+from runtime_api.models import MODEL_CALL_BUDGET
 from sqlalchemy import text
 
 from openswe import completion
@@ -133,3 +134,9 @@ async def test_a_run_that_stopped_responding_is_failed_once(
     assert reply.await_count == 2
     frozen = await index.get("frozen")
     assert frozen is not None and frozen.status == "error"
+
+
+def test_a_run_is_stalled_only_after_twice_a_model_calls_budget() -> None:
+    """MDA ends a model call, its retries across the fallback included, within the budget;
+    a run quiet for that long is still working."""
+    assert stalls.STALLED_AFTER >= 2 * MODEL_CALL_BUDGET

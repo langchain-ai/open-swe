@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Mapping
 
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from runtime_api.loop import ModelCall
 
 from rt.model_calls import PROMPT_CACHE_TTL
@@ -109,3 +109,40 @@ class ThreadPromptMiddleware(AgentMiddleware):
             return await handler(request)
         system = _appended(request.system_message, [planned.thread_prompt], cached=0)
         return await handler(request.override(system_message=system))
+
+
+class ReminderMiddleware(AgentMiddleware):
+    """Remind the model of what its loop planned to (``ModelCall.reminder``) with the
+    latest input: a tool result, or a message such as a wakeup, a background command's
+    completion or a monitor's event. In this call's request alone, never the conversation.
+
+    The reminder is the input's last block, and for Anthropic the block before it ends
+    the conversation's cached prefix, so the next call, reminded elsewhere, reads it.
+    """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        planned = _planned(request)
+        messages = request.messages
+        if planned is None or not planned.reminder or not messages:
+            return await handler(request)
+        last = messages[-1]
+        if not isinstance(last, ToolMessage | HumanMessage):
+            return await handler(request)
+        blocks: list[_Block] = (
+            [{"type": "text", "text": last.content}]
+            if isinstance(last.content, str)
+            else list(last.content)
+        )
+        if blocks and isinstance(request.model, ChatAnthropic):
+            blocks[-1] = _cached(blocks[-1])
+        reminder = f"<system-reminder>\n{planned.reminder}\n</system-reminder>"
+        reminded = last.model_copy(
+            update={"content": [*blocks, {"type": "text", "text": reminder}]}
+        )
+        return await handler(request.override(messages=[*messages[:-1], reminded]))

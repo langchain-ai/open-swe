@@ -46,6 +46,7 @@ const pr: OpenPullRequest = {
   requiredChecksPassing: true,
   missingChecks: [],
   unresolvedThreads: 1,
+  conversationResolutionRequired: false,
 }
 
 it("blocks the sibling action as soon as one is queued", async () => {

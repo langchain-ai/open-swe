@@ -187,7 +187,9 @@ class Operation:
         if rejection := self._rejection(tool):
             return OperationResult(content=rejection, status="error")
         if client is not None and (
-            pending := client.pending_result(request.name, request.request_id)
+            pending := await client.pending_result(
+                request.name, request.request_id, request.arguments
+            )
         ):
             return self._result(pending)
         events: list[object] = []

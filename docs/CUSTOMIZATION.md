@@ -104,8 +104,8 @@ ModelChoice("openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort"
 ModelChoice("google_genai:gemini-2.5-pro", {"temperature": 0, "max_tokens": 16_000})
 ```
 
-`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort.
-To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
+`provider_model_kwargs()` in `packages/runtime-api/src/runtime_api/models.py` builds those settings for a catalog model and effort.
+To change how a provider's chat model is built (its client, retries or gateway routing), edit `make_model` there: the backend and the MDA runtime (`mda/rt/models.py`) both build their models with it, from the same model table.
 
 ### Using different models per context
 
@@ -157,6 +157,14 @@ LANGSMITH_TRACING=false python -m evals.model_request
 The cases cover typos, ambiguous names, quoted and forwarded requests, model mentions as task subjects, and unavailable models.
 They call Jev and are separate from the deterministic unit tests.
 
+### Reminders beside a person's message
+
+When the person who started the run has the **Memory** experiment on, each new human message in an agent run is also read by Jev for reminders, notes the model reads right after that message, like Claude Code's system reminders.
+A reminder is a `system:reminder` input message: the dashboard never shows it, and the system prompt tells the model the person cannot see it.
+Every reminder in `openswe/reminders.py` is one Jev question, all asked in one call; its prompts live in `openswe/resources/prompts/reminders/<name>/`.
+The `frustration` reminder fires when the person sounds frustrated with the agent and asks it to correct course and save the lesson with `remember`.
+A message is read once, with the same credentials, deadline and confidence cutoff as routing; a failure adds no reminder.
+
 ### Routing through the LangSmith LLM Gateway
 
 Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly.
@@ -175,7 +183,7 @@ Enable it either way:
 
 The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
-Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`.
+Routing is applied centrally in `make_model` (`packages/runtime-api/src/runtime_api/models.py`), which resolves the effective on/off and wires the gateway's URL and key, on the backend and in the MDA runtime alike.
 **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
@@ -366,6 +374,9 @@ It opens each connection for review without saving automatically.
 Existing connections keep their enabled state and selected tools.
 Local `command` servers and environment-variable expansion are not supported.
 
+For Linear on an MDA deployment with the Linear channel, use the channel's app token instead of the example below; see [Linear's MCP server on the Linear channel's token](#linears-mcp-server-on-the-linear-channels-token).
+Linear holds one app token per app: a client-credentials token for the channel's app revokes the channel's, and its Linear grant then needs an admin's approval again.
+
 For a Linear OAuth application, enable **Client credentials tokens** in the application's settings, then import this configuration.
 The `oauth` object is a Robin extension to the remote MCP JSON format:
 
@@ -474,12 +485,33 @@ Create the connection from `mda/` after the deployment's first `mda deploy`, for
 ```
 
 The slug must be `open-swe-mcp-<server>`: a server never gets a credential Robin or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+The one exception is Linear's MCP server, below.
 Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
 The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
 A server with a connection takes no headers or OAuth, and saving it drops those the record had.
 An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
 Robin cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
 A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+
+#### Linear's MCP server on the Linear channel's token
+
+With the Linear channel on the MDA deployment, Linear's MCP server can read the channel's own app token, `mda/linear-token`, which the channel's `mda deploy` keeps and Agent Auth renews.
+Linear's MCP server takes an existing OAuth token as `Authorization: Bearer` ([Linear's MCP docs](https://linear.app/docs/mcp)), and its tools then act as the Open SWE app, as with client credentials.
+Prefer this over the client-credentials example above: Linear holds one app token per app, so a server requesting its own for the channel's app revokes the channel's.
+Save an instance or workspace server with no `oauth` or headers:
+
+```json
+{
+  "name": "linear",
+  "url": "https://mcp.linear.app/mcp",
+  "allowed_tools": ["list_issues", "get_issue"],
+  "connection": {"slug": "mda/linear-token", "owner": "agent"}
+}
+```
+
+The URL must be on `https://mcp.linear.app` (`/mcp`, `/mcp/readonly` or `/sse`), with no port or credentials; the backend refuses the token for any other server, and the MDA run refuses to send it anywhere else.
+Personal servers cannot name it.
+Once the server reads the channel's token, turn off **Client credentials tokens** on the Linear app.
 The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
 
 ### Adding a Python tool

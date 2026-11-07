@@ -1,5 +1,6 @@
 """GitHub repository access checks for dashboard actions."""
 
+import asyncio
 import logging
 
 import httpx2
@@ -45,25 +46,57 @@ async def assert_repo_access(full_name: str, token: str) -> str:
     return full_name
 
 
-async def require_repo_access_for_user(login: str, full_name: str) -> str:
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, github_reauth_message(login))
-    try:
-        await assert_repo_access(full_name, token)
-    except HTTPException as exc:
-        if exc.status_code != 401:
-            raise
-        token = await get_valid_access_token(login, force_refresh=True)
+class RepoAccessChecks:
+    """GitHub repository read checks in flight, so a page's parallel reads share one.
+
+    A check's answer is never kept past the check itself: access revoked on GitHub
+    takes effect on the next request, and every waiter gets the token the check confirmed.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[tuple[str, str, int], asyncio.Future[str]] = {}
+
+    async def require(self, login: str, full_name: str) -> str:
+        key = (
+            login.lower(),
+            normalize_repo_full_name(full_name).lower(),
+            id(asyncio.get_running_loop()),
+        )
+        pending = self._pending.get(key)
+        if pending is None:
+            pending = asyncio.ensure_future(self._confirm(login, full_name))
+            self._pending[key] = pending
+            pending.add_done_callback(lambda _: self._pending.pop(key, None))
+        return await asyncio.shield(pending)
+
+    @staticmethod
+    async def _confirm(login: str, full_name: str) -> str:
+        token = await get_valid_access_token(login)
         if not token:
-            raise HTTPException(401, github_reauth_message(login)) from exc
+            raise HTTPException(401, github_reauth_message(login))
         try:
             await assert_repo_access(full_name, token)
-        except HTTPException as refreshed_exc:
-            if refreshed_exc.status_code == 401:
-                raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
-            raise
-    return token
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            token = await get_valid_access_token(login, force_refresh=True)
+            if not token:
+                raise HTTPException(401, github_reauth_message(login)) from exc
+            try:
+                await assert_repo_access(full_name, token)
+            except HTTPException as refreshed_exc:
+                if refreshed_exc.status_code == 401:
+                    raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
+                raise
+        return token
+
+
+_ACCESS_CHECKS = RepoAccessChecks()
+
+
+async def require_repo_access_for_user(login: str, full_name: str) -> str:
+    """The person's GitHub token, once GitHub confirms it can read ``full_name``."""
+    return await _ACCESS_CHECKS.require(login, full_name)
 
 
 async def require_repo_access_for_workspace(full_name: str) -> str:

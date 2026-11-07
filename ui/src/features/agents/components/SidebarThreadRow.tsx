@@ -36,7 +36,7 @@ import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import type { SVGProps } from "react"
 
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
@@ -52,9 +52,9 @@ import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
-  markAgentThreadViewed,
   markReviewViewed,
   useDeleteAgentThread,
+  useSetAgentThreadViewed,
 } from "@/features/agents/lib/queries"
 import {
   noteReviewOpenedFromSidebar,
@@ -413,6 +413,7 @@ export function SidebarThreadRow({
 }) {
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
+  const setViewed = useSetAgentThreadViewed()
   const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
@@ -437,9 +438,11 @@ export function SidebarThreadRow({
   const [workersExpanded, setWorkersExpanded] = useState(
     Boolean(activeWorkerId)
   )
-  useEffect(() => {
+  const [previousWorkerId, setPreviousWorkerId] = useState(activeWorkerId)
+  if (previousWorkerId !== activeWorkerId) {
+    setPreviousWorkerId(activeWorkerId)
     if (activeWorkerId) setWorkersExpanded(true)
-  }, [activeWorkerId])
+  }
   const hasSubagents = subagents.length > 0
   const activeSubagent =
     isActive &&
@@ -453,25 +456,13 @@ export function SidebarThreadRow({
     (Boolean(activeWorkerId) && !workersExpanded)
   const source = sourceMeta(item)
   const SourceIcon = source?.icon
-  // Strictly an unread marker, not a "finished" one: any thread the user has
-  // not opened since its latest run shows the dot. The focused thread is being
-  // read right now, so it never does — derived rather than left to the
-  // optimistic cache patch, which a list refetch can overwrite.
-  const unread = !item.viewed && !isActive
+  const unread = !item.viewed
   const isDeleting =
     deleteThread.isPending && deleteThread.variables === item.id
 
   const markViewed = () => {
     if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
-    else markAgentThreadViewed(queryClient, item.id)
   }
-
-  // Covers every way a row becomes active — click, command palette, keyboard
-  // nav, browser back — not just the click handler below.
-  useEffect(() => {
-    if (isActive && !item.viewed) markViewed()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, item.viewed])
 
   const onConfirmDelete = () => {
     if (isDeleting) return
@@ -644,6 +635,9 @@ export function SidebarThreadRow({
             isDeleting={isDeleting}
             onRename={() => setRenameOpen(true)}
             onTogglePin={onTogglePin}
+            onToggleViewed={() =>
+              setViewed.mutate({ threadId: item.id, viewed: !item.viewed })
+            }
             onToggleArchived={onToggleArchived}
             onDelete={() => setDeleteOpen(true)}
           />
@@ -904,7 +898,6 @@ function SidebarTaskWorkerRow({
   indent: boolean
   onNavigate?: () => void
 }) {
-  const queryClient = useQueryClient()
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
   const subagents = (worker.subagents ?? []).filter(
@@ -939,10 +932,7 @@ function SidebarTaskWorkerRow({
         search={{}}
         aria-current={rowIsActive ? "page" : undefined}
         title={`${worker.title} — ${status}`}
-        onClick={() => {
-          markAgentThreadViewed(queryClient, worker.id)
-          onNavigate?.()
-        }}
+        onClick={() => onNavigate?.()}
         {...sidebarRowProps({
           active: rowIsActive,
           archived: worker.resolved === true,

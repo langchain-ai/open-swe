@@ -1,10 +1,11 @@
 import asyncio
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
+from runtime_api.slack import SlackTurnDeclined
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
@@ -301,6 +302,11 @@ def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
+    monkeypatch.setattr(slack_webhooks.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        slack_webhooks.SlackLiveMessage, "enabled_for", AsyncMock(return_value=False)
+    )
+
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {
             "profile": {
@@ -390,7 +396,7 @@ def _setup_slack_mention_fakes(
     async def fake_post_prompt(*args, **kwargs) -> None:
         captured["prompt"] = {"args": args, "kwargs": kwargs}
 
-    async def fake_resolve_slack_thread_id(client, channel_id, thread_ts):
+    async def fake_resolve_slack_thread_id(channel_id, thread_ts):
         return "mapped-thread"
 
     monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
@@ -574,7 +580,7 @@ async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
 async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(slack_file_mention):
     request, threads, captured = slack_file_mention
 
-    prepared = await slack_webhooks.prepare_slack_channel_run(request, None)
+    prepared, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
 
     # MDA's channel starts the run; nothing holds up its answer for a sandbox.
     assert prepared is not None
@@ -780,6 +786,59 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
     assert captured["prompt"] == {"reason": "revoked"}
 
 
+@pytest.mark.parametrize(
+    ("has_token_record", "reason"), [(False, "sign_in"), (True, "sign_in_again")]
+)
+def test_a_turn_built_for_mdas_slack_channel_says_why_instead_of_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+    has_token_record: bool,
+    reason: Literal["sign_in", "sign_in_again"],
+) -> None:
+    """MDA's Slack channel replies with the decline; the backend posts no prompt itself."""
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    prompt = AsyncMock()
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        webhook_common.User,
+        "login_for_slack",
+        AsyncMock(return_value="mason-gh" if has_token_record else None),
+    )
+    monkeypatch.setattr(webhook_common.User, "login_for_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "has_access_token_record", AsyncMock(return_value=has_token_record)
+    )
+    monkeypatch.setattr(webhook_common, "post_account_link_prompt", prompt)
+    monkeypatch.setattr(
+        slack_webhooks, "build_settings_url", lambda: "https://openswe.test/settings"
+    )
+
+    prepared, _ = asyncio.run(
+        slack_webhooks.prepare_slack_channel_run(
+            SlackRequest(
+                channel_id="C123",
+                thread_ts="1700000000.000100",
+                event_ts="1700000000.000200",
+                user_id="U123",
+                text="<@UBOT> do the thing",
+                bot_user_id="UBOT",
+                thread_id="11111111-1111-4111-8111-111111111111",
+            ),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
+            declines=True,
+        )
+    )
+
+    assert prepared == SlackTurnDeclined(
+        reason=reason, settings_url="https://openswe.test/settings"
+    )
+    assert "run_create" not in captured
+    prompt.assert_not_awaited()
+
+
 @pytest.fixture
 def bot_run(monkeypatch, allowed_bot):
     captured: dict[str, Any] = {}
@@ -919,6 +978,8 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
+        source_message_ts=cast(str, kwargs.get("source_message_ts", "")),
+        context_channel_id=cast(str, kwargs.get("context_channel_id", "")),
         request_text="do the thing",
         request_blocks=[{"type": "text", "text": "do the thing"}],
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
@@ -936,6 +997,33 @@ def test_current_slack_message_preserves_ingress_mention(explicit_mention: bool)
     trigger = ElementTree.fromstring(trigger_blocks[0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicit_mention).lower()
     assert (trigger.text or "").strip() == "do the thing"
+
+
+@pytest.mark.parametrize("source_message_ts", ["", "1.000001"])
+def test_trigger_permalink_uses_only_source_post_timestamp(source_message_ts: str) -> None:
+    contents = _context_input([], source_message_ts=source_message_ts)
+    trigger = ElementTree.fromstring(contents[-1][0]["text"])
+    assert trigger.get("timestamp") == "9.0"
+    assert trigger.get("slack_message_ts") == (source_message_ts or None)
+
+
+@pytest.mark.parametrize("context_channel_id", ["C123", "COTHER"])
+def test_cross_channel_context_does_not_link_source_timestamps_to_destination(
+    context_channel_id: str,
+) -> None:
+    contents = _context_input(
+        [{"ts": "1.000001", "user": "U123", "text": "Earlier message"}],
+        source_message_ts="2.000002",
+        context_channel_id=context_channel_id,
+    )
+    envelopes = [
+        ElementTree.fromstring(content if isinstance(content, str) else content[0]["text"])
+        for content in contents
+        if isinstance(content, list) or content.startswith("<input-message")
+    ]
+    assert [envelope.get("slack_message_ts") for envelope in envelopes] == (
+        ["1.000001", "2.000002"] if context_channel_id == "C123" else [None, None]
+    )
 
 
 def test_multiline_trigger_appends_only_forwarded_context() -> None:
@@ -1304,6 +1392,8 @@ async def test_performance_directive_switches_unless_quoted(
     monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
     notice = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
+    receipt = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_utils, "add_slack_reaction", receipt)
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
     await slack_webhooks.process_slack_mention(
@@ -1316,8 +1406,20 @@ async def test_performance_directive_switches_unless_quoted(
             text=text,
             bot_user_id="UBOT",
             concierge_mode=concierge,
+            original_message_ts="1700000000.000100" if concierge else "",
         ),
         repo=None,
+    )
+    if concierge:
+        receipt.assert_awaited_once_with(
+            "C123",
+            "1700000000.000100",
+            "hourglass_flowing_sand",
+        )
+    else:
+        receipt.assert_not_awaited()
+    assert dispatch.call_args.kwargs["concierge_message_ts"] == (
+        "1700000000.000100" if concierge else ""
     )
     configurable = dispatch.call_args.args[3]
     if not switches:

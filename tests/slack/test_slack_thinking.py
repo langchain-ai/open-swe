@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Literal
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 from uuid import uuid4
 
 import httpx
@@ -15,6 +15,7 @@ from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, Task, TaskContext, TaskMembership
 from openswe.threads.index import IndexedThread
 from openswe.threads.runtimes import MdaRun
+from tests.conftest import serve_runs_from
 
 
 @pytest.fixture(autouse=True)
@@ -238,11 +239,12 @@ async def test_rate_limit_defers_append_until_retry_after(monkeypatch) -> None:
     assert not stream.pending
 
 
-def _status_client() -> AsyncMock:
+def _status_client(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     client = AsyncMock()
     client.runs.join.return_value = {}
     client.runs.list.return_value = []
     client.threads.get.return_value = {"metadata": {}}
+    serve_runs_from(monkeypatch, client)
     return client
 
 
@@ -250,7 +252,7 @@ async def test_idle_origin_keeps_status_until_routed_destination_finishes(monkey
     from contextlib import asynccontextmanager
 
     metadata = {"origin": {}, "destination": {}, "other": {}}
-    client = _status_client()
+    client = _status_client(monkeypatch)
 
     now = datetime.now(UTC)
     threads = {
@@ -292,21 +294,25 @@ async def test_idle_origin_keeps_status_until_routed_destination_finishes(monkey
         return MdaRun(run_id="queued", status="pending", created_at=now) if busy else None
 
     monkeypatch.setattr(
-        routed_work.RUNTIMES, "runs_on", lambda _runtime: SimpleNamespace(latest_run=latest_run)
+        routed_work.RUNTIMES,
+        "runs_on",
+        lambda _runtime: SimpleNamespace(
+            latest_run=latest_run, has_active_run=AsyncMock(return_value=False)
+        ),
     )
     monkeypatch.setattr(routed_work, "agent_thread_pr_state_lock", unlocked)
     await RoutedWork("origin").track("destination")
     await RoutedWork("origin").track("other")
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    await slack_thinking.clear_slack_thinking_status_if_idle("origin", "C1", "1.0")
     assert set_status.await_args.args[-1] == "Thinking..."
     destination_busy = False
-    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    await slack_thinking.clear_slack_thinking_status_if_idle("origin", "C1", "1.0")
     assert set_status.await_args.args[-1] == "Thinking..."
     assert threads["origin"].metadata["routed_work_destinations"] == ["other"]
     other_busy = False
-    await slack_thinking.clear_slack_thinking_status_if_idle(client, "origin", "C1", "1.0")
+    await slack_thinking.clear_slack_thinking_status_if_idle("origin", "C1", "1.0")
     assert set_status.await_args.args[-1] == ""
     assert threads["origin"].metadata["routed_work_destinations"] == []
     assert threads["destination"].metadata["routed_work_origins"] == []
@@ -376,7 +382,11 @@ async def test_routed_answer_releases_background_server_after_run_finishes(
     run = MdaRun(run_id="run", status=status, created_at=now)
     latest_run = AsyncMock(return_value=run)
     monkeypatch.setattr(
-        routed_work.RUNTIMES, "runs_on", lambda _runtime: SimpleNamespace(latest_run=latest_run)
+        routed_work.RUNTIMES,
+        "runs_on",
+        lambda _runtime: SimpleNamespace(
+            latest_run=latest_run, has_active_run=AsyncMock(return_value=False)
+        ),
     )
     monkeypatch.setattr(routed_work, "sidebar_memberships", AsyncMock(return_value={}))
     monkeypatch.setattr(routed_work.TaskMessage, "pending_threads", AsyncMock(return_value=set()))
@@ -410,7 +420,7 @@ async def test_routed_listing_does_not_prune_idle_links(monkeypatch: pytest.Monk
 async def test_status_sync_does_not_clear_run_started_during_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _status_client()
+    client = _status_client(monkeypatch)
     client.runs.list.side_effect = [[], [], [{"run_id": "new-run"}]]
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -429,7 +439,7 @@ async def test_status_wait_keeps_refreshing_after_repeated_failures(
     refreshed = asyncio.Event()
     complete = asyncio.Event()
     statuses: list[str] = []
-    client = _status_client()
+    client = _status_client(monkeypatch)
     client.runs.list.return_value = [{"run_id": "run-1"}]
 
     async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
@@ -473,7 +483,7 @@ async def test_status_wait_keeps_refreshing_after_repeated_failures(
 async def test_status_tracks_worker_runs_while_coordinator_idle(
     monkeypatch: pytest.MonkeyPatch, worker_wakeup: bool
 ) -> None:
-    client = _status_client()
+    client = _status_client(monkeypatch)
     coordinator_metadata = {
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}
     }
@@ -556,9 +566,7 @@ async def test_status_tracks_worker_runs_while_coordinator_idle(
                 assert not observer.done()
                 assert set(statuses) == {"Thinking..."}
                 worker_status = "running"
-                await slack_thinking.clear_slack_thinking_status_if_idle(
-                    client, "coordinator", "C1", "1.0"
-                )
+                await slack_thinking.clear_slack_thinking_status_if_idle("coordinator", "C1", "1.0")
                 assert set(statuses) == {"Thinking..."}
                 if worker_wakeup:
                     worker_done.set()
@@ -590,7 +598,7 @@ async def test_status_wait_cancellation_propagates_and_clears_idle_status(
         await asyncio.Event().wait()
         return {}
 
-    client = _status_client()
+    client = _status_client(monkeypatch)
     client.runs.join.side_effect = join
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -625,16 +633,15 @@ async def test_failed_status_clear_stops_retrying(
     set_status = AsyncMock(return_value=False)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
 
-    await slack_thinking.clear_slack_thinking_status_if_idle(
-        _status_client(), "thread-1", "D1", "1.0"
-    )
+    _status_client(monkeypatch)
+    await slack_thinking.clear_slack_thinking_status_if_idle("thread-1", "D1", "1.0")
 
     assert set_status.await_args_list == [call("D1", "1.0", "")] * 3
     assert "cleanup retries exhausted" in caplog.text
 
 
 async def test_status_clear_retry_preserves_newer_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _status_client()
+    client = _status_client(monkeypatch)
     calls: list[str] = []
 
     async def set_status(_channel_id: str, thread_ts: str, _status: str) -> bool:
@@ -643,6 +650,31 @@ async def test_status_clear_retry_preserves_newer_run(monkeypatch: pytest.Monkey
         return False
 
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "D1", "1.0")
+    await slack_thinking.clear_slack_thinking_status_if_idle("thread-1", "D1", "1.0")
 
     assert calls == ["1.0"]
+
+
+async def test_active_runs_are_asked_of_the_runtime_the_thread_runs_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+    thread = IndexedThread(
+        thread_id="thread-1",
+        runtime="mda",
+        metadata={},
+        status="busy",
+        created_at=now,
+        updated_at=now,
+    )
+    threads = {"thread-1": thread}
+    monkeypatch.setattr(slack_thinking.THREADS, "get", AsyncMock(side_effect=threads.get))
+    has_active_run = AsyncMock(return_value=True)
+    runs_on = Mock(return_value=SimpleNamespace(has_active_run=has_active_run))
+    monkeypatch.setattr(type(slack_thinking.RUNTIMES), "runs_on", lambda _self, rt: runs_on(rt))
+
+    assert await slack_thinking._thread_has_active_runs("thread-1") is True
+    runs_on.assert_called_once_with("mda")
+    has_active_run.assert_awaited_once_with("thread-1")
+    with pytest.raises(LookupError):
+        await slack_thinking._thread_has_active_runs("missing")

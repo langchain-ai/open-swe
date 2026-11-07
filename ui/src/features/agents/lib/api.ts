@@ -4,6 +4,7 @@ import type {
   AgentPullRequestStatusResponse,
   AgentBackgroundOutput,
   AgentBackgroundWork,
+  AgentThreadGoal,
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
@@ -471,11 +472,12 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
-  getThread: (threadId: string, options?: { markViewed?: boolean }) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}${
-        options?.markViewed === false ? "?mark_viewed=false" : ""
-      }`
+  getThread: (threadId: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  setThreadViewed: (threadId: string, viewed: boolean) =>
+    agentsRequest<{ viewed: boolean }>(
+      `/threads/${encodeURIComponent(threadId)}/read-state`,
+      { method: "PUT", body: JSON.stringify({ viewed }) }
     ),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
@@ -487,6 +489,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getThreadGoal: (threadId: string) =>
+    agentsRequest<AgentThreadGoal | null>(
+      `/threads/${encodeURIComponent(threadId)}/goal`
     ),
   getThreadBackgroundWork: (threadId: string) =>
     agentsRequest<AgentBackgroundWork>(

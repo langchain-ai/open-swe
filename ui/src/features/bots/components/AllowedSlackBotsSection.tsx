@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   CaretRightIcon,
   MagnifyingGlassRegularIcon,
@@ -85,10 +86,10 @@ export function AllowedSlackBotsSection({
 
   const pending = add.isPending
   const unavailable = pending || bots.isPending || bots.isError
-  const matches = directory.data?.filter((bot) =>
-    `${bot.name} ${bot.bot_id} ${bot.user_id}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase())
+  const matches = new FuzzySearch(search).rank(
+    directory.data ?? [],
+    (bot) => bot.name,
+    (bot) => `${bot.bot_id} ${bot.user_id}`
   )
   const allow = (id: string) => {
     if (!id || unavailable) return

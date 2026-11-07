@@ -22,9 +22,10 @@ from collections.abc import Mapping
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict
+from runtime_api.provenance import Provenance
 
 from openswe.github.pull_requests import PullRequest
-from openswe.input_messages import input_message_text, message_sender_id
+from openswe.input_messages import input_message_text
 from openswe.review_guide.buttons import LABELS as BUTTON_LABELS
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.utils.thread_ops import langgraph_client
@@ -46,6 +47,7 @@ class _StateMessage(BaseModel):
     # Absent on a message written straight into state rather than through a run.
     id: str | None = None
     content: str | list[dict[str, Any]] = ""
+    additional_kwargs: dict[str, Any] = {}
 
 
 class HumanTurn(BaseModel):
@@ -122,9 +124,10 @@ class SteeringHistory(BaseModel):
             message = _StateMessage.model_validate(entry)
             if message.type != "human":
                 continue
-            sender = message_sender_id(message.content, kind="human")
-            if sender is None:
+            provenance = Provenance.of(message.model_dump())
+            if provenance is None or not provenance.human:
                 continue
+            sender = provenance.sender
             body = (input_message_text(message.content) or "").strip()
             if not body:
                 continue

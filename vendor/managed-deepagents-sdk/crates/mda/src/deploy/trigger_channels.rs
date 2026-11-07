@@ -129,6 +129,9 @@ struct SlackProviderConfig {
     #[serde(default)]
     trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
+    // SDKs only emit this for a channel with handlers that take such events.
+    #[serde(default)]
+    forwarded_events: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +158,7 @@ pub(crate) struct PreparedTriggerChannel {
     trigger_on_all_messages: bool,
     trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
+    forwarded_events: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -316,6 +320,7 @@ pub(crate) fn prepare(
             .trigger_mode
             .filter(|mode| *mode != SlackTriggerMode::All),
         allow_bot_triggers: provider_config.allow_bot_triggers,
+        forwarded_events: provider_config.forwarded_events,
     }))
 }
 
@@ -370,6 +375,7 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
             trigger_on_all_messages: prepared.trigger_on_all_messages,
             trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
+            forwarded_events: prepared.forwarded_events.clone(),
         },
         customer_app: None,
     }
@@ -1101,18 +1107,19 @@ mod tests {
         for (provider_config, options) in [
             (
                 json!({"triggerOnAllMessages": false}),
-                json!({"triggerOnAllMessages": false, "allowBotTriggers": false}),
+                json!({"triggerOnAllMessages": false, "allowBotTriggers": false, "forwardedEvents": []}),
             ),
             (
                 json!({"triggerOnAllMessages": true}),
-                json!({"triggerOnAllMessages": true, "allowBotTriggers": false}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": []}),
             ),
             (
                 json!({"triggerOnAllMessages": false, "triggerMode": "thread"}),
                 json!({
                     "triggerOnAllMessages": false,
                     "triggerMode": "thread",
-                    "allowBotTriggers": false
+                    "allowBotTriggers": false,
+                    "forwardedEvents": []
                 }),
             ),
             (
@@ -1120,12 +1127,24 @@ mod tests {
                 json!({
                     "triggerOnAllMessages": false,
                     "triggerMode": "mention",
-                    "allowBotTriggers": false
+                    "allowBotTriggers": false,
+                    "forwardedEvents": []
+                }),
+            ),
+            (
+                json!({
+                    "triggerOnAllMessages": true,
+                    "forwardedEvents": ["message_changed", "reaction_added"]
+                }),
+                json!({
+                    "triggerOnAllMessages": true,
+                    "allowBotTriggers": false,
+                    "forwardedEvents": ["message_changed", "reaction_added"]
                 }),
             ),
             (
                 json!({"triggerOnAllMessages": true, "triggerMode": "all"}),
-                json!({"triggerOnAllMessages": true, "allowBotTriggers": false}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": []}),
             ),
         ] {
             let mut requirements = requirements();
@@ -1546,7 +1565,8 @@ mod tests {
                     },
                     "options": {
                         "triggerOnAllMessages": false,
-                        "allowBotTriggers": false
+                        "allowBotTriggers": false,
+                        "forwardedEvents": []
                     }
                 }
             })

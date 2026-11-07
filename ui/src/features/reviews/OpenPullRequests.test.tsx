@@ -95,6 +95,7 @@ const pull = (
   requiredChecksPassing: true,
   missingChecks: [],
   unresolvedThreads: 0,
+  conversationResolutionRequired: false,
   ...fields,
 })
 const payload = {
@@ -321,13 +322,16 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     await chooseMergeMethod(1, "Squash merge")
     fireEvent.click(
-      within(card).getByRole("button", { name: "Squash and merge" })
+      within(card).getByRole("button", {
+        name: "Squash and merge",
+      })
     )
     expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
     expect(screen.getByText("Change 1")).toBeTruthy()
     expect(api.mergePullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
-      "squash"
+      "squash",
+      false
     )
     finish({ action: "merge", done: true })
     await waitFor(() =>
@@ -338,6 +342,96 @@ describe("My PRs", () => {
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
+
+  it.each(["clean", "blocked"] as const)(
+    "keeps merging available with unknown conversation rules (%s)",
+    async (mergeState) => {
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [
+          pull(1, {
+            unresolvedThreads: 2,
+            conversationResolutionRequired: null,
+            mergeState,
+          }),
+        ],
+      })
+      vi.mocked(api.mergePullRequest).mockResolvedValue({
+        action: "merge",
+        done: true,
+      })
+      mount()
+      await screen.findByText("Change 1")
+      await chooseMergeMethod(1, "Squash merge")
+      const button = screen.getByRole("button", { name: "Squash and merge" })
+      expect((button as HTMLButtonElement).disabled).toBe(false)
+      fireEvent.click(button)
+      expect(screen.queryByRole("dialog") !== null).toBe(
+        mergeState === "blocked"
+      )
+      if (mergeState === "blocked") {
+        const dialog = await screen.findByRole("dialog")
+        within(dialog).getByText(/Could not confirm whether/)
+        fireEvent.click(
+          within(dialog).getByRole("button", { name: "Resolve and merge" })
+        )
+      }
+      await waitFor(() =>
+        expect(api.mergePullRequest).toHaveBeenCalledWith(
+          expect.objectContaining({ number: 1 }),
+          "squash",
+          mergeState === "blocked"
+        )
+      )
+    }
+  )
+
+  it.each([false, true])(
+    "asks to resolve required conversations before merging (auto-merge: %s)",
+    async (autoMerge) => {
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [
+          pull(1, {
+            unresolvedThreads: 2,
+            conversationResolutionRequired: true,
+            ci: autoMerge ? "pending" : "passing",
+          }),
+        ],
+      })
+      vi.mocked(api.mergePullRequest).mockResolvedValue({
+        action: "merge",
+        done: true,
+      })
+      mount()
+      const card = (await screen.findByText("Change 1")).closest("li")!
+      await chooseMergeMethod(1, "Squash merge")
+      fireEvent.click(
+        within(card).getByRole("button", {
+          name: autoMerge ? "Enable auto-merge" : "Squash and merge",
+        })
+      )
+      const dialog = await screen.findByRole("dialog")
+      expect(
+        within(dialog).getByText(/2 unresolved conversations/)
+      ).toBeTruthy()
+      expect(api.mergePullRequest).not.toHaveBeenCalled()
+      fireEvent.click(
+        within(dialog).getByRole("button", {
+          name: autoMerge
+            ? "Resolve and enable auto-merge"
+            : "Resolve and merge",
+        })
+      )
+      await waitFor(() =>
+        expect(api.mergePullRequest).toHaveBeenCalledWith(
+          expect.objectContaining({ number: 1 }),
+          "squash",
+          true
+        )
+      )
+    }
+  )
 
   it("enables auto-merge for pending checks without marking the PR merged", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
@@ -605,6 +699,38 @@ describe("My PRs", () => {
     expect(api.openPullRequests).toHaveBeenCalledTimes(2)
   })
 
+  it("finds a pull request by its combined repository and number", async () => {
+    mount()
+    await screen.findByText("Change 1")
+    fireEvent.change(
+      screen.getByPlaceholderText("Search title, description, or PR number…"),
+      {
+        target: { value: "acme/app #1" },
+      }
+    )
+    await waitFor(() => expect(titles()).toEqual(["Change 1"]))
+  })
+
+  it("finds short typoed titles without a stored search result", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(2, { repo: "langchain-ai/langchainplus", title: "Fix typo" }),
+      ],
+    })
+    mount()
+    await screen.findByText("Fix typo")
+    fireEvent.change(
+      screen.getByPlaceholderText("Search title, description, or PR number…"),
+      { target: { value: "fiz typo" } }
+    )
+    await waitFor(() => {
+      const rows = within(section()).getAllByRole("listitem")
+      expect(rows).toHaveLength(1)
+      expect(within(rows[0]!).getByText("Fix typo")).toBeTruthy()
+    })
+  })
+
   it("shows no PRs and offers a repository filter when the search times out", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
@@ -854,7 +980,8 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
-        "squash"
+        "squash",
+        false
       )
     )
   })
@@ -884,7 +1011,8 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
-        "rebase"
+        "rebase",
+        false
       )
     )
   })

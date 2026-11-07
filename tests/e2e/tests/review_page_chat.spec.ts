@@ -145,6 +145,7 @@ test.describe("review page", () => {
     // The server-rendered input shows before the client handles it; retry until it does.
     await page.goto("/agents/reviews");
     await expect(async () => {
+      await input.clear();
       await input.fill(`see ${link} thx`);
       await input.press("Enter");
       await expect(page).toHaveURL(target, { timeout: 5_000 });

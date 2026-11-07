@@ -67,6 +67,7 @@ _PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
 TURN_ATTRIBUTION_FIELDS = frozenset(
     {
         "user_id",
+        "user_email",
         ACTING_USER_KEY,
         "ls_repo_provider",
         "ls_attribution_identifier",
@@ -122,9 +123,10 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
 )
 
 
-async def _dispatch_input(
+async def dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
+    """The attributed input of a run ``configurable`` starts, saying ``content``."""
     surface: Surface = (
         source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
@@ -377,6 +379,8 @@ async def _run_user_metadata(
             return metadata
         if user is not None:
             metadata["user_id"] = str(user.id)
+            if user.email:
+                metadata["user_email"] = user.email
             if user.github_login:
                 metadata["ls_attribution_identifier"] = user.github_login
     except Exception:
@@ -525,7 +529,7 @@ async def dispatch_agent_run(
                 systems=systems,
             )
             if context is not None
-            else await _dispatch_input(content, source, configurable)
+            else await dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
     return await create_durable_run(

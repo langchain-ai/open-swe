@@ -20,6 +20,8 @@
 /desktop/build
 /dist
 **/dist
+# App bundles are published to Open SWE, never committed.
+plugins/*/bundle/
 .turbo/
 
 # misc

@@ -423,10 +423,9 @@ test.describe("threads workspace", () => {
     const pinned = sidebarSection(page.locator("aside"), "Pinned");
     const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
     await expect(pinnedRow).toBeVisible();
-    await expect(pinnedRow).toBeVisible();
 
     await pinnedRow.press("Shift+F10");
-    await page.getByRole("menuitem", { name: "Unpin thread" }).click();
+    await page.getByRole("menuitem", { name: "Unpin", exact: true }).click();
     await expect(pinned).toHaveCount(0);
   });
 

@@ -60,8 +60,9 @@ from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
+from openswe.users.authorization import allowed_orgs
 from openswe.utils.build_info import build_info
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import PublicOrigin
 
 router = APIRouter(tags=["auth"])
 
@@ -106,7 +107,7 @@ async def github_link_login(
     query = urlencode(
         {
             "client_id": client_id,
-            "redirect_uri": f"{dashboard_api_base_url()}{GITHUB_CALLBACK_PATH}",
+            "redirect_uri": f"{PublicOrigin.dashboard_api_base_url()}{GITHUB_CALLBACK_PATH}",
             "state": state,
         }
     )
@@ -280,16 +281,18 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         ),
         "display_name": user.display_name if user else "",
         "email": session.get("email") or (user.email or None if user else None),
-        "avatar_url": session.get("avatar_url"),
+        "avatar_url": (user.avatar_url if user else None) or session.get("avatar_url"),
         "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
+        # The web UI shows these organizations' repositories by name alone; plugins never see the list.
+        "base_orgs": list(allowed_orgs()),
         "follow_up_behavior": preferences["follow_up_behavior"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": postgres.configured(),
         "slack_oauth_enabled": principal.github_login is not None and slack_oauth_configured(),
-        "api_base_url": dashboard_api_base_url(),
+        "api_base_url": PublicOrigin.dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
         "build_info": build_info(),
     }
@@ -309,7 +312,7 @@ async def auth_langsmith_login(
         )
     nonce = new_state_nonce()
     url = await LangSmithLogin().start(
-        redirect_uri=dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
+        redirect_uri=PublicOrigin.dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
         redirect_to=sanitize_redirect_to(redirect_to) or frontend_base_url(),
         nonce=nonce,
         handoff_challenge=challenge,
@@ -330,7 +333,10 @@ async def auth_langsmith_callback(
     payload = decode_state(state)
     if payload.get("provider") != "langsmith":
         raise HTTPException(400, "oauth provider mismatch")
-    if payload.get("redirect_uri") != dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH:
+    if (
+        payload.get("redirect_uri")
+        != PublicOrigin.dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH
+    ):
         raise HTTPException(400, "LangSmith sign-in used another callback — please retry")
     handoff = desktop_handoff_from_state(payload)
     nonce_hash = payload.get("nonce_hash")

@@ -9,7 +9,7 @@ their admin status and integration MCPs without any session state.
 import json
 import logging
 from collections.abc import Sequence
-from typing import Final, NamedTuple, override
+from typing import Final, NamedTuple, Self, override
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -21,7 +21,9 @@ from fastmcp.server.providers import Provider
 from fastmcp.tools import Tool, ToolResult
 from fastmcp.utilities.components import FastMCPComponent
 from pydantic import JsonValue
-from starlette.routing import BaseRoute, Route
+from starlette.datastructures import URLPath
+from starlette.routing import BaseRoute, Match, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mcp.types import Icon, TextContent
 from openswe.config import ENV
@@ -29,7 +31,11 @@ from openswe.dashboard.dev_login import dev_login_enabled
 from openswe.dashboard.oauth import AUTH_PATH, GITHUB_CALLBACK_PATH, MCP_SIGN_IN_CALLBACK_PATH
 from openswe.mcp.caller import ToolCaller
 from openswe.mcp.token_store import SealedStore
-from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_base_url
+from openswe.utils.dashboard_links import (
+    PublicOrigin,
+    dashboard_api_base_url,
+    dashboard_base_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,21 +95,27 @@ class Mount(NamedTuple):
 
     The root routes are RFC 8414 discovery and the sign-in endpoints, which live
     under the dashboard's auth path so GitHub returns to the App's one callback.
+    ``apps`` holds one server per origin (the canonical one first, then each of
+    ``DASHBOARD_ALIAS_URLS``): an MCP token names the URL it was issued for, so
+    each domain signs in and verifies its own. ``app`` and ``root_routes``
+    answer a request with the one for the origin it came in through; each of
+    ``apps`` needs its lifespan run.
     """
 
-    app: StarletteWithLifespan
+    app: ASGIApp
     root_routes: list[BaseRoute]
+    apps: list[StarletteWithLifespan]
 
 
-def _auth() -> AuthProvider | None:
+def _auth(api_base_url: str) -> AuthProvider | None:
     client_id = ENV.GITHUB_APP_CLIENT_ID.optional()
     client_secret = ENV.GITHUB_APP_CLIENT_SECRET.optional()
     if client_id and client_secret and ENV.TOKEN_ENCRYPTION_KEY.optional():
         return GitHubProvider(
             client_id=client_id,
             client_secret=client_secret,
-            base_url=dashboard_api_base_url() + AUTH_PATH,
-            resource_base_url=dashboard_api_base_url() + PREFIX,
+            base_url=api_base_url + AUTH_PATH,
+            resource_base_url=api_base_url + PREFIX,
             redirect_path=GITHUB_CALLBACK_PATH.removeprefix(AUTH_PATH),
             client_storage=SealedStore(),
             cache_ttl_seconds=_GITHUB_CACHE_SECONDS,
@@ -114,28 +126,96 @@ def _auth() -> AuthProvider | None:
     return None
 
 
+class _Served(NamedTuple):
+    app: StarletteWithLifespan
+    root_routes: list[BaseRoute]
+
+    @classmethod
+    def build(cls, api_base_url: str, dashboard_url: str) -> Self | None:
+        auth = _auth(api_base_url)
+        if auth is None:
+            return None
+        server = FastMCP(
+            _SERVER_NAME,
+            icons=[Icon(src=f"{dashboard_url}/logo-mark.png", mime_type="image/png")]
+            if dashboard_url
+            else None,
+            website_url=dashboard_url or None,
+            providers=[_CallerProvider()],
+            auth=auth,
+        )
+        # The only provider is the caller's catalog: a refusal must reach the client,
+        # not list as an empty catalog.
+        server.provider_error_strategy = "raise"
+        app = server.http_app(path=_MCP_PATH, json_response=True, stateless_http=True)
+        return cls(
+            app=app,
+            root_routes=[*auth.get_well_known_routes(mcp_path=_MCP_PATH), *_sign_in_routes(auth)],
+        )
+
+
 def build_mount() -> Mount | None:
-    auth = _auth()
-    if auth is None:
+    canonical = _Served.build(dashboard_api_base_url(), dashboard_base_url())
+    if canonical is None:
         return None
-    dashboard_url = dashboard_base_url()
-    server = FastMCP(
-        _SERVER_NAME,
-        icons=[Icon(src=f"{dashboard_url}/logo-mark.png", mime_type="image/png")]
-        if dashboard_url
-        else None,
-        website_url=dashboard_url or None,
-        providers=[_CallerProvider()],
-        auth=auth,
-    )
-    # The only provider is the caller's catalog: a refusal must reach the client,
-    # not list as an empty catalog.
-    server.provider_error_strategy = "raise"
-    app = server.http_app(path=_MCP_PATH, json_response=True, stateless_http=True)
+    aliases: dict[str, _Served] = {}
+    for origin in sorted(PublicOrigin.aliases()):
+        served = _Served.build(origin, origin)
+        if served is not None:
+            aliases[origin] = served
+    if not aliases:
+        return Mount(app=canonical.app, root_routes=canonical.root_routes, apps=[canonical.app])
     return Mount(
-        app=app,
-        root_routes=[*auth.get_well_known_routes(mcp_path=_MCP_PATH), *_sign_in_routes(auth)],
+        app=_ByAlias(canonical.app, {origin: s.app for origin, s in aliases.items()}),
+        root_routes=[
+            _RouteByAlias(route, {origin: s.root_routes[i] for origin, s in aliases.items()})
+            for i, route in enumerate(canonical.root_routes)
+        ],
+        apps=[canonical.app, *(s.app for s in aliases.values())],
     )
+
+
+class _ByAlias:
+    """The ASGI app for the alias origin the request came in through, else the canonical one."""
+
+    def __init__(self, canonical: ASGIApp, by_alias: dict[str, ASGIApp]) -> None:
+        self.canonical = canonical
+        self.by_alias = by_alias
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        app = self.by_alias.get(PublicOrigin.current_alias() or "", self.canonical)
+        await app(scope, receive, send)
+
+
+class _RouteByAlias(BaseRoute):
+    """One root route, answered by the alias origin's copy of it when there is one.
+
+    Every origin's routes share their paths; only the URLs inside the responses
+    (issuer, resource, callback) differ.
+    """
+
+    def __init__(self, canonical: BaseRoute, by_alias: dict[str, BaseRoute]) -> None:
+        for route in by_alias.values():
+            if getattr(route, "path", None) != getattr(canonical, "path", None):
+                raise RuntimeError("MCP routes differ between origins")
+        self.canonical = canonical
+        self.by_alias = by_alias
+        self.path = getattr(canonical, "path", "")
+
+    def _route(self) -> BaseRoute:
+        return self.by_alias.get(PublicOrigin.current_alias() or "", self.canonical)
+
+    @override
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        return self._route().matches(scope)
+
+    @override
+    def url_path_for(self, name: str, /, **path_params: object) -> URLPath:
+        return self.canonical.url_path_for(name, **path_params)
+
+    @override
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self._route().handle(scope, receive, send)
 
 
 def _sign_in_routes(auth: AuthProvider) -> list[BaseRoute]:

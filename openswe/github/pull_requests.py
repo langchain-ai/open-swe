@@ -59,6 +59,7 @@ from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
 from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.search import FuzzySearch
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -254,19 +255,32 @@ class PullRequest(Base):
         if not query.strip() or not repositories:
             return []
         tsquery = func.websearch_to_tsquery("english", query)
+        authorized = Repository.key.in_([repository.lower() for repository in repositories])
+        exact = (
+            select(cls)
+            .join(cls.repository)
+            .where(authorized, cls.search_vector.bool_op("@@")(tsquery))
+        )
         async with postgres.session() as session:
+            rows = list(
+                await session.scalars(
+                    cls._with_links(exact)
+                    .order_by(
+                        func.ts_rank_cd(cls.search_vector, tsquery).desc(),
+                        cls.updated_at.desc(),
+                        cls.id.desc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+            if rows or await session.scalar(select(exact.exists())):
+                return rows
             rows = await session.scalars(
                 cls._with_links(select(cls))
                 .join(cls.repository)
-                .where(
-                    Repository.key.in_([repository.lower() for repository in repositories]),
-                    cls.search_vector.bool_op("@@")(tsquery),
-                )
-                .order_by(
-                    func.ts_rank_cd(cls.search_vector, tsquery).desc(),
-                    cls.updated_at.desc(),
-                    cls.id.desc(),
-                )
+                .where(authorized, FuzzySearch(query).condition(cls.title))
+                .order_by(cls.updated_at.desc(), cls.id.desc())
                 .limit(limit)
                 .offset(offset)
             )

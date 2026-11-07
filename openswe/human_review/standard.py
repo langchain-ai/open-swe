@@ -52,6 +52,7 @@ from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
+from openswe.human_review.pick_modals import SNOOZE_DURATIONS
 from openswe.human_review.picking import (
     Area,
     Coverage,
@@ -81,7 +82,6 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
-    get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
 )
@@ -107,14 +107,6 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
-SNOOZE_DURATIONS = {
-    "30 minutes": timedelta(minutes=30),
-    "1 hour": timedelta(hours=1),
-    "2 hours": timedelta(hours=2),
-    "4 hours": timedelta(hours=4),
-    "1 day": timedelta(days=1),
-    "2 days": timedelta(days=2),
-}
 _REMAINING_OWNERS_ASKED = "remaining_owners_asked"
 
 
@@ -274,7 +266,7 @@ async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: Sl
 
 
 async def _permalink(request: HumanReviewRequest) -> str:
-    return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
+    return await request.card_url()
 
 
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
@@ -565,7 +557,6 @@ async def _request_review(
         raise
     request.slack_message_ts = message_ts
     request = await request.save()
-    await ReviewCard(request).link_on_github()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
     refusal = ""
@@ -1009,7 +1000,7 @@ async def _settle_posted(
     snapshot: PullRequestSnapshot,
     states: dict[str, str],
 ) -> None:
-    """React once the pull request's owners approve; until then, time how long it has sat green."""
+    """Record owner approvals; until then, time how long the pull request has sat green."""
     approvers = {login for login, state in states.items() if state == "APPROVED"}
     approved = bool(approvers)
     if approved:
@@ -1120,10 +1111,9 @@ async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
                 return "auto-merge paused — could not verify PR thread activity"
             if thread.status == "busy":
                 return "auto-merge paused — a PR thread has an active run"
-            client = RUNTIMES.runs_on(thread.runtime).client
-            for run_status in ("pending", "running"):
-                if await client.runs.list(thread_id, status=run_status, limit=1):
-                    return "auto-merge paused — a PR thread has an active run"
+            # Not the SDK's write client: an MDA channel's own threads are readable only.
+            if await RUNTIMES.runs_on(thread.runtime).has_active_run(thread_id):
+                return "auto-merge paused — a PR thread has an active run"
     except Exception:
         logger.warning(
             "Could not check PR thread activity before auto-merge",

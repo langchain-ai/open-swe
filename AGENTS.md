@@ -19,7 +19,7 @@ The backend is a set of stateless APIs MDA calls: typed endpoints at `/agent-api
 Shape new behavior to fit:
 
 - Control flow (when to nudge, route, stop, refresh) is middleware in `mda/rt`; checks around the file and shell tools go in `rt/file_tools.py`.
-- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`route_model`, `task_context`), never a generic phase call or an untyped body.
+- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`model_choice`, `refresh_github_proxy`), never a generic phase call or an untyped body.
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
@@ -28,6 +28,9 @@ As a run starts, its kind resolves the run's catalog from what only the backend 
 The backend never runs middleware around a model call; the only middleware objects it keeps are the preparation and the reporters a named endpoint calls.
 
 ## Conventions
+
+- Do not build special-purpose features when the need can be met by composing generic capabilities such as plugins, automations, skills, or external MCP servers.
+  First check whether existing capabilities, with small generic additions if needed, can deliver the feature.
 
 - Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
 - Flag likely desktop-release requirements to the developer for native shell/preload, bundled bridge/CLI, packaging, or incompatible IPC changes; downloaded UI and backend-only changes need no desktop release.
@@ -54,9 +57,11 @@ The backend never runs middleware around a model call; the only middleware objec
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
+  Exception: a prompt only an MDA channel handler renders lives in `mda/prompts/`, rendered with `rt.prompts.prompt`; so do the route classifier's prompts, copies of the backend's that `tests/agent/test_mda_routing_prompts.py` keeps in step, and the prompts the tools MDA runs itself answer with, which `tests/agent/test_mda_local_results.py` keeps in step.
 - Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
   Preserve structured messages through delivery instead of wrapping their envelopes again.
   For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
+  Every input message records what it is (`human`, `system` or `context`) and whom it is from in its provenance (`runtime_api.provenance`); ask `Provenance.of(message)`, never the envelope text, whether a person wrote a message.
 - Keep comments minimal and only explain non-obvious reasons.
 - Before asking a clarifying question about Robin's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
@@ -82,6 +87,8 @@ The backend never runs middleware around a model call; the only middleware objec
   Reference other rows by foreign key whenever a table holds them (our own `id`, or the key of an existing table such as `slack_channel`), creating the referenced row first if it is filled lazily; store a bare id only for things kept outside our database, like Agent Server threads or Slack teams.
 - Structured logging: static message, values in `extra`.
   Avoid standard `LogRecord` field names in `extra`.
+- Web plugins (`plugins/`, served by `openswe/plugins/`) run in a sandboxed frame whose policy blocks their requests and reach the backend only through the generic `/plugins/{id}/...` API.
+  Never add backend code for one plugin; grow that API (storage, GitHub, rooms, people, threads), checking both the installation's grant and the person's own access.
 - Prefer exposing UI write operations as authorized agent tools.
   Whenever adding or changing a setting, add or update its authorized agent tool alongside the UI, reusing the same validation and permission checks.
   Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.
@@ -103,6 +110,12 @@ Never run the full test suite locally; run only tests related to the change.
 
 `mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`).
 Never import `openswe` there; test each side of an endpoint against the models it exchanges.
+Exception for channel input: a channel handler in `mda/` that writes a run's input keeps its own copy of what it needs from the backend, and only that: the `<input-message>` envelope (`mda/rt/input_messages.py`, standard library only, held byte-identical to `openswe.input_messages` by `tests/agent/test_mda_input_messages.py`) fetching the images a message links to (`mda/rt/images.py`, over `rt.public_http`), reading the repository a message names (`mda/rt/repositories.py`, standard library only, held to `openswe.utils.repo` by `tests/agent/test_mda_repositories.py`), and fencing someone else's words as untrusted (`mda/rt/untrusted.py`, standard library only, held byte-identical to `openswe.github.comments` by `tests/agent/test_mda_untrusted.py`).
+The GitHub channel writes an issue mention's run and an automation's prompt (`mda/rt/github_issues.py`, `mda/rt/github_automations.py`) byte for byte as the backend did; `mda/tests/github_prompt_backend.json` holds what the backend wrote.
+Exception for the tools MDA runs itself (`ToolSpec.runtime_runs`): what those that read only their arguments answer (`mda/rt/local_results.py`, standard library only) is held byte-identical to the backend's tools by `tests/agent/test_mda_local_results.py`; change both together.
+The GitHub channel's switchboard (`mda/rt/github_routes.py`, standard library and `runtime_api` only) keeps the backend's GitHub action sets and its mention pattern, held to `openswe.webhooks.common` by `tests/agent/test_mda_github_routes.py`; the handles themselves come from the backend with each delivery.
+The backend still checks anything that grants access, such as a run's repository, before it signs the run.
+Change the backend's envelope and the copy together.
 
 Tests are maintenance cost.
 Add one only when you can name a concrete regression existing coverage would miss.

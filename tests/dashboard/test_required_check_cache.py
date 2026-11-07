@@ -3,24 +3,33 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx2
 import pytest
 from sqlalchemy import text
 
 from openswe.database.postgres import transaction
-from openswe.github.ci import RequiredCheck
-from openswe.github.http import GitHubAppUnavailable, GitHubClient
-from openswe.github.required_check_cache import (
+from openswe.github.branch_config import (
     CACHE_TTL,
     REFRESH_JOB,
-    RequiredCheckCache,
+    BranchConfig,
+    BranchRules,
     refresh_required_checks,
 )
+from openswe.github.ci import RequiredCheck
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.jobs import queue
 from openswe.jobs.worker import JobWorker
 from openswe.ui_invalidations.topics import Topic
 from openswe.users.models import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
+
+
+@pytest.fixture(autouse=True)
+def conversation_rules(monkeypatch):
+    monkeypatch.setattr(
+        RepoClient, "requires_conversation_resolution", AsyncMock(return_value=True)
+    )
 
 
 async def test_required_checks_refresh_off_request_and_expire_per_branch(monkeypatch):
@@ -31,31 +40,41 @@ async def test_required_checks_refresh_off_request_and_expire_per_branch(monkeyp
     monkeypatch.setattr(GitHubClient, "as_app", app)
     fetch = AsyncMock(return_value={RequiredCheck("lint", 42)})
     monkeypatch.setattr(RequiredCheck, "for_branch", fetch)
-    cache = RequiredCheckCache("Acme/App", "main")
+    cache = BranchConfig("Acme/App", "main")
     assert await cache.read() is None
-    assert await RequiredCheckCache("acme/app", "main").read() is None
+    assert await BranchConfig("acme/app", "main").read() is None
     assert fetch.await_count == 0
     assert len(await queue.find({})) == 1
 
     worker = JobWorker()
     worker.register(REFRESH_JOB)(refresh_required_checks)
     assert await worker.run_due() == 1
-    assert await cache.read() == {RequiredCheck("lint", 42)}
-    assert await RequiredCheckCache("acme/app", "release").read() is None
+    assert await cache.read() == BranchRules({RequiredCheck("lint", 42)}, True)
+    assert await BranchConfig("acme/app", "release").read() is None
     assert fetch.await_count == 1
 
     async with transaction() as conn:
         await conn.execute(
             text(
-                "UPDATE required_check_cache SET updated_at = clock_timestamp() - CAST(:age AS interval)"
+                "UPDATE branch_config SET updated_at = clock_timestamp() - CAST(:age AS interval)"
             ),
             {"age": CACHE_TTL + timedelta(seconds=1)},
         )
-    assert await cache.read() == {RequiredCheck("lint", 42)}
+    assert await cache.read() == BranchRules({RequiredCheck("lint", 42)}, True)
     fetch.return_value = set()
     assert await worker.run_due() == 2
-    assert await cache.read() == set()
-    assert await RequiredCheckCache("acme/app", "release").read() == set()
+    assert await cache.read() == BranchRules(set(), True)
+    assert await BranchConfig("acme/app", "release").read() == BranchRules(set(), True)
+
+    fetch.return_value = {RequiredCheck("test")}
+    monkeypatch.setattr(
+        RepoClient,
+        "requires_conversation_resolution",
+        AsyncMock(side_effect=httpx2.ConnectError("GitHub unavailable")),
+    )
+    with pytest.raises(httpx2.ConnectError, match="GitHub unavailable"):
+        await cache.refresh()
+    assert await cache.read() == BranchRules({RequiredCheck("test")}, True)
 
 
 async def test_failed_refresh_does_not_turn_unknown_rules_into_no_checks(monkeypatch):
@@ -65,7 +84,7 @@ async def test_failed_refresh_does_not_turn_unknown_rules_into_no_checks(monkeyp
 
     monkeypatch.setattr(GitHubClient, "as_app", app)
     monkeypatch.setattr(RequiredCheck, "for_branch", AsyncMock(return_value=None))
-    cache = RequiredCheckCache("acme/app", "main")
+    cache = BranchConfig("acme/app", "main")
     assert await cache.read() is None
     worker = JobWorker()
     worker.register(REFRESH_JOB)(refresh_required_checks)
@@ -94,12 +113,12 @@ async def test_refresh_uses_viewer_when_app_is_not_installed(monkeypatch):
     monkeypatch.setattr(
         RequiredCheck, "for_branch", AsyncMock(return_value={RequiredCheck("lint")})
     )
-    cache = RequiredCheckCache("acme/app", "main")
+    cache = BranchConfig("acme/app", "main")
     assert await cache.read("alice") is None
     [job] = await queue.find({})
     assert job.payload["viewer_id"] == str(viewer.id)
     await refresh_required_checks(job)
-    assert await cache.read() == {RequiredCheck("lint")}
+    assert await cache.read() == BranchRules({RequiredCheck("lint")}, True)
 
 
 async def test_required_check_notifications_authorize_only_accessible_repositories(monkeypatch):

@@ -5,6 +5,7 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from pydantic import ValidationError
+from runtime_api.connections import ConnectionRef
 from sqlalchemy import select
 
 from openswe.dashboard import deps, oauth, routes
@@ -236,6 +237,86 @@ def test_a_server_never_sends_a_credential_open_swe_or_a_channel_reads_for_itsel
             allowed_tools=["search"],
             connection={"slug": slug, "owner": owner},
         )
+
+
+_LINEAR_MCP_URLS = [
+    "https://mcp.linear.app/mcp",
+    "https://mcp.linear.app/mcp/readonly",
+    "https://mcp.linear.app/sse",
+]
+
+
+@pytest.mark.parametrize("url", _LINEAR_MCP_URLS)
+async def test_linears_mcp_server_may_send_the_linear_channels_app_token(url):
+    # Linear holds one app token per app: a server with its own would revoke the channel's.
+    connection = {"slug": "mda/linear-token", "owner": "agent"}
+    update = MCPConnectionUpdate(
+        name="linear", url=url, allowed_tools=["list_issues"], connection=connection
+    )
+    saved = await prepare_connection(update, scope="workspace")
+    assert saved.connection == ConnectionRef(**connection)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://linear.app/mcp",
+        "https://api.linear.app/mcp",
+        "https://attacker.example/mcp",
+        "http://mcp.linear.app/mcp",
+        "https://mcp.linear.app.evil.com/mcp",
+        "https://evil.com/mcp.linear.app",
+        "https://evil.com/?u=https://mcp.linear.app/mcp",
+        "https://user@mcp.linear.app/mcp",
+        "https://user:password@mcp.linear.app/mcp",
+        "https://mcp.linear.app:8443/mcp",
+        "https://mcp.linear.app:443/mcp",
+        "https://mcp.linear.app\\@evil.com/mcp",
+        "https://mcp.linear.app\n.evil.com/mcp",
+        "wss://mcp.linear.app/mcp",
+    ],
+)
+def test_the_linear_channels_app_token_goes_to_linears_mcp_server_alone(url):
+    assert not ConnectionRef(slug="mda/linear-token", owner="agent").for_mcp_server(url)
+    with pytest.raises(ValidationError):
+        MCPConnectionUpdate(
+            name="linear",
+            url=url,
+            allowed_tools=["list_issues"],
+            connection={"slug": "mda/linear-token", "owner": "agent"},
+        )
+
+
+@pytest.mark.parametrize("url", _LINEAR_MCP_URLS)
+@pytest.mark.parametrize(
+    ("slug", "owner"),
+    [
+        ("mda/linear-token", "user"),
+        ("mda/github-token", "agent"),
+        ("mda/slack-bot-token", "agent"),
+        ("mda/linear", "agent"),
+        ("mda/linear-token-2", "agent"),
+        ("open-swe-exa", "agent"),
+    ],
+)
+def test_linears_mcp_server_sends_no_other_credential_open_swe_or_a_channel_reads(url, slug, owner):
+    with pytest.raises(ValidationError, match="open-swe-mcp-<server>|MDA's own connection"):
+        MCPConnectionUpdate(
+            name="linear",
+            url=url,
+            allowed_tools=["list_issues"],
+            connection={"slug": slug, "owner": owner},
+        )
+
+
+async def test_a_personal_server_never_sends_the_linear_channels_app_token():
+    update = MCPConnectionUpdate(
+        name="linear",
+        url="https://mcp.linear.app/mcp",
+        connection={"slug": "mda/linear-token", "owner": "agent"},
+    )
+    with pytest.raises(ValueError, match="owner user"):
+        await prepare_connection(update, scope="user")
 
 
 @pytest.mark.parametrize(

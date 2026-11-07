@@ -60,6 +60,71 @@ def _empty_thread_pins(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "list_thread_pin_ids", empty_pins)
 
 
+@pytest.mark.parametrize(
+    ("thread_id", "resolved", "failure", "expected"),
+    [
+        ("parent", True, None, {"parent", "worker"}),
+        ("parent", False, None, {"worker", "private"}),
+        ("worker", True, None, {"worker"}),
+        ("parent", True, "lookup", {"parent"}),
+        ("parent", True, "update", {"parent", "worker"}),
+    ],
+)
+async def test_archive_cascades_only_to_readable_task_workers(
+    monkeypatch, thread_id: str, resolved: bool, failure: str | None, expected: set[str]
+) -> None:
+    from openswe.analytics import emitter
+
+    initial = not resolved
+    metadata: dict[str, dict[str, object]] = {
+        key: {"resolved": initial, "owner_login": "octocat", "visibility": "public"}
+        for key in ("parent", "worker", "private", "unrelated")
+    }
+    metadata["private"].update(owner_login="someone-else", visibility="private")
+    metadata["unrelated"]["resolved"] = False
+
+    async def get(key: str) -> dict[str, object]:
+        return {"thread_id": key, "metadata": dict(metadata[key])}
+
+    async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        if failure == "update" and thread_id == "failing":
+            raise RuntimeError("worker update unavailable")
+        for key, value in metadata.items():
+            state[thread_id][key] = value
+
+    state = metadata
+    if failure == "update":
+        state["failing"] = dict(state["worker"])
+    client = SimpleNamespace(threads=SimpleNamespace(get=get, update=update))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr(handlers, "agent_thread_pr_state_lock", _unlocked)
+    monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
+    monkeypatch.setattr(emitter, "task_marked_complete", AsyncMock())
+    monkeypatch.setattr(emitter, "task_accepted", AsyncMock())
+    memberships = {
+        key: SidebarTaskMembership(key, "task", "worker", "parent")
+        for key in (
+            ("failing", "worker", "private") if failure == "update" else ("worker", "private")
+        )
+    }
+    monkeypatch.setattr(
+        handlers,
+        "sidebar_memberships",
+        AsyncMock(
+            return_value=memberships if thread_id == "parent" else {},
+            side_effect=RuntimeError("worker lookup unavailable") if failure == "lookup" else None,
+        ),
+    )
+
+    await handlers.resolve_dashboard_thread(thread_id, "octocat", resolved=resolved)
+
+    assert {key for key, value in state.items() if value["resolved"]} == expected
+    if resolved and thread_id == "parent" and failure != "lookup":
+        assert state["worker"]["resolved_at_ms"] == state["parent"]["resolved_at_ms"]
+        assert state["worker"]["auto_resolved_by_prs"] is False
+        assert state["worker"]["attention_reason"] is None
+
+
 @pytest.mark.parametrize("start", [True, False])
 async def test_create_session_starts_only_when_requested(monkeypatch, start: bool) -> None:
     create = AsyncMock(return_value="new-thread")
@@ -516,7 +581,7 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
         return (
-            SimpleNamespace(id=second, github_login=login)
+            SimpleNamespace(id=second, github_login=login, email="second@example.com")
             if (provider, login) == ("github", "second-gh")
             else None
         )
@@ -533,9 +598,17 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "follow up"}]},
-            "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"},
+            "metadata": {
+                "user_id": str(first),
+                "user_email": "first@example.com",
+                "ls_attribution_identifier": "first-gh",
+            },
             "config": {
-                "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"}
+                "metadata": {
+                    "user_id": str(first),
+                    "user_email": "first@example.com",
+                    "ls_attribution_identifier": "first-gh",
+                }
             },
         },
     }
@@ -552,6 +625,8 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
     assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+    assert enriched["params"]["metadata"]["user_email"] == "second@example.com"
+    assert enriched["params"]["config"]["metadata"]["user_email"] == "second@example.com"
 
 
 @pytest.mark.parametrize("relayed", [False, True])
@@ -1265,7 +1340,9 @@ async def test_pr_link_search_finds_exact_associations_outside_participation(mon
     monkeypatch.setattr(
         thread_listing,
         "_summarize_threads",
-        AsyncMock(side_effect=lambda client, rows: [{"id": row["thread_id"]} for row in rows]),
+        AsyncMock(
+            side_effect=lambda client, rows, **kwargs: [{"id": row["thread_id"]} for row in rows]
+        ),
     )
 
     page = await thread_listing.list_dashboard_threads_page(
@@ -1725,7 +1802,7 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(
         order.append("dispatch")
         return {"run_id": "replacement-run"}
 
-    async def fake_summary(thread: dict[str, object]) -> dict[str, object]:
+    async def fake_summary(thread: dict[str, object], **kwargs: object) -> dict[str, object]:
         return {"thread_id": "thread-1"}
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())

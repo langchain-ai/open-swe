@@ -279,6 +279,12 @@ async def test_linking_github_returns_a_langsmith_person_to_their_github_account
     credential = await load_credential("langsmith_login", "alice")
     assert credential is not None and decrypt_token(credential.encrypted_access_token) == "access"
     assert await load_credential("langsmith_login", f"user:{person.id}") is None
+    users, total = await User.page(offset=0, limit=10)
+    assert total == 1
+    assert [user.id for user in users] == [joined.id]
+    assert await User.get(person.id) is not None
+    users, total = await User.page(offset=0, limit=10, search=person.display_name)
+    assert person.id not in {user.id for user in users}
 
     me = await client.get("/dashboard/api/me")
     assert me.status_code == 200
@@ -296,6 +302,9 @@ async def test_linking_github_returns_a_langsmith_person_to_their_github_account
         email="other@example.com",
         authorization=LangSmithAccount(sub="ls-other", ls_org_id=server.organization),
     )
+    users, total = await User.page(offset=0, limit=10)
+    assert total == 2
+    assert {user.id for user in users} == {joined.id, other.id}
     with pytest.raises(AccountConflict):
         await other.join_github("1", login="alice", email="Same@Example.com")
 

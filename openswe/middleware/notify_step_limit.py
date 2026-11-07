@@ -2,11 +2,8 @@
 
 import logging
 
-from langgraph_sdk import get_client
-
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
-    LANGGRAPH_URL,
     get_active_slack_thread,
     post_slack_thread_reply,
 )
@@ -21,7 +18,6 @@ async def notify_step_limit() -> None:
     """Tell the run's Slack thread the run stopped at its step limit, as the run."""
     cfg = RunConfig.from_runtime()
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

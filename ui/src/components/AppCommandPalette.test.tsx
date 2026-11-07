@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { AppCommandPalette } from "./AppCommandPalette"
+import { AppCommandPalette, buildPaletteResults } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
@@ -121,4 +121,10 @@ describe("AppCommandPalette", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+})
+
+it("finds typoed app commands", () => {
+  expect(
+    buildPaletteResults(commands, [], "> settngs").map((result) => result.id)
+  ).toContain("command:settings")
 })

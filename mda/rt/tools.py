@@ -1,4 +1,5 @@
-"""The run's tools, each one calling an operation of the Open SWE backend for its work.
+"""The run's tools, each one calling an operation of the Open SWE backend for its work,
+or run here where the backend marks it and this runtime has it (``rt.local_tools``).
 
 They carry the names, descriptions and argument schemas the backend gives its
 operations, so the prompts, the transcript and the dashboard see what an
@@ -52,6 +53,7 @@ from rt.backend import (
     reported_call,
 )
 from rt.git_evidence import turn_git
+from rt.local_tools import run_locally, runs_locally
 from rt.session_handoff import HeldSessions
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,9 @@ class UnreadConnectionError(RuntimeError):
     async def result(self, tool_call_id: str) -> ToolMessage | Command:
         """The failed tool call, which tells the model why."""
         return ToolMessage(content=str(self), tool_call_id=tool_call_id, status="error")
+
+
+_SHELL_OPERATIONS: Final = frozenset({"background_execute"})
 
 
 def run_id() -> str | None:
@@ -264,6 +269,18 @@ async def _operate(
     return _result(answer, tool_call_id, spec.name)
 
 
+async def _run_locally(
+    backend: OpenSweBackend,
+    spec: ToolSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    tool_call_id: str,
+    credentials: dict[str, str],
+) -> ToolMessage | Command:
+    answer = await run_locally(spec, backend.run, arguments, runtime, credentials)
+    return _result(answer, tool_call_id, spec.name)
+
+
 async def called(
     backend: OpenSweBackend,
     name: str,
@@ -328,6 +345,16 @@ async def run_operation(
 ) -> ToolMessage | Command:
     """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
     reads of the connections it names."""
+    if spec.name in _SHELL_OPERATIONS and (
+        refusal := backend.run.sleep_refusal(arguments.get("command"))
+    ):
+
+        async def refused(tool_call_id: str) -> ToolMessage:
+            return ToolMessage(
+                content=refusal, tool_call_id=tool_call_id, name=spec.name, status="error"
+            )
+
+        return await called(backend, spec.name, arguments, runtime, refused)
     # Read before code mode reports the call: a pause for a grant runs the code again,
     # which reports the call under a new id, so a report made first would never finish.
     try:
@@ -335,7 +362,8 @@ async def run_operation(
     except UnreadConnectionError as exc:
         make = exc.result
     else:
-        make = partial(_operate, backend, spec, arguments, runtime, credentials=credentials)
+        run = _run_locally if runs_locally(spec, backend.run, runtime) else _operate
+        make = partial(run, backend, spec, arguments, runtime, credentials=credentials)
     return await called(backend, spec.name, arguments, runtime, make, cites_evidence=cites_evidence)
 
 

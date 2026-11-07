@@ -54,7 +54,7 @@ function AgentThreadContent({
   composerDraft?: { key: number; text: string }
   ownsTitle?: boolean
 }) {
-  const threadQuery = useAgentThread(threadId)
+  const threadQuery = useAgentThread(threadId, active)
   const transcript = threadQuery.data?.transcript === "v2"
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title

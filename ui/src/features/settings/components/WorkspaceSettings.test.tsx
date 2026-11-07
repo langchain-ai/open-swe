@@ -21,7 +21,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
-import { invalidationTopic } from "@/lib/invalidations/topics"
+import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -159,8 +159,7 @@ async function invalidateWorkspaces() {
   await act(async () => {
     await clients.at(-1)?.invalidateQueries({
       predicate: (query) =>
-        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
-        false,
+        queryTopics(query).includes(invalidationTopic("workspaces")),
     })
     await vi.advanceTimersByTimeAsync(1)
   })
@@ -270,16 +269,16 @@ describe("WorkspaceSettingsPanel", () => {
     expect(
       screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
     ).toContain("C2")
-    const secondKitchen = screen.getByRole("switch", {
-      name: "Kitchen mode for Slack channel 2",
+    const secondMode = screen.getByRole("combobox", {
+      name: "Channel type for Slack channel 2",
     })
-    fireEvent.click(secondKitchen)
-    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    fireEvent.click(secondMode)
+    fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+    expect(secondMode.textContent).toContain("Ask")
     expect(
-      screen
-        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
-        .getAttribute("aria-checked")
-    ).toBe("false")
+      screen.getByRole("combobox", { name: "Channel type for Slack channel 1" })
+        .textContent
+    ).toContain("Mention-only")
     await act(async () => finish({ channels: [], refreshing: false }))
     expect(channel.textContent).toBe("Slack channel 1")
   })
@@ -380,6 +379,7 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        ask_channel_ids: [],
         prompt: "Run make test.",
       })
     )

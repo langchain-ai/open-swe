@@ -12,8 +12,8 @@ from openswe.api.github_errors import add_github_error_handlers
 from openswe.dashboard.oauth import require_session
 from openswe.database import postgres
 from openswe.github import app as github_app
+from openswe.github import channel as github_channel
 from openswe.github import http as github_http
-from openswe.github import routes as github_routes
 from openswe.github.http import GitHubError
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
@@ -24,7 +24,7 @@ from openswe.review.findings import REVIEWER_THREAD_KIND, new_finding
 from openswe.thread_ids import reviewer_thread_id
 from openswe.ui_invalidations import Topic
 from openswe.webhooks import common as webhook_common
-from tests.conftest import post_signed_github_webhook
+from tests.github_channel import deliver_github_event
 
 pytestmark = pytest.mark.usefixtures("findings_from_metadata")
 
@@ -255,8 +255,7 @@ async def test_review_page_reconciles_stored_flags_and_invalidates_after_missed_
     assert (topic in topics) is not github_failure
 
     if not github_failure:
-        monkeypatch.setattr(github_routes, "repo_is_routable", AsyncMock(return_value=True))
-        monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", "thread-state-secret")
+        monkeypatch.setattr(github_channel, "repo_is_routable", AsyncMock(return_value=True))
         monkeypatch.setattr(
             webhook_common, "get_thread_metadata_safe", AsyncMock(return_value=thread["metadata"])
         )
@@ -264,16 +263,16 @@ async def test_review_page_reconciles_stored_flags_and_invalidates_after_missed_
             PullRequestClient, "review_thread_states", AsyncMock(return_value={"THREAD_1": False})
         )
         for action in ("unresolved", "resolved"):
-            response = await post_signed_github_webhook(
+            delivered = await deliver_github_event(
+                monkeypatch,
                 "pull_request_review_thread",
                 {
                     "action": action,
                     "repository": {"owner": {"login": "acme"}, "name": "app"},
                     "pull_request": {"number": 7},
                 },
-                secret="thread-state-secret",
             )
-            assert response.json()["status"] == "accepted"
+            assert delivered.work == ("sync_review_thread",)
             persisted = await findings_store.list_findings(thread["thread_id"])
             assert persisted[0]["status"] == "open"
             assert persisted[0]["github_resolved_thread_ids"] == []

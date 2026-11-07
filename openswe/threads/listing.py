@@ -22,6 +22,7 @@ from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
@@ -50,6 +51,7 @@ from openswe.threads.summary import (
 from openswe.transcript.subagents import attach_subagents
 from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
+from openswe.utils.search import FuzzySearch
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
 from openswe.walkthrough.record import Walkthrough
@@ -282,8 +284,8 @@ def _search_matches(values: Sequence[object], query: str) -> bool:
             if isinstance(value, str)
             for actual in [parse_github_pr_url(value)]
         )
-    needle = query.lower()
-    return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
+    search = FuzzySearch(query)
+    return any(isinstance(value, (str, int)) and search.matches(str(value)) for value in values)
 
 
 def _metadata_matches_filters(
@@ -463,6 +465,8 @@ async def _summarize_thread(
     client: Any,
     thread: ThreadLike,
     *,
+    viewer_login: str | None = None,
+    read_states: Mapping[str, JsonObject] | None = None,
     refresh_active_run: bool = True,
     minimal_run_update: bool = False,
 ) -> dict[str, Any]:
@@ -477,6 +481,8 @@ async def _summarize_thread(
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
         bridge_status=False,
+        viewer_login=viewer_login,
+        read_states=read_states,
     )
 
 
@@ -485,21 +491,26 @@ async def _summarize_threads(
     threads: list[ThreadLike],
     *,
     minimal_run_update: bool = False,
+    viewer_login: str | None = None,
 ) -> list[dict[str, Any]]:
+    read_states = (
+        await THREAD_READ_STATES.for_threads(
+            viewer_login, [thread_id for thread in threads if (thread_id := _thread_id(thread))]
+        )
+        if viewer_login
+        else {}
+    )
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
     async def summarize(thread: ThreadLike) -> dict[str, Any]:
-        if not _should_refresh_latest_run(thread):
-            return await _summarize_thread(
-                client,
-                thread,
-                refresh_active_run=False,
-            )
         async with semaphore:
             return await _summarize_thread(
                 client,
                 thread,
+                refresh_active_run=_should_refresh_latest_run(thread),
                 minimal_run_update=minimal_run_update,
+                viewer_login=viewer_login,
+                read_states=read_states,
             )
 
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
@@ -621,7 +632,9 @@ async def attach_task_workers(
     ]
     if filter_workers is not None:
         worker_threads = await filter_workers(worker_threads)
-    workers = await _summarize_threads(client, worker_threads, minimal_run_update=True)
+    workers = await _summarize_threads(
+        client, worker_threads, minimal_run_update=True, viewer_login=login
+    )
     by_parent: dict[str, list[JsonObject]] = {}
     for worker in workers:
         membership = children[str(worker["id"])]
@@ -697,7 +710,7 @@ async def _task_hierarchy_page(
             key=lambda key: order.rank(key, _thread_timestamp_ms(roots[key], "created_at"))
         )
     items = await _summarize_threads(
-        client, [roots[key] for key in ordered[offset : offset + limit]]
+        client, [roots[key] for key in ordered[offset : offset + limit]], viewer_login=login
     )
     matching_roots = {
         str(summary["id"])
@@ -724,7 +737,7 @@ async def _task_hierarchy_page(
         ]
         if viewed is None and status is None:
             return filtered
-        summaries = await _summarize_threads(client, filtered)
+        summaries = await _summarize_threads(client, filtered, viewer_login=login)
         matching_workers = set(beneath_matching_root)
         for summary in summaries:
             worker_id = str(summary["id"])
@@ -862,7 +875,9 @@ async def _collect_thread_candidates(
                     [str(_thread_id(thread)) for thread in new_threads]
                 )
                 if viewed is not None or status is not None:
-                    summaries = await _summarize_threads(client, new_threads)
+                    summaries = await _summarize_threads(
+                        client, new_threads, viewer_login=viewer_login
+                    )
                     matches: set[str] = set()
                     for summary in summaries:
                         thread_id = str(summary["id"])
@@ -998,6 +1013,7 @@ async def _pinned_thread_summaries(
         client,
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
+        viewer_login=login,
     )
     await attach_task_workers(client, summaries, login, email)
     return summaries
@@ -1141,7 +1157,7 @@ async def list_dashboard_threads_page(
                 if thread_is_readable(metadata, login, email) and (
                     include_private or metadata.get("visibility", "public") == "public"
                 ):
-                    items = [await _summarize_thread(client, thread)]
+                    items = [await _summarize_thread(client, thread, viewer_login=login)]
         return {"items": items, "limit": 1, "offset": max(offset, 0), "hasMore": False}
     pr_ref = parse_github_pr_url(normalized_query)
     if pr_ref:
@@ -1260,6 +1276,7 @@ async def list_dashboard_threads_page(
         summaries = await _summarize_threads(
             client,
             candidates,
+            viewer_login=login,
         )
         _attach_flat_task_memberships(
             summaries, await sidebar_memberships([str(summary["id"]) for summary in summaries])
@@ -1286,6 +1303,7 @@ async def list_dashboard_threads_page(
         items = await _summarize_threads(
             client,
             window,
+            viewer_login=login,
         )
         has_more = len(candidates) > safe_offset + safe_limit
         _attach_flat_task_memberships(

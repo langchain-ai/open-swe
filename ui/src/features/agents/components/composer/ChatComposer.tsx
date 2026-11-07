@@ -11,6 +11,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { ComposerReplyCards } from "./ComposerReplyCards"
 import type { PendingReply } from "./ComposerReplyCards"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
@@ -283,38 +284,45 @@ export function buildCommandItems(
   }
 
   if (trigger.kind === "slash-command" || trigger.kind === "skill-command") {
-    const skillItems = skills
-      .filter((skill) => skill.name.startsWith(query))
-      .map((skill) => ({
-        id: `skill:${skill.name}`,
-        type: "skill" as const,
-        name: skill.name,
-        label: `/${skill.name}`,
-        description: skill.description,
-      }))
-    if (trigger.kind === "skill-command") return skillItems
+    const search = new FuzzySearch(query)
+    const skillItems = skills.map((skill) => ({
+      id: `skill:${skill.name}`,
+      type: "skill" as const,
+      name: skill.name,
+      label: `/${skill.name}`,
+      description: skill.description,
+    }))
+    if (trigger.kind === "skill-command")
+      return search.rank(
+        skillItems,
+        (item) => item.name,
+        (item) => item.description
+      )
 
     const skillNames = new Set(skills.map((skill) => skill.name))
-    return [
-      ...SLASH_COMMANDS.filter(
-        (spec) =>
-          spec.command.startsWith(query) &&
-          !skillNames.has(spec.command) &&
-          (includeModelCommand || spec.command !== "model") &&
-          (includeOffloadCommand || spec.command !== "offload")
-      ).map((spec) => ({
-        id: `slash:${spec.command}`,
-        type: "slash-command" as const,
-        command: spec.command,
-        label: spec.label,
-        description: spec.description,
-      })),
-      ...skillItems,
-    ]
+    return search.rank(
+      [
+        ...SLASH_COMMANDS.filter(
+          (spec) =>
+            !skillNames.has(spec.command) &&
+            (includeModelCommand || spec.command !== "model") &&
+            (includeOffloadCommand || spec.command !== "offload")
+        ).map((spec) => ({
+          id: `slash:${spec.command}`,
+          type: "slash-command" as const,
+          command: spec.command,
+          label: spec.label,
+          description: spec.description,
+        })),
+        ...skillItems,
+      ],
+      (item) => item.label,
+      (item) => item.description
+    )
   }
 
   const paths: Array<ComposerCommandItem> = mentionPaths
-    .filter((path) => !query || path.toLowerCase().includes(query))
+    .filter((path) => new FuzzySearch(query).matches(path))
     .map((path) => ({
       id: `path:${path}`,
       type: "path",
@@ -325,7 +333,7 @@ export function buildCommandItems(
   const people: Array<ComposerCommandItem> = slackUsers
     .filter((user) =>
       [user.name, user.display_name, user.real_name].some((name) =>
-        name.toLowerCase().includes(query)
+        new FuzzySearch(query).matches(name)
       )
     )
     .slice(
@@ -714,6 +722,18 @@ export const ChatComposer = memo(function ChatComposer({
             return true
           }
           case "Enter":
+            if (
+              (trigger?.kind === "slash-command" ||
+                trigger?.kind === "skill-command") &&
+              activeItemId !== activeItem.id &&
+              !activeItem.label
+                .slice(1)
+                .toLowerCase()
+                .startsWith(trigger.query.toLowerCase())
+            )
+              break
+            selectCommandItem(activeItem)
+            return true
           case "Tab":
             selectCommandItem(activeItem)
             return true
@@ -732,6 +752,8 @@ export const ChatComposer = memo(function ChatComposer({
     },
     [
       activeItem,
+      activeItemId,
+      trigger,
       canSubmit,
       commandItems,
       handleSubmit,
@@ -1055,6 +1077,8 @@ export const ChatComposer = memo(function ChatComposer({
           disabled={disabled}
           editorRef={editorRef}
           onChange={(nextValue, nextCursor) => {
+            if (nextValue !== value || nextCursor !== cursor)
+              setActiveItemId(null)
             setValue(nextValue)
             setCursor(nextCursor)
           }}

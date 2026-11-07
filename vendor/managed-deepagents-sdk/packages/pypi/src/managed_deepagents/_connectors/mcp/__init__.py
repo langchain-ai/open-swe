@@ -151,6 +151,16 @@ class McpServersConfig(TypedDict, closed=True):
     teardown.
     """
 
+    jit_auth: NotRequired[bool]
+    """Optional, default False. Ask for LangSmith managed-tools connections on use.
+
+    Applies only to LangSmith managed-tools URLs. When True, a kit's tools for
+    providers the caller has not connected are still offered to the model; the
+    first call to one interrupts with the connect link and retries that call
+    after the run resumes. By default the run asks for every missing connection
+    before it starts.
+    """
+
 
 __all__ = [
     "HttpMcpServerConfig",
@@ -390,6 +400,7 @@ class _McpServersArgs(BaseModel):
     servers: dict[str, _RemoteMcpServer]
     throw_on_load_error: StrictBool = True
     on_connection_error: str = "throw"
+    jit_auth: StrictBool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -438,6 +449,9 @@ def define_mcp(**config: Unpack[McpServersConfig]) -> McpServersDefinition:
             requirements and invalid selections always surface.
         on_connection_error: Default and only value ``"throw"``. Native invocation
             failures propagate; native MCP tool errors retain failed tool output.
+        jit_auth: Default False. True asks for a LangSmith managed-tools
+            connection when the model first calls one of its tools, instead of
+            before the run starts.
 
     Returns:
         A ``McpServersDefinition`` consumed by the managed runtime.

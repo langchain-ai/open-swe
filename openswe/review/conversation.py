@@ -271,7 +271,7 @@ class ReviewThread(BaseModel):
     @staticmethod
     async def states(pull: PullRequestClient) -> dict[int, _ThreadState]:
         """Each thread's node id and resolution, keyed by its first comment's id."""
-        threads = _THREAD_STATES.validate_python(await pull.review_threads())
+        threads = _THREAD_STATES.validate_python(await pull.review_threads(roots_only=True))
         return {
             int(thread.comments.nodes[0].fullDatabaseId): thread
             for thread in threads

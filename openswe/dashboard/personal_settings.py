@@ -17,7 +17,8 @@ from openswe.dashboard.user_preferences import (
 from openswe.users import User, UserPreferencesPatch
 from openswe.utils.time import now_iso
 
-SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
+SQL_FLAG_KEYS = feature_flag_names(UserPreferencesPatch)
+SQL_SETTING_KEYS = SQL_FLAG_KEYS | {"personal_kitchen_channel_id"}
 
 PROFILE_SETTING_KEYS = frozenset(
     {
@@ -58,7 +59,7 @@ async def patch_personal_settings(
     flag_patch = {
         key: value
         for key, value in settings.items()
-        if key in feature_flag_names(ProfileUpdate) | SQL_SETTING_KEYS
+        if key in feature_flag_names(ProfileUpdate) | SQL_FLAG_KEYS
     }
     if invalid := [key for key, value in flag_patch.items() if not isinstance(value, bool)]:
         raise ValueError(f"Feature flags must be true or false: {', '.join(sorted(invalid))}")

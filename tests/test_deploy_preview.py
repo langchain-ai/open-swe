@@ -9,6 +9,9 @@ import pytest
 from scripts import deploy_preview
 from scripts.deploy_preview import Deployer, DeployError, Revision, Revisions, SourceRevisionConfig
 
+# The autouse fixture below replaces it; this keeps the real lookup for its own test.
+real_preview_sha = deploy_preview.preview_sha
+
 
 @pytest.fixture(autouse=True)
 def preview_branch(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
@@ -173,3 +176,24 @@ async def test_times_out_when_automatic_revision_never_appears(
         deployer = Deployer(client, "preview", "published")
         with pytest.raises(DeployError, match="no automatic revision for published"):
             await deployer.deploy()
+
+
+@pytest.mark.parametrize(
+    ("branch", "ref"),
+    [(None, "refs/heads/preview"), ("openswe-preview", "refs/heads/openswe-preview")],
+)
+async def test_reads_the_configured_preview_branch(
+    monkeypatch: pytest.MonkeyPatch, branch: str | None, ref: str
+) -> None:
+    if branch is None:
+        monkeypatch.delenv("PREVIEW_BRANCH", raising=False)
+    else:
+        monkeypatch.setenv("PREVIEW_BRANCH", branch)
+    sha = "a" * 40
+    process = AsyncMock(returncode=0)
+    process.communicate.return_value = (f"{sha}\t{ref}\n".encode(), b"")
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(deploy_preview.asyncio, "create_subprocess_exec", spawn)
+
+    assert await real_preview_sha() == sha
+    assert spawn.await_args.args[-1] == ref

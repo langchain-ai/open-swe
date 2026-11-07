@@ -223,7 +223,7 @@ ENV.var(
 ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
-    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
+    "signs each call its channels make to /mda/channel-api/* with it "
     "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
     "and GitHub channels.",
     secret=True,
@@ -292,7 +292,6 @@ ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
-ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
@@ -365,6 +364,12 @@ ENV.var(
 )
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
+    "DASHBOARD_ALIAS_URLS",
+    "Comma-separated other origins whose dashboard proxy also serves this backend (e.g. a "
+    "second domain). A request arriving through one gets its sign-in and MCP URLs there; "
+    "each needs its OAuth callbacks registered first.",
+)
+ENV.var(
     "DASHBOARD_JWT_SECRET",
     "HMAC secret for dashboard session cookies and OAuth state.",
     secret=True,
@@ -413,12 +418,27 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
+    "OPENSWE_SOURCE_REPO",
+    "GitHub repository (owner/name) the agent changes when asked to change Open SWE itself.",
+    default="langchain-ai/open-swe",
+)
+ENV.var(
+    "OPENSWE_SOURCE_PATH",
+    "Directory of OPENSWE_SOURCE_REPO that holds Open SWE, when it is not the repository root.",
+)
+ENV.var(
     "POSTHOG_API_KEY",
     "Optional PostHog project API key; public by design, it is also served to the dashboard "
     "for browser capture.",
     default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var(
+    "SEGMENT_BROWSER_WRITE_KEY",
+    "Optional public Segment browser source write key, served to the web and desktop UI. "
+    "Unset disables Segment; use a separate source for each deployment environment.",
+    default="",
+)
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")

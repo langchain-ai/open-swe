@@ -15,13 +15,11 @@ from openswe.slack.payloads import SlackChannelContext, SlackEvent
 from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import restore_slack_thinking_status
-from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
 
 SUMMON_REACTION = "robin"
-SUMMON_REACTIONS = frozenset({SUMMON_REACTION, "openswe"})
 _SUMMON_REACTION_SENDER: SystemIdentity = {
     "id": "system:slack-reaction",
     "display_name": "Slack reaction",
@@ -67,6 +65,7 @@ async def process_slack_summon_reaction(
         thread_ts=thread_ts,
         event_ts=event.event_ts,
         original_message_ts=item.ts,
+        source_message_ts=item.ts,
         event_id=event_id,
         user_id=user_id,
         text=prompt(
@@ -87,7 +86,7 @@ async def process_slack_summon_reaction(
 def _first_summoner(message: dict[str, object], reaction_name: str) -> str:
     reactions = message.get("reactions")
     for reaction in reactions if isinstance(reactions, list) else []:
-        if isinstance(reaction, dict) and reaction.get("name") in SUMMON_REACTIONS:
+        if isinstance(reaction, dict) and reaction.get("name") == SUMMON_REACTION:
             users = reaction.get("users")
             return (
                 str(users[0])
@@ -102,9 +101,7 @@ async def _dispatch(request: SlackRequest) -> None:
         return
     await restore_slack_thinking_status(request.channel_id, request.thread_ts)
     try:
-        thread_id = await resolve_slack_thread_id(
-            langgraph_client(), request.channel_id, request.thread_ts
-        )
+        thread_id = await resolve_slack_thread_id(request.channel_id, request.thread_ts)
     except SlackThreadMappingError as exc:
         raise SlackRequestError(
             "Robin found conflicting state for this Slack thread and will not guess "

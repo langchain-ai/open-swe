@@ -14,6 +14,7 @@ from typing import Any, Literal, cast
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from runtime_api.provenance import Provenance
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.config import ENV
@@ -40,6 +41,7 @@ from openswe.dispatch import (
     _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
+    dispatch_input,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.input_messages import (
@@ -52,8 +54,10 @@ from openswe.input_messages import (
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
+from openswe.plugins.records import PluginChat
 from openswe.projects.store import PROJECT_ID_KEY, PROJECTS, ProjectError
 from openswe.prompts import prompt
+from openswe.run_config import PluginChatConfig
 from openswe.slack.client import (
     SlackNotice,
     fetch_latest_slack_thread_message,
@@ -78,6 +82,7 @@ from openswe.threads.summary import (
     _is_thread_resolved,
     _now_ms,
     _parse_repo,
+    chats_beside_plugin,
     repo_config_from_metadata,
     thread_source,
 )
@@ -266,7 +271,7 @@ async def create_dashboard_thread_record(
     email: str | None = None,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
-    prompt: str,
+    prompt: str | None,
     images: list[DashboardImageBody] | None = None,
     title: str | None = None,
     model_id: str | None = None,
@@ -276,14 +281,19 @@ async def create_dashboard_thread_record(
     workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
     profile: dict[str, Any] | None = None,
+    if_exists: Literal["raise", "do_nothing"] = "raise",
 ) -> dict[str, Any]:
     """Create a dashboard thread with immutable ownership and visibility.
 
-    ``profile`` is the person's profile when the caller already read it.
+    ``prompt`` is its first message, checked here; ``None`` opens it with none
+    yet, named by ``title``. ``profile`` is the person's profile when the caller
+    already read it. With ``do_nothing`` a thread that already exists keeps its
+    metadata and gets the creation record an earlier attempt may not have written.
     """
+    if prompt is None and not title:
+        raise ValueError("a thread opened without a message needs a title")
     profile = profile if profile is not None else await get_profile(login) or {}
     now_ms = _now_ms()
-    prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
         profile, model_id, effort, workspace
     )
@@ -292,7 +302,11 @@ async def create_dashboard_thread_record(
         resolved_effort,
         has_images=bool(images),
     )
-    _user_message_content(prompt, images or [], model_id=resolved_model)
+    if prompt is not None:
+        prompt = prompt.strip()
+        _user_message_content(prompt, images or [], model_id=resolved_model)
+    else:
+        prompt = ""
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or "Default"
     metadata_effort = chosen_effort
@@ -352,7 +366,7 @@ async def create_dashboard_thread_record(
         thread_id,
         title=initial_title,
         metadata=metadata,
-        if_exists="raise",
+        if_exists=if_exists,
     )
     thread = await client.threads.get(thread_id)
     if not transcribed:
@@ -389,7 +403,13 @@ async def _build_dashboard_configurable(
     *,
     profile: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
+    plugin_tools: bool = False,
 ) -> dict[str, Any]:
+    """The run config of a dashboard run on ``thread_id``.
+
+    ``plugin_tools`` gives a plugin chat's run the plugin's tools: only runs
+    sent from its dock, where the plugin is open to answer them, get them.
+    """
     profile = profile if profile is not None else await get_profile(login) or {}
     source = thread_source(metadata)
     configurable: dict[str, Any] = {
@@ -426,6 +446,11 @@ async def _build_dashboard_configurable(
         # that still read it from the run config keep working.
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
+    if plugin_tools and chats_beside_plugin(metadata):
+        user = await User.for_person(ThreadIdentity(login).person)
+        chat = await PluginChat.run_config(thread_id, user.id) if user else None
+        if chat is not None:
+            configurable["plugin_chat"] = chat.model_dump(mode="json")
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -529,23 +554,28 @@ async def start_dashboard_thread(
     return thread_id
 
 
-async def start_sandbox_guest_run(
+async def start_run_with_tool_results(
     thread_id: str,
     login: str,
     *,
     prompt: str,
     tool_results: Sequence[Mapping[str, str]],
     overrides: dict[str, Any],
+    plugin_tools: bool = False,
 ) -> str:
-    """Start a run on a thread a sandbox program talks to, with the tool results it ran for it."""
+    """Start a run with the results of tools its client ran: a sandbox program, or a plugin's frame."""
     await _ensure_dashboard_github_token(login)
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
     configurable = await _build_dashboard_configurable(
-        thread_id, login, metadata, overrides=overrides
+        thread_id, login, metadata, overrides=overrides, plugin_tools=plugin_tools
     )
     if tool_results:
-        user = [{"role": "user", "content": prompt}] if prompt else []
+        user = (
+            (await dispatch_input(prompt, DASHBOARD_SOURCE, configurable))["messages"]
+            if prompt
+            else []
+        )
         run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
@@ -883,6 +913,45 @@ async def _attributed_run_messages(
     return structured, injected
 
 
+MAX_PLUGIN_CONTEXT = 8_000
+PLUGIN_CONTEXT_MIME = "application/vnd.open-swe.plugin-context"
+"""A message's attachment that marks the plugin context sent with it; its name is the label shown."""
+
+
+def _plugin_context(
+    metadata: Mapping[str, object],
+    client_configurable: Mapping[str, object],
+    chat: PluginChatConfig,
+) -> tuple[list[RunMessage], list[MessageAttachment]]:
+    """What the plugin beside a chat says when the person writes from its dock: how it
+    describes its tools, and what it has open.
+
+    Its author wrote both, so the agent reads them in a message ahead of the person's,
+    never in its system prompt. The person's message carries an attachment naming the
+    context, which the thread shows in place of it.
+    """
+    if not chats_beside_plugin(metadata) or client_configurable.get("plugin_dock") is not True:
+        return [], []
+    context = client_configurable.get("plugin_context")
+    context = context[:MAX_PLUGIN_CONTEXT] if isinstance(context, str) and context.strip() else ""
+    instructions = chat.instructions.strip()
+    if not context and not instructions:
+        return [], []
+    label = client_configurable.get("plugin_context_label")
+    label = label.strip()[:120] if isinstance(label, str) and label.strip() else "Plugin context"
+    return (
+        [
+            {
+                "role": "user",
+                "id": f"plugin-context:{uuid.uuid7()}",
+                "content": prompt("plugins/context", instructions=instructions, context=context),
+                "additional_kwargs": Provenance.harness("plugin_context").stamp(),
+            }
+        ],
+        [MessageAttachment(mime_type=PLUGIN_CONTEXT_MIME, file_name=label)] if context else [],
+    )
+
+
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
@@ -957,6 +1026,24 @@ async def _enrich_run_start_command(
         relayed_from = _relayed_from(params)
         if offloading and creating:
             raise HTTPException(400, "offloading requires an existing conversation")
+        # The person wrote, so the plugin's results may resume the chat again; any
+        # that waited for them reach the agent with their message.
+        plugin_user = (
+            await User.for_person(ThreadIdentity(login).person)
+            if chats_beside_plugin(metadata)
+            else None
+        )
+        plugin_chat = (
+            await PluginChat.run_config(thread_id, plugin_user.id) if plugin_user else None
+        )
+        held_results = (
+            await PluginChat.person_wrote(thread_id, plugin_user.id)
+            if plugin_user and plugin_chat and not offloading
+            else []
+        )
+        context_messages, context_attachments = (
+            _plugin_context(metadata, client_configurable, plugin_chat) if plugin_chat else ([], [])
+        )
         command_images = _dashboard_images_from_content(content)
         invocation_id = new_invocation_id()
         invocation_started_at = datetime.now(UTC).isoformat()
@@ -1071,7 +1158,7 @@ async def _enrich_run_start_command(
         structured[-1]["id"] = message_id
     run_input = params.get("input")
     if isinstance(run_input, dict):
-        run_input["messages"] = structured
+        run_input["messages"] = [*held_results, *context_messages, *structured]
     metadata_update: dict[str, Any] = {
         # A relay keeps the thread answering where its person is.
         **({} if relayed_from else {"source": DASHBOARD_SOURCE}),
@@ -1131,6 +1218,7 @@ async def _enrich_run_start_command(
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
             attachments, pending = _transcript_attachments(command_images, message_id)
+            attachments.extend(context_attachments)
             appended = await append(
                 thread_id,
                 [
@@ -1171,6 +1259,7 @@ async def _enrich_run_start_command(
         metadata,
         profile=profile,
         overrides=overrides,
+        plugin_tools=client_configurable.get("plugin_dock") is True,
     )
 
     run_metadata = params.get("metadata")
@@ -1478,6 +1567,11 @@ async def queue_follow_up_run(
                     extra={"queue": {"thread_id": thread_id, "turn_id": str(turn_id)}},
                 )
         raise
+
+    if chats_beside_plugin(metadata):
+        user = await User.for_person(ThreadIdentity(login).person)
+        if user:
+            await PluginChat.deliver_input(thread_id, user.id, run_input)
 
     if turn_id is not None:
         # The run exists and will start on its own, so failing the request here

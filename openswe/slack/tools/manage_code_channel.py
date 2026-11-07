@@ -97,7 +97,7 @@ async def manage_code_channel(
 
         client = langgraph_client()
         active = await get_active_slack_thread(
-            client, thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+            thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
         )
         if not active:
             return {"success": False, "error": "Current Slack location is unavailable"}
@@ -327,9 +327,7 @@ async def _create(
         }
     )
     try:
-        await rebind_slack_thread(
-            client, thread_id, SlackThreadRef.model_validate(active), new_slack
-        )
+        await rebind_slack_thread(thread_id, SlackThreadRef.model_validate(active), new_slack)
     except SlackRebindError as exc:
         if exc.moved:
             return {

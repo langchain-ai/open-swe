@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 export class RepositoryLabels {
   private readonly owner: string | null
 
@@ -10,10 +11,15 @@ export class RepositoryLabels {
   }
 
   matches(fullName: string, query: string): boolean {
-    return fullName
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]/gu, "")
-      .includes(query.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""))
+    const normalized = fullName.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+    const needle = query.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+    if (normalized.includes(needle)) return true
+    const [owner, name] = fullName.toLowerCase().split("/")
+    const ownerKey = owner?.replace(/[^\p{L}\p{N}]/gu, "") ?? ""
+    const repositoryQuery = needle.startsWith(ownerKey)
+      ? needle.slice(ownerKey.length)
+      : needle
+    return new FuzzySearch(repositoryQuery).matches(name ?? fullName)
   }
 
   label(fullName: string): string {
