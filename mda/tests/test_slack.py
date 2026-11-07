@@ -186,6 +186,35 @@ def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
     assert "thread" not in normalized
 
 
+@pytest.mark.parametrize("subtype", ["", "bot_message"])
+@pytest.mark.parametrize("user_id", [None, "UALERT"])
+@pytest.mark.usefixtures("slack_reads")
+def test_an_allowlisted_bot_mention_starts_a_turn_with_its_system_identity(
+    monkeypatch: pytest.MonkeyPatch, subtype: str, user_id: str | None
+) -> None:
+    backend = _backend(
+        monkeypatch,
+        SlackTurnStarted(run=_RUN, prompt=_PROMPT),
+        SlackMessageFacts(conversation="new", allowed_bot=True, bot_name="release-bot"),
+    )
+    event = _event(
+        "<@UBOT> investigate the alert",
+        user_id=user_id,
+        thread_ts="171.2",
+        payload={"type": "message", "subtype": subtype, "bot_id": "B1", "app_id": "A9"},
+    )
+
+    result = asyncio.run(slack.start_turn(event, _thread()))
+
+    [turn] = backend.turns
+    assert turn.kind == "turn"
+    assert (turn.user_id, turn.bot_id, turn.bot_app_id) == (user_id or "", "B1", "A9")
+    [run] = cast(list[ChannelRun], result)
+    prompt = str(run["input"])
+    assert 'sender="system:slack-bot-B1"' in prompt
+    assert "release-bot" in prompt
+
+
 @pytest.mark.usefixtures("slack_reads")
 def test_a_turn_leaves_out_what_the_thread_already_holds(monkeypatch: pytest.MonkeyPatch) -> None:
     _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT))
@@ -434,10 +463,30 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
             _event(user_id=None, payload={"type": "message", "bot_id": "B1", "app_id": "A9"}),
             SlackMessageFacts(conversation="mda"),
         ),
+        (
+            _event(
+                user_id=None,
+                payload={
+                    "type": "message",
+                    "subtype": "bot_message",
+                    "bot_id": "B1",
+                    "app_id": "A9",
+                },
+            ),
+            SlackMessageFacts(conversation="mda"),
+        ),
         # A channel Slack can't confirm has no external participants.
         (_event(), SlackMessageFacts(channel="unverified")),
     ],
-    ids=["other-person", "untagged", "backend", "code-channel", "unlisted-bot", "unverified"],
+    ids=[
+        "other-person",
+        "untagged",
+        "backend",
+        "code-channel",
+        "unlisted-bot",
+        "unlisted-bot-subtype",
+        "unverified",
+    ],
 )
 @pytest.mark.usefixtures("slack_reads")
 def test_messages_not_for_the_agent_start_nothing(
