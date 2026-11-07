@@ -364,6 +364,12 @@ ENV.var(
 )
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
+    "DASHBOARD_ALIAS_URLS",
+    "Comma-separated other origins whose dashboard proxy also serves this backend (e.g. a "
+    "second domain). A request arriving through one gets its sign-in and MCP URLs there; "
+    "each needs its OAuth callbacks registered first.",
+)
+ENV.var(
     "DASHBOARD_JWT_SECRET",
     "HMAC secret for dashboard session cookies and OAuth state.",
     secret=True,

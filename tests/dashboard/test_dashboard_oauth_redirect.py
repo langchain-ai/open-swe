@@ -10,6 +10,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 
+from openswe.api.public_origin import PublicOriginMiddleware
 from openswe.dashboard import auth_routes, github_link, routes
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
@@ -21,6 +22,7 @@ from openswe.dashboard.oauth import (
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from openswe.utils.dashboard_links import PUBLIC_ORIGIN_HEADER
 
 
 @pytest.mark.parametrize(
@@ -217,10 +219,16 @@ def linking(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return collected
 
 
-def _langsmith_client(person: User) -> TestClient:
+def _langsmith_client(person: User, *, through: str | None = None) -> TestClient:
+    """A signed-in browser on the dashboard, or on the alias domain ``through``."""
     app = FastAPI()
     app.include_router(routes.router)
-    client = TestClient(app, base_url="https://dashboard.example")
+    app.add_middleware(PublicOriginMiddleware)
+    client = TestClient(
+        app,
+        base_url=through or "https://dashboard.example",
+        headers={PUBLIC_ORIGIN_HEADER: through} if through else None,
+    )
     client.cookies.set(
         COOKIE_NAME,
         issue_session(
@@ -261,6 +269,34 @@ def test_linking_github_turns_the_langsmith_session_into_its_github_login(
 
     assert linking["join"] == {"user": linking["person"], "external_id": "42", "login": "alice"}
     assert linking["tokens"] == {"login": "alice", "email": "alice@example.com", "data": _TOKENS}
+
+
+@pytest.mark.parametrize(
+    ("through", "lands_on"),
+    [
+        ("https://robin.example", "https://robin.example"),
+        # An origin the deployment doesn't list is answered as the canonical domain.
+        ("https://evil.example", "https://dashboard.example"),
+    ],
+)
+def test_linking_github_through_an_alias_domain_stays_on_it(
+    linking: dict[str, Any], monkeypatch: pytest.MonkeyPatch, through: str, lands_on: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_ALIAS_URLS", "https://robin.example")
+    with _langsmith_client(linking["person"], through=through) as client:
+        start = client.get(
+            "/dashboard/api/github/login", params={"redirect_to": "/agents"}, follow_redirects=False
+        )
+        authorize = parse_qs(urlparse(start.headers["location"]).query)
+        assert authorize["redirect_uri"] == [f"{lands_on}/dashboard/api/auth/callback"]
+        callback = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": authorize["state"][0]},
+            follow_redirects=False,
+        )
+
+    assert callback.status_code == 302
+    assert callback.headers["location"] == f"{lands_on}/agents"
 
 
 def test_linking_github_rejects_a_callback_without_its_state_cookie(

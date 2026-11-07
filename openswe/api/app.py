@@ -13,6 +13,7 @@ from starlette.routing import Route
 from openswe.agent_api import server as agent_api_server
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
+from openswe.api.public_origin import PublicOriginMiddleware
 from openswe.api.request_ids import add_request_ids
 from openswe.api.tracing import add_trace_resource_names, configure_datadog_environment
 from openswe.audit_logs.middleware import AuditLogMiddleware
@@ -128,7 +129,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
             stack.enter_context(watch_for_stalls())
             if AGENT_MCP is not None:
-                await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
+                for mcp_app in AGENT_MCP.apps:
+                    await stack.enter_async_context(mcp_app.lifespan(mcp_app))
             yield
     finally:
         await JOB_WORKER.stop()
@@ -171,6 +173,8 @@ def create_app() -> FastAPI:
     app.add_middleware(ThreadRouter)
     # Starlette leaves `text/event-stream` and already-encoded responses alone.
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
+    # Wraps every route and the MCP mount, so they see which domain the request used.
+    app.add_middleware(PublicOriginMiddleware)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
@@ -195,7 +199,7 @@ def create_app() -> FastAPI:
         Route(agent_api_server.API_PATH, agent_api_server.API, methods=["POST"])
     )
     if AGENT_MCP is not None:
-        app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server
+        app.state.fastmcp_server = AGENT_MCP.apps[0].state.fastmcp_server
         app.router.routes.extend(AGENT_MCP.root_routes)
         app.mount(agent_mcp_server.PREFIX, AGENT_MCP.app)
     mount_dashboard_ui(app)

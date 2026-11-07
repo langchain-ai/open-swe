@@ -62,7 +62,7 @@ from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
 from openswe.users.authorization import allowed_orgs
 from openswe.utils.build_info import build_info
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import PublicOrigin
 
 router = APIRouter(tags=["auth"])
 
@@ -107,7 +107,7 @@ async def github_link_login(
     query = urlencode(
         {
             "client_id": client_id,
-            "redirect_uri": f"{dashboard_api_base_url()}{GITHUB_CALLBACK_PATH}",
+            "redirect_uri": f"{PublicOrigin.dashboard_api_base_url()}{GITHUB_CALLBACK_PATH}",
             "state": state,
         }
     )
@@ -292,7 +292,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": postgres.configured(),
         "slack_oauth_enabled": principal.github_login is not None and slack_oauth_configured(),
-        "api_base_url": dashboard_api_base_url(),
+        "api_base_url": PublicOrigin.dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
         "build_info": build_info(),
     }
@@ -312,7 +312,7 @@ async def auth_langsmith_login(
         )
     nonce = new_state_nonce()
     url = await LangSmithLogin().start(
-        redirect_uri=dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
+        redirect_uri=PublicOrigin.dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
         redirect_to=sanitize_redirect_to(redirect_to) or frontend_base_url(),
         nonce=nonce,
         handoff_challenge=challenge,
@@ -333,7 +333,10 @@ async def auth_langsmith_callback(
     payload = decode_state(state)
     if payload.get("provider") != "langsmith":
         raise HTTPException(400, "oauth provider mismatch")
-    if payload.get("redirect_uri") != dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH:
+    if (
+        payload.get("redirect_uri")
+        != PublicOrigin.dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH
+    ):
         raise HTTPException(400, "LangSmith sign-in used another callback — please retry")
     handoff = desktop_handoff_from_state(payload)
     nonce_hash = payload.get("nonce_hash")
