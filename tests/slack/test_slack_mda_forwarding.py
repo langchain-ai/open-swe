@@ -11,9 +11,14 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import httpx2
 import pytest
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import JsonValue
-from runtime_api.slack import SLACK_MOVE_MARKER, SlackTurnDeclined, SlackTurnPrompt
+from runtime_api.slack import (
+    SLACK_MOVE_MARKER,
+    ActOnSlackMessage,
+    SlackTurnDeclined,
+    SlackTurnPrompt,
+)
 from standardwebhooks import Webhook
 from starlette.datastructures import URL
 from starlette.requests import Request
@@ -272,6 +277,77 @@ async def test_every_other_conversation_stays_on_the_backend() -> None:
     [(task, (request, _repo))] = tasks.tasks
     assert task is slack_service.process_slack_mention
     assert request.thread_id == "backend-thread"
+
+
+async def _hand_back(
+    event: dict[str, JsonValue], webhook_id: str = "msg_1"
+) -> tuple[object, _FakeBackgroundTasks]:
+    """A message MDA's Slack channel hands back, as ``act_on_slack_message`` gets it."""
+    tasks = _FakeBackgroundTasks()
+    call = channel_api.ChannelCall(
+        request=cast(Request, _FakeRequest({}, {"webhook-id": webhook_id})),
+        background=cast(BackgroundTasks, tasks),
+    )
+    message = ActOnSlackMessage(team_id="T1", app_id="A1", delivery_id="d-1", event=event)
+    return await slack_channel.act_on_slack_message(call, message), tasks
+
+
+async def test_a_message_mda_hands_back_is_answered_here() -> None:
+    # Slack's Events URL points at Trigger Server: a conversation the backend holds
+    # is heard only this way, and runs on its own thread as before.
+    event = cast(dict[str, JsonValue], _mention()["event"])
+
+    acted, tasks = await _hand_back(event)
+
+    assert acted.acted
+    [(task, (request, _repo))] = tasks.tasks
+    assert task is slack_service.process_slack_mention
+    assert request.thread_id == "backend-thread"
+    cast(AsyncMock, mda_forwarding.startable_thread).assert_not_awaited()
+
+
+async def test_a_message_mda_hands_back_never_goes_to_mda_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Even if MDA's channel holds the thread by now, sending it back there would loop.
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    event = cast(dict[str, JsonValue], _mention()["event"])
+
+    _acted, tasks = await _hand_back(event)
+
+    assert all(task is not mda_forwarding.forward_to_trigger_server for task, _ in tasks.tasks)
+
+
+async def test_a_message_mda_hands_back_again_is_acted_on_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_channel.event_claims, "claim", AsyncMock(return_value=False))
+    event = cast(dict[str, JsonValue], _mention()["event"])
+
+    acted, tasks = await _hand_back(event)
+
+    assert not acted.acted
+    assert tasks.tasks == []
+
+
+async def test_a_message_mda_hands_back_that_fails_is_run_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A 503 while Slack can't confirm the channel acted on nothing: the call's claim goes,
+    # so MDA's retry under the same webhook ID runs it.
+    released = AsyncMock()
+    monkeypatch.setattr(slack_channel.event_claims, "release", released)
+    monkeypatch.setattr(
+        slack_routes.SlackEventsDelivery,
+        "handle",
+        AsyncMock(side_effect=HTTPException(503, "Slack channel verification unavailable")),
+    )
+    event = cast(dict[str, JsonValue], _mention()["event"])
+
+    with pytest.raises(HTTPException):
+        await _hand_back(event)
+
+    released.assert_awaited_once_with("slack_message_call", "act:msg_1")
 
 
 @pytest.mark.parametrize("single_session", ["code_channel", "concierge_dm"])
@@ -549,7 +625,11 @@ def _message(**fields: JsonValue) -> dict[str, JsonValue]:
 async def test_the_channel_api_answers_only_mda(monkeypatch: pytest.MonkeyPatch) -> None:
     app = _api(monkeypatch)
 
-    for path in ("/mda/channel-api/slack_message_facts", "/mda/channel-api/start_slack_turn"):
+    for path in (
+        "/mda/channel-api/slack_message_facts",
+        "/mda/channel-api/start_slack_turn",
+        "/mda/channel-api/act_on_slack_message",
+    ):
         answered = await _post_endpoint(app, _message(), signed=False, path=path)
         assert answered.status_code == 401
     # The endpoint channels once named is gone: MDA builds its turns from the event.

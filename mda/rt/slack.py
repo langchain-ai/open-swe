@@ -21,6 +21,7 @@ the backend, which holds its one session.
 import logging
 import re
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any, Final, Literal, cast
 
 from langchain_core.messages.content import create_text_block
@@ -39,8 +40,10 @@ from managed_deepagents._channels.slack.api import (  # noqa: PLC2701
 )
 from pydantic import JsonValue
 from runtime_api.slack import (
+    ACT_ON_SLACK_MESSAGE,
     SLACK_MESSAGE_FACTS,
     START_SLACK_TURN,
+    ActOnSlackMessage,
     SlackMessage,
     SlackMessageFacts,
     SlackMessageFactsRequest,
@@ -67,6 +70,16 @@ _REVIEW_CARD_PREFIXES: Final = ("Review requested for ", "Expedited review reque
 logger = logging.getLogger(__name__)
 
 type Kind = Literal["turn", "by_the_way", "breakout", "web", "move"]
+
+
+class _Backend(Enum):
+    """A message the backend answers, as ``/webhooks/slack`` always has, not this channel:
+    the handler hands it back (``act_on_slack_message``)."""
+
+    ANSWERS = "answers"
+
+
+BACKEND: Final = _Backend.ANSWERS
 
 _bot: tuple[str, str] | None = None
 
@@ -148,6 +161,20 @@ async def start_turn(
     decided = _decide(message, facts, parsed, bot_user_id, is_message=_is_message(raw))
     if isinstance(decided, str):
         return reply(decided)
+    if decided is BACKEND:
+        # Not this channel's to start: the backend answers it, and hears it only from
+        # here once Slack's Events URL points at Trigger Server.
+        await ask_backend(
+            ACT_ON_SLACK_MESSAGE,
+            ActOnSlackMessage(
+                team_id=message.team_id,
+                app_id=message.app_id,
+                delivery_id=event.delivery_id,
+                event=raw,
+            ),
+            msg_id=f"msg_{event.delivery_id}",
+        )
+        return None
     if decided is None:
         return None
     kind, turn = decided
@@ -176,16 +203,18 @@ def _decide(
     bot_user_id: str,
     *,
     is_message: bool,
-) -> str | tuple[Kind, StartSlackTurn] | None:
+) -> str | tuple[Kind, StartSlackTurn] | _Backend | None:
     """What a message starts, as the backend's ``/webhooks/slack`` decides it: ``None``
-    for nothing, a reply's text, or the turn's kind and the call that starts it."""
+    for nothing, a reply's text, :data:`BACKEND` for one the backend answers itself, or
+    the turn's kind and the call that starts it."""
     explicit = message.explicit_mention
     if facts.channel != "ok":
         # A person's mention in a channel with external participants hears why.
         refused = facts.channel == "external" and explicit and not message.subtype
         return EXTERNAL_CHANNEL if refused and message.user_id else None
     if facts.code_channel:
-        return None
+        # A code channel's one session stays with the backend.
+        return BACKEND
     bot = bool(message.bot_id)
     if bot and not (
         facts.allowed_bot
@@ -213,8 +242,8 @@ def _decide(
         return None
     breakout = Breakout.of(parsed)
     kind = _kind(message, facts, parsed, breakout, dm=dm, bot=bot)
-    if kind is None:
-        return None
+    if kind is None or kind is BACKEND:
+        return kind
     performance_command = parsed.performance_model and not facts.concierge and not bot
     turn = StartSlackTurn(
         **message.model_dump(),
@@ -237,9 +266,9 @@ def _kind(
     *,
     dm: bool,
     bot: bool,
-) -> Kind | None:
-    """Which kind of turn a message addressed to Open SWE starts, or ``None`` when the
-    backend answers it, as for a conversation it holds."""
+) -> Kind | _Backend | None:
+    """Which kind of turn a message addressed to Open SWE starts, :data:`BACKEND` when
+    the backend answers it, as for a conversation it holds, or ``None`` for nothing."""
     started = message.subtype in _STARTED_SUBTYPES
     command = message.explicit_mention and not (dm or bot) and started
     if command and parsed.action is SlackAction.BY_THE_WAY:
@@ -252,14 +281,18 @@ def _kind(
             return "breakout"
         if facts.conversation == "mda" and not facts.concierge:
             return "move"
-        return None
-    if facts.conversation == "backend" or not started:
-        return None
+        return BACKEND
+    if facts.conversation == "backend":
+        return BACKEND
+    if not started:
+        # A kind of message this channel never starts: the backend answers it, except
+        # in a conversation the channel holds, where nothing does.
+        return None if facts.conversation == "mda" else BACKEND
     if facts.conversation == "new" and parsed.action in {
         SlackAction.BREAKOUT,
         SlackAction.BREAKOUT_WEB,
     }:
-        return None
+        return BACKEND
     return "turn"
 
 

@@ -22,12 +22,14 @@ from pydantic import JsonValue
 from runtime_api.slack import (
     SLACK_MOVE_MARKER,
     ActOnSlackClick,
+    ActOnSlackMessage,
     OptionClick,
     PlanSlackClick,
     RetryClick,
     SlackClickActed,
     SlackClickStart,
     SlackMessage,
+    SlackMessageActed,
     SlackMessageFacts,
     SlackMessageFactsRequest,
     SlackTurnDeclined,
@@ -72,6 +74,7 @@ _CLICK_SCOPE: Final = "slack_click"
 _CLICK_TTL: Final = timedelta(days=7)
 #: The call that claimed a message, which may be sent again.
 _CLICK_CALL_SCOPE: Final = "slack_click_call"
+_MESSAGE_CALL_SCOPE: Final = "slack_message_call"
 _CALL_TTL: Final = timedelta(minutes=10)
 #: A message starts one turn: Slack sends a mention as both ``app_mention`` and ``message``.
 _TURN_SCOPE: Final = "slack_turn"
@@ -521,6 +524,41 @@ async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> Slack
         origin=(click.channel_id, click.thread_ts),
     )
     return SlackClickActed()
+
+
+async def act_on_slack_message(call: ChannelCall, message: ActOnSlackMessage) -> SlackMessageActed:
+    """Answer a message MDA's Slack channel handed back, as ``/webhooks/slack`` always has.
+
+    Its conversation is the backend's, or it's in a code channel, which MDA's channel
+    doesn't take; Slack's Events URL points at Trigger Server, so this is how the backend
+    hears it. Trigger Server verified Slack's signature, and MDA signed this call. The
+    backend claims each Slack message once, so Slack's message and app_mention events
+    for one mention start one run.
+    """
+    webhook_id = call.request.headers.get("webhook-id", "")
+    claim = f"act:{webhook_id}"
+    if webhook_id and not await event_claims.claim(_MESSAGE_CALL_SCOPE, claim, ttl=_CALL_TTL):
+        return SlackMessageActed(acted=False)
+    envelope: dict[str, JsonValue] = {
+        "type": "event_callback",
+        "team_id": message.team_id,
+        "api_app_id": message.app_id,
+        "event_id": f"mda-{message.delivery_id}",
+        "event": message.event,
+    }
+    from openswe.slack.routes import SlackEventsDelivery  # noqa: PLC0415 - routes imports this
+
+    try:
+        await SlackEventsDelivery.handle(
+            call.request, json.dumps(envelope).encode(), call.background, from_mda=True
+        )
+    except BaseException:
+        # Nothing was acted on (a 503 while Slack can't confirm the channel, say): MDA
+        # sends the call again under the same webhook ID, which must run it then.
+        if webhook_id:
+            await event_claims.release(_MESSAGE_CALL_SCOPE, claim)
+        raise
+    return SlackMessageActed()
 
 
 async def _claim_click(plan: PlanSlackClick, webhook_id: str) -> Literal["first", "again"] | None:

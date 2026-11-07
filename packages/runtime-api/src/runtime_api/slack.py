@@ -256,6 +256,26 @@ class SlackClickActed(BaseModel):
     acted: bool = True
 
 
+class ActOnSlackMessage(BaseModel):
+    """A message MDA's Slack channel hands back to the backend, which answers it as
+    ``/webhooks/slack`` always has: one in a conversation the backend holds, or in a
+    code channel. Slack's Events URL points at Trigger Server, so the backend hears
+    these only this way."""
+
+    # The Slack workspace and app the event came through, as Trigger Server keyed it.
+    team_id: str = Field(min_length=1, max_length=64)
+    app_id: str = Field(min_length=1, max_length=64)
+    # Trigger Server's ID for the delivery: the event's ID on the backend.
+    delivery_id: str = Field(min_length=1, max_length=128)
+    # Slack's event, as the Events API sent it.
+    event: dict[str, JsonValue]
+
+
+class SlackMessageActed(BaseModel):
+    # False for a call already acted on under the same webhook ID.
+    acted: bool = True
+
+
 SLACK_MESSAGE_FACTS: Final = Endpoint(
     "slack_message_facts",
     SlackMessageFactsRequest,
@@ -294,6 +314,16 @@ ACT_ON_SLACK_CLICK: Final = Endpoint(
     SlackClickActed,
     seconds=60.0,
     # The backend acts once per webhook ID; one sent again changes nothing.
+    prefix=CHANNEL_API_PREFIX,
+)
+
+ACT_ON_SLACK_MESSAGE: Final = Endpoint(
+    "act_on_slack_message",
+    ActOnSlackMessage,
+    SlackMessageActed,
+    seconds=60.0,
+    # The backend acts once per webhook ID, and claims each Slack message once, so
+    # Slack's message and app_mention events for one mention start one run.
     prefix=CHANNEL_API_PREFIX,
 )
 

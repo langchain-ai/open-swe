@@ -52,6 +52,7 @@ def _handlers() -> Handlers[ChannelCall]:
     )
     from runtime_api.slack import (
         ACT_ON_SLACK_CLICK,
+        ACT_ON_SLACK_MESSAGE,
         PLAN_SLACK_CLICK,
         SLACK_MESSAGE_FACTS,
         START_SLACK_TURN,
@@ -76,6 +77,7 @@ def _handlers() -> Handlers[ChannelCall]:
     handlers.serve(START_SLACK_TURN, slack.start_slack_turn)
     handlers.serve(PLAN_SLACK_CLICK, slack.plan_slack_click)
     handlers.serve(ACT_ON_SLACK_CLICK, slack.act_on_slack_click)
+    handlers.serve(ACT_ON_SLACK_MESSAGE, slack.act_on_slack_message)
     return handlers
 
 

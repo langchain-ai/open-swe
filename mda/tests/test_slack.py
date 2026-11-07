@@ -20,8 +20,11 @@ from managed_deepagents._channels.run_input import RunChannel, normalize_run_inp
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.slack import (
+    ACT_ON_SLACK_MESSAGE,
     SLACK_MESSAGE_FACTS,
     START_SLACK_TURN,
+    ActOnSlackMessage,
+    SlackMessageActed,
     SlackMessageFacts,
     SlackMessageFactsRequest,
     SlackTurnDeclined,
@@ -90,6 +93,7 @@ class _Backend:
         self.facts, self.started = facts, started
         self.asked_facts: list[SlackMessageFactsRequest] = []
         self.turns: list[StartSlackTurn] = []
+        self.handed_back: list[ActOnSlackMessage] = []
 
     async def __call__(
         self, endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
@@ -98,6 +102,10 @@ class _Backend:
             assert msg_id == "facts_delivery-1"
             self.asked_facts.append(cast(SlackMessageFactsRequest, request))
             return self.facts
+        if endpoint is ACT_ON_SLACK_MESSAGE:
+            assert msg_id == "msg_delivery-1"
+            self.handed_back.append(cast(ActOnSlackMessage, request))
+            return SlackMessageActed()
         assert endpoint is START_SLACK_TURN
         assert msg_id == "msg_delivery-1"
         self.turns.append(cast(StartSlackTurn, request))
@@ -425,10 +433,14 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
         (_event("<@U9> can you look?", key="message"), SlackMessageFacts(conversation="mda")),
         # An untagged reply nobody asked the agent for.
         (_event("thanks!", key="message"), SlackMessageFacts(conversation="mda")),
-        # A conversation the backend holds.
-        (_event(), SlackMessageFacts(conversation="backend")),
-        # A code channel's one session stays with the backend.
-        (_event(), SlackMessageFacts(code_channel=True, conversation="mda")),
+        # The same in a conversation the backend holds: the backend's own checks (a solo
+        # follow-up, a kitchen channel) are in the facts and say no.
+        (_event("thanks!", key="message"), SlackMessageFacts(conversation="backend")),
+        # A kind of message this channel never starts, in one of its own conversations.
+        (
+            _event(payload={"type": "message", "subtype": "thread_broadcast", "text": "x"}),
+            SlackMessageFacts(conversation="mda"),
+        ),
         # A bot that isn't on the allow-list.
         (
             _event(user_id=None, payload={"type": "message", "bot_id": "B1", "app_id": "A9"}),
@@ -437,7 +449,14 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
         # A channel Slack can't confirm has no external participants.
         (_event(), SlackMessageFacts(channel="unverified")),
     ],
-    ids=["other-person", "untagged", "backend", "code-channel", "unlisted-bot", "unverified"],
+    ids=[
+        "other-person",
+        "untagged",
+        "backend-untagged",
+        "mda-broadcast",
+        "unlisted-bot",
+        "unverified",
+    ],
 )
 @pytest.mark.usefixtures("slack_reads")
 def test_messages_not_for_the_agent_start_nothing(
@@ -447,6 +466,42 @@ def test_messages_not_for_the_agent_start_nothing(
 
     assert asyncio.run(slack.start_turn(event, _thread())) is None
     assert backend.turns == []
+    assert backend.handed_back == []
+
+
+@pytest.mark.parametrize(
+    ("event", "facts"),
+    [
+        # A mention in a conversation the backend holds.
+        (_event(), SlackMessageFacts(conversation="backend")),
+        # A code channel's one session stays with the backend.
+        (_event(), SlackMessageFacts(code_channel=True, conversation="mda")),
+        # A breakout naming a known channel and no instruction, outside MDA's conversations.
+        (_event("<@UBOT> /breakout <#C2|ops>"), SlackMessageFacts(conversation="new")),
+        # A web breakout with nothing to ask, in a new conversation.
+        (_event("<@UBOT> /breakout:web"), SlackMessageFacts(conversation="new")),
+        # A kind of message this channel never starts, outside its conversations.
+        (
+            _event(payload={"type": "message", "subtype": "thread_broadcast", "text": "x"}),
+            SlackMessageFacts(conversation="new"),
+        ),
+    ],
+    ids=["backend-mention", "code-channel", "breakout-to-channel", "empty-web", "broadcast"],
+)
+@pytest.mark.usefixtures("slack_reads")
+def test_messages_the_backend_answers_go_back_to_it(
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent, facts: SlackMessageFacts
+) -> None:
+    # Slack's Events URL points at Trigger Server, so the backend hears them only from
+    # here: dropping them left every conversation it holds unanswered.
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
+
+    assert asyncio.run(slack.start_turn(event, _thread())) is None
+
+    assert backend.turns == []
+    [handed] = backend.handed_back
+    assert (handed.team_id, handed.app_id, handed.delivery_id) == ("T1", "A1", "delivery-1")
+    assert handed.event == event.payload
 
 
 @pytest.mark.usefixtures("slack_reads")
