@@ -1208,7 +1208,7 @@ function environmentMenuItem() {
 function iconPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
-    : path.resolve(__dirname, "../resources/icon.png");
+    : path.resolve(__dirname, "../../ui/public/logo-mark.png");
 }
 
 function errorPage(error) {

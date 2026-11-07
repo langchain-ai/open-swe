@@ -30,7 +30,7 @@
       "node_modules/node-pty/**/*"
     ],
     "npmRebuild": true,
-    "icon": "resources/icon.png",
+    "icon": "../ui/public/logo-mark.png",
     "directories": {
       "output": "dist"
     },
@@ -45,7 +45,7 @@
         "to": "app-update.yml"
       },
       {
-        "from": "resources/icon.png",
+        "from": "../ui/public/logo-mark.png",
         "to": "icon.png"
       },
       {
@@ -60,7 +60,6 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "artifactName": "Robin-${version}-${arch}-mac.${ext}",
-      "icon": "resources/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",

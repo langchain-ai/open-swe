@@ -143,6 +143,10 @@ pnpm --dir desktop run dist # installer for the current platform
 ```
 
 Neither command builds or embeds the dashboard.
+The dashboard's `ui/public/logo-mark.png` is the shared source for the desktop app icon.
+Electron Builder converts it into platform-specific icon formats during packaging and copies it as `icon.png` for native windows; source launches use the same source image directly.
+Change that source image rather than maintaining desktop-specific icon assets.
+Installed app icons require a desktop shell release, not a downloaded UI update.
 Build outputs are written to `desktop/dist/`; the bundle is `Robin.app`.
 The source installer replaces a verified `Open SWE.app` in the same Applications directory after installing Robin; it does not remove profile or CLI data.
 If an older copy remains in a different Applications directory, remove that app bundle manually after quitting it.
