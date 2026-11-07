@@ -219,18 +219,27 @@ class IncidentSession:
             # A responder is waiting on an answer, so say it once per run and never hold it back.
             should_post = not delivered_this_run
         else:
-            # The channel gets exactly one automatic message: the first investigation that
-            # reaches a supported conclusion. After that it belongs to the responders, and
-            # later automatic turns only keep this record and the postmortem current. An
-            # inconclusive first turn does not spend it, so the real investigation still lands.
-            should_post = not latest.investigation_posted and report.outcome == "findings"
+            needs_responder = bool(report.questions)
+            new_questions = (
+                previous is None
+                or previous.report.questions != report.questions
+                or previous.posted_digest != previous.digest
+            )
+            should_post = (not latest.investigation_posted and report.outcome == "findings") or (
+                needs_responder and new_questions and not delivered_this_run
+            )
         posted = False
         if should_post and not record.is_archived:
+            notification = (
+                not explicit
+                and bool(report.questions)
+                and (latest.investigation_posted or report.outcome != "findings")
+            )
             text, blocks = report_message(
                 report,
-                report.summary,
+                "\n".join(report.questions) if notification else report.summary,
                 dashboard_incident_url(record.id),
-                reason="answer" if explicit else "findings",
+                reason="answer" if explicit else "blocker" if notification else "findings",
             )
             try:
                 await post_slack_thread_reply_with_ts(
@@ -253,7 +262,9 @@ class IncidentSession:
                 # spends the incident's one automatic message.
                 latest.posted_digest, latest.posted_run_id = digest, run_id
                 latest.posted_at = now_iso()
-                latest.investigation_posted = latest.investigation_posted or not explicit
+                latest.investigation_posted = latest.investigation_posted or (
+                    not explicit and report.outcome == "findings"
+                )
                 await service.REPORTS.put(record.id, latest)
 
         return {

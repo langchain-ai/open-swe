@@ -91,8 +91,12 @@ def report_message(
         summary = "" if report.problem else compact(text, 800)
         sections = [f"*{heading}*\n{summary}" if summary else f"*{heading}*"]
         sections.extend(_investigation(report, compact))
+        if report.questions:
+            sections.append(
+                "*Questions*\n" + "\n".join(compact(item, 500) for item in report.questions[:5])
+            )
     else:
-        summary = compact(text, 2400 if reason == "answer" else 800)
+        summary = compact(text, 2400 if reason in {"answer", "blocker"} else 800)
         sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]
     blocks: list[dict[str, Any]] = [
         {"type": "section", "text": {"type": "mrkdwn", "text": section, "verbatim": True}}

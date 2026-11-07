@@ -16,6 +16,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     fetch_slack_thread_messages,
     get_slack_user_info,
+    parse_slack_ts,
     post_slack_thread_reply_with_ts,
     slack_message_bot_id,
 )
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 CONTROL_WORDS = frozenset({"pause", "resume", "complete", "reopen"})
 HISTORY_LIMIT = 100
+FOLLOWUP_WINDOW_SECONDS = 300
 _HANDLED_EVENTS = frozenset(
     {
         "channel_created",
@@ -264,6 +266,54 @@ async def apply_control(
     return record
 
 
+class IncidentConversation:
+    """A human message and the incident conversation it may continue."""
+
+    def __init__(
+        self, record: Incident, policy: IncidentPolicy, message: dict[str, object]
+    ) -> None:
+        self.record = record
+        self.policy = policy
+        self.message = message
+
+    async def request(self) -> str:
+        text = str(self.message.get("text") or "").strip()
+        if self.message.get("subtype") or not text:
+            return ""
+        thread_ts = str(self.message.get("thread_ts") or "")
+        ts = str(self.message.get("ts") or "")
+        if not ts:
+            return ""
+        history = await fetch_slack_thread_messages(
+            self.record.channel_id, thread_ts or turns.SESSION_TS
+        )
+        if thread_ts and any(
+            _own_message(previous, self.policy)
+            and 0 < parse_slack_ts(str(previous.get("ts") or "")) < parse_slack_ts(ts)
+            for previous in history
+        ):
+            return text[:8000]
+        if thread_ts:
+            history = await fetch_slack_thread_messages(self.record.channel_id, turns.SESSION_TS)
+        for previous in history[-HISTORY_LIMIT:]:
+            previous_ts = str(previous.get("ts") or "")
+            elapsed = parse_slack_ts(ts) - parse_slack_ts(previous_ts)
+            if not parse_slack_ts(previous_ts) or elapsed <= 0:
+                continue
+            if previous.get("user") != self.message.get("user"):
+                continue
+            bot_user = ENV.SLACK_BOT_USER_ID.get()
+            previous_text = str(previous.get("text") or "")
+            if not bot_user or f"<@{bot_user}>" not in previous_text:
+                continue
+            action, question = parse_mention(previous_text)
+            if action != "ask" or not question:
+                continue
+            if elapsed <= FOLLOWUP_WINDOW_SECONDS:
+                return text[:8000]
+        return ""
+
+
 async def handle_slack_event(
     payload: dict[str, Any], background_tasks: BackgroundTasks
 ) -> dict[str, str] | None:
@@ -325,15 +375,26 @@ async def handle_slack_event(
     bot_user = ENV.SLACK_BOT_USER_ID.get()
     user = message.get("user")
     mentioned = kind == "app_mention" or bool(bot_user and f"<@{bot_user}>" in text)
-    if mentioned and isinstance(user, str) and user and not slack_message_bot_id(message):
-        action, question = parse_mention(text)
+    if isinstance(user, str) and user and not slack_message_bot_id(message):
+        action, question = parse_mention(text) if mentioned else ("", "")
+        actor = None
+        if (
+            not mentioned
+            and record.status in {"watching", "needs_attention"}
+            and not _own_message(message, policy)
+            and event.get("subtype") != "message_changed"
+        ):
+            actor = await linked_slack_user(user)
+            if actor is not None:
+                question = await IncidentConversation(record, policy, message).request()
         if action in CONTROL_WORDS:
             background_tasks.add_task(control_by_slack_user, record, action, user)
             return {"status": "accepted"}
-        if action == "ask":
+        if question:
             ts = str(message.get("ts") or "")
             thread_ts = str(message.get("thread_ts") or "")
-            actor = await linked_slack_user(user)
+            if mentioned:
+                actor = await linked_slack_user(user)
             if actor is None:
                 # A question unlocks the agent's tools, so it needs a connected account.
                 background_tasks.add_task(
@@ -349,7 +410,8 @@ async def handle_slack_event(
                 reply_thread_ts=thread_ts if thread_ts and thread_ts != ts else "",
             )
             return {"status": "accepted"}
-        return {"status": "ignored"}
+        if mentioned:
+            return {"status": "ignored"}
     if record.status == "completed" or not _is_context(message, policy):
         return {"status": "ignored"}
     await turns.queue_context(record, message)

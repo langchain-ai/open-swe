@@ -237,7 +237,10 @@ _SHELL_OPERATOR = re.compile(r"(&&|\|\||[;&|()])")
 def _command_words(command: str) -> list[str]:
     """``command``'s words, with control operators split off even where written unspaced."""
     return [
-        part for token in shell_tokens(command) for part in _SHELL_OPERATOR.split(token) if part
+        part
+        for token in shell_tokens(command.replace("\\\n", ""))
+        for part in _SHELL_OPERATOR.split(token)
+        if part
     ]
 
 
@@ -257,13 +260,27 @@ def _chained_push_dirs(command: str) -> list[str | None]:
         repo_dir = cwd
         position = index + 1
         while position < len(tokens) and tokens[position].startswith("-"):
-            if tokens[position] in {"-C", "-c"} and position + 1 < len(tokens):
+            if tokens[position] in {
+                "-C",
+                "-c",
+                "--git-dir",
+                "--work-tree",
+                "--namespace",
+                "--config-env",
+                "--super-prefix",
+            } and position + 1 < len(tokens):
+                if (
+                    tokens[position] == "-c"
+                    and tokens[position + 1].startswith("alias.")
+                    and "push" in tokens[position + 1]
+                ):
+                    dirs.append(repo_dir)
                 if tokens[position] == "-C":
                     repo_dir = tokens[position + 1]
                 position += 2
                 continue
             position += 1
-        if position < len(tokens) and tokens[position] == "push":
+        if position < len(tokens) and tokens[position].removeprefix("$") == "push":
             dirs.append(repo_dir)
     return dirs
 
@@ -828,6 +845,20 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        cfg = _configurable(request)
+        if cfg.source == "incidents_agent" and any(
+            _standalone_push_args(command) is not None or _chained_push_dirs(command)
+            for command in shell_commands(request)
+        ):
+            from openswe.incidents.runtime import load_incident_session
+
+            session = await load_incident_session(request.runtime.config, run_id=cfg.run_id)
+            if session.explicit_request is None:
+                return ToolMessage(
+                    content="Automatic incident turns cannot push code. Ask the responder to @mention the bot with the request using record_incident_report questions.",
+                    tool_call_id=_tool_call_id(request) or "",
+                    status="error",
+                )
         try:
             change = await self._change_for_request(request)
         except WorkflowPushInspectionError as exc:
