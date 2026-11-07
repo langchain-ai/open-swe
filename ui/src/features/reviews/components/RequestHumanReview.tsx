@@ -83,7 +83,9 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const label = requestReview.isPending
     ? "Requesting…"
     : active
-      ? "Review requested"
+      ? permalink
+        ? "Review requested"
+        : "Retry review status"
       : requestReview.isError
         ? "Retry review request"
         : "Request review in Slack"
@@ -93,30 +95,32 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       onClick={(event) => event.stopPropagation()}
       title={channelHint ?? undefined}
     >
-      {(needsChannel || (availability.isError && !active)) &&
-        !requestReview.isSuccess && (
-          <SlackChannelCombobox
-            value={channel}
-            onValueChange={setChannel}
-            placeholder="Choose a review channel"
-            aria-label="Review channel"
-            eligible={(option) => option.is_member}
-            disabled={requestReview.isPending}
-          />
-        )}
+      {(needsChannel || (availability.isError && !active)) && (
+        <SlackChannelCombobox
+          value={channel}
+          onValueChange={setChannel}
+          placeholder="Choose a review channel"
+          aria-label="Review channel"
+          eligible={(option) => option.is_member}
+          disabled={requestReview.isPending}
+        />
+      )}
       <PullRequestActionButton
         label={label}
-        loading={requestReview.isPending}
-        disabled={Boolean(channelHint)}
+        loading={
+          requestReview.isPending ||
+          (active && !permalink && availability.isFetching)
+        }
+        disabled={
+          Boolean(channelHint) ||
+          (active && !permalink && availability.isFetching)
+        }
         onClick={() => {
           if (requestReview.isPending) return
           if (active) {
             if (permalink) {
               window.open(permalink, "_blank", "noopener,noreferrer")
             } else {
-              toast.error(
-                "The review card's Slack link is unavailable. Retry the review status."
-              )
               void availability.refetch()
             }
           } else if (channelHint) {
@@ -126,7 +130,8 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           }
         }}
       />
-      {availability.isError && (
+      {((availability.isError && !active) ||
+        (active && Boolean(permalink))) && (
         <PullRequestActionButton
           label="Retry review status"
           loading={availability.isFetching}

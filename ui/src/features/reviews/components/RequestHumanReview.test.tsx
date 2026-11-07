@@ -128,7 +128,7 @@ it.each([
       })
     )
     const requested = await screen.findByRole("button", {
-      name: "Review requested",
+      name: permalink ? "Review requested" : "Retry review status",
     })
     await waitFor(() => expect(requested.hasAttribute("disabled")).toBe(false))
     if (permalink) fireEvent.click(requested)
@@ -184,7 +184,7 @@ it.each([
       })
     )
     const requested = await screen.findByRole("button", {
-      name: "Review requested",
+      name: permalink ? "Review requested" : "Retry review status",
     })
     expect(requested.hasAttribute("disabled")).toBe(false)
     expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
@@ -194,7 +194,9 @@ it.each([
       focusManager.setFocused(false)
       focusManager.setFocused(true)
     })
-    const restored = screen.getByRole("button", { name: "Review requested" })
+    const restored = screen.getByRole("button", {
+      name: permalink ? "Review requested" : "Retry review status",
+    })
     expect(restored.hasAttribute("disabled")).toBe(false)
     fireEvent.click(restored)
     expect(open.mock.calls).toEqual(
@@ -251,6 +253,55 @@ it.each(["loading", "error", "blocked", "additional approval required"])(
     await waitFor(() =>
       expect(request.mock.calls).toEqual(needsChannel ? [] : [[current, ""]])
     )
+  }
+)
+
+it.each([
+  "",
+  "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+])(
+  "can request another review after a Slack dismissal with cached link %j",
+  async (permalink) => {
+    const errorToast = vi.spyOn(toast, "error")
+    vi.spyOn(api, "humanReviewAvailability")
+      .mockResolvedValueOnce({
+        available: true,
+        active: true,
+        permalink,
+        blockers: [],
+      })
+      .mockResolvedValue({
+        available: true,
+        active: false,
+        permalink: "",
+        blockers: [],
+      })
+    const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
+      success: true,
+      reused: false,
+      permalink:
+        "https://workspace.slack.com/archives/C0123456789/p2234567890123456",
+      error: "",
+      request_id: "replacement",
+      channel: "C0123456789",
+      channel_name: "reviews",
+    })
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
+      </QueryClientProvider>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry review status" })
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Request review in Slack" })
+    )
+    await screen.findByRole("button", { name: "Review requested" })
+    expect(request).toHaveBeenCalledWith(pr, "")
+    expect(errorToast).not.toHaveBeenCalled()
   }
 )
 
@@ -333,7 +384,10 @@ it("recovers channel selection after availability fails", async () => {
   fireEvent.click(
     screen.getByRole("button", { name: "Request review in Slack" })
   )
-  await screen.findByRole("button", { name: "Review requested" })
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Retry review status" })
+  )
+  await screen.findByRole("button", { name: "Choose channel" })
   expect(request).toHaveBeenCalledWith(pr, "C0123456789")
   expect(successToast).toHaveBeenCalledWith(
     "Asked #reviews to review acme/app#7",
