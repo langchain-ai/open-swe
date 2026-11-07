@@ -198,18 +198,15 @@ def assert_thread_readable(
         raise HTTPException(404, "thread not found")
 
 
-def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
-    """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
-
-    A thread a Slack bot started is steered from its Slack thread only, so the
-    dashboard keeps it read-only for everyone, admins included, and so does a
-    mirrored Claude Code session.
-    """
+def _assert_thread_promptable(
+    metadata: Mapping[str, Any], login: str | None, *, allow_bot: bool = False
+) -> None:
+    """Authorize dashboard mutations, optionally allowing bot-thread workflow decisions."""
     if thread_source(metadata) == CLAUDE_CODE_SOURCE and thread_is_readable(metadata, login):
         raise HTTPException(403, MIRRORED_SESSION_READ_ONLY)
     if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
-    if thread_is_bot_triggered(metadata):
+    if thread_is_bot_triggered(metadata) and not allow_bot:
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
     # Its wake run must take direction from nobody, and a message would join that run.
     if metadata.get(CURATOR_THREAD_KEY):
