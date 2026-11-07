@@ -137,6 +137,7 @@ def define_deep_agent(
     browser: BrowserDefinition | Omitted | None = OMITTED,
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
+    trace_only_deployment_project: bool = False,
     **kwargs: Never,
 ) -> DeepAgentDefinition:
     """Define a Managed Deep Agent.
@@ -226,6 +227,9 @@ def define_deep_agent(
         config["debug"] = debug
     if metadata is not None:
         config["metadata"] = dict(metadata)
+
+    if trace_only_deployment_project:
+        config["trace_only_deployment_project"] = True
 
     config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory, browser))
 

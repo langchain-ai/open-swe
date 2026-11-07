@@ -1,8 +1,9 @@
 """Config defaults for native LangGraph execution."""
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Iterator, Mapping
-from contextlib import AsyncExitStack
+from contextlib import AbstractContextManager, AsyncExitStack, nullcontext
 from contextvars import Token
 from functools import cached_property
 from typing import Any, cast
@@ -19,6 +20,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import StateSnapshot
+from langsmith import get_tracing_context, tracing_context
 
 from managed_deepagents._channels.binding import (
     ChannelBinding,
@@ -173,6 +175,24 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     scheduled run that raises reports the failure there before it raises.
     """
 
+    trace_only_deployment_project: bool = False
+
+    def _tracing(self, config: RunnableConfig | None) -> AbstractContextManager[None]:
+        project = ensure_config(self.config, config)["configurable"].get("__langsmith_project__")
+        if not self.trace_only_deployment_project or not project:
+            return nullcontext()
+        context = get_tracing_context()
+        replicas = [
+            replica
+            for replica in context["replicas"] or ()
+            if replica.get("project_name") == os.environ["LANGSMITH_PROJECT"]
+        ]
+        context["replicas"] = replicas
+        parent = context["parent"]
+        if parent is not None:
+            context["parent"] = parent.model_copy(update={"replicas": replicas})
+        return tracing_context(**context)
+
     def stream(
         self,
         input: Any,
@@ -192,7 +212,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             while True:
                 tokens = _enter_step(binding, routing, thread, log, output)
                 try:
-                    item = next(iterator)
+                    with self._tracing(config):
+                        item = next(iterator)
                 except StopIteration:
                     self._deliver(thread, merged, routing, output)
                     return
@@ -208,7 +229,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         finally:
             log_token = enter_log_context(log)
             try:
-                iterator.close()
+                with self._tracing(config):
+                    iterator.close()
             finally:
                 exit_log_context(log_token)
 
@@ -226,7 +248,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         log = run_log_context(self.config, config)
         output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
-        config = ManagedTurnTracer.for_run(ensure_config(self.config, config))
+        with self._tracing(config):
+            config = ManagedTurnTracer.for_run(ensure_config(self.config, config))
         iterator = super().astream(input, config, context=context, **kwargs)
         resources = AsyncExitStack()
         try:
@@ -235,7 +258,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 try:
                     resource_token = _current_resources.set(resources)
                     try:
-                        item = await anext(iterator)
+                        with self._tracing(config):
+                            item = await anext(iterator)
                     finally:
                         _current_resources.reset(resource_token)
                 except StopAsyncIteration:
@@ -252,7 +276,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             log_token = enter_log_context(log)
             try:
                 try:
-                    await iterator.aclose()
+                    with self._tracing(config):
+                        await iterator.aclose()
                 finally:
                     await resources.aclose()
             finally:
@@ -372,6 +397,12 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         """Whether the run's state can be read back; a stateless run's cannot."""
         checkpointer = config["configurable"].get(CONFIG_KEY_CHECKPOINTER, self.checkpointer)
         return isinstance(checkpointer, BaseCheckpointSaver)
+
+
+class DeploymentProjectManagedAgent(ManagedCompiledAgent):
+    """Keep legacy project requests from duplicating deployment traces."""
+
+    trace_only_deployment_project = True
 
 
 def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
