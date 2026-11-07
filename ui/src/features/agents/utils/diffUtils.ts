@@ -119,13 +119,13 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-bg-separator-override: var(--bg-surface-level-1-hover);
   --diffs-bg-buffer-override: var(--diffs-surface);
 
-  --diffs-bg-addition-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-success-strong)));
-  --diffs-bg-addition-number-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-success-strong)));
+  --diffs-bg-addition-override: var(--bg-success-strong);
+  --diffs-bg-addition-number-override: var(--bg-success-strong);
   --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-success-strong));
   --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-success-strong));
 
-  --diffs-bg-deletion-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-error-strong)));
-  --diffs-bg-deletion-number-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-error-strong)));
+  --diffs-bg-deletion-override: var(--bg-error-strong);
+  --diffs-bg-deletion-number-override: var(--bg-error-strong);
   --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-error-strong));
   --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-error-strong));
 
@@ -139,11 +139,13 @@ export const DIFF_UNSAFE_CSS = `
 
 [data-line-type="change-addition"],
 [data-line-type="change-deletion"] {
-  --mix-light: 80%;
+  --mix-light: 78%;
+  --mix-dark: 84%;
 }
 
 :is([data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) {
-  --mix-light: 75%;
+  --mix-light: 72%;
+  --mix-dark: 74%;
 }
 
 [data-file-info] {
