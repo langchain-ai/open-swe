@@ -59,6 +59,7 @@ from openswe.mda_channels.api import ChannelCall
 from openswe.merge_queue.controller import wake_native_queue
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
+from openswe.threads import index
 from openswe.threads.router import (
     adopt_channel_run,
     channel_run_metadata,
@@ -399,12 +400,13 @@ async def _prepare_run(
 async def _signed(
     act: ActOnGitHubDelivery, thread_id: str, configurable: Mapping[str, object], *, source: str
 ) -> dict[str, Any]:
-    """The run's signed context, metadata and run-complete webhook, for the channel to
-    start it on ``thread_id``; the thread is busy from here on."""
+    """Sign the channel run's context and metadata, then mark its thread busy."""
+    indexed = await index.get(thread_id)
     run_config = await prepare_durable_run(
         "agent",
         {"configurable": dict(configurable)},
         {
+            **(indexed.run_classification() if indexed else {}),
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: CHANNEL,
             "github_delivery": act.delivery_id,
@@ -419,8 +421,7 @@ async def _signed(
             # So the attribution the run's hooks read rides in its run token.
             "metadata": cast(JsonValue, run_config["metadata"]),
         },
-        # A channel thread has no Slack thread to link.
-        thread_metadata={},
+        thread_metadata=indexed.metadata if indexed else {},
     )
     await channel_run_starting(thread_id)
     return {

@@ -33,6 +33,7 @@ from runtime_api.linear import (
 from openswe.dashboard.oauth import build_settings_url
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.source_context import SourceContext
+from openswe.threads import index
 from openswe.threads.router import (
     adopt_channel_run,
     channel_run_metadata,
@@ -182,10 +183,15 @@ async def plan_linear_session(plan: PlanLinearSession) -> LinearSessionStart:
         source_context=SourceContext.parse({"linear_issue": linear_issue}),
         workspace=workspace,
     )
+    indexed = await index.get(thread_id)
     run_config = await prepare_durable_run(
         "agent",
         {"configurable": configurable},
-        {**common.AGENT_VERSION_METADATA, CHANNEL_METADATA_KEY: LINEAR_CHANNEL},
+        {
+            **(indexed.run_classification() if indexed else {}),
+            **common.AGENT_VERSION_METADATA,
+            CHANNEL_METADATA_KEY: LINEAR_CHANNEL,
+        },
         source="linear",
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
@@ -196,8 +202,7 @@ async def plan_linear_session(plan: PlanLinearSession) -> LinearSessionStart:
             # So the attribution the run's hooks read rides in its run token.
             "metadata": cast(JsonValue, run_config["metadata"]),
         },
-        # A channel thread has no Slack thread to link.
-        thread_metadata={},
+        thread_metadata=indexed.metadata if indexed else {},
     )
     run = LinearSessionRun(
         repository=plan.repository,
