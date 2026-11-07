@@ -93,7 +93,6 @@ from rt.backend import (
     OpenSweBackend,
     Run,
     RunLocal,
-    harness_message,
     human_messages,
     namespace,
     reporting,
