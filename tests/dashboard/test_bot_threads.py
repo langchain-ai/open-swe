@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.slack import client as slack_client
 from openswe.threads import handlers, listing, plan_api, summary, workflow_approval_api
+from openswe.users import User
 
 _ADMINS = {"admin"}
 
@@ -56,7 +58,9 @@ def test_bot_thread_is_readable_and_still_promptable_from_slack(bot_thread):
 
 
 @pytest.mark.parametrize("login", ["bob", "admin"])
-async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypatch):
+async def test_dashboard_bot_thread_nonapproval_actions_remain_read_only(
+    bot_thread, login, monkeypatch
+):
     _, client = bot_thread
     session = {"sub": login}
     operations = [
@@ -68,8 +72,6 @@ async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypat
         lambda: plan_api.update_plan(
             "bot-thread", plan_api.PlanUpdate(html="<p>edit</p>"), session
         ),
-        lambda: workflow_approval_api.approve_workflow_push("bot-thread", "fp", session),
-        lambda: workflow_approval_api.reject_workflow_push("bot-thread", "fp", session),
     ]
     for operation in operations:
         with pytest.raises(HTTPException) as exc:
@@ -135,3 +137,66 @@ def test_nobody_posts_in_a_memory_curators_thread(monkeypatch, login):
     with pytest.raises(HTTPException) as exc:
         summary.assert_thread_postable(metadata, login)
     assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("approved", [True, False])
+@pytest.mark.parametrize(
+    "identity",
+    [
+        "participant",
+        "unlinked",
+        "outsider",
+        "bot",
+        "requester",
+        "other-requester",
+        "absent-requester",
+    ],
+)
+async def test_bot_workflow_decisions_require_linked_human_participant(
+    bot_thread, monkeypatch, approved, identity
+):
+    metadata = bot_thread[0]["metadata"]
+    slack_thread = metadata["source_context"]["slack_thread"]
+    slack_thread.update(channel_id="C123", thread_ts="1")
+    if identity in {"requester", "other-requester", "absent-requester"}:
+        slack_thread["triggering_user_id"] = "U123"
+    person = SimpleNamespace(
+        id="person", github_login="bob", slack_user_id="U123", slack_team_id="T123"
+    )
+    actor = (
+        SimpleNamespace(id="other", github_login="eve", slack_user_id="U999", slack_team_id="T123")
+        if identity in {"other-requester", "absent-requester"}
+        else person
+    )
+    monkeypatch.setattr(
+        User, "for_login", AsyncMock(return_value=None if identity == "unlinked" else actor)
+    )
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=person))
+    messages = [{"user": "U123"}, {"user": "U999"}] if identity != "outsider" else []
+    if identity == "absent-requester":
+        messages = [{"user": "U999"}]
+    if identity == "bot":
+        messages = [{"user": "U123", "bot_id": "B123"}]
+    monkeypatch.setattr(
+        slack_client, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+    decide = AsyncMock(return_value=({"status": "approved" if approved else "rejected"}, True))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(workflow_approval_api, "decide_workflow_push_approval", decide)
+    monkeypatch.setattr(workflow_approval_api, "dispatch_followup", dispatch)
+    operation = (
+        workflow_approval_api.approve_workflow_push
+        if approved
+        else workflow_approval_api.reject_workflow_push
+    )
+    if identity not in {"participant", "requester"}:
+        with pytest.raises(HTTPException) as exc:
+            await operation("bot-thread", "fp", {"sub": "bob"})
+        assert exc.value.status_code == 403
+        decide.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        return
+    result = await operation("bot-thread", "fp", {"sub": "bob"})
+    assert result["status"] == ("approved" if approved else "rejected")
+    decide.assert_awaited_once_with("bot-thread", "fp", approved=approved, actor="bob")
+    assert dispatch.await_count == int(approved)

@@ -297,10 +297,10 @@ def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
         "error_type": "WorkflowPushMustStandAlone",
         "error": (
             "This command pushes as part of a longer command, and that push could carry "
-            "GitHub workflow file changes, so Robin cannot show the thread owner what it "
+            "GitHub workflow file changes, so Robin cannot show the approver what it "
             "pushes. Nothing ran. Commit first, then run the push on its own (for example "
             "`git -C <repo> push -u origin <branch>`); workflow changes then go to the "
-            "thread owner for approval."
+            "eligible human for approval."
         ),
     }
     return ToolMessage(
@@ -695,7 +695,11 @@ def _blocked_message(
         "error": (
             "This git push includes GitHub workflow file changes and requires human "
             "approval before Robin can push it. Retry the same standalone git push "
-            "after the thread owner approves the workflow diff in Slack or the web UI."
+            "after an eligible human approves the workflow diff in Slack or the web UI. "
+            "In a bot-started Slack thread, ask the linked human requester, if recorded; "
+            "otherwise ask a human participant with a linked GitHub account. In other "
+            "threads, Slack approval requires the owner; web approval follows the "
+            "thread's usual access rules."
         ),
         "workflow_approval_status": status,
         "fingerprint": change.fingerprint,
