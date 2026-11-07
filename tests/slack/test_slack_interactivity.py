@@ -426,6 +426,8 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
         ("bot", "owner", "pending", True),
         ("bot-reject", "owner", "pending", False),
         ("bot", "other", "pending", False),
+        ("bot-requester-absent", "other", "pending", False),
+        ("bot-requester-absent-reject", "other", "pending", False),
         ("bot", "unlinked", "pending", False),
         ("bot-unrelated", "owner", "pending", False),
         ("coordinator", "owner", "approved", False),
@@ -446,7 +448,7 @@ async def test_workflow_approval_requires_owner_and_authorized_card_location(
     target = "coordinator" if location == "legacy" else "worker"
     button = {
         "type": "workflow_push_approval",
-        "action": "reject" if location in {"dm-reject", "bot-reject"} else "approve",
+        "action": "reject" if location.endswith("reject") else "approve",
         "fingerprint": "fp",
     }
     if location != "legacy":
@@ -473,6 +475,16 @@ async def test_workflow_approval_requires_owner_and_authorized_card_location(
         )
         monkeypatch.setattr(
             slack_client, "fetch_slack_thread_messages", AsyncMock(return_value=[{"user": "U1"}])
+        )
+    if location.startswith("bot-requester-absent"):
+        metadata["source_context"]["slack_thread"]["triggering_user_id"] = "U1"
+        monkeypatch.setattr(
+            workflow_approval.User,
+            "for_identity",
+            AsyncMock(return_value=SimpleNamespace(id="requester", github_login="owner")),
+        )
+        monkeypatch.setattr(
+            slack_client, "fetch_slack_thread_messages", AsyncMock(return_value=[{"user": "U2"}])
         )
     decide = AsyncMock(return_value=({"status": "approved" if approved else "rejected"}, True))
     dispatch = AsyncMock()

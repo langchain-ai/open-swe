@@ -142,7 +142,7 @@ class SourceContext(BaseModel):
         participants = slack_participant_ids(messages)
         if user.slack_user_id not in participants:
             raise HTTPException(403, "You are not a participant in this Slack thread.")
-        if thread.triggering_user_id in participants:
+        if thread.triggering_user_id:
             requester = await User.for_identity("slack", thread.triggering_user_id)
             if requester is not None and requester.github_login and requester.id != user.id:
                 raise HTTPException(403, "Only the requester can answer this workflow approval.")

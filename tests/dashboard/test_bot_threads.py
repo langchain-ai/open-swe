@@ -141,7 +141,16 @@ def test_nobody_posts_in_a_memory_curators_thread(monkeypatch, login):
 
 @pytest.mark.parametrize("approved", [True, False])
 @pytest.mark.parametrize(
-    "identity", ["participant", "unlinked", "outsider", "bot", "requester", "other-requester"]
+    "identity",
+    [
+        "participant",
+        "unlinked",
+        "outsider",
+        "bot",
+        "requester",
+        "other-requester",
+        "absent-requester",
+    ],
 )
 async def test_bot_workflow_decisions_require_linked_human_participant(
     bot_thread, monkeypatch, approved, identity
@@ -149,14 +158,14 @@ async def test_bot_workflow_decisions_require_linked_human_participant(
     metadata = bot_thread[0]["metadata"]
     slack_thread = metadata["source_context"]["slack_thread"]
     slack_thread.update(channel_id="C123", thread_ts="1")
-    if identity in {"requester", "other-requester"}:
+    if identity in {"requester", "other-requester", "absent-requester"}:
         slack_thread["triggering_user_id"] = "U123"
     person = SimpleNamespace(
         id="person", github_login="bob", slack_user_id="U123", slack_team_id="T123"
     )
     actor = (
         SimpleNamespace(id="other", github_login="eve", slack_user_id="U999", slack_team_id="T123")
-        if identity == "other-requester"
+        if identity in {"other-requester", "absent-requester"}
         else person
     )
     monkeypatch.setattr(
@@ -164,6 +173,8 @@ async def test_bot_workflow_decisions_require_linked_human_participant(
     )
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=person))
     messages = [{"user": "U123"}, {"user": "U999"}] if identity != "outsider" else []
+    if identity == "absent-requester":
+        messages = [{"user": "U999"}]
     if identity == "bot":
         messages = [{"user": "U123", "bot_id": "B123"}]
     monkeypatch.setattr(
