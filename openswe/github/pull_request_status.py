@@ -15,7 +15,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
-from openswe.github.ci import RequiredCheck, unreported_required_checks
+from openswe.github.branch_config import BranchConfig
+from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
@@ -63,6 +64,21 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
               url
             }
           }
+        }
+      }
+    }
+  }
+}
+"""
+_REVIEW_THREAD_ROOTS_QUERY = """
+query PullRequestReviewThreadRoots($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated
+          comments(first: 1) { nodes { fullDatabaseId } }
         }
       }
     }
@@ -196,7 +212,9 @@ class PullRequestReviewer(BaseModel):
 _GITHUB_REVIEWS = TypeAdapter(list[_GithubReview])
 
 
-ReviewAssignment = Literal["assigned", "tentative", "mentioned"]
+ReviewAssignment = Literal[
+    "assigned", "requested", "tentative", "mentioned", "draft", "speculative"
+]
 
 
 class OpenPullRequest(BaseModel):
@@ -209,6 +227,7 @@ class OpenPullRequest(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     draft: bool | None = None
+    author: str | None = None
     details_loading: bool = False
     additions: int | None = None
     deletions: int | None = None
@@ -219,10 +238,12 @@ class OpenPullRequest(BaseModel):
     head_ref: str | None = None
     status_available: bool = False
     ci: CheckState = "unknown"
+    required_checks_passing: bool | None = None
     review_decision: ReviewDecision | None = None
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
     unresolved_threads: int | None = None
+    conversation_resolution_required: bool | None = None
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
@@ -483,6 +504,9 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without an object")
         return payload
 
+    async def update_description(self, body: str) -> None:
+        await self.repo.patch(f"pulls/{self.number}", {"body": body})
+
     async def head_sha(self) -> str:
         head = (await self.pull()).get("head")
         sha = head.get("sha") if isinstance(head, dict) else None
@@ -568,16 +592,15 @@ class PullRequestClient:
     async def delete_review(self, review_id: int) -> None:
         await self.repo.delete(f"pulls/{self.number}/reviews/{review_id}")
 
-    async def review_threads(self) -> list[dict[str, Any]]:
-        """Every review thread with its position and comments, pending ones included."""
+    async def review_threads(self, *, roots_only: bool = False) -> list[dict[str, Any]]:
+        """Every review thread, optionally with only its root comment's identity."""
+        query = _REVIEW_THREAD_ROOTS_QUERY if roots_only else _ALL_REVIEW_THREADS_QUERY
         threads: list[dict[str, Any]] = []
         cursor: str | None = None
         seen: set[str] = set()
         while True:
             pull = _graphql_pull(
-                await self.repo.graphql(
-                    _ALL_REVIEW_THREADS_QUERY, {"number": self.number, "cursor": cursor}
-                )
+                await self.repo.graphql(query, {"number": self.number, "cursor": cursor})
             )
             connection = pull.get("reviewThreads") if pull is not None else None
             if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):
@@ -651,8 +674,9 @@ class PullRequestClient:
         keep_review_id: int | None = None,
         keep_commit: str | None = None,
         scope_to_review_id: int | None = None,
+        state: Literal["approved", "changes_requested"] = "approved",
     ) -> list[int]:
-        """Dismiss Open SWE's standing approvals other than the kept ones; the ids GitHub refused.
+        """Dismiss Open SWE's standing reviews in ``state`` other than the kept ones; the ids GitHub refused.
 
         ``scope_to_review_id`` limits this to that review's login. An unknown review dismisses nothing.
         """
@@ -666,7 +690,7 @@ class PullRequestClient:
         refused: list[int] = []
         for review in reviews:
             if (
-                review.state != "approved"
+                review.state != state
                 or review.user is None
                 or review.user.login.lower() not in OPEN_SWE_GITHUB_LOGINS
                 or (only_login is not None and review.user.login.lower() != only_login)
@@ -1010,6 +1034,9 @@ class PullRequestClient:
             created_at=_as_optional_str(source.get("created_at")),
             updated_at=_as_optional_str(source.get("updated_at")),
             draft=_as_optional_bool(source.get("draft")),
+            author=_as_optional_str(source["user"].get("login"))
+            if isinstance(source.get("user"), Mapping)
+            else None,
             details_loading=not details,
             additions=_as_optional_int(source.get("additions")),
             deletions=_as_optional_int(source.get("deletions")),
@@ -1020,6 +1047,8 @@ class PullRequestClient:
         )
         if pull is None:
             return result
+        if result.merge_state == "clean":
+            result.required_checks_passing = True
         head = pull.get("head")
         if not isinstance(head, Mapping):
             return result
@@ -1040,6 +1069,15 @@ class PullRequestClient:
         )
         result.review_required = review_state.review_required
         result.unresolved_threads = review_state.unresolved_threads
+        base = pull.get("base")
+        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
+        config = None
+        if base_ref is not None and (
+            review_state.unresolved_threads or result.merge_state != "clean"
+        ):
+            config = await BranchConfig(self.repo.full_name, base_ref).read(self.repo.github.login)
+            if config is not None:
+                result.conversation_resolution_required = config.requires_conversation_resolution
         if runs is None or statuses is None:
             return result
         failed, _, _ = _normalize_checks(runs, statuses)
@@ -1070,13 +1108,19 @@ class PullRequestClient:
             if runs or statuses
             else "none"
         )
-        base = pull.get("base")
-        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        # A check gated on `needs:` has no run until its upstream jobs finish.
-        if base_ref is not None and result.merge_state == "blocked" and not pending:
-            required = await RequiredCheck.for_branch(self.repo, base_ref)
-            if required is not None:
-                result.missing_checks = unreported_required_checks(required, runs, statuses)
+        if config is not None and result.merge_state != "clean":
+            required = config.checks
+            passing_runs = [
+                run
+                for run in runs
+                if run.get("status") == "completed"
+                and run.get("conclusion") in {"success", "neutral", "skipped"}
+            ]
+            passing_statuses = [status for status in statuses if status.get("state") == "success"]
+            result.required_checks_passing = all(
+                check.reported_by(passing_runs, passing_statuses) for check in required
+            )
+            result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 
 
@@ -1104,7 +1148,7 @@ async def list_open_pull_requests(
     sort: str = "updated",
     direction: str = "desc",
     page: int = 1,
-    scope: Literal["mine", "review-requested"] = "mine",
+    scope: Literal["mine", "review-requested", "drafts"] = "mine",
 ) -> OpenPullRequests:
     """Read the open PRs ``login`` authored or is asked to review, with current-head checks."""
     if not _OWNER_PATTERN.fullmatch(login):
@@ -1119,8 +1163,10 @@ async def list_open_pull_requests(
         raise HTTPException(422, "repository must be owner/repo")
     if sort not in {"created", "updated"} or direction not in {"asc", "desc"}:
         raise HTTPException(422, "invalid PR sort")
-    qualifier = "author" if scope == "mine" else "review-requested"
+    qualifier = "author" if scope in {"mine", "drafts"} else "review-requested"
     query = f"is:pr is:open {qualifier}:{login}"
+    if scope == "drafts":
+        query += " draft:true"
     for name in repositories:
         query += f" repo:{name}"
     try:

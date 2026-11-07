@@ -1,9 +1,18 @@
 """Shared builders for dashboard ("Open in Web") URLs."""
 
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import ClassVar
 from urllib.parse import quote, unquote, urlsplit
 
 from openswe.config import ENV
 from openswe.utils.dashboard_ui import is_single_origin
+
+# Set by the dashboard's server proxy (ui/server/backend-proxy.ts) to the origin the
+# browser used, so a request that came in through an alias domain gets its sign-in
+# and MCP URLs on that domain.
+PUBLIC_ORIGIN_HEADER = "x-open-swe-public-origin"
 
 
 def dashboard_base_url() -> str:
@@ -58,6 +67,69 @@ def _origin(url: str) -> str | None:
     return f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}"
 
 
+class PublicOrigin:
+    """The origin a request is answered on: the configured one, or an alias of it.
+
+    ``DASHBOARD_ALIAS_URLS`` lists other origins that serve this dashboard and its
+    API. Each is a full alias: the dashboard's proxy serves the UI and forwards the
+    API on it, so a request arriving through one is answered with URLs on that
+    origin. ``PublicOriginMiddleware`` binds the current request's alias.
+    """
+
+    _current: ClassVar[ContextVar[str | None]] = ContextVar("request_alias_origin", default=None)
+
+    @staticmethod
+    def aliases() -> frozenset[str]:
+        """The alias origins configured in ``DASHBOARD_ALIAS_URLS``, normalized."""
+        return frozenset(
+            origin
+            for value in ENV.DASHBOARD_ALIAS_URLS.get().split(",")
+            if (origin := _origin(value.strip())) is not None
+        )
+
+    @classmethod
+    def alias(cls, claimed: str | None) -> str | None:
+        """``claimed`` normalized, if it is one of the configured alias origins.
+
+        The header that carries it can be set by anyone who reaches the backend
+        directly, so it only ever selects among origins this deployment lists.
+        """
+        if not claimed:
+            return None
+        origin = _origin(claimed.strip())
+        return origin if origin is not None and origin in cls.aliases() else None
+
+    @classmethod
+    @contextmanager
+    def serving(cls, origin: str | None) -> Generator[None]:
+        """Answer the current request as if ``origin`` (an alias, or None) were the base URL."""
+        token = cls._current.set(origin)
+        try:
+            yield
+        finally:
+            cls._current.reset(token)
+
+    @classmethod
+    def current_alias(cls) -> str | None:
+        """The alias origin the current request came in through, or None."""
+        return cls._current.get()
+
+    @classmethod
+    def dashboard_base_url(cls) -> str:
+        """``dashboard_base_url()``, or the alias origin the current request came in through.
+
+        For URLs the browser follows within this request (sign-in redirects, the
+        page to land on afterwards). Links sent elsewhere (Slack, GitHub, email)
+        keep ``dashboard_base_url()``, so they don't depend on who triggered them.
+        """
+        return cls.current_alias() or dashboard_base_url()
+
+    @classmethod
+    def dashboard_api_base_url(cls) -> str:
+        """``dashboard_api_base_url()``, or the alias origin the current request came in through."""
+        return cls.current_alias() or dashboard_api_base_url()
+
+
 def dashboard_is_same_origin() -> bool:
     """True when the dashboard is served from the API's own origin."""
     frontend = _origin(dashboard_base_url())
@@ -74,7 +146,8 @@ def dashboard_thread_url(thread_id: str) -> str | None:
 
 def _dashboard_origins() -> set[str]:
     configured = [dashboard_base_url(), *ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")]
-    return {origin for value in configured if (origin := _origin(value.strip())) is not None}
+    origins = {origin for value in configured if (origin := _origin(value.strip())) is not None}
+    return origins | PublicOrigin.aliases()
 
 
 def dashboard_thread_id(locator: str) -> str | None:

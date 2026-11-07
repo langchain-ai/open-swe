@@ -14,13 +14,14 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from runtime_api.provenance import Provenance
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.claude_code.hooks import mirror_thread_id
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
+from openswe.input_messages import input_message_text
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
@@ -31,6 +32,7 @@ from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.records import lookup_slack_link_thread_id
 from openswe.slack.workflow_approval_cards import share_workflow_approval
 from openswe.threads import plan_api
+from openswe.threads import routes as thread_routes
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -38,7 +40,12 @@ from openswe.threads.handlers import (
     resolve_dashboard_thread,
 )
 from openswe.threads.identity import ThreadIdentity
-from openswe.threads.listing import list_dashboard_threads_page
+from openswe.threads.listing import (
+    SIDEBAR_ORDERS,
+    SidebarThreadOrderBody,
+    list_dashboard_threads_page,
+)
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
@@ -76,6 +83,8 @@ ThreadAction = Literal[
     "admin_cancel",
     "resolve",
     "unresolve",
+    "mark_read",
+    "mark_unread",
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
@@ -138,9 +147,7 @@ class _Actor:
             return None
         thread_id = mirror_thread_id(owner.id, session_id)
         try:
-            summary = await get_dashboard_thread(
-                thread_id, self.login, email=self.email, mark_viewed=False
-            )
+            summary = await get_dashboard_thread(thread_id, self.login, email=self.email)
         except HTTPException as exc:
             if exc.status_code == 404:
                 return None
@@ -452,9 +459,17 @@ async def list_threads(
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     try:
-        results = [
-            await _compact_list_item(item) if compact else _list_item(item) for item in items
-        ]
+        if compact:
+            results = []
+            for start in range(0, len(items), 8):
+                async with asyncio.TaskGroup() as tasks:
+                    batch = [
+                        tasks.create_task(_compact_list_item(item))
+                        for item in items[start : start + 8]
+                    ]
+                results.extend(task.result() for task in batch)
+        else:
+            results = [_list_item(item) for item in items]
     except Exception:
         logger.exception("Could not load thread outcomes")
         return _failure("Could not list threads")
@@ -537,7 +552,7 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
         return {
             "text": text[:_MAX_DETAIL_MESSAGE_CHARS],
             "truncated": truncated,
-            "sender_id": message_sender_id(content),
+            "sender_id": provenance.sender if (provenance := Provenance.of(message)) else None,
             "timestamp": _message_timestamp(message),
         }
     return None
@@ -588,7 +603,7 @@ def _transcript(state: Any) -> dict[str, Any]:
                 "role": "user" if kind in {"human", "user"} else "assistant",
                 "text": returned_text,
                 "truncated": len(returned_text) < len(text),
-                "sender_id": message_sender_id(content),
+                "sender_id": provenance.sender if (provenance := Provenance.of(message)) else None,
                 "timestamp": _message_timestamp(message),
             }
         )
@@ -621,35 +636,23 @@ async def _latest_state_github_login(state: Mapping[str, object] | None) -> str 
     if not isinstance(messages, list):
         return None
     for message in reversed(messages):
-        if _message_kind(message) not in {"human", "user"}:
+        provenance = Provenance.of(message)
+        if provenance is None or not provenance.human:
             continue
-        content = _message_content(message)
-        if dynamic_context_hash(content) is not None or message_sender_id(content, kind="system"):
-            continue
-        sender_id = message_sender_id(content)
-        if isinstance(sender_id, str) and sender_id.startswith("github:"):
+        sender_id = provenance.sender
+        if sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
             if not login.isdigit():
                 return login or None
-            blocks = content if isinstance(content, list) else [content]
-            for block in blocks:
-                text = _value(block, "text") if isinstance(block, Mapping) else block
-                if not isinstance(text, str):
-                    continue
-                try:
-                    envelope = ElementTree.fromstring(text)
-                except ElementTree.ParseError:
-                    continue
-                if (
-                    envelope.tag == "input-message"
-                    and envelope.get("sender") == sender_id
-                    and envelope.get("surface") in {"web", "automation"}
-                ):
-                    return login
+            if provenance.surface in {"web", "automation"}:
+                return login
             for context_message in reversed(messages):
-                context_content = _message_content(context_message)
-                if dynamic_context_hash(context_content) is None:
+                introduced = Provenance.of(context_message)
+                if introduced is None or introduced.kind != "context":
                     continue
+                if introduced.sender != sender_id:
+                    continue
+                context_content = _message_content(context_message)
                 blocks = context_content if isinstance(context_content, list) else [context_content]
                 for block in blocks:
                     text = _value(block, "text") if isinstance(block, Mapping) else block
@@ -658,12 +661,6 @@ async def _latest_state_github_login(state: Mapping[str, object] | None) -> str 
                     try:
                         context = ElementTree.fromstring(text)
                     except ElementTree.ParseError:
-                        continue
-                    if (
-                        context.tag != "dynamic-context"
-                        or context.get("kind") != "person"
-                        or context.get("id") != sender_id
-                    ):
                         continue
                     for line in (context.text or "").splitlines():
                         field, separator, value = line.partition(":")
@@ -733,7 +730,7 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
         snapshot = await get_langsmith_thread_cost(
             thread_id,
             invocation_id,
-            **({"lookup_start": str(lookup_start)} if lookup_start else {}),
+            lookup_start=str(lookup_start) if lookup_start else None,
         )
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
@@ -851,14 +848,14 @@ async def _authorized_locator(
     if langsmith_locator:
         thread_id = await get_open_swe_thread_id_from_langsmith(locator) or ""
         if not thread_id:
-            return _failure("Could not resolve LangSmith trace to an Open SWE thread")
+            return _failure("Could not resolve LangSmith trace to a Robin thread")
     elif slack_locator:
         thread_id = await lookup_slack_link_thread_id(locator) or ""
         if not thread_id:
-            return _failure("Could not resolve Slack link to an Open SWE thread")
+            return _failure("Could not resolve Slack link to a Robin thread")
     if not thread_id:
         return _failure(
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, "
+            "thread_id must be an exact thread ID, Robin dashboard URL, Slack link, "
             "or LangSmith trace URL"
         )
     try:
@@ -866,7 +863,6 @@ async def _authorized_locator(
             thread_id,
             actor.login,
             email=actor.email,
-            mark_viewed=False,
         )
     except HTTPException as exc:
         if exc.status_code != 404 or langsmith_locator or not _looks_uuid(locator):
@@ -882,7 +878,6 @@ async def _authorized_locator(
                 thread_id,
                 actor.login,
                 email=actor.email,
-                mark_viewed=False,
             )
     if (
         summary.get("visibility") == "private"
@@ -939,6 +934,7 @@ def _available_actions(
         actions.append("add_plan_comment")
     if can_delete_plan_comment:
         actions.append("delete_plan_comment")
+    actions.extend(["mark_read", "mark_unread"])
     actions.append("unresolve" if resolved else "resolve")
     if running:
         actions.append("cancel")
@@ -981,9 +977,11 @@ async def get_thread(
             pending_runs_task = tasks.create_task(
                 client.runs.list(thread_id, status="pending", limit=1000)
             )
+            runs = await runs_task
+            cost_task = tasks.create_task(_thread_cost(thread_id, runs[0] if runs else None))
         thread = thread_task.result()
         thread_state = state_task.result()
-        runs = runs_task.result()
+        cost = cost_task.result()
         plan_content = plan_content_task.result()
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
@@ -1006,7 +1004,6 @@ async def get_thread(
     can_delete_plan_comment = any(
         comment.get("author_login") == actor.login for comment in plan_comments
     )
-    cost = await _thread_cost(thread_id, latest_run)
     pr = summary.get("pr")
     pr_url = pr.get("url") if isinstance(pr, Mapping) else None
     links = {
@@ -1169,6 +1166,8 @@ def _unexpected_action_arguments(
         "admin_cancel": set(),
         "resolve": set(),
         "unresolve": set(),
+        "mark_read": set(),
+        "mark_unread": set(),
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
@@ -1190,6 +1189,46 @@ def _unexpected_action_arguments(
     if content_format != "html":
         provided.add("content_format")
     return sorted(provided - allowed)
+
+
+@expose_mcp()
+@audit_tool()
+async def reorder_sidebar_threads(
+    thread_ids: list[str],
+    project: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
+    state: Annotated[dict[str, object] | None, InjectedState] = None,
+) -> dict[str, object]:
+    """Reorder the requester's threads within one personal sidebar folder."""
+    actor = await _actor(state)
+    if actor is None:
+        return {"ok": False, "error": _NO_WRITER}
+    try:
+        body = SidebarThreadOrderBody(
+            thread_ids=thread_ids, project=project, repo=repo, ownerless=ownerless
+        )
+        await SIDEBAR_ORDERS.reorder(actor.login, body, email=actor.email)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
+
+
+@expose_mcp()
+@audit_tool()
+async def reorder_thread_pins(
+    thread_ids: list[str],
+    state: Annotated[dict[str, object] | None, InjectedState] = None,
+) -> dict[str, object]:
+    """Reorder the verified requester's already pinned sidebar threads."""
+    actor = await _actor(state)
+    if actor is None:
+        return {"ok": False, "error": _NO_WRITER}
+    try:
+        await THREAD_PINS.reorder(actor.login, thread_ids)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
 
 
 @expose_mcp()
@@ -1275,6 +1314,13 @@ async def manage_thread(
                     "thread": {"id": thread_id, "status": thread.get("status")},
                 }
             return {"success": True, "thread": _list_item(thread)}
+        if action in {"mark_read", "mark_unread"}:
+            result = await thread_routes.api_set_thread_read_state(
+                thread_id,
+                thread_routes.ThreadReadState(viewed=action == "mark_read"),
+                session=actor.session,
+            )
+            return {"success": True, "thread_id": thread_id, "viewed": result.viewed}
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
                 thread_id,

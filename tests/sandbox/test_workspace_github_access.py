@@ -8,7 +8,6 @@ from fnmatch import fnmatchcase
 from typing import TypedDict
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import httpx2
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
@@ -35,7 +34,7 @@ class ListedRepository(TypedDict):
 
 
 @pytest.fixture
-def github_requests() -> list[httpx.Request]:
+def github_requests() -> list[httpx2.Request]:
     return []
 
 
@@ -51,14 +50,14 @@ def github_repositories() -> list[ListedRepository]:
 @pytest.fixture
 def github(
     monkeypatch: pytest.MonkeyPatch,
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
     github_repositories: list[ListedRepository],
 ) -> Iterator[list[dict[str, object]]]:
     """GitHub issues synthetic tokens encoding their repository permissions."""
     payloads: list[dict[str, object]] = []
     client = httpx2.AsyncClient
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         github_requests.append(request)
         if request.url.path.endswith("/access_tokens"):
             body = json.loads(request.content or b"{}")
@@ -67,12 +66,12 @@ def github(
             if requested is not None and not set(requested) <= {
                 repo["id"] for repo in github_repositories
             }:
-                return httpx.Response(422, json={"message": "Validation Failed"})
+                return httpx2.Response(422, json={"message": "Validation Failed"})
             ids = requested if requested is not None else [11, 22]
             token = "repos:" + ",".join(str(repo_id) for repo_id in ids)
             if permissions := body.get("permissions"):
                 token += ";" + ",".join(f"{k}={v}" for k, v in sorted(permissions.items()))
-            return httpx.Response(
+            return httpx2.Response(
                 201,
                 json={
                     "token": token,
@@ -80,7 +79,7 @@ def github(
                 },
             )
         if request.url.path == "/installation/repositories":
-            return httpx.Response(200, json={"repositories": github_repositories})
+            return httpx2.Response(200, json={"repositories": github_repositories})
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     def handle_proxy(request: httpx2.Request) -> httpx2.Response:
@@ -92,7 +91,12 @@ def github(
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     def make_client(**kwargs: object) -> httpx2.AsyncClient:
-        return client(transport=httpx2.MockTransport(handle_proxy))
+        transport = kwargs.get("transport")
+        return client(
+            transport=transport
+            if isinstance(transport, httpx2.MockTransport)
+            else httpx2.MockTransport(handle_proxy)
+        )
 
     monkeypatch.setattr(httpx2, "AsyncClient", make_client)
     mock_github_sdk(monkeypatch, handle)
@@ -579,11 +583,11 @@ async def test_repository_access_uses_later_installation_pages(
 ) -> None:
     requests: list[dict[str, object]] = []
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         if request.method == "POST":
             body = json.loads(request.content or b"{}")
             requests.append(body)
-            return httpx.Response(
+            return httpx2.Response(
                 201, json={"token": "test-token", "expires_at": "2099-01-01T00:00:00Z"}
             )
         page = int(request.url.params.get("page", "1"))
@@ -599,7 +603,7 @@ async def test_repository_access_uses_later_installation_pages(
             if page == 1
             else {}
         )
-        return httpx.Response(200, json={"repositories": repos}, headers=headers)
+        return httpx2.Response(200, json={"repositories": repos}, headers=headers)
 
     mock_github_sdk(monkeypatch, handle)
     monkeypatch.setattr(app, "GITHUB_APP_ID", "1")
@@ -614,7 +618,7 @@ async def test_repository_access_uses_later_installation_pages(
         app.clear_app_token_cache()
 
 
-def listing_calls(requests: list[httpx.Request]) -> int:
+def listing_calls(requests: list[httpx2.Request]) -> int:
     return sum(request.url.path == "/installation/repositories" for request in requests)
 
 
@@ -632,7 +636,7 @@ async def stored_github_id(full_name: str) -> int | None:
 
 @pytest.mark.usefixtures("registry_db", "github")
 async def test_first_use_lists_the_installation_once_and_stores_the_id(
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
 ) -> None:
     await stored_repository("acme/api")
 
@@ -647,7 +651,7 @@ async def test_first_use_lists_the_installation_once_and_stores_the_id(
 
 @pytest.mark.usefixtures("registry_db", "github")
 async def test_repository_outside_the_installation_is_looked_for_again_after_the_interval(
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
     github_repositories: list[ListedRepository],
 ) -> None:
     await stored_repository("acme/api")
@@ -670,7 +674,7 @@ async def test_repository_outside_the_installation_is_looked_for_again_after_the
 
 @pytest.mark.usefixtures("registry_db", "github")
 async def test_refused_stored_id_is_replaced_from_the_listing(
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
 ) -> None:
     await stored_repository("acme/api", github_id=99)
 
@@ -702,7 +706,7 @@ async def test_renamed_repository_keeps_its_stored_id(
 @pytest.mark.usefixtures("registry_db", "github")
 async def test_refused_ids_fail_closed_after_one_listing(
     monkeypatch: pytest.MonkeyPatch,
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
 ) -> None:
     await stored_repository("acme/api", github_id=11)
     monkeypatch.setattr(
@@ -720,7 +724,7 @@ async def test_refused_ids_fail_closed_after_one_listing(
 @pytest.mark.usefixtures("registry_db", "github")
 async def test_unreadable_stored_ids_fall_back_to_the_listing(
     monkeypatch: pytest.MonkeyPatch,
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
 ) -> None:
     await stored_repository("acme/api", github_id=11)
     monkeypatch.setattr(
@@ -735,7 +739,7 @@ async def test_unreadable_stored_ids_fall_back_to_the_listing(
 async def test_reconnect_restricted_to_one_repository_mints_from_stored_ids(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
-    github_requests: list[httpx.Request],
+    github_requests: list[httpx2.Request],
 ) -> None:
     await stored_repository("acme/api")
     await stored_repository("acme/internal")

@@ -11,7 +11,6 @@ from time import monotonic
 from typing import Any, Literal
 
 from langgraph_sdk.client import LangGraphClient
-from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel
 
 from openswe.slack.client import (
@@ -26,10 +25,10 @@ from openswe.slack.records import lookup_slack_thread_id, store_slack_run_mappin
 from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
 from openswe.tasks.store import TaskMembership, sidebar_memberships
+from openswe.threads.runtimes import RUNTIMES
+from openswe.threads.store import THREADS
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
-from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
-from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,7 @@ def _basename(value: str) -> str:
     return PurePath(value).name if value else "file"
 
 
-def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
+def tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     if name in {"read_file", "write_file", "edit_file", "delete"}:
         action = {
             "read_file": "Reading",
@@ -165,7 +164,7 @@ class SlackThinkingStream:
             return False
         self.next_location_check = now + _LOCATION_CHECK_SECONDS
         home = (self.channel_id, self.mapping_thread_ts)
-        location = await _current_slack_location(self.client, self.thread_id, unbound=home)
+        location = await _current_slack_location(self.thread_id, unbound=home)
         return location is not None and location != home
 
     async def start(self) -> bool:
@@ -212,7 +211,7 @@ class SlackThinkingStream:
             if startup and startup.status == "in_progress":
                 startup.status = "complete"
                 self.pending[startup.task_id] = startup
-            title, details = _tool_step(name, data.get("input"))
+            title, details = tool_step(name, data.get("input"))
             step = Step(
                 _step_id(self.run_id, namespace, call_id),
                 title,
@@ -390,12 +389,12 @@ async def show_slack_thinking_status(
         nonlocal last_known
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            location = await _current_slack_location(client, thread_id, unbound=home)
+            location = await _current_slack_location(thread_id, unbound=home)
             if location is None:
                 continue
             last_known = location
             if not is_code_channel_session(last_known[1]) and (
-                await _task_has_active_runs(client, thread_id)
+                await _task_has_active_runs(thread_id)
                 or await RoutedWork(thread_id).delegated_active()
             ):
                 await restore_slack_thinking_status(*last_known)
@@ -410,7 +409,7 @@ async def show_slack_thinking_status(
             try:
                 await client.runs.join(run_thread_id or thread_id, run_id)
                 while run_thread_id is None and (
-                    await _task_has_active_runs(client, thread_id)
+                    await _task_has_active_runs(thread_id)
                     or await RoutedWork(thread_id).delegated_active()
                 ):
                     await asyncio.sleep(_STATUS_REFRESH_SECONDS)
@@ -437,15 +436,15 @@ async def show_slack_thinking_status(
                     exc_info=(type(error), error, error.__traceback__),
                 )
         finally:
-            await asyncio.shield(_settle_after_run(client, thread_id, home, last_known))
+            await asyncio.shield(_settle_after_run(thread_id, home, last_known))
 
 
 async def _current_slack_location(
-    client: LangGraphClient, thread_id: str, *, unbound: tuple[str, str]
+    thread_id: str, *, unbound: tuple[str, str]
 ) -> tuple[str, str] | None:
     """The thread's Slack binding now, `unbound` when it has none, or None when unreadable."""
     try:
-        metadata = thread_metadata(await client.threads.get(thread_id))
+        metadata = await _metadata(thread_id)
     except Exception:
         logger.warning(
             "Could not read the thread's current Slack location",
@@ -457,7 +456,6 @@ async def _current_slack_location(
 
 
 async def _settle_after_run(
-    client: LangGraphClient,
     thread_id: str,
     home: tuple[str, str],
     last_known: tuple[str, str],
@@ -466,17 +464,16 @@ async def _settle_after_run(
     for attempt, delay in enumerate((0.0, *_STATUS_RETRY_DELAYS)):
         if attempt:
             await asyncio.sleep(delay)
-        location = await _current_slack_location(client, thread_id, unbound=home)
+        location = await _current_slack_location(thread_id, unbound=home)
         if location is not None:
             break
     location = location or last_known
     if not is_code_channel_session(location[1]):
-        await clear_slack_thinking_status_if_idle(client, thread_id, *location)
+        await clear_slack_thinking_status_if_idle(thread_id, *location)
 
 
 async def settle_slack_thread_status(channel_id: str, thread_ts: str) -> None:
     """Hand a Slack thread's status back to the conversation mapped there, or clear it."""
-    client = langgraph_client()
     try:
         thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     except Exception:
@@ -487,7 +484,7 @@ async def settle_slack_thread_status(channel_id: str, thread_ts: str) -> None:
         )
         thread_id = None
     if thread_id:
-        await sync_slack_background_status(client, thread_id, resume=True)
+        await refresh_slack_background_status(thread_id, resume=True)
     else:
         await set_slack_thread_status(channel_id, thread_ts, "")
 
@@ -501,7 +498,6 @@ async def release_slack_location_status(channel_id: str, thread_ts: str) -> None
 
 
 async def clear_slack_thinking_status_if_idle(
-    client: LangGraphClient,
     thread_id: str,
     channel_id: str,
     thread_ts: str,
@@ -513,7 +509,6 @@ async def clear_slack_thinking_status_if_idle(
         if attempt:
             await asyncio.sleep(delay)
         if await _settle_slack_thinking_status(
-            client,
             thread_id,
             channel_id,
             thread_ts,
@@ -527,7 +522,6 @@ async def clear_slack_thinking_status_if_idle(
 
 
 async def _settle_slack_thinking_status(
-    client: LangGraphClient,
     thread_id: str,
     channel_id: str,
     thread_ts: str,
@@ -536,8 +530,8 @@ async def _settle_slack_thinking_status(
 ) -> bool:
     try:
         if metadata is None:
-            metadata = thread_metadata(await client.threads.get(thread_id))
-        if await _task_has_active_runs(client, thread_id):
+            metadata = await _metadata(thread_id)
+        if await _task_has_active_runs(thread_id):
             return True
         if await RoutedWork(thread_id).delegated_active(metadata=metadata):
             return await restore_slack_thinking_status(channel_id, thread_ts)
@@ -546,15 +540,14 @@ async def _settle_slack_thinking_status(
             for worker in (await sidebar_memberships([thread_id], workers_of=True)).values():
                 if worker.cancelled or worker.launch_error:
                     continue
-                try:
-                    worker_metadata = thread_metadata(await client.threads.get(worker.thread_id))
-                except NotFoundError:
+                worker_thread = await THREADS.get(worker.thread_id)
+                if worker_thread is None:
                     logger.debug(
                         "Worker thread creation is incomplete",
                         extra={"worker_thread_id": worker.thread_id},
                     )
                     continue
-                if worker_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+                if worker_thread.metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
                     waiting = True
                     break
         if not await set_slack_thread_status(
@@ -582,13 +575,53 @@ async def sync_slack_background_status(
     metadata: Mapping[str, object] | None = None,
     source_context: SourceContext | None = None,
 ) -> None:
+    """Refresh the indicator, and follow a worker's run `run_id` until its task is idle.
+
+    Following the run joins it, which is all this needs the client for.
+    """
+    refreshed = await refresh_slack_background_status(
+        thread_id, resume=resume, metadata=metadata, source_context=source_context
+    )
+    if run_id is None or refreshed is None or refreshed.thread_id == thread_id:
+        return
+    observer = asyncio.create_task(
+        show_slack_thinking_status(
+            client=client,
+            thread_id=refreshed.thread_id,
+            run_id=run_id,
+            channel_id=refreshed.channel_id,
+            thread_ts=refreshed.thread_ts,
+            run_thread_id=thread_id,
+        )
+    )
+    _STATUS_OBSERVERS.add(observer)
+    observer.add_done_callback(_STATUS_OBSERVERS.discard)
+
+
+@dataclass(frozen=True)
+class StatusLocation:
+    """The thread whose Slack status a refresh settled (a worker's coordinator) and where."""
+
+    thread_id: str
+    channel_id: str
+    thread_ts: str
+
+
+async def refresh_slack_background_status(
+    thread_id: str,
+    *,
+    resume: bool = False,
+    metadata: Mapping[str, object] | None = None,
+    source_context: SourceContext | None = None,
+) -> StatusLocation | None:
     """Refresh the indicator using a current snapshot or a destination-only hint.
 
-    A source context without Slack is authoritative; None means it is unknown.
-    A destination hint never substitutes for task metadata when settling idle work.
+    A worker's indicator is its coordinator's. A source context without Slack is
+    authoritative; None means it is unknown. A destination hint never substitutes
+    for task metadata when settling idle work. None when there's no Slack thread
+    to show it in, or it couldn't be refreshed.
     """
     try:
-        run_thread_id = thread_id
         context = await TaskMembership.context_for_thread(thread_id)
         if context is not None and context.membership.role == "worker":
             thread_id = context.task.require_coordinator()
@@ -596,33 +629,20 @@ async def sync_slack_background_status(
             source_context = None
         if source_context is None:
             if metadata is None:
-                metadata = thread_metadata(await client.threads.get(thread_id))
+                metadata = await _metadata(thread_id)
             source_context = SourceContext.from_metadata(metadata)
         slack_thread = source_context.slack_thread
         if slack_thread is None or not slack_thread.location:
-            return
+            return None
         channel_id, thread_ts = slack_thread.location
         if is_code_channel_session(thread_ts):
-            return
-        if run_id and run_thread_id != thread_id:
-            observer = asyncio.create_task(
-                show_slack_thinking_status(
-                    client=client,
-                    thread_id=thread_id,
-                    run_id=run_id,
-                    channel_id=channel_id,
-                    thread_ts=thread_ts,
-                    run_thread_id=run_thread_id,
-                )
-            )
-            _STATUS_OBSERVERS.add(observer)
-            observer.add_done_callback(_STATUS_OBSERVERS.discard)
-        if await _task_has_active_runs(client, thread_id):
+            return None
+        if await _task_has_active_runs(thread_id):
             if resume:
                 await restore_slack_thinking_status(channel_id, thread_ts)
         else:
             await clear_slack_thinking_status_if_idle(
-                client, thread_id, channel_id, thread_ts, metadata=metadata
+                thread_id, channel_id, thread_ts, metadata=metadata
             )
     except Exception:
         logger.warning(
@@ -630,24 +650,34 @@ async def sync_slack_background_status(
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
+        return None
+    return StatusLocation(thread_id, channel_id, thread_ts)
 
 
-async def _task_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
-    if await _thread_has_active_runs(client, thread_id):
+async def _task_has_active_runs(thread_id: str) -> bool:
+    if await _thread_has_active_runs(thread_id):
         return True
     for worker in (await sidebar_memberships([thread_id], workers_of=True)).values():
         if worker.cancelled or worker.launch_error:
             continue
         try:
-            if await _thread_has_active_runs(client, worker.thread_id):
+            if await _thread_has_active_runs(worker.thread_id):
                 return True
-        except NotFoundError:
+        except LookupError:
             logger.warning("Worker thread is missing", extra={"worker_thread_id": worker.thread_id})
     return False
 
 
-async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
-    for status in ("pending", "running"):
-        if await client.runs.list(thread_id, status=status, limit=1):
-            return True
-    return False
+async def _thread_has_active_runs(thread_id: str) -> bool:
+    """Whether a run on the thread is still pending or running, asked of its runtime."""
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise LookupError(f"Thread {thread_id} is not indexed")
+    return await RUNTIMES.runs_on(thread.runtime).has_active_run(thread_id)
+
+
+async def _metadata(thread_id: str) -> Mapping[str, object]:
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise LookupError(f"Thread {thread_id} is not indexed")
+    return thread.metadata

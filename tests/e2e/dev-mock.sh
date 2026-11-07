@@ -53,7 +53,7 @@ export DASHBOARD_ALLOWED_ORIGINS="$UI"
 echo
 echo "┌──────────────────────────────────────────────────────────────────────┐"
 echo "│  START HERE →  ${UI}/login                            │"
-echo "│  Continue with GitHub → pick Alice or Bob (mock sign-in)              │"
+echo "│  Continue with LangSmith → pick Alice or Bob (mock sign-in)           │"
 echo "└──────────────────────────────────────────────────────────────────────┘"
 echo "  Mock Slack:  ${UI}/mock/slack          (send as Alice or Bob)"
 echo "  Everything is on ${UI} (Vite HMR; API + WS proxied to the harness)."

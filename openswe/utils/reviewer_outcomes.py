@@ -79,7 +79,7 @@ async def _ensure_dataset(client: AsyncLangSmithClient) -> uuid.UUID:
         ds = await client.create_dataset(
             dataset_name=OUTCOMES_DATASET_NAME,
             description=(
-                "Open SWE reviewer finding outcomes (resolved / dismissed / 👍👎) "
+                "Robin reviewer finding outcomes (resolved / dismissed / 👍👎) "
                 "captured in production."
             ),
         )

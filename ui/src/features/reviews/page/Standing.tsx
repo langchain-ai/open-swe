@@ -198,7 +198,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
       </div>
       {open && status && (
         <div className="divide-y border-t border-default">
-          <ChecksRow checks={detail.checks} status={status} login={login} />
+          <ChecksRow pr={pr} status={status} login={login} />
           <ReviewsRow pr={pr} detail={detail} status={status} login={login} />
           <BranchRow pr={pr} detail={detail} status={status} login={login} />
           <OpenSweRow pr={pr} detail={detail} />
@@ -389,14 +389,18 @@ function checkState(
 const checkRank = { fail: 0, pending: 1, pass: 2, skip: 3 } as const
 
 function ChecksRow({
-  checks,
+  pr,
   status,
   login,
 }: {
-  checks: Array<ReviewCheckRun>
+  pr: PullRequestRef
   status: OpenPullRequest
   login: string
 }) {
+  const checksQuery = useQuery(reviewQueries.checks(pr))
+  const checks = checksQuery.data ?? []
+  // Until the runs arrive, the status cache's CI state stands in for them.
+  const loading = checksQuery.isPending
   const [expanded, setExpanded] = useState(status.ci === "failing")
   const askInChat = useReviewPage((state) => state.askInChat)
   const states = checks.map(checkState)
@@ -426,7 +430,7 @@ function ChecksRow({
     <div>
       <Row
         icon={
-          failed
+          failed || (loading && status.ci === "failing")
             ? failIcon
             : pending || status.ci === "pending"
               ? pendingIcon
@@ -446,7 +450,7 @@ function ChecksRow({
           ) : null
         }
       >
-        {summary}
+        {loading ? <Skeleton className="h-3 w-40" /> : summary}
       </Row>
       {expanded && (
         <ul className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7">
@@ -505,7 +509,7 @@ function ChecksRow({
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  className="ml-auto h-auto border-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
                   Ask why
                 </Button>
@@ -760,7 +764,7 @@ function OpenSweRow({
   const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
-    meta: { errorTitle: "Couldn't start the Open SWE review" },
+    meta: { errorTitle: "Couldn't start the Robin review" },
     onSuccess: () => {
       queryClient.setQueryData(reviewQueries.detail(pr).queryKey, (old) =>
         old ? { ...old, status: "running" as const } : old
@@ -788,7 +792,9 @@ function OpenSweRow({
                 ? "approved"
                 : verdict.decision === "would_approve"
                   ? "would approve"
-                  : "needs human review"
+                  : verdict.decision === "would_approve_conditionally"
+                    ? "would approve subject to human approval"
+                    : "needs human review"
               : null,
             bugs || flags
               ? [bugs && plural(bugs, "bug"), flags && plural(flags, "flag")]
@@ -805,7 +811,7 @@ function OpenSweRow({
         icon={
           running ? <Spinner size="xs" /> : <AgentMark className="size-4" />
         }
-        label="Open SWE"
+        label="Robin"
         expandable={canExpand}
         expanded={expanded}
         onToggle={() => setChosen(!expanded)}
@@ -938,7 +944,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                   size="xs"
                   variant="plain"
                   color="secondary"
-                  aria-label={`Ask Open SWE about: ${finding.title}`}
+                  aria-label={`Ask Robin about: ${finding.title}`}
                   onClick={() => askInChat(askAboutFinding(finding))}
                 >
                   Ask
@@ -948,7 +954,7 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                     size="xs"
                     variant="plain"
                     color="secondary"
-                    aria-label={`Ask Open SWE to fix: ${finding.title}`}
+                    aria-label={`Ask Robin to fix: ${finding.title}`}
                     onClick={() => askInChat(fixFinding(finding))}
                   >
                     Fix it
@@ -957,7 +963,10 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
               </span>
             </div>
             {open && (
-              <div className="markdown-body mt-space-1 max-w-prose text-xs text-secondary">
+              <div
+                data-reply-part={`Robin finding at ${findingLocation(finding)}: ${finding.title}`}
+                className="markdown-body mt-space-1 max-w-prose text-xs text-secondary"
+              >
                 <Markdown content={finding.description} />
                 {finding.resolution_note && (
                   <p className="mt-space-1 flex items-center gap-space-1">

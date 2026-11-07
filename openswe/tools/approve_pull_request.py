@@ -6,7 +6,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.review_guide.context import GuideContext, GuideUnavailableError, requester_login
 from openswe.review_guide.github import approve
 
-DEFAULT_BODY = "Approved after a guided walkthrough in Slack via Open SWE."
+DEFAULT_BODY = "Approved after a guided walkthrough in Slack via Robin."
 
 
 @audit_tool()

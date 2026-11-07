@@ -40,6 +40,12 @@ export const reviewQueries = {
       queryFn: () => api.getReviewDiff(pr.owner, pr.repo, pr.number),
       ...reviewDiffOptions,
     }),
+  checks: (pr: PullRequestRef) =>
+    queryOptions({
+      queryKey: reviewKeys.checks(pr),
+      queryFn: () => api.getReviewChecks(pr.owner, pr.repo, pr.number),
+      ...sharedReviewOptions(pr),
+    }),
   conversation: (pr: PullRequestRef) =>
     queryOptions({
       queryKey: reviewKeys.conversation(pr),
@@ -117,6 +123,7 @@ export function warmReviewPage(queryClient: QueryClient, pr: PullRequestRef) {
   void queryClient.prefetchQuery(reviewQueries.detail(pr))
   void queryClient.prefetchQuery(reviewQueries.diff(pr))
   void queryClient.prefetchQuery(reviewQueries.conversation(pr))
+  void queryClient.prefetchQuery(reviewQueries.checks(pr))
   getOrCreateWorkerPoolSingleton({
     poolOptions: DIFF_WORKER_POOL_OPTIONS,
     highlighterOptions: DIFF_WORKER_HIGHLIGHTER_OPTIONS,

@@ -7,6 +7,8 @@ import httpx2
 import pytest
 from fastapi import FastAPI
 
+from openswe.audit_logs.context import current_audit_log
+from openswe.audit_logs.models import AuditLog
 from openswe.dashboard import oauth, profiles, routes
 from openswe.users.models import User
 
@@ -128,7 +130,13 @@ async def test_admin_can_add_list_and_remove_bot(
 ) -> None:
     assert (await client.get("/dashboard/api/slack/bots")).json() == []
     assert (await client.get("/dashboard/api/slack/allowed-bots")).json() == []
-    response = await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": " U123 "})
+    entry = AuditLog(operation_name="allow_slack_bot")
+    token = current_audit_log.set(entry)
+    try:
+        response = await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": " U123 "})
+    finally:
+        current_audit_log.reset(token)
+    assert entry.enrichments.resource_ids == ["slack:T123:B123"]
     assert response.status_code == 200, response.text
     bot = response.json()
     assert {key: bot[key] for key in ("team_id", "bot_id", "user_id", "created_by", "name")} == {
@@ -140,7 +148,15 @@ async def test_admin_can_add_list_and_remove_bot(
     }
     assert (await client.get("/dashboard/api/slack/allowed-bots")).json() == [bot]
     assert directory["auth_calls"] == 1
-    assert (await client.delete("/dashboard/api/slack/allowed-bots/T123/B123")).status_code == 200
+    entry = AuditLog(operation_name="remove_allowed_slack_bot")
+    token = current_audit_log.set(entry)
+    try:
+        assert (
+            await client.delete("/dashboard/api/slack/allowed-bots/T123/B123")
+        ).status_code == 200
+    finally:
+        current_audit_log.reset(token)
+    assert entry.enrichments.resource_ids == ["slack:T123:B123"]
     assert (await client.get("/dashboard/api/slack/allowed-bots")).json() == []
 
 

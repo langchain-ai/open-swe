@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal, Self, TypedDict
+from urllib.parse import quote
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
@@ -121,7 +122,7 @@ class HumanReviewRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
-    # Hunks the agent left off an expedited card as qualifying under the target repo's APPROVALS.md.
+    # Hunks the agent left off an expedited card as qualifying under the target repo's auto-approve rules.
     excluded_hunks: Mapped[list[ExcludedHunk]] = mapped_column(JSONB, default_factory=list)
     tldr: Mapped[str] = mapped_column(server_default="", default="")
     state: Mapped[RequestState] = mapped_column(Text, default="open")
@@ -223,6 +224,18 @@ class HumanReviewRequest(Base):
         """GitHub handles of the approvers, for display."""
         return [participant.github_login for participant in self.approvals]
 
+    @property
+    def approval_condition(self) -> str:
+        """What an expedited card asks voters to okay in place of the hunks it hides."""
+        return next(
+            (e["guideline"] for e in self.excluded_hunks if e.get("approval_condition")), ""
+        )
+
+    @property
+    def auto_approved(self) -> str:
+        """What Open SWE's review judged the approval criteria already cover besides the condition."""
+        return next((e["reason"] for e in self.excluded_hunks if e.get("approval_condition")), "")
+
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
 
@@ -247,6 +260,18 @@ class HumanReviewRequest(Base):
             return False
         owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
+
+    async def card_url(self) -> str:
+        """Link to the card even when Slack's permalink lookup is unavailable."""
+        from openswe.slack.client import get_slack_permalink
+
+        channel, timestamp = self.slack_channel_id, self.slack_message_ts
+        if not channel or not timestamp:
+            return ""
+        permalink = await get_slack_permalink(channel, timestamp)
+        if permalink:
+            return permalink
+        return f"https://app.slack.com/archives/{quote(channel, safe='')}/p{quote(timestamp.replace('.', ''), safe='')}"
 
     @property
     def slack_location(self) -> tuple[str, str] | None:

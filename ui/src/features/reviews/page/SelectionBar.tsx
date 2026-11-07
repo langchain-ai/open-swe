@@ -93,13 +93,13 @@ export function SelectionBar({
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label="Ask Open SWE"
+        aria-label="Ask Robin"
         type="button"
         onClick={onAsk}
         className="gap-space-2 px-space-2 py-space-1 font-medium hover:bg-elevated-hover"
       >
         <AgentMark />
-        Ask Open SWE
+        Ask Robin
         <Kbd>{askShortcut}</Kbd>
       </Button>
       <Button

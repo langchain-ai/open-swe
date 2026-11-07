@@ -311,6 +311,10 @@ describe("WorkspacesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(screen.getByText("#oss-help")).toBeTruthy()
 
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Channel type for #oss-help" })
+    )
+    fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
@@ -319,6 +323,7 @@ describe("WorkspacesSection", () => {
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
       kitchen_channel_ids: [],
+      ask_channel_ids: ["C0000000002"],
     })
   })
 })

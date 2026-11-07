@@ -1,14 +1,17 @@
 """Slack interactivity for expedited approvals: the card's clicks and its channel picker."""
 
 import logging
+from uuid import UUID
 
 from fastapi import BackgroundTasks
 from pydantic import ValidationError
 
 from openswe.expedited_review import card
 from openswe.expedited_review.voting import CardAction, process_vote
+from openswe.human_review.lifecycle import ReviewCard
+from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import PersonIdentity
-from openswe.slack.blocks import conversation_input, modal, view_payload
+from openswe.slack.blocks import view_payload
 from openswe.slack.client import open_slack_modal
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction, SlackModalOrigin
 from openswe.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
@@ -17,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 BUTTON_TYPE = card.BUTTON_TYPE
 CHANNEL_SELECT_ACTION = card.CHANNEL_SELECT_ACTION
-CHANNEL_MODAL = "expedited_review_channel"
-_MODAL_BLOCK = "channel"
-_MODAL_ACTION = "channel"
+CHANNEL_MODAL = card.CHANNEL_MODAL
+_MODAL_BLOCK = card.PICKER_BLOCK
+_MODAL_ACTION = card.PICKER_ACTION
 
 
 class _PickerOrigin(SlackModalOrigin):
@@ -34,29 +37,23 @@ def slack_person(slack_user_id: str) -> PersonIdentity:
 
 
 async def _open_picker(interaction: SlackInteraction, approval_id: str) -> WebhookResponse:
+    """Open the picker from a card posted before Trigger Server opened it."""
     origin = _PickerOrigin(
         channel_id=interaction.channel_id, approval_id=approval_id, thread_ts=interaction.thread_ts
     )
-    view = modal(
-        callback_id=CHANNEL_MODAL,
-        title="Send expedited review",
-        blocks=[
-            conversation_input(
-                block_id=_MODAL_BLOCK,
-                label="Channel",
-                action_id=_MODAL_ACTION,
-                include=["public"],
-            )
-        ],
-        submit="Send",
-        close="Cancel",
-        private_metadata=origin.model_dump_json(),
-    )
-    if not interaction.trigger_id or not await open_slack_modal(
+    view = card.channel_picker(origin.model_dump_json())
+    if interaction.trigger_id and await open_slack_modal(
         interaction.trigger_id, view_payload(view)
     ):
-        return ignored("Could not open the channel picker")
-    return accepted("Channel picker opened")
+        return accepted("Channel picker opened")
+    # Too late to open it: the card's current button opens it through Trigger Server.
+    try:
+        approval = await HumanReviewRequest.get(UUID(approval_id))
+    except ValueError:
+        approval = None
+    if approval is not None:
+        await ReviewCard(approval).refresh()
+    return ignored("Could not open the channel picker")
 
 
 def _picked_channel(interaction: SlackInteraction) -> str:
@@ -120,6 +117,7 @@ async def handle_button(
         message_ts=interaction.message_ts,
         message_text=interaction.message.text,
         message_blocks=interaction.message.blocks,
+        response_url=interaction.response_url,
     )
     return accepted("Expedited review vote queued")
 
@@ -148,3 +146,26 @@ def handle_picker_submission(
         target_channel=picked,
     )
     return {}
+
+
+def handle_picker_modal(
+    interaction: SlackInteraction,
+    approval_id: str,
+    origin: tuple[str, str],
+    background_tasks: BackgroundTasks,
+) -> WebhookResponse:
+    """The picker Trigger Server opened: ``origin`` is the card's channel and thread."""
+    picked = interaction.view.state.input(_MODAL_BLOCK, _MODAL_ACTION).selected_conversation
+    if not picked or not interaction.user.id:
+        return ignored("Invalid channel picker submission")
+    channel_id, thread_ts = origin
+    background_tasks.add_task(
+        process_vote,
+        approval_id,
+        decision="send",
+        person=slack_person(interaction.user.id),
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        target_channel=picked,
+    )
+    return accepted("Channel picked")

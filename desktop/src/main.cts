@@ -58,6 +58,7 @@ const {
 } = require("./terminal-manager.cjs");
 const {
   addProject,
+  linkProject,
   readProjects,
   removeProject,
 } = require("./project-store.cjs");
@@ -77,6 +78,7 @@ const {
   desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   resolveAppRuntime,
   resolveBackendUrl,
   connectExchangeUrl,
@@ -108,7 +110,7 @@ const appRuntime = resolveAppRuntime({
 const isDevelopment = appRuntime.isDevelopment;
 if (appRuntime.userDataPath) {
   fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
-  app.setName(appRuntime.name);
+  app.setName(path.basename(appRuntime.userDataPath));
   app.setPath("userData", appRuntime.userDataPath);
 }
 app.setAppUserModelId(appRuntime.appUserModelId);
@@ -305,9 +307,20 @@ function projectScopeSession(scopeId) {
   return project ? { id: scopeId, cwd: project.cwd } : null;
 }
 
-function sendProjectsChanged() {
+/** The folders with the GitHub repository each is a clone of, for the dashboard to file them. */
+async function describedProjects() {
+  return Promise.all(
+    listProjects().map(async (project) => ({
+      ...project,
+      repo: await originRepo(project.cwd),
+    })),
+  );
+}
+
+async function sendProjectsChanged() {
+  const projects = await describedProjects();
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("desktop:projects-changed", listProjects());
+    mainWindow.webContents.send("desktop:projects-changed", projects);
   }
 }
 
@@ -418,7 +431,7 @@ async function diffThread(threadId) {
 
 /** Whether the backend has a run in flight on this thread. */
 async function threadRunning(threadId) {
-  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl) throw new Error("Robin is not connected to a backend");
   const response = await backendFetch(
     new URL(
       `/dashboard/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
@@ -438,7 +451,7 @@ async function threadRunning(threadId) {
  * brings its own abort signal; anything else gives up rather than hold a quit.
  */
 async function sendBridgeRequest(method, apiPath, { body, signal }) {
-  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl) throw new Error("Robin is not connected to a backend");
   const response = await backendFetch(
     new URL(`/dashboard/api${apiPath}`, backendUrl).toString(),
     {
@@ -526,7 +539,7 @@ async function followCheckedOutBranch(thread, repo, ref) {
   const target = ref.worktreePath ? managedWorktree(ref.worktreePath) : null;
   if (ref.worktreePath && !target)
     throw new Error(
-      `“${ref.name}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+      `“${ref.name}” is checked out in ${ref.worktreePath}, which Robin does not manage.`,
     );
   await moveThreadWorkspace(thread, target);
   sendLocalThreadsChanged();
@@ -621,7 +634,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:copy-page-link", (event) => {
     requireTrustedDesktopIpc(event);
-    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    if (!backendUrl) throw new Error("Robin is not connected to a backend");
     const source = new URL(event.sender.getURL());
     const target = new URL(backendUrl);
     target.pathname = source.pathname;
@@ -665,7 +678,21 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
-    return listProjects();
+    return describedProjects();
+  });
+
+  ipcMain.handle("desktop:link-project", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const cwd = input && typeof input.cwd === "string" ? input.cwd : null;
+    const project = cwd ? registeredProject(cwd) : null;
+    if (!project) throw new Error("Project is not registered");
+    const linked = linkProject(
+      projectsPath(),
+      project,
+      input.projectId ?? null,
+    );
+    await sendProjectsChanged();
+    return linked ? withScopeId(linked) : null;
   });
 
   const projectHeadWatches = new Map<number, () => void>();
@@ -730,8 +757,11 @@ function configureDesktopIpc() {
       : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
-    sendProjectsChanged();
-    return withScopeId(project);
+    void sendProjectsChanged();
+    return {
+      ...withScopeId(project),
+      repo: await originRepo(project.cwd),
+    };
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {
@@ -741,7 +771,7 @@ function configureDesktopIpc() {
     const options = {
       type: "warning",
       title: "Remove project",
-      message: `Remove “${project.name}” from Open SWE?`,
+      message: `Remove “${project.name}” from Robin?`,
       detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
       buttons: ["Cancel", "Remove"],
       defaultId: 0,
@@ -752,7 +782,7 @@ function configureDesktopIpc() {
       : await dialog.showMessageBox(options);
     if (result.response !== 1) return false;
     const removed = removeProject(projectsPath(), project.cwd);
-    if (removed) sendProjectsChanged();
+    if (removed) void sendProjectsChanged();
     return removed;
   });
 
@@ -812,13 +842,13 @@ function configureDesktopIpc() {
         thread = await startThreadWorktree(thread, input?.baseBranch);
       if (!thread.managedTaskFolder)
         thread = await recordLocalCheckpoint(thread);
-      const bridgeId = await localBridges.ensure(thread.id);
-      return {
-        bridgeId,
-        repo: thread.managedTaskFolder
-          ? null
-          : await originRepo(threadRoot(thread)),
-      };
+      const [bridgeId, repo] = await Promise.all([
+        localBridges.ensure(thread.id),
+        thread.managedTaskFolder
+          ? Promise.resolve(null)
+          : originRepo(threadRoot(thread)),
+      ]);
+      return { bridgeId, repo };
     } catch (error) {
       await discardLocalThread(thread);
       throw error;
@@ -855,9 +885,26 @@ function configureDesktopIpc() {
         throw error;
       }
     }
-    const cwd = await projectForRepo(input.repo);
-    if (!cwd)
-      throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
+    let cwd = await projectForRepo(input.repo);
+    if (!cwd) {
+      const options = {
+        title: `Choose your checkout of ${input.repo}`,
+        properties: ["openDirectory"],
+      };
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      const picked = result.canceled ? null : result.filePaths[0];
+      if (!picked)
+        throw new Error(
+          `Choose a checkout of ${input.repo} to move this thread`,
+        );
+      const origin = await originRepo(picked);
+      if (origin?.toLowerCase() !== input.repo.toLowerCase())
+        throw new Error(`${picked} is not a checkout of ${input.repo}`);
+      cwd = addProject(projectsPath(), picked).cwd;
+      void sendProjectsChanged();
+    }
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
     try {
       thread = await createThreadWorktree(thread, null);
@@ -928,7 +975,7 @@ function configureDesktopIpc() {
     if (ref?.worktreePath) {
       if (!managedWorktree(ref.worktreePath))
         throw new Error(
-          `“${branch}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+          `“${branch}” is checked out in ${ref.worktreePath}, which Robin does not manage.`,
         );
       return moveThreadWorkspace(thread, ref.worktreePath);
     }
@@ -1058,7 +1105,7 @@ function isBackendSessionCookie(cookie) {
   );
 }
 
-/** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
+/** Mirror the app's session into the shared config, so `robin` is signed in whenever the app is. */
 async function shareBackendSession() {
   if (isDevelopment) return;
   session.defaultSession.cookies.on(
@@ -1070,7 +1117,7 @@ async function shareBackendSession() {
         if (removed) unshareSession(configPath(), backendUrl, cookie.value);
         else shareSession(configPath(), backendUrl, cookie.value);
       } catch (error) {
-        console.warn("Could not share the desktop session with oswe", error);
+        console.warn("Could not share the desktop session with robin", error);
       }
     },
   );
@@ -1082,7 +1129,7 @@ async function shareBackendSession() {
     });
     if (cookie) shareSession(configPath(), backendUrl, cookie.value);
   } catch (error) {
-    console.warn("Could not share the desktop session with oswe", error);
+    console.warn("Could not share the desktop session with robin", error);
   }
 }
 
@@ -1643,10 +1690,12 @@ function handleNavigation(window, event, url) {
     void startExternalLogin(url);
     return;
   }
-  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
-  if (callback) {
+  const targetUrl = backendUrl
+    ? localCallbackUrl(url, backendUrl) || desktopDeepLinkUrl(url, backendUrl)
+    : null;
+  if (targetUrl) {
     event.preventDefault();
-    void window.loadURL(callback);
+    void window.loadURL(targetUrl);
     return;
   }
   if (isAppUrl(url)) return;
@@ -1688,20 +1737,15 @@ function createWindow(initialUrl = APP_URL) {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const scheme = new URL(url).protocol;
-    if (isAppLoginUrl(url)) {
-      void startExternalLogin(url);
-    } else if (["http:", "https:", "mailto:"].includes(scheme)) {
-      void shell.openExternal(url);
-    }
+    handleNavigation(window, { preventDefault() {} }, url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) =>
     handleNavigation(window, event, url),
   );
-  window.webContents.on("will-redirect", (event, url) =>
-    handleNavigation(window, event, url),
-  );
+  window.webContents.on("will-redirect", (event) => {
+    if (event.isMainFrame) handleNavigation(window, event, event.url);
+  });
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
@@ -1832,9 +1876,14 @@ function configureFraming() {
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: ["https://*/*"] },
     (details, callback) => {
-      const page = webContents.fromId(details.webContentsId)?.getURL();
+      // Requests no page made, like the main process's own, carry no webContentsId.
+      const page =
+        details.resourceType === "subFrame" &&
+        details.webContentsId !== undefined
+          ? webContents.fromId(details.webContentsId)?.getURL()
+          : undefined;
       callback(
-        details.resourceType === "subFrame" && isAppUrl(page ?? "")
+        isAppUrl(page ?? "")
           ? { responseHeaders: headersFramedByApp(details.responseHeaders) }
           : {},
       );
@@ -1844,11 +1893,11 @@ function configureFraming() {
 
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
-    (webContents, permission, callback, details) => {
+    (requester, permission, callback, details) => {
       callback(
         isTrustedPermissionRequest(
           permission,
-          details.requestingUrl || webContents.getURL(),
+          details.requestingUrl || requester.getURL(),
         ),
       );
     },
@@ -1904,6 +1953,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    app.setName(appRuntime.name);
     migrateStoredConfig();
     try {
       backendUrl = resolveBackendUrl({

@@ -1,4 +1,4 @@
-DM an announcement from the Open SWE bot to every user with a linked Slack account, such as news of a feature that just shipped.
+DM an announcement from the Robin bot to every user with a linked Slack account, such as news of a feature that just shipped.
 Requires a currently authorized admin on a private admin surface (a private dashboard thread or the admin's own Slack DM with the bot), started by the admin directly.
 Use only when the admin explicitly asks to message everyone.
 

@@ -43,7 +43,7 @@ def required_slack_value(variable: EnvVar) -> str:
         return variable.require()
     except KeyError as exc:
         raise SlackConfigurationError(
-            f"{variable.name} is required: every Open SWE deployment must have Slack configured"
+            f"{variable.name} is required: every Robin deployment must have Slack configured"
         ) from exc
 
 

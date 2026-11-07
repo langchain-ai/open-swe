@@ -26,6 +26,7 @@ from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
+from runtime_api.model_errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 
 from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
@@ -34,26 +35,27 @@ from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
-from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
+from openswe.review.goal_review import GoalReview
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import (
     SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
     post_slack_thread_reply,
+    remove_slack_reaction,
 )
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.routed_work import RoutedWork
-from openswe.slack.thinking import sync_slack_background_status
+from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
+from openswe.threads.goal import ThreadGoals
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
-from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_error_url
+from openswe.utils.langsmith import LangSmithErrorLink, get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -115,14 +117,14 @@ _REASON_TEXT = {
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
     "sandbox_unreachable": "the run lost its sandbox",
-    "backend_interrupted": "the connection to the Open SWE backend was interrupted",
+    "backend_interrupted": "the connection to the Robin backend was interrupted",
     "step_limit": "the run hit its step limit",
     "run_stalled": "the run stopped responding",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
-    "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+    "model_unavailable": "Pick a different model in Robin Web, then retry.",
     "backend_interrupted": "Re-trigger the run to try again.",
     "run_stalled": "Send your message again to retry.",
 }
@@ -139,12 +141,24 @@ def _failure_reason(status: str, reason_code: str | None) -> str:
     return "the run hit an unexpected error"
 
 
-def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
+def _failure_text(
+    status: str,
+    trace_link: LangSmithErrorLink | None = None,
+    reason_code: str | None = None,
+    *,
+    follow_up: str | None = None,
+) -> str:
     reason = _failure_reason(status, reason_code)
-    follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
-    text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
-    if trace_url:
-        text += f" View the error in <{trace_url}|LangSmith>."
+    follow_up = follow_up or _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
+    text = warning(f"Robin wasn't able to finish that — {reason}. {follow_up}")
+    if trace_link:
+        if trace_link.is_fallback:
+            text += (
+                " Couldn't link to the specific error trace; "
+                f"view this conversation's traces in <{trace_link.url}|LangSmith>."
+            )
+        else:
+            text += f" View the error in <{trace_link.url}|LangSmith>."
     return text
 
 
@@ -182,10 +196,10 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
+            trace_link = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             from openswe.slack.retry import SlackRetry
 
-            slack_text = _failure_text(status, trace_url, reason_code)
+            slack_text = _failure_text(status, trace_link, reason_code)
             blocks = None
             slack_thread = ctx.slack_thread
             if (
@@ -193,12 +207,12 @@ async def _post_failure_reply(
                 and not slack_thread.triggering_bot_id
                 and reason_code not in {"context_too_long", "model_unavailable"}
             ):
-                retry_text = warning(
-                    f"Open SWE wasn't able to finish that — {_failure_reason(status, reason_code)}. "
-                    "Click Retry to pick this back up."
+                retry_text = _failure_text(
+                    status,
+                    trace_link,
+                    reason_code,
+                    follow_up="Click Retry to pick this back up.",
                 )
-                if trace_url:
-                    retry_text += f" View the error in <{trace_url}|LangSmith>."
                 blocks = SlackRetry(
                     channel_id=location[0],
                     thread_ts=slack_thread.thread_ts,
@@ -226,13 +240,6 @@ async def _post_failure_reply(
                 blocks=blocks,
                 agent_thread_id=thread_id,
                 notice=notice,
-            )
-        return False
-
-    if source == "linear":
-        if ctx.linear_issue and ctx.linear_issue.id:
-            return await post_linear_notification(
-                ctx.linear_issue.id, _failure_text(status, reason_code=reason_code)
             )
         return False
 
@@ -389,7 +396,7 @@ async def _handle_successful_run(
     if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND}:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    await sync_slack_background_status(client, thread_id)
+    await refresh_slack_background_status(thread_id)
     payload_metadata = payload.get("metadata")
     invocation_id = _invocation_id(payload)
     if invocation_id is None:
@@ -552,6 +559,11 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
+        channel_id = payload_metadata.get("slack_channel_id")
+        message_ts = payload_metadata.get("slack_concierge_message_ts")
+        if isinstance(channel_id, str) and isinstance(message_ts, str) and message_ts:
+            await remove_slack_reaction(channel_id, message_ts, "hourglass_flowing_sand")
     channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
@@ -572,7 +584,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status in _TERMINAL_RUN_STATUSES:
         await RoutedWork(thread_id).settle_origins()
     if is_worker:
-        await sync_slack_background_status(langgraph_client(), thread_id)
+        await refresh_slack_background_status(thread_id)
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
@@ -581,6 +593,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
+    if status in _TERMINAL_FAILURE_STATUSES:
+        await ThreadGoals.failed(thread_id)
+        await GoalReview.run_failed(thread_id)
     if (
         status in _TERMINAL_FAILURE_STATUSES
         and isinstance(payload_metadata, dict)
@@ -607,7 +622,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
         return await turns.handle_run_completion(thread_id, run_id, str(status))
     await _settle_code_channel_session(client, thread_id, metadata)
-    await sync_slack_background_status(client, thread_id)
+    await refresh_slack_background_status(thread_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.
@@ -692,7 +707,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
-    await sync_slack_background_status(client, thread_id)
+    await refresh_slack_background_status(thread_id)
     logger.info(
         "Posted failure reply",
         extra={"failure_reply": {"thread_id": thread_id, "status": status, "code": reason_code}},

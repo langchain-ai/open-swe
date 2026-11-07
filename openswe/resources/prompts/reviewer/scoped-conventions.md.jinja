@@ -1,0 +1,12 @@
+# Scoped repository conventions (AGENTS.md / CLAUDE.md)
+
+These files come from the PR's base branch.
+Each applies only to changed files under its directory; the most deeply nested applicable file wins on conflict, including over the root instructions.
+{% for path, scope, content in scoped_agents_md %}
+
+## Instructions from `{{ path }}` (scope: `{{ scope }}/`)
+
+```
+{{ content }}
+```
+{% endfor %}

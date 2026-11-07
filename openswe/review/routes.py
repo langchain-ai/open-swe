@@ -18,7 +18,7 @@ from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
-from openswe.review.approvals import fetch_approvals_md
+from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
@@ -48,6 +48,7 @@ from openswe.review.reviews import (
     PostedReviewComment,
     PullRequestPreview,
     PullRequestReviewEvent,
+    ReviewCheck,
     ReviewScoutTrigger,
     ReviewSummary,
     SubmittedReview,
@@ -215,6 +216,18 @@ async def api_get_review(
     return await get_review(owner, repo, pr_number)
 
 
+@router.get("/reviews/{owner}/{repo}/{pr_number}/checks")
+async def api_get_review_checks(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> list[ReviewCheck]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    async with GitHubClient.as_app(owner, repo) as github:
+        return await ReviewCheck.on_head(github.repo(owner, repo).pull_request(pr_number))
+
+
 @router.get("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
 async def get_assessment_feedback(
     owner: str,
@@ -252,6 +265,23 @@ async def api_get_pull_request_preview(
 ) -> PullRequestPreview:
     async with _as_viewer(session, owner, repo) as repository:
         return await get_pull_request_preview(repository.pull_request(pr_number))
+
+
+class PullRequestDescriptionUpdate(BaseModel):
+    body: str = Field(max_length=65_536)
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/description", status_code=204)
+@audit_endpoint
+async def api_update_pull_request_description(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    update: PullRequestDescriptionUpdate,
+    session: dict[str, str] = SESSION_DEP,
+) -> None:
+    async with _as_viewer(session, owner, repo) as repository:
+        await repository.pull_request(pr_number).update_description(update.body)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")
@@ -624,7 +654,7 @@ async def api_get_review_style_approvals_file(
     token = await require_repo_access_for_user(session["sub"], full_name)
     owner, _, name = full_name.partition("/")
     return ApprovalsFileStatus(
-        found=await fetch_approvals_md(owner, name, None, token=token) is not None
+        found=(await ApprovalPolicy.load(owner, name, token=token)).configured
     )
 
 

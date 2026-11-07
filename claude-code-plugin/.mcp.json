@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "open-swe": {
+    "robin": {
       "type": "http",
       "url": "${user_config.server_url}/oswe/mcp"
     }

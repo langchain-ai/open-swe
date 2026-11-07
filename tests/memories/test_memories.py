@@ -3,8 +3,10 @@ from uuid import UUID
 import pytest
 
 from openswe.database import postgres
+from openswe.input_messages import person_introduction
 from openswe.memories.store import MEMORIES, MemoryRow, Scope
 from openswe.users import User
+from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 from openswe.workspaces.rows import WorkspaceRow
 
 
@@ -133,3 +135,65 @@ async def test_taking_a_memory_back_asks_the_curator_unless_it_never_saw_it(
         (habit, True),
     }
     assert await MEMORIES.for_curator(workspace.slug, "held") == []
+
+
+async def test_a_triggered_memory_leaves_context_until_recalled(registry_db: None) -> None:
+    workspace = WorkspaceRow(slug="platform", name="Platform")
+    person = User(display_name="Ada")
+    async with postgres.session() as session:
+        session.add_all([workspace, person])
+
+    async def save(body: str, *, private: bool = False) -> UUID:
+        row = await MEMORIES.save(
+            scope="personal",
+            body=body,
+            person=person.id,
+            workspace=workspace.slug,
+            thread_id=None,
+            from_private_thread=private,
+        )
+        return row.id
+
+    broad, api, deploy = await save("broad"), await save("api only"), await save("deploy")
+    await MEMORIES.set_trigger(workspace.slug, "repo:org/api", "Working in org/api.")
+    await MEMORIES.set_trigger(workspace.slug, "task:deploy", "Deploying.")
+    for slug, memory in (("repo:org/api", api), ("repo:org/api", deploy), ("task:deploy", deploy)):
+        assert await MEMORIES.link_trigger(workspace.slug, slug, memory, linked=True)
+    assert not await MEMORIES.link_trigger(workspace.slug, "repo:org/web", broad, linked=True)
+
+    assert [m.id for m in await MEMORIES.personal(person.id)] == [broad]
+    assert [t.line for t in await MEMORIES.triggers(person.id)] == [
+        "repo:org/api: Working in org/api.",
+        "task:deploy: Deploying.",
+    ]
+    assert [m.id for m in await MEMORIES.recall(person.id, "repo:org/api")] == [deploy, api]
+    assert [m.id for m in await MEMORIES.recall(person.id, "task:deploy")] == [deploy]
+
+    # A memory stays held back while any trigger still links it.
+    assert await MEMORIES.delete_trigger(workspace.slug, "repo:org/api")
+    assert {m.id for m in await MEMORIES.personal(person.id)} == {broad, api}
+    curated = await MEMORIES.for_curator(workspace.slug, "pending")
+    assert {m.id: m.triggers for m in curated}[deploy] == ["task:deploy"]
+
+    participant = ThreadParticipant(
+        identity=CollaboratorIdentity("Ada", "Ada", "ada@example.com"),
+        person_id=f"user:{person.id}",
+        memories=tuple(m.line for m in await MEMORIES.personal(person.id)),
+        memory_triggers=tuple(t.line for t in await MEMORIES.triggers(person.id)),
+    )
+    introduction = person_introduction(participant.as_person())["content"]
+    assert "task:deploy: Deploying." in introduction
+    assert "repo:org/api" not in introduction
+    assert "deploy (" not in introduction
+
+    private = await save("private deployment", private=True)
+    assert await MEMORIES.link_trigger(workspace.slug, "task:deploy", private, linked=True)
+    public = {deploy}
+    for i in range(50):
+        memory = await save(f"deployment {i}")
+        assert await MEMORIES.link_trigger(workspace.slug, "task:deploy", memory, linked=True)
+        public.add(memory)
+    assert {m.id for m in await MEMORIES.recall(person.id, "task:deploy")} == public
+    assert {
+        m.id for m in await MEMORIES.recall(person.id, "task:deploy", include_private=True)
+    } == public | {private}

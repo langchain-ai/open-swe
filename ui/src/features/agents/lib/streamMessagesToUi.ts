@@ -15,7 +15,7 @@ import type { Chunk, ImageChunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return undefined
-  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
+  if (entity?.openSweAccount === "unlinked") return "not a Robin user"
   return undefined
 }
 
@@ -358,6 +358,9 @@ export function streamMessagesToUi(
               structuredSenderId: parsed.sender,
               structuredSenderKind: parsed.senderKind,
               structuredSurface: parsed.surface,
+              ...(parsed.slackMessageUrl
+                ? { slackMessageUrl: parsed.slackMessageUrl }
+                : {}),
               ...(replies ? { replies } : {}),
               structuredSenderName:
                 entity?.displayName ??

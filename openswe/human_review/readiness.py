@@ -69,9 +69,7 @@ class ReadinessCard(BaseModel):
 
     async def mark_ready(self, slack_user_id: str) -> None:
         if datetime.now(UTC) >= self.expires_at:
-            raise ValueError(
-                "This readiness card expired. Ask Open SWE for a new Mark ready button."
-            )
+            raise ValueError("This readiness card expired. Ask Robin for a new Mark ready button.")
         actor = linked_participant(await User.for_person({"id": f"slack:{slack_user_id}"}))
         if (
             isinstance(actor, Outcome)
@@ -92,7 +90,7 @@ class ReadinessCard(BaseModel):
             if details.head_sha != self.head_sha:
                 raise ValueError(
                     "New commits changed this pull request. Review the changes carefully and "
-                    "ask Open SWE for a new Mark ready button."
+                    "ask Robin for a new Mark ready button."
                 )
             await act_on_pull_request(pull, MarkReadyAction(action="mark-ready"))
 
@@ -259,7 +257,7 @@ async def _process(interaction: SlackInteraction, value: SlackButtonValue) -> No
             except Exception:
                 logger.warning("Could not restore readiness card", exc_info=True)
         if marked:
-            error = "Marked ready, but Open SWE could not resume the request. Ask it to request review again."
+            error = "Marked ready, but Robin could not resume the request. Ask it to request review again."
         elif isinstance(exc, GitHubSignInRequired):
             error = f"Sign in to GitHub before marking ready. {github_token_hint()}"
         elif isinstance(exc, HTTPException):

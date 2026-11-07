@@ -145,7 +145,7 @@ def test_mcp_consent_keeps_branding_on_root_auth_routes(
         base_url="http://localhost/dashboard/api/auth",
         client_storage=MemoryStore(),
     )
-    monkeypatch.setattr(server, "_auth", lambda: auth)
+    monkeypatch.setattr(server, "_auth", lambda _api_base_url: auth)
     monkeypatch.setattr(app_module, "AGENT_MCP", server.build_mount())
     client = TestClient(app_module.create_app(), base_url="http://localhost")
     registration = client.post(
@@ -164,7 +164,7 @@ def test_mcp_consent_keeps_branding_on_root_auth_routes(
         },
     )
     assert response.status_code == 200
-    assert "Open SWE" in response.text
+    assert "Robin" in response.text
     if dashboard_url:
         assert f'src="{dashboard_url}/logo-mark.png"' in response.text
         assert f'href="{dashboard_url}"' in response.text

@@ -2,6 +2,7 @@ import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 
 import type { PassageReply } from "@/features/agents/utils/passageReply"
+import { cn } from "@/lib/utils"
 
 export interface PendingReply {
   id: string
@@ -29,12 +30,23 @@ export function ComposerReplyCards({
           className="group relative flex h-24 w-36 flex-col justify-between rounded-lg border border-default bg-surface-level-2 p-space-2"
         >
           <div className="flex min-h-0 flex-col gap-0.5 border-l-2 border-default pl-space-2">
-            {reply.file && (
+            {reply.file ? (
               <span className="truncate font-mono text-xxs text-tertiary">
                 {reply.file.split("/").pop()}:{reply.lines}
               </span>
+            ) : (
+              reply.part && (
+                <span className="truncate text-xxs text-tertiary">
+                  {reply.part}
+                </span>
+              )
             )}
-            <p className="line-clamp-3 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+            <p
+              className={cn(
+                "text-xs [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary",
+                reply.file || reply.part ? "line-clamp-2" : "line-clamp-3"
+              )}
+            >
               {reply.comment || reply.selection}
             </p>
           </div>

@@ -1,4 +1,4 @@
-Read or set automatic Open SWE reviews for one repository.
+Read or set automatic Robin reviews for one repository.
 Requires a currently authorized workspace admin and access to that repository.
 `read` requires a private dashboard thread or authenticated Slack DM; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.

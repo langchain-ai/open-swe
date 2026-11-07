@@ -52,7 +52,7 @@ def pin_single_event_loop() -> None:
     if not hasattr(langgraph_config, ISOLATED_LOOPS_ENV):
         msg = (
             f"langgraph_api.config has no {ISOLATED_LOOPS_ENV}. The queue's loop model "
-            "changed, so Open SWE can no longer guarantee one event loop per process."
+            "changed, so Robin can no longer guarantee one event loop per process."
         )
         raise RuntimeError(msg)
 
@@ -144,7 +144,11 @@ class StallWatchdog:
         if task is None:
             return _Stall(stack=stack, task=None, serving={})
         coro = task.get_coro()
-        name = task.get_name() if coro is None else f"{task.get_name()} {coro.__qualname__}"
+        name = (
+            task.get_name()
+            if coro is None
+            else f"{task.get_name()} {getattr(coro, '__qualname__', type(coro).__qualname__)}"
+        )
         serving: Mapping[str, object] | None = None
         if self._logging_context is not None:
             serving = task.get_context().get(self._logging_context)

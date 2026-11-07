@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { getSingularPatch } from "@pierre/diffs"
 import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs"
 
@@ -321,7 +322,7 @@ export function notesSignature(notes: ReadonlyArray<NoteAnnotation>): string {
 
 export function matchesFileFilter(path: string, filter: string): boolean {
   const query = filter.trim().toLowerCase()
-  return !query || path.toLowerCase().includes(query)
+  return new FuzzySearch(query).matches(path)
 }
 
 /** Only entries whose file matches. */

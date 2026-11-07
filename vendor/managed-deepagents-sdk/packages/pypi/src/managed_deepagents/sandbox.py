@@ -94,7 +94,6 @@ class SandboxDefinition:
     #: Options that shape how MDA resolves the box rather than the create request.
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
         "_openswe_per_thread",
-        "_openswe_thread_id",
         "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
@@ -129,7 +128,6 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
             "run-scoped name automatically."
         )
 
-    _validate_thread_id(normalized.get("_openswe_thread_id"))
     _validate_create_fields(normalized.get("_openswe_create_fields"))
     if normalized.get("_openswe_no_manage_proxy") and normalized.get("proxy_config") is not None:
         raise TypeError(
@@ -176,12 +174,6 @@ def is_per_thread(options: Mapping[str, object]) -> bool:
     return options.get("_openswe_per_thread") is True
 
 
-def owning_thread(options: Mapping[str, object]) -> str | None:
-    """The thread whose box a definition uses, when not the run's own."""
-    thread_id = options.get("_openswe_thread_id")
-    return thread_id if isinstance(thread_id, str) else None
-
-
 def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefinition | None:
     """The box ``runtime``'s run uses: what ``_openswe_select`` picks for it, else ``sandbox``.
 
@@ -211,11 +203,6 @@ def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
 def manages_proxy(options: Mapping[str, object]) -> bool:
     """Whether MDA sets the box's proxy config before each command."""
     return options.get("_openswe_no_manage_proxy") is not True
-
-
-def _validate_thread_id(thread_id: object) -> None:
-    if thread_id is not None and (not isinstance(thread_id, str) or not thread_id.strip()):
-        raise TypeError("sandbox _openswe_thread_id must be a non-empty string")
 
 
 def _validate_create_fields(fields: object) -> None:

@@ -13,7 +13,6 @@ from openswe.slack.client import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.tools.create_sandbox_file_download_url import resolve_sandbox_file
-from openswe.utils.thread_ops import langgraph_client
 
 _MAX_SLACK_ATTACHMENT_BYTES = 10 * 1024 * 1024
 _MAX_COMMENT_CHARS = 3000
@@ -69,9 +68,7 @@ async def slack_attach_html(
         thread_id = configurable.get("thread_id")
         if not isinstance(thread_id, str) or not thread_id:
             return {"success": False, "error": "Missing thread_id in config"}
-        client = langgraph_client()
         active = await get_active_slack_thread(
-            client,
             thread_id,
             slack_thread if isinstance(slack_thread, dict) else None,
         )
@@ -87,7 +84,6 @@ async def slack_attach_html(
             return {"success": False, "error": "failed to read staged sandbox file"}
 
         async with slack_thread_mutation_lock(
-            client,
             channel_id,
             thread_ts,
             thread_id=thread_id,

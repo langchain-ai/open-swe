@@ -15,6 +15,7 @@ use super::channel_setup::ChannelStatus;
 use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
+use crate::error::{categorize_unclassified, ErrorCategory};
 use crate::langsmith::{
     self, is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
     ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
@@ -128,6 +129,9 @@ struct SlackProviderConfig {
     #[serde(default)]
     trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
+    // SDKs only emit this for a channel with handlers that take such events.
+    #[serde(default)]
+    forwarded_events: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +158,7 @@ pub(crate) struct PreparedTriggerChannel {
     trigger_on_all_messages: bool,
     trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
+    forwarded_events: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -315,6 +320,7 @@ pub(crate) fn prepare(
             .trigger_mode
             .filter(|mode| *mode != SlackTriggerMode::All),
         allow_bot_triggers: provider_config.allow_bot_triggers,
+        forwarded_events: provider_config.forwarded_events,
     }))
 }
 
@@ -369,6 +375,7 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
             trigger_on_all_messages: prepared.trigger_on_all_messages,
             trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
+            forwarded_events: prepared.forwarded_events.clone(),
         },
         customer_app: None,
     }
@@ -526,11 +533,24 @@ pub(crate) fn register(
             )
         },
         |_| Ok(()),
-    )?;
+    )
+    .map_err(transient_failure_category)?;
     if registered.is_some() {
         ui.success(READY)?;
     }
     Ok(())
+}
+
+/// A setup request that might have succeeded when made again, and was not:
+/// Trigger Server or Slack was busy (a 5xx or 429), which is the server's
+/// failure, or the request got no answer, which a timeout already says.
+/// Categorized only here, so retries can still tell it is transient.
+fn transient_failure_category(error: anyhow::Error) -> anyhow::Error {
+    if is_transient_setup_error(&error) {
+        categorize_unclassified(ErrorCategory::Remote, error)
+    } else {
+        error
+    }
 }
 
 const READY: &str =
@@ -1087,18 +1107,19 @@ mod tests {
         for (provider_config, options) in [
             (
                 json!({"triggerOnAllMessages": false}),
-                json!({"triggerOnAllMessages": false, "allowBotTriggers": false}),
+                json!({"triggerOnAllMessages": false, "allowBotTriggers": false, "forwardedEvents": []}),
             ),
             (
                 json!({"triggerOnAllMessages": true}),
-                json!({"triggerOnAllMessages": true, "allowBotTriggers": false}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": []}),
             ),
             (
                 json!({"triggerOnAllMessages": false, "triggerMode": "thread"}),
                 json!({
                     "triggerOnAllMessages": false,
                     "triggerMode": "thread",
-                    "allowBotTriggers": false
+                    "allowBotTriggers": false,
+                    "forwardedEvents": []
                 }),
             ),
             (
@@ -1106,12 +1127,24 @@ mod tests {
                 json!({
                     "triggerOnAllMessages": false,
                     "triggerMode": "mention",
-                    "allowBotTriggers": false
+                    "allowBotTriggers": false,
+                    "forwardedEvents": []
+                }),
+            ),
+            (
+                json!({
+                    "triggerOnAllMessages": true,
+                    "forwardedEvents": ["message_changed", "reaction_added"]
+                }),
+                json!({
+                    "triggerOnAllMessages": true,
+                    "allowBotTriggers": false,
+                    "forwardedEvents": ["message_changed", "reaction_added"]
                 }),
             ),
             (
                 json!({"triggerOnAllMessages": true, "triggerMode": "all"}),
-                json!({"triggerOnAllMessages": true, "allowBotTriggers": false}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false, "forwardedEvents": []}),
             ),
         ] {
             let mut requirements = requirements();
@@ -1532,7 +1565,8 @@ mod tests {
                     },
                     "options": {
                         "triggerOnAllMessages": false,
-                        "allowBotTriggers": false
+                        "allowBotTriggers": false,
+                        "forwardedEvents": []
                     }
                 }
             })
@@ -1840,6 +1874,30 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("HTTP 400"), "{error}");
+    }
+
+    #[test]
+    fn a_setup_that_stayed_busy_is_the_servers_failure() {
+        let busy = transient_failure_category(anyhow::Error::new(
+            crate::langsmith::TransientSetupError("Channel setup failed (HTTP 503).".into()),
+        ));
+        let refused = transient_failure_category(crate::error::categorized(
+            ErrorCategory::Authentication,
+            "Channel setup failed (HTTP 401).",
+        ));
+        let other =
+            transient_failure_category(anyhow!("Channel setup returned an invalid response."));
+
+        assert_eq!(busy.to_string(), "Channel setup failed (HTTP 503).");
+        assert_eq!(crate::error::category_of(&busy), ErrorCategory::Remote);
+        assert_eq!(
+            crate::error::category_of(&refused),
+            ErrorCategory::Authentication
+        );
+        assert_eq!(
+            crate::error::category_of(&other),
+            ErrorCategory::Unclassified
+        );
     }
 
     #[test]

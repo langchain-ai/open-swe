@@ -1273,6 +1273,203 @@ fn several_installations_keep_the_token() {
     assert!(env.log.last().unwrap().contains("installed more than once"));
 }
 
+fn installed_twice() -> GitHubChannelStatus {
+    let mut twice = status(true);
+    let mut other = twice.installations[0].clone();
+    other.id = 10;
+    twice.installations.push(other);
+    twice
+}
+
+#[test]
+fn a_pinned_installation_renews_the_token_among_several() {
+    let mut env = drifted();
+    env.installation_env = Some("10".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(installed_twice()))]);
+    env.started = Some(session("completed"));
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert_eq!(
+        env.log[2..4],
+        [
+            format!("scopes {PROVIDER} issues:write,metadata:read"),
+            format!("start {APP} Installation(\"10\")"),
+        ]
+    );
+    assert!(env.log.last().unwrap().contains("now has"), "{:?}", env.log);
+}
+
+fn installed_past_the_report() -> GitHubChannelStatus {
+    // Agent Auth lists only the first 100 installations.
+    let mut many = installed_twice();
+    many.installations_truncated = true;
+    many
+}
+
+#[test]
+fn a_pinned_installation_past_the_report_never_widens_the_token() {
+    // What the unlisted installation grants beyond the current token is
+    // unknown, and a failed widening would lose the working token.
+    let mut env = drifted();
+    env.installation_env = Some("777".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(
+        installed_past_the_report(),
+    ))]);
+    env.started = Some(session("completed"));
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert!(
+        !env.log
+            .iter()
+            .any(|line| line.starts_with("scopes") || line.starts_with("start ")),
+        "{:?}",
+        env.log
+    );
+    assert_eq!(
+        env.log.last().unwrap(),
+        "info: GitHub App installation 777 (MDA_GITHUB_APP_INSTALLATION_ID) is not among the first 100 installations Agent Auth reports, so deploy cannot see what it grants and the agent's GitHub token keeps its current permissions."
+    );
+}
+
+#[test]
+fn a_pinned_installation_past_the_report_narrows_to_what_its_token_held() {
+    // The current token was minted there, so a subset of it is granted.
+    let mut env = narrowed();
+    env.installation_env = Some("777".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(
+        installed_past_the_report(),
+    ))]);
+    env.started = Some(session("completed"));
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert_eq!(
+        env.log[2..4],
+        [
+            format!("scopes {PROVIDER} issues:write,metadata:read"),
+            format!("start {APP} Installation(\"777\")"),
+        ]
+    );
+}
+
+#[test]
+fn a_pinned_installation_past_the_report_narrows_an_unrestricted_token() {
+    // No scopes means the token held everything the installation accepted,
+    // bounded by the App's permissions, not nothing: it is renewed with the
+    // channel's scopes, not dropped.
+    let mut env = narrowed();
+    if let Some(connection) = env.connection.as_mut() {
+        connection.scopes = Vec::new();
+    }
+    env.installation_env = Some("777".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(
+        installed_past_the_report(),
+    ))]);
+    env.started = Some(session("completed"));
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert_eq!(
+        env.log[2..4],
+        [
+            format!("scopes {PROVIDER} issues:write,metadata:read"),
+            format!("start {APP} Installation(\"777\")"),
+        ]
+    );
+}
+
+#[test]
+fn a_pinned_installation_past_the_report_narrows_only_to_what_its_token_held() {
+    // The channel drops contents but raises issues to a level the token never
+    // had: only the part the token held is requested, never the unaccepted rest.
+    let mut env = narrowed();
+    if let Some(connection) = env.connection.as_mut() {
+        connection.scopes = vec![
+            "contents:write".into(),
+            "issues:read".into(),
+            "metadata:read".into(),
+        ];
+    }
+    env.installation_env = Some("777".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(
+        installed_past_the_report(),
+    ))]);
+    env.started = Some(session("completed"));
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert_eq!(
+        env.log[2..4],
+        [
+            format!("scopes {PROVIDER} metadata:read"),
+            format!("start {APP} Installation(\"777\")"),
+        ]
+    );
+}
+
+#[test]
+fn a_pinned_installation_the_token_cannot_use_keeps_the_token() {
+    // Not installed there, and the report lists every installation.
+    let mut env = drifted();
+    env.installation_env = Some("777".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(installed_twice()))]);
+    run_setup(&mut env, &channel()).unwrap();
+    assert!(
+        !env.log.iter().any(|line| line.starts_with("scopes")),
+        "{:?}",
+        env.log
+    );
+    assert_eq!(
+        env.log.last().unwrap(),
+        "warning: The GitHub App is not installed as installation 777 (MDA_GITHUB_APP_INSTALLATION_ID), so the agent's GitHub token keeps its current permissions."
+    );
+
+    // Suspended.
+    let mut env = drifted();
+    env.installation_env = Some("10".into());
+    let mut suspended = installed_twice();
+    suspended.installations[1].suspended_at = Some("2026-11-01T00:00:00Z".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(suspended))]);
+    run_setup(&mut env, &channel()).unwrap();
+    assert!(
+        !env.log.iter().any(|line| line.starts_with("scopes")),
+        "{:?}",
+        env.log
+    );
+    assert!(
+        env.log.last().unwrap().contains("is suspended"),
+        "{:?}",
+        env.log
+    );
+}
+
+#[test]
+fn a_pinned_installation_the_token_cannot_use_still_drops_a_narrowed_token() {
+    // A narrowing never leaves the broader token, pin or not.
+    let mut env = narrowed();
+    env.installation_env = Some("777".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(installed_twice()))]);
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert!(
+        env.log
+            .contains(&format!("scopes {PROVIDER} issues:write,metadata:read")),
+        "{:?}",
+        env.log
+    );
+    assert!(
+        !env.log.iter().any(|line| line.starts_with("start ")),
+        "{:?}",
+        env.log
+    );
+    let last = env.log.last().unwrap();
+    assert!(last.contains("not installed as installation 777"), "{last}");
+    assert!(last.contains("the agent has no GitHub token"), "{last}");
+}
+
 const TEST_KEY: &str = "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----";
 
 fn existing_env() -> ExistingAppEnv {

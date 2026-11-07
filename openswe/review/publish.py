@@ -20,11 +20,12 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
+from collections.abc import Sequence
 from html import escape
 from typing import Any, Literal, TypedDict
 
 import httpx2
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from openswe.github.checks import CheckConclusion, complete_review_check_run
 from openswe.github.http import (
@@ -148,7 +149,7 @@ def render_inline_comment_body(finding: Finding) -> str:
         [
             "",
             "---",
-            "*Your feedback helps Open SWE learn. React with 👍 or 👎 to tell us if this review comment was useful.*",
+            "*Your feedback helps Robin learn. React with 👍 or 👎 to tell us if this review comment was useful.*",
         ]
     )
     body = "\n".join(body_parts)
@@ -279,23 +280,55 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
     )
 
 
+APPROVAL_CONDITION_MAX_CHARS = 200
+AUTO_APPROVED_MAX_CHARS = 500
+
+ReviewDecision = Literal["would_approve", "would_approve_conditionally", "needs_human_review"]
+
+
 class ReviewAssessment(BaseModel):
     """Advisory judgment for the exact commit the reviewer inspected."""
 
     head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     risk_score: int = Field(ge=1, le=5, strict=True)
-    decision: Literal["would_approve", "needs_human_review"]
+    decision: ReviewDecision
     explanation: str = Field(min_length=1, max_length=1500)
+    approval_condition: str | None = Field(
+        default=None, min_length=1, max_length=APPROVAL_CONDITION_MAX_CHARS
+    )
+    auto_approved: str | None = Field(
+        default=None, min_length=1, max_length=AUTO_APPROVED_MAX_CHARS
+    )
+
+    @model_validator(mode="after")
+    def _condition_only_when_conditional(self) -> ReviewAssessment:
+        conditional = self.decision == "would_approve_conditionally"
+        if conditional != bool(self.approval_condition) or conditional != bool(self.auto_approved):
+            raise ValueError(
+                "Give an `approval_condition` and `auto_approved` exactly when the decision is "
+                "would_approve_conditionally"
+            )
+        return self
+
+    @property
+    def verdict(self) -> str:
+        if self.decision == "would_approve":
+            return "Would approve"
+        if self.decision == "would_approve_conditionally":
+            return "Would approve subject to human approval of the stated condition"
+        return "Needs human review"
 
     def settled(self, findings: list[Finding]) -> ReviewAssessment:
         """This assessment as published: unresolved findings always need a human."""
-        if self.decision != "would_approve" or not any(
+        if self.decision == "needs_human_review" or not any(
             finding.get("status", "open") == "open" for finding in findings
         ):
             return self
         return self.model_copy(
             update={
                 "decision": "needs_human_review",
+                "approval_condition": None,
+                "auto_approved": None,
                 "explanation": f"Unresolved findings remain. {self.explanation}",
             }
         )
@@ -377,6 +410,8 @@ def render_review_body(
     assessment: ReviewAssessment | None = None,
     approved: bool = False,
     dry_run: bool = False,
+    approval_errors: Sequence[str] = (),
+    config_errors: Sequence[str] = (),
 ) -> str:
     """Compose the top-level review body.
 
@@ -388,35 +423,51 @@ def render_review_body(
     has_additional = additional_findings_count > 0
     if surfaced_count == 0 and not out_of_diff_findings:
         headline = (
-            "## ✅ Open SWE Review: No issues found\n\n"
-            "Open SWE reviewed this PR and found no potential bugs to report."
+            "## ✅ Robin Review: No issues found\n\n"
+            "Robin reviewed this PR and found no potential bugs to report."
         )
     elif surfaced_count == 0:
-        headline = "**Open SWE Review** found no issues in the changed lines."
+        headline = "**Robin Review** found no issues in the changed lines."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
-        headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
+        headline = f"**Robin Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if config_errors:
+        parts.append(
+            "**Changes requested: invalid Robin configuration.** "
+            "This pull request changes Robin configuration that cannot be applied:\n\n"
+            + "\n".join(f"- {escape(error)}" for error in config_errors)
+        )
+    if approval_errors:
+        parts.append(
+            "**Auto approval did not run:** the auto-approve rules on the default branch "
+            "could not be applied:\n\n"
+            + "\n".join(f"- {escape(error)}" for error in approval_errors)
+        )
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
     if out_of_diff_findings:
         parts.append(render_out_of_diff_section(out_of_diff_findings))
     if assessment is not None:
-        decision = (
-            "Would approve" if assessment.decision == "would_approve" else "Needs human review"
-        )
+        decision = assessment.verdict
         if approved:
             decision = "Approved"
         suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
+        if assessment.approval_condition:
+            parts.append(f"**Approval condition:** {escape(assessment.approval_condition)}")
+        if assessment.auto_approved:
+            parts.append(
+                f"**Already covered by auto-approval:** {escape(assessment.auto_approved)}"
+            )
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
             + (
-                "Approved automatically under the repository's `.open-swe/APPROVALS.md`. No merge is performed."
+                "Approved automatically under the repository's `.open-swe/auto-approve-rules/`. No merge is performed."
                 if approved
                 else "Dry run: this assessment does not approve or merge the PR."
                 if dry_run
@@ -425,7 +476,7 @@ def render_review_body(
             + "\n\n</details>"
         )
         feedback_link = (
-            f", or [rate the latest assessment in Open SWE]({ui_url}#assessment-feedback)"
+            f", or [rate the latest assessment in Robin]({ui_url}#assessment-feedback)"
             if ui_url
             else ""
         )
@@ -434,7 +485,7 @@ def render_review_body(
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
     if trace_url:
-        links.append(f"[View Open SWE trace]({trace_url})")
+        links.append(f"[View Robin trace]({trace_url})")
     if links:
         parts.append(" • ".join(links))
     parts.append(review_summary_marker(pr_number))
@@ -458,13 +509,13 @@ def render_status_comment(
     "Open in Web" link while the run is live; deleted once ``publish_review``
     posts the review (which carries the same link).
     """
-    parts = ["## 🔍 Open SWE Review: in progress\n\nOpen SWE is reviewing this PR…"]
+    parts = ["## 🔍 Robin Review: in progress\n\nRobin is reviewing this PR…"]
     links = []
     ui_url = dashboard_thread_url(thread_id) if thread_id else None
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
     if trace_url:
-        links.append(f"[View Open SWE trace]({trace_url})")
+        links.append(f"[View Robin trace]({trace_url})")
     if links:
         parts.append(" • ".join(links))
     parts.append(status_comment_marker(pr_number))
@@ -478,9 +529,9 @@ def render_failed_status_comment(*, pr_number: int, thread_id: str, reason: str)
     it when it starts or publishes.
     """
     parts = [
-        "## ⚠️ Open SWE Review: couldn't run\n\n"
-        f"Open SWE stopped before it could review this PR: {reason}. "
-        "Push a commit or re-request a review from Open SWE to run it again."
+        "## ⚠️ Robin Review: couldn't run\n\n"
+        f"Robin stopped before it could review this PR: {reason}. "
+        "Push a commit or re-request a review from Robin to run it again."
     ]
     if ui_url := dashboard_thread_url(thread_id):
         parts.append(f"[Open in Web]({ui_url})")
@@ -585,7 +636,7 @@ async def settle_review_check_run(
     title: str,
     summary: str,
 ) -> None:
-    """Complete the tracked ``Open SWE Review`` check run, if one is open.
+    """Complete the tracked ``Robin Review`` check run, if one is open.
 
     The dispatching webhook stores ``review_check_run_id`` in reviewer thread
     metadata when it creates the check. No-op when none is tracked. The id is
@@ -710,7 +761,7 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
-    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
+    event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
@@ -766,11 +817,8 @@ async def post_pull_request_review(
                     error_kind = "unresolved_anchor"
                 for error in error_messages:
                     message = error.get("message") if isinstance(error, dict) else error
-                    if (
-                        isinstance(message, str)
-                        and "Can not approve your own pull request" in message
-                    ):
-                        error_kind = "self_approval"
+                    if isinstance(message, str) and "your own pull request" in message:
+                        error_kind = "self_review"
                         break
             return {
                 "_error": f"HTTP {e.response.status_code}: {body}",

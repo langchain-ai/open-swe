@@ -10,17 +10,21 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from openswe.config import ENV
-from openswe.dashboard.admin import configured_admins, is_admin
 from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
-from openswe.dashboard.langsmith_login import LANGSMITH_LOGIN_CALLBACK_PATH, LangSmithLogin
+from openswe.dashboard.github_link import GitHubLink
+from openswe.dashboard.langsmith_login import (
+    LANGSMITH_LOGIN_CALLBACK_PATH,
+    LANGSMITH_STATE_COOKIE_PATH,
+    LangSmithLogin,
+)
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
     GITHUB_CALLBACK_PATH,
     MCP_SIGN_IN_CALLBACK_PATH,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
-    GithubUser,
+    DesktopConnectExchange,
     clear_state_cookie,
     cookie_security,
     decode_session,
@@ -28,18 +32,19 @@ from openswe.dashboard.oauth import (
     desktop_callback_url,
     desktop_handoff_from_state,
     enforce_github_login_gate,
-    exchange_code,
-    fetch_github_user,
     frontend_base_url,
     hash_state_nonce,
     is_dashboard_state,
+    issue_connect_handoff,
     issue_desktop_handoff,
     issue_session,
     issue_state,
     new_state_nonce,
     optional_session,
     rebind_session,
+    redeem_connect_handoff,
     redeem_desktop_handoff,
+    require_session,
     sanitize_redirect_to,
     session_user_id,
     set_session_cookie,
@@ -50,14 +55,14 @@ from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.dashboard.profiles import (
     upsert_access_token,
-    upsert_access_token_from_github_response,
 )
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
+from openswe.users.authorization import allowed_orgs
 from openswe.utils.build_info import build_info
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import PublicOrigin
 
 router = APIRouter(tags=["auth"])
 
@@ -69,50 +74,58 @@ GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 
 
 @router.get("/auth/login")
-async def auth_login(
-    request: Request,
+async def auth_login(request: Request, redirect_to: str | None = None) -> RedirectResponse:
+    """Everyone signs in with LangSmith; locally without it, as the `gh` CLI's user."""
+    if dev_login_enabled() and not request.query_params.get("desktop"):
+        return RedirectResponse(
+            "/dashboard/api/auth/dev-login?"
+            + urlencode({"redirect_to": sanitize_redirect_to(redirect_to)}),
+            status_code=302,
+        )
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(f"/dashboard/api/auth/langsmith/login{query}", status_code=302)
+
+
+@router.get("/github/login")
+async def github_link_login(
     redirect_to: str | None = None,
-    desktop: bool = False,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
+    _session: dict[str, Any] = SESSION_DEP,
 ) -> RedirectResponse:
+    """Start linking a GitHub account to the signed-in LangSmith person."""
     client_id = ENV.GITHUB_APP_CLIENT_ID.get()
     if not client_id:
-        # Locally there is no App to redirect to, and the `gh` CLI already holds
-        # the only credential the per-user reads need.
-        if dev_login_enabled() and not desktop:
-            return RedirectResponse(
-                "/dashboard/api/auth/dev-login?"
-                + urlencode({"redirect_to": sanitize_redirect_to(redirect_to)}),
-                status_code=302,
-            )
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
-    safe_redirect = sanitize_redirect_to(redirect_to) or frontend_base_url()
-
     nonce = new_state_nonce()
     state = issue_state(
-        redirect_to=safe_redirect,
+        redirect_to=sanitize_redirect_to(redirect_to) or frontend_base_url(),
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,
     )
-    api_base_url = dashboard_api_base_url()
-    if desktop:
-        forwarded_proto = request.headers.get("x-forwarded-proto", "").partition(",")[0].strip()
-        scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
-        api_base_url = str(request.base_url.replace(scheme=scheme)).rstrip("/")
-    redirect_uri = f"{api_base_url}{GITHUB_CALLBACK_PATH}"
     query = urlencode(
         {
             "client_id": client_id,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": f"{PublicOrigin.dashboard_api_base_url()}{GITHUB_CALLBACK_PATH}",
             "state": state,
         }
     )
-    url = f"{GITHUB_AUTHORIZE_URL}?{query}"
-    response = RedirectResponse(url, status_code=302)
+    response = RedirectResponse(f"{GITHUB_AUTHORIZE_URL}?{query}", status_code=302)
     set_state_cookie(response, nonce)
     return response
+
+
+@router.post("/github/desktop/exchange")
+async def github_link_desktop_exchange(
+    body: DesktopConnectExchange, response: Response, session: dict[str, Any] = SESSION_DEP
+) -> dict[str, Any]:
+    """Finish a desktop GitHub link with the app's own session."""
+    claims = redeem_connect_handoff(provider="github", code=body.code, verifier=body.verifier)
+    principal = DashboardPrincipal.from_session(session)
+    user = await GitHubLink.from_handoff(claims).join(principal)
+    set_session_cookie(response, GitHubLink.session(principal, user, session.get("email")))
+    return {"connected": True}
 
 
 @router.get("/auth/dev-login")
@@ -158,7 +171,7 @@ async def auth_callback(request: Request, state: str, code: str | None = None) -
         # The GitHub App has this one callback, so MCP sign-ins return here too.
         return RedirectResponse(f"{MCP_SIGN_IN_CALLBACK_PATH}?{request.url.query}", 302)
     if code is None:
-        raise HTTPException(400, "GitHub sign-in was cancelled — please retry login")
+        raise HTTPException(400, "GitHub linking was cancelled — please retry")
     state_payload = decode_state(state)
     if state_payload.get("provider", "github") != "github":
         raise HTTPException(400, "oauth provider mismatch")
@@ -172,60 +185,27 @@ async def auth_callback(request: Request, state: str, code: str | None = None) -
     ):
         # Either the cookie went missing (different browser, expired,
         # cookies blocked) or the state was issued for a different session.
-        raise HTTPException(400, "oauth state mismatch — please retry login")
+        raise HTTPException(400, "oauth state mismatch — please retry")
 
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
-
-    token_data = await exchange_code(code)
-    access_token = token_data.get("access_token")
-    if not isinstance(access_token, str):
-        raise HTTPException(400, "oauth exchange missing access_token")
-    user, email = await fetch_github_user(access_token)
-    login = user.login
-    if not login:
-        raise HTTPException(400, "could not resolve GitHub login")
-
-    await enforce_github_login_gate(login)
-
-    user_id = await _signed_in_user_id(user, email)
-    await upsert_access_token_from_github_response(login, email or "", token_data)
-
+    link = await GitHubLink.from_code(code)
     if handoff is not None:
-        # Desktop login runs in the user's own browser, so the session belongs to
-        # the app rather than to this browser: hand back a PKCE-bound code the
-        # app redeems for one, and leave no session cookie behind here.
+        # The app finishes the link under the session it holds.
         challenge, port = handoff
-        handoff_code = issue_desktop_handoff(
-            login=login,
-            email=email,
-            avatar_url=user.avatar_url,
-            challenge=challenge,
-            user_id=user_id,
+        handoff_code = issue_connect_handoff(
+            provider="github", challenge=challenge, claims=link.handoff_claims()
         )
         response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         clear_state_cookie(response)
         return response
 
-    session_jwt = issue_session(
-        login=login, email=email, avatar_url=user.avatar_url, user_id=user_id
-    )
+    session = await require_session(request)
+    principal = DashboardPrincipal.from_session(session)
+    user = await link.join(principal)
+    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
-    set_session_cookie(response, session_jwt)
+    set_session_cookie(response, GitHubLink.session(principal, user, session.get("email")))
     clear_state_cookie(response)
     return response
-
-
-async def _signed_in_user_id(user: GithubUser, email: str | None) -> str:
-    signed_in = await User.sign_in(
-        "github",
-        str(user.id),
-        login=user.login,
-        email=email or "",
-        display_name=user.name or "",
-        avatar_url=user.avatar_url or "",
-        admin=is_admin(email, login=user.login) if configured_admins() else None,
-    )
-    return str(signed_in.id)
 
 
 class DesktopHandoffExchange(BaseModel):
@@ -236,7 +216,9 @@ class DesktopHandoffExchange(BaseModel):
 @router.post("/auth/desktop/exchange")
 async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, object]:
     token = redeem_desktop_handoff(code=body.code, verifier=body.verifier)
-    await DashboardPrincipal.from_session(decode_session(token)).authorize()
+    await DashboardPrincipal.from_session(decode_session(token)).authorize(
+        path="/dashboard/api/auth/desktop/exchange"
+    )
     return {
         "session": token,
         "expires_in": SESSION_TTL_SECONDS,
@@ -276,7 +258,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         )
     else:
         if user is None and postgres.configured():
-            raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
+            raise HTTPException(401, "Robin account not found — sign in again")
     if user is not None and session_user_id(session) != user.id:
         # The dashboard boots here, so every stale cookie is repaired on its next load.
         set_session_cookie(response, rebind_session(session, str(user.id)))
@@ -285,34 +267,32 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
             extra={"github_login": session["sub"], "user_id": str(user.id)},
         )
     if principal.provider == "langsmith" and user is not None:
-        set_session_cookie(
-            response,
-            issue_session(
-                login=principal.subject,
-                email=session.get("email"),
-                avatar_url=session.get("avatar_url"),
-                user_id=str(user.id),
-                provider="langsmith",
-                langsmith_subject=principal.langsmith_subject,
-            ),
-        )
-    preferences = await get_user_preferences(session["sub"])
+        set_session_cookie(response, GitHubLink.session(principal, user, session.get("email")))
+        principal = DashboardPrincipal.from_session({**session, "sub": user.session_login})
+    preferences = await get_user_preferences(principal.subject)
     return {
-        "login": session["sub"],
+        "login": principal.subject,
         "auth_provider": principal.provider,
         "github_login": principal.github_login,
+        "requires_github_link": (
+            await user.requires_github_link()
+            if principal.provider == "langsmith" and user is not None
+            else False
+        ),
         "display_name": user.display_name if user else "",
         "email": session.get("email") or (user.email or None if user else None),
-        "avatar_url": session.get("avatar_url"),
+        "avatar_url": (user.avatar_url if user else None) or session.get("avatar_url"),
         "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
+        # The web UI shows these organizations' repositories by name alone; plugins never see the list.
+        "base_orgs": list(allowed_orgs()),
         "follow_up_behavior": preferences["follow_up_behavior"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": postgres.configured(),
-        "slack_oauth_enabled": principal.provider == "github" and slack_oauth_configured(),
-        "api_base_url": dashboard_api_base_url(),
+        "slack_oauth_enabled": principal.github_login is not None and slack_oauth_configured(),
+        "api_base_url": PublicOrigin.dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
         "build_info": build_info(),
     }
@@ -326,35 +306,47 @@ async def auth_langsmith_login(
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
     challenge = valid_handoff_challenge(desktop_handoff)
-    if challenge is None or desktop_port is None:
+    if (challenge is None) != (desktop_port is None):
         raise HTTPException(
             400, "Desktop LangSmith login requires a PKCE challenge and loopback port"
         )
     nonce = new_state_nonce()
     url = await LangSmithLogin().start(
-        redirect_uri=dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
+        redirect_uri=PublicOrigin.dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH,
         redirect_to=sanitize_redirect_to(redirect_to) or frontend_base_url(),
         nonce=nonce,
         handoff_challenge=challenge,
         handoff_port=desktop_port,
     )
     response = RedirectResponse(url, status_code=302)
-    set_state_cookie(response, nonce)
+    set_state_cookie(response, nonce, path=LANGSMITH_STATE_COOKIE_PATH)
     return response
 
 
-@router.get("/auth/langsmith/callback")
+@router.get("/langsmith/callback")
 async def auth_langsmith_callback(
     request: Request, state: str, code: str | None = None
 ) -> Response:
+    """Finish LangSmith sign-in on the callback the LangSmith OAuth client registers."""
     if not code:
         raise HTTPException(400, "LangSmith sign-in was cancelled — please retry")
     payload = decode_state(state)
     if payload.get("provider") != "langsmith":
         raise HTTPException(400, "oauth provider mismatch")
+    if (
+        payload.get("redirect_uri")
+        != PublicOrigin.dashboard_api_base_url() + LANGSMITH_LOGIN_CALLBACK_PATH
+    ):
+        raise HTTPException(400, "LangSmith sign-in used another callback — please retry")
     handoff = desktop_handoff_from_state(payload)
-    if handoff is None:
-        raise HTTPException(400, "LangSmith login requires a desktop handoff")
+    nonce_hash = payload.get("nonce_hash")
+    cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
+    if handoff is None and (
+        not isinstance(nonce_hash, str)
+        or not cookie_nonce
+        or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash)
+    ):
+        raise HTTPException(400, "oauth state mismatch — please retry login")
     login = LangSmithLogin()
     account, tokens, token_endpoint = await login.complete(payload, code)
     user = await User.sign_in(
@@ -368,9 +360,25 @@ async def auth_langsmith_callback(
     key = f"user:{user.id}"
     async with refresh_guard("langsmith_login", key):
         await login.save(key, tokens, token_endpoint, email=account.email or None)
+    if handoff is None:
+        session_jwt = issue_session(
+            login=user.session_login,
+            email=account.email or None,
+            avatar_url=account.picture or None,
+            user_id=str(user.id),
+            provider="langsmith",
+            langsmith_subject=account.sub,
+        )
+        response = RedirectResponse(
+            sanitize_redirect_to(payload.get("redirect_to")) or frontend_base_url(),
+            status_code=302,
+        )
+        set_session_cookie(response, session_jwt)
+        clear_state_cookie(response, path=LANGSMITH_STATE_COOKIE_PATH)
+        return response
     challenge, port = handoff
     handoff_code = issue_desktop_handoff(
-        login=key,
+        login=user.session_login,
         email=account.email or None,
         avatar_url=account.picture or None,
         user_id=str(user.id),
@@ -379,5 +387,5 @@ async def auth_langsmith_callback(
         challenge=challenge,
     )
     response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
-    clear_state_cookie(response)
+    clear_state_cookie(response, path=LANGSMITH_STATE_COOKIE_PATH)
     return response

@@ -62,7 +62,7 @@ class ManagedToolsError(ValueError):
 
 class LangSmithNotConnected(ManagedToolsError):
     def __init__(self) -> None:
-        super().__init__("Connect LangSmith in Settings first")
+        super().__init__("Sign in with LangSmith again first")
 
 
 class MissingCredential(BaseModel):
@@ -188,7 +188,7 @@ def gateway_id(value: str) -> str:
 
 async def _headers(login: str) -> dict[str, str]:
     if not managed_tools_configured():
-        raise ManagedToolsError("Managed tools are not configured on this Open SWE instance")
+        raise ManagedToolsError("Managed tools are not configured on this Robin instance")
     token = await langsmith_access_token(login)
     if token is None:
         raise LangSmithNotConnected

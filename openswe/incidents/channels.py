@@ -176,7 +176,7 @@ async def enroll_channel(
         record.channel_name = str(info.get("name") or channel_name)
         record.title = record.channel_name
         client = get_client()
-        record.thread_id = await resolve_slack_thread_id(client, channel_id, turns.SESSION_TS)
+        record.thread_id = await resolve_slack_thread_id(channel_id, turns.SESSION_TS)
         persisted = await upsert_agent_thread_metadata(
             record.thread_id,
             source="incidents_agent",

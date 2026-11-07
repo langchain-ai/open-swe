@@ -45,13 +45,13 @@ from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
+from runtime_api.provenance import Provenance
 from sqlalchemy import text as sql
 
 from openswe.database import postgres
 from openswe.input_messages import (
     delivered_event_match_ids,
     input_message_text,
-    message_sender_id,
 )
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.transcript.attachments import PendingAttachment, UnsupportedAttachment
@@ -1337,7 +1337,7 @@ def _parse_turn_id(raw: str | None) -> UUID | None:
 def _sender(human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]) -> MessageSender:
     """Who asked for this turn, from the message envelope then the run config."""
     login = (
-        message_sender_id(human.content, kind="human")
+        (provenance.sender if (provenance := Provenance.of(human)) and provenance.human else None)
         or _string(ids.configurable.get("github_login"))
         or _string(metadata.get("owner_login"))
         or "unknown"

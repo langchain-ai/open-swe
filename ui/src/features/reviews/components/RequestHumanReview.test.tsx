@@ -54,8 +54,10 @@ const pr: OpenPullRequest = {
   ci: "passing",
   failingChecks: ["lint"],
   pendingChecks: [],
+  requiredChecksPassing: true,
   missingChecks: [],
   unresolvedThreads: 1,
+  conversationResolutionRequired: false,
 }
 
 it.each([
@@ -126,7 +128,7 @@ it.each([
       })
     )
     const requested = await screen.findByRole("button", {
-      name: "Review requested",
+      name: permalink ? "Review requested" : "Retry review status",
     })
     await waitFor(() => expect(requested.hasAttribute("disabled")).toBe(false))
     if (permalink) fireEvent.click(requested)
@@ -182,7 +184,7 @@ it.each([
       })
     )
     const requested = await screen.findByRole("button", {
-      name: "Review requested",
+      name: permalink ? "Review requested" : "Retry review status",
     })
     expect(requested.hasAttribute("disabled")).toBe(false)
     expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
@@ -192,26 +194,27 @@ it.each([
       focusManager.setFocused(false)
       focusManager.setFocused(true)
     })
-    const restored = screen.getByRole("button", { name: "Review requested" })
+    const restored = screen.getByRole("button", {
+      name: permalink ? "Review requested" : "Retry review status",
+    })
     expect(restored.hasAttribute("disabled")).toBe(false)
-    if (permalink) fireEvent.click(restored)
+    fireEvent.click(restored)
     expect(open.mock.calls).toEqual(
       permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
     )
     expect(request).not.toHaveBeenCalled()
     expect(successToast).not.toHaveBeenCalled()
-    expect(availability).toHaveBeenCalledTimes(1)
+    expect(availability).toHaveBeenCalledTimes(permalink ? 1 : 2)
   }
 )
 
-it.each(["loading", "error", "blocked", "approved"])(
+it.each(["loading", "error", "blocked", "additional approval required"])(
   "requires a known default or selected channel when availability is %s",
   async (state) => {
-    const current = {
-      ...pr,
-      reviewDecision:
-        state === "approved" ? ("approved" as const) : pr.reviewDecision,
-    }
+    const current: OpenPullRequest =
+      state === "additional approval required"
+        ? { ...pr, reviewDecision: "approved", reviewRequired: true }
+        : pr
     const availability = vi.spyOn(api, "humanReviewAvailability")
     if (state === "loading") availability.mockReturnValue(new Promise(() => {}))
     else if (state === "error")
@@ -250,6 +253,55 @@ it.each(["loading", "error", "blocked", "approved"])(
     await waitFor(() =>
       expect(request.mock.calls).toEqual(needsChannel ? [] : [[current, ""]])
     )
+  }
+)
+
+it.each([
+  "",
+  "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+])(
+  "can request another review after a Slack dismissal with cached link %j",
+  async (permalink) => {
+    const errorToast = vi.spyOn(toast, "error")
+    vi.spyOn(api, "humanReviewAvailability")
+      .mockResolvedValueOnce({
+        available: true,
+        active: true,
+        permalink,
+        blockers: [],
+      })
+      .mockResolvedValue({
+        available: true,
+        active: false,
+        permalink: "",
+        blockers: [],
+      })
+    const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
+      success: true,
+      reused: false,
+      permalink:
+        "https://workspace.slack.com/archives/C0123456789/p2234567890123456",
+      error: "",
+      request_id: "replacement",
+      channel: "C0123456789",
+      channel_name: "reviews",
+    })
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TooltipProvider>
+          <RequestHumanReview pr={pr} />
+        </TooltipProvider>
+      </QueryClientProvider>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry review status" })
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Request review in Slack" })
+    )
+    await screen.findByRole("button", { name: "Review requested" })
+    expect(request).toHaveBeenCalledWith(pr, "")
+    expect(errorToast).not.toHaveBeenCalled()
   }
 )
 
@@ -332,7 +384,10 @@ it("recovers channel selection after availability fails", async () => {
   fireEvent.click(
     screen.getByRole("button", { name: "Request review in Slack" })
   )
-  await screen.findByRole("button", { name: "Review requested" })
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Retry review status" })
+  )
+  await screen.findByRole("button", { name: "Choose channel" })
   expect(request).toHaveBeenCalledWith(pr, "C0123456789")
   expect(successToast).toHaveBeenCalledWith(
     "Asked #reviews to review acme/app#7",
@@ -365,13 +420,41 @@ it("can request a selected channel without recovering availability", async () =>
   await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
 })
 
-it("does not offer a review request for a draft", () => {
-  vi.spyOn(api, "humanReviewAvailability").mockReturnValue(
-    new Promise(() => {})
-  )
+it.each<Partial<OpenPullRequest>>([
+  { draft: true },
+  { reviewDecision: "approved" },
+])("does not offer a review request for %j", (status) => {
+  const availability = vi.spyOn(api, "humanReviewAvailability")
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <RequestHumanReview pr={{ ...pr, draft: true }} />
+      <RequestHumanReview pr={{ ...pr, ...status }} />
+    </QueryClientProvider>
+  )
+  expect(screen.queryByRole("button")).toBeNull()
+  expect(availability).not.toHaveBeenCalled()
+})
+
+it("removes the channel picker when the PR becomes approved", async () => {
+  vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
+    available: false,
+    active: false,
+    permalink: "",
+    blockers: [],
+  })
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  await screen.findByRole("button", { name: "Choose channel" })
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <RequestHumanReview pr={{ ...pr, reviewDecision: "approved" }} />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   expect(screen.queryByRole("button")).toBeNull()

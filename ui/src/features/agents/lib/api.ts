@@ -1,10 +1,10 @@
-import type { Experience } from "@/lib/experience"
 import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
   AgentBackgroundOutput,
   AgentBackgroundWork,
+  AgentThreadGoal,
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
@@ -152,7 +152,6 @@ export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
-  experience?: Experience
   hierarchy?: boolean
   limit?: number
   offset?: number
@@ -167,6 +166,8 @@ export interface ThreadsPageParams {
   /** An allowed Slack bot's `team_id:bot_id`, with `scope: "bot"`. */
   bot?: string
   repo?: string
+  /** A project id, or `"none"` for threads outside every project. */
+  project?: string
   ownerless?: boolean
   owned?: boolean
   /** Thread sources to leave out, such as `claude_code`. */
@@ -188,7 +189,20 @@ export interface SidebarRepo {
   updatedAt: number
   /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
   workspace: string
+  projectId?: null
 }
+
+/** One of the viewer's projects, listed even before it has a thread. */
+export interface SidebarProjectFolder {
+  projectId: string
+  /** The repository bound to the project, whose threads it files. */
+  repoFullName: string | null
+  name: string
+  updatedAt: number
+  workspace: string
+}
+
+export type SidebarFolder = SidebarRepo | SidebarProjectFolder
 
 const API_BASE = dashboardApiBase()
 
@@ -304,13 +318,12 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     blob: await res.blob(),
     filename:
       filenameFromContentDisposition(res.headers.get("content-disposition")) ??
-      "open-swe-recovery.patch",
+      "robin-recovery.patch",
   }
 }
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
-  if (params.experience) search.set("experience", params.experience)
   if (params.hierarchy != null)
     search.set("hierarchy", String(params.hierarchy))
   if (params.limit != null) search.set("limit", String(params.limit))
@@ -325,6 +338,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.automationId) search.set("automation_id", params.automationId)
   if (params.bot) search.set("bot", params.bot)
   if (params.repo) search.set("repo", params.repo)
+  if (params.project) search.set("project", params.project)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
@@ -336,14 +350,12 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 }
 
 function buildReposQuery(params: {
-  experience?: Experience
   includeResolved?: boolean
   includeAutomations?: boolean
   owned?: boolean
   excludeSources?: Array<string>
 }): string {
   const search = new URLSearchParams()
-  if (params.experience) search.set("experience", params.experience)
   if (params.includeResolved != null)
     search.set("include_resolved", String(params.includeResolved))
   if (params.includeAutomations != null) {
@@ -374,20 +386,31 @@ export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
   listThreadRepos: (
     params: {
-      experience?: Experience
       includeResolved?: boolean
       includeAutomations?: boolean
       owned?: boolean
       excludeSources?: Array<string>
     } = {}
   ) =>
-    agentsRequest<Array<SidebarRepo>>(
+    agentsRequest<Array<SidebarFolder>>(
       `/threads/repos${buildReposQuery(params)}`
     ),
-  listPinnedThreads: (experience?: Experience) =>
-    agentsRequest<Array<AgentThread>>(
-      `/threads/pinned${experience ? `?experience=${experience}` : ""}`
-    ),
+  listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  reorderSidebarThreads: (body: {
+    thread_ids: Array<string>
+    project?: string
+    repo?: string
+    ownerless?: boolean
+  }) =>
+    agentsRequest<{ ok: boolean }>("/threads/order", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  reorderPinnedThreads: (threadIds: Array<string>) =>
+    agentsRequest<{ ok: boolean }>("/threads/pinned/order", {
+      method: "PUT",
+      body: JSON.stringify({ thread_ids: threadIds }),
+    }),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   shareThreadWithWorkspace: (threadId: string) =>
@@ -449,21 +472,13 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
-  getThread: (threadId: string, options?: { markViewed?: boolean }) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}${
-        options?.markViewed === false ? "?mark_viewed=false" : ""
-      }`
+  getThread: (threadId: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  setThreadViewed: (threadId: string, viewed: boolean) =>
+    agentsRequest<{ viewed: boolean }>(
+      `/threads/${encodeURIComponent(threadId)}/read-state`,
+      { method: "PUT", body: JSON.stringify({ viewed }) }
     ),
-  markThreadViewed: (threadId: string, runId: string) =>
-    agentsRequest<{
-      runId: string | null
-      viewed: boolean
-      viewedAt: number | null
-    }>(`/threads/${encodeURIComponent(threadId)}/viewed`, {
-      method: "POST",
-      body: JSON.stringify({ run_id: runId }),
-    }),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
   ) =>
@@ -474,6 +489,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getThreadGoal: (threadId: string) =>
+    agentsRequest<AgentThreadGoal | null>(
+      `/threads/${encodeURIComponent(threadId)}/goal`
     ),
   getThreadBackgroundWork: (threadId: string) =>
     agentsRequest<AgentBackgroundWork>(

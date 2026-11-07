@@ -15,7 +15,6 @@ from typing import Final
 
 import jwt
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import RoutingRules
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
@@ -54,6 +53,7 @@ class AgentTurnSettings(BaseModel):
 
     # Whoever sent the message that started the run, and whose private credentials it may use.
     profile_login: str | None = None
+    goal_mode: bool = False
     credential_login: str | None = None
     # Whether the sender administers workspaces, and is the only one who may write here.
     admin_workspaces: bool = False
@@ -62,8 +62,7 @@ class AgentTurnSettings(BaseModel):
     title_model_id: str
     title_effort: str | None = None
     use_gateway: bool = False
-    # How each call's route is picked, and the model and effort each route stands for.
-    routing: RoutingRules = RoutingRules()
+    # The model and effort each route stands for.
     route_models: dict[str, tuple[str, str | None]] = {}
     # Whether the opening message may ask for a model, and the one an earlier message did.
     offers_requested_models: bool = False
@@ -77,14 +76,14 @@ class AgentTurnSettings(BaseModel):
     review_guide: bool = False
     # Whether the thread had one that has closed: its guide stays, to retire its rules.
     review_guide_closed: bool = False
-    # Whether the thread is a task worker, which may use its coordinator's sandbox only once
-    # the backend has checked it may.
-    task_worker: bool = False
+    # A task worker's coordinator, whose sandbox the worker may use only once the backend has
+    # checked it may, and whose GitHub token its runs keep fresh.
+    coordinator_thread_id: str | None = None
 
     @property
     def reaches_sandbox(self) -> bool:
         """Whether preparing a turn connects to the thread's sandbox even where MDA keeps it."""
-        return self.review_guide or self.task_worker
+        return self.review_guide or self.coordinator_thread_id is not None
 
 
 class RunSettings(BaseModel):
@@ -106,6 +105,8 @@ class RunSettings(BaseModel):
     tools: str | None = None
     # Where an incident run answers: its incident's Slack thread, not the run's own.
     slack_thread: dict[str, JsonValue] | None = None
+    # Tools the run's catalog offers the model but never grants (``Catalog.disabled``).
+    disabled_tools: list[str] = []
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""
@@ -136,14 +137,21 @@ class RemoteRun(BaseModel):
     expires_at: int | None = None
 
     def grant(self, operation: str) -> str | None:
-        """The grant of ``operation`` to this run, which its calls of it must carry."""
+        """The grant of ``operation`` to this run, which its calls of it must carry; None
+        for one the run's catalog offers but disables."""
         keys = _signing_keys()
-        return _grant(keys[0], self, operation) if keys else None
+        if not keys or operation in self.settings.disabled_tools:
+            return None
+        return _grant(keys[0], self, operation)
 
     def granted(self, operation: str, grant: str | None) -> bool:
         """Whether this run may call ``operation``: its catalog granted it, under any live key."""
-        return grant is not None and any(
-            hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+        return (
+            grant is not None
+            and operation not in self.settings.disabled_tools
+            and any(
+                hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+            )
         )
 
 

@@ -6,6 +6,8 @@ from openswe.slack.client import (
     get_slack_permalink,
     post_slack_thread_reply,
 )
+from openswe.slack.request import SlackRequest
+from openswe.utils.dashboard_links import dashboard_thread_url
 
 
 def breakout_root_blocks(text: str, dashboard_url: str | None) -> list[Block]:
@@ -37,6 +39,16 @@ async def mark_broken_out(
     where = "" if breakout_channel_id == channel_id else f" in <#{breakout_channel_id}>"
     text = f"Continued in <{permalink}|the breakout thread>{where}."
     await notify_breakout(channel_id, thread_ts, text)
+
+
+async def notify_web_breakout(request: SlackRequest) -> None:
+    """Tell the Slack thread a ``/breakout:web`` came from where it continues."""
+    await notify_breakout(
+        request.context_channel_id,
+        request.context_thread_ts,
+        f"<@{request.user_id}> continued in a "
+        f"<{dashboard_thread_url(request.thread_id or '')}|private web breakout>.",
+    )
 
 
 async def notify_breakout(channel_id: str, thread_ts: str, text: str) -> None:

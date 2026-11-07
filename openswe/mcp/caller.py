@@ -29,6 +29,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.manage_feature_flags",
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_shadow",
+    "openswe.tools.slack_bots",
     "openswe.tools.manage_review_repos",
     "openswe.tools.read_only_sql",
     "openswe.tools.fetch_url",
@@ -36,6 +37,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.web_search",
     "openswe.tools.remember",
     "openswe.tools.save_user_settings",
+    "openswe.tools.projects",
     "openswe.tools.connect_claude_code",
     "openswe.tools.user_skills",
     "openswe.tools.threads",
@@ -82,11 +84,9 @@ class ToolCaller:
 
         user = await User.for_identity("github", external_id)
         if user is None or not user.github_login:
-            raise PermissionError("Sign in to the Open SWE dashboard before connecting over MCP")
+            raise PermissionError("Sign in to the Robin dashboard before connecting over MCP")
         if not await is_authorized_github_login(user.github_login):
-            raise PermissionError(
-                "Your GitHub account is not authorized for this Open SWE instance"
-            )
+            raise PermissionError("Your GitHub account is not authorized for this Robin instance")
         return cls(login=user.github_login, email=user.email or None)
 
     @property

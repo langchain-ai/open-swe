@@ -75,7 +75,7 @@ export function Composer({
           rows={4}
           resize="vertical"
           value={body}
-          placeholder="Leave a comment, or ask Open SWE about these lines"
+          placeholder="Leave a comment, or ask Robin about these lines"
           onChange={setBody}
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -119,7 +119,7 @@ export function Composer({
           </Button>
           <Button type="submit" size="sm">
             <AgentMark />
-            Ask Open SWE
+            Ask Robin
             <Kbd variant="inherit">{askKey}</Kbd>
           </Button>
         </div>

@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   CaretDownIcon,
@@ -185,10 +186,10 @@ export function ModelPicker({
   const filteredModels = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return models
-    return models.filter(
-      (model) =>
-        model.label.toLowerCase().includes(q) ||
-        model.id.toLowerCase().includes(q)
+    return new FuzzySearch(q).rank(
+      models,
+      (model) => model.label,
+      (model) => model.id
     )
   }, [models, query])
 

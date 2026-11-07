@@ -93,6 +93,63 @@ async def test_a_server_never_gets_a_credential_open_swe_or_a_channel_reads_for_
     assert (loaded.tools, agent_auth.read) == ([], [])
 
 
+@pytest.mark.parametrize(
+    ("url", "slug"),
+    [
+        ("https://mcp.linear.app.evil.com/mcp", "mda/linear-token"),
+        ("https://evil.com/mcp.linear.app", "mda/linear-token"),
+        ("https://mcp.linear.app:8443/mcp", "mda/linear-token"),
+        ("https://user@mcp.linear.app/mcp", "mda/linear-token"),
+        ("http://mcp.linear.app/mcp", "mda/linear-token"),
+        ("https://mcp.linear.app/mcp", "mda/github-token"),
+    ],
+)
+async def test_the_linear_channels_app_token_goes_to_linears_mcp_server_alone(
+    monkeypatch: pytest.MonkeyPatch, url: str, slug: str
+) -> None:
+    server = McpServer(
+        McpServerSpec(
+            name="linear",
+            url=url,
+            transport="streamable_http",
+            tools={"list_issues": "mcp_linear_list_issues"},
+            connection=ConnectionRef(slug=slug, owner="agent"),
+        )
+    )
+    agent_auth = _Connections(AssertionError("read the token"))
+    monkeypatch.setattr(mcp, "connections", agent_auth)
+    with pytest.raises(McpServerError):
+        await server.credential()
+    assert agent_auth.read == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://mcp.linear.app/mcp",
+        "https://mcp.linear.app/mcp/readonly",
+        "https://mcp.linear.app/sse",
+    ],
+)
+async def test_linears_mcp_server_reads_the_linear_channels_app_token(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    server = McpServer(
+        McpServerSpec(
+            name="linear",
+            url=url,
+            transport="sse" if url.endswith("/sse") else "streamable_http",
+            tools={"list_issues": "mcp_linear_list_issues"},
+            connection=ConnectionRef(slug="mda/linear-token", owner="agent"),
+        )
+    )
+    agent_auth = _Connections(CredentialStoreError("no grant"))
+    monkeypatch.setattr(mcp, "connections", agent_auth)
+    with pytest.raises(CredentialStoreError):
+        await server.credential()
+    assert agent_auth.read == ["mda/linear-token"]
+
+
 async def test_a_server_tool_gets_the_arguments_langchain_names_for_itself(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -117,7 +174,11 @@ async def test_a_server_tool_gets_the_arguments_langchain_names_for_itself(
     sent: list[Mapping[str, object]] = []
 
     async def call(
-        _definition: Tool, arguments: Mapping[str, object], tool_call_id: str
+        _definition: Tool,
+        arguments: Mapping[str, object],
+        tool_call_id: str,
+        *,
+        held: object = None,
     ) -> ToolMessage:
         sent.append(arguments)
         return ToolMessage(content="ok", tool_call_id=tool_call_id)

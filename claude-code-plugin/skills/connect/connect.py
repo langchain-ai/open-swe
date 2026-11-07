@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Redeem an Open SWE connect claim and install the hooks it returns into Claude Code's settings.
+"""Redeem a Robin connect claim and install its hooks in Claude Code's settings.
 
 Usage: connect.py <claim_url> <claim>
 
@@ -35,7 +35,7 @@ def redeem(url: str, claim: str) -> dict[str, object]:
             detail = json.load(exc).get("detail", exc.reason)
         except ValueError:
             detail = exc.reason
-        raise SystemExit(f"Open SWE refused the claim ({exc.code}): {detail}") from None
+        raise SystemExit(f"Robin refused the claim ({exc.code}): {detail}") from None
 
 
 def load(path: Path) -> dict[str, object]:
@@ -93,9 +93,9 @@ def main() -> None:
     answered = minted.get("settings")
     hooks = answered.get("hooks") if isinstance(answered, dict) else None
     if not isinstance(hooks, dict):
-        raise SystemExit("Open SWE answered without hooks")
+        raise SystemExit("Robin answered without hooks")
     install(settings, hooks, path)
-    print(f"Connected {minted.get('name')} to Open SWE.")
+    print(f"Connected {minted.get('name')} to Robin.")
 
 
 if __name__ == "__main__":

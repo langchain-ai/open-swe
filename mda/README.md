@@ -1,6 +1,6 @@
-# Open SWE on Managed Deep Agents
+# Robin on Managed Deep Agents
 
-Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
+Robin's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`.
 Each run's context names the kind of run it is (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds the deep agent for that kind from it.
 
 The model loop, its checkpoints, every tool call and the middleware around them run here.
@@ -28,7 +28,7 @@ Every call is authenticated with the run token.
   Threads the backend gave a sandbox keep it; bridged threads run on the user's machine; a task worker works in its coordinator's MDA sandbox once the backend has attached it there.
 - **Browser:** the coding agent (`agent`) also gets Stagehand's `browser_run`, `browser_snapshot` and `browser_screenshot` tools on one LangSmith browser per thread (`managed_deepagents.browser`), which shares the thread's sandbox's `localhost`.
   The deployment's workspace needs the LangSmith browser beta.
-  It has no `browser_handoff`: MDA's watcher run would start the run that wakes the agent when the user hands the browser back, and Open SWE runs only what its backend signs (`rt/browser.py`).
+  It has no `browser_handoff`: MDA's watcher run would start the run that wakes the agent when the user hands the browser back, and Robin runs only what its backend signs (`rt/browser.py`).
 - **`catalog`:** the run's operations, subagents, models, sandbox and loop rules (`runtime_api.catalog.Catalog`), in every run's context: dispatch does not start a run it cannot plan.
   The context names the tools and carries none of their specs, since the Agent Server copies the context into every checkpoint; the run reads their specs and grants from the backend as it starts (`tool_specs`).
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
@@ -37,16 +37,20 @@ Every call is authenticated with the run token.
   The backend names a person's connection only in the catalog of a run that acts as one (the run token's `acting_user_id`, never `user_id`, whom the run is only attributed to), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
   A person's connection the run cannot read otherwise (no grant given, Agent Auth not reached) is left out, and the tool works as it did without; a call whose deployment connection is missing or unreadable fails and names it.
   The backend runs no tools node and no tool-call middleware.
+  A tool that reads nothing of the backend's, which the backend marks (`runtime_runs`), MDA runs itself and answers as its operation would, byte for byte, reported to the transcript alike (`rt/local_tools.py`, `rt/local_results.py`): `web_search` (where `MDA_EXA_CONNECTION` names the Exa key, which MDA reads), `fetch_url` and `http_request`, whose requests go only to public addresses, each redirect checked (`rt/public_http.py`), and `slack_no_reply_needed`, `cli_result`, `record_human_input`, `note_on_diff`, `propose_review_comment` and `propose_pr_review`.
+  A large search result or response goes to the sandbox MDA owns; a run without one calls those two as operations, and MDA calls any marked tool it does not have as one.
   An operation whose sandbox stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
 - **`search_tools`, `resolve_tool`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
-  The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs.
-  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `resolve_tool` which tool that is, with the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
+  The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs and the catalog names (`tool_set`).
+  The deployment reads each set once per process (`tool_set`) and `search_tools` searches it here, with the backend's own BM25 index (`runtime_api.tool_search.ToolIndex`); a run whose catalog names no set searches on the backend.
+  The run calls a tool by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, is looked up in the set here, and only a name it has asks `resolve_tool` for the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
-- **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Open SWE record).
+- **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Robin record).
   The catalog names those (`mcp_servers`), and `rt/mcp.py` connects to them before the run's first model call, in a node of its own: it reads each credential with `managed_deepagents.connections`, the deployment's for an instance or workspace server and the person's own for a personal one, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.
   Each call reads the credential again and sends it only to the server's HTTPS origin, at a public address.
-  Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Open SWE or a channel reads for itself, such as `mda/github-token`.
+  Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Robin or a channel reads for itself, such as `mda/github-token`.
+  The one exception is the Linear channel's app token, `mda/linear-token`, and only for an instance or workspace server on Linear's MCP origin, `https://mcp.linear.app`.
   A person who has not granted a connection is asked to (MDA's credential interrupt); a run that acts for no one, or whose agent connection is missing, goes without that server.
   The backend names a personal server only to a run that acts for its owner, never to one for no person, such as a background task's completion.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
@@ -75,7 +79,7 @@ Every call is authenticated with the run token.
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
     Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read names what that receipt holds until the backend took it, so the backend receives it before reading; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;
-  - `RunLoop` (`rt/loop.py`), around each model call, as the run's `LoopRules` say: the catalog's for the coding agent, whose rules depend on the run, and those of its kind (`rt/kinds.py`) for the reviewer and the scout, which every run of theirs follows: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`) and an incident run's instructions (`incident_context`, which also checks the incident still wants the run and records the evidence people's messages carry) and keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`), both asked while the inbox is read, picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
+  - `RunLoop` (`rt/loop.py`), around each model call, as the run's `LoopRules` say: the catalog's for the coding agent, whose rules depend on the run, and those of its kind (`rt/kinds.py`) for the reviewer and the scout, which every run of theirs follows: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context its catalog carries (a coordinator's first worker hands back the task it joined) and an incident run's instructions (`incident_context`, which also checks the incident still wants the run and records the evidence people's messages carry), keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`, asked while the inbox is read; a worker's is its coordinator's), picks the route (`rt/routing.py` classifies a new thread's request alongside preparing it), adds the reminders a person's new message calls for (`reminders`) and picks the model, and assembles the system prompt and tool list.
     After an answer that calls no tool it asks again for the CLI result and the Slack reply the run owes, then posts the answer itself (`reply_on_behalf`).
     At the end it asks for the graph's own end-of-run work (`step_limit_reached`, `settle_review_check`, `finish_scout_plan`) and reports the run ended (`run_ended`: transcript, usage), and the run ends without waiting for either;
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
@@ -93,18 +97,14 @@ Every call is authenticated with the run token.
 - **State:** graph state preparation and the loop write that MDA does not know rides in `open_swe_state` and goes back with every call.
   Custom stream events the backend emits are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
-  Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`).
+  Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`) and fails an attempt that outlives 15 minutes, its retries included, with `ModelCallTimeoutError`.
   `rt/model_retries.py` owns up to five transient-error retries for OpenAI, Anthropic, Fireworks and Google GenAI; `rt/models.py` disables their SDK retries (Google counts total attempts, so receives one).
   Other integrations keep SDK ownership and receive no extra middleware retries.
   Backoff uses jitter and honors `Retry-After`, with at most 60 seconds of total retry sleep per provider call; an excessive hint fails rather than retrying before the provider permits it.
   Structured logs and `model_retry` custom events report retry counts and waits without including provider error text.
-  An agent's primary call, retries and fallback share one 15-minute elapsed budget, reasoning included, enforced by `BackendRunMiddleware` with `ModelCallTimeoutError`.
-  With a fallback available, the entire primary call—all attempts and retry waits combined—shares one 10-minute window to start streaming; retries do not reset that window, leaving at least five minutes for the backup after a silent stall.
-  Once any primary attempt starts streaming, that window is lifted for the rest of the primary call, including later retries, while the overall 15-minute limit still applies.
-  Without a fallback the primary keeps all 15 minutes.
-  Transient failures can retry even after streaming: each accepted retry or fallback marks that attempt's streamed message ids superseded, so the dashboard discards its partial text and unexecuted tool calls.
-  Failed attempts never enter graph history, and completed tools are never replayed by model retries.
-  If recovery is exhausted, the final partial output stays visible with the run error.
+  An agent's call that still fails transiently (a timeout, a dropped connection, 429, 5xx, an overload) goes again, alternating between its model and the fallback model with waits of 0, 5, 15, 30 and 45 seconds, all within 45 minutes; once every attempt failed, the run ends with a message saying so.
+  Each retry or failover marks the failed attempt's streamed message ids superseded, so the dashboard discards its partial text and unexecuted tool calls; failed attempts never enter graph history, and completed tools are never replayed.
+  An error another attempt would repeat ends the run at once, after telling the backend why (`model_failed`), so the failure reply names it; a model the workspace may not use answers with that instead.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
@@ -144,9 +144,10 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 
 | Variable | Purpose |
 |---|---|
-| `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
+| `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Robin backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `BASETEN_API_KEY`, … | Model keys for direct (non-gateway) model calls |
+| `OPENAI_BASE_URL`, `LANGSMITH_GATEWAY_BASE_URL`, `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | Optional, as the backend's: both sides build models with `runtime_api.models`. `deploy_mda.yml` forwards the repository variables of these names when set; unset, MDA uses the defaults (`wss://api.openai.com/v1`, `https://gateway.smith.langchain.com`, the Responses API) |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 | `MDA_SERVICE_SECRET` | Shared with the backend: MDA signs each call its channels make to the backend's endpoints with it, as Standard Webhooks does |
 
@@ -157,11 +158,12 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
+| `MDA_LANGSMITH_PROJECT` | This deployment's LangSmith project (its `LANGSMITH_PROJECT`, the deployment name), where its runs are traced; the backend's trace links, costs, feedback and reviewer evals read runs there. Unset: the backend's `LANGSMITH_PROJECT` |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
-| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the sandboxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |
-| `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses. Unset: the backend's `EXA_API_KEY` |
-| `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Open SWE knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
+| `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses, run in MDA. Unset: the backend runs it with its `EXA_API_KEY` |
+| `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Robin knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
 
 ## Run locally
 
@@ -169,14 +171,14 @@ The backend:
 1. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above.
    Then run `make dev-mda` from the repository root.
    Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
-1. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here.
+1. Use Robin as usual: your dashboard, Slack and GitHub threads run here.
    `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
 
 The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.
 
 ## Build and deploy
 
-Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
+Each Robin backend calls its own MDA deployment, created with `mda deploy`:
 
 | Deployment | Backend it calls |
 |---|---|
@@ -184,10 +186,15 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 | `open-swe-mda-preview` | `open-swe-preview` |
 | `open-swe-mda-prod` | `open-swe-v3` |
 
-Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET` (repository secret `MDA_SERVICE_SECRET_<ENVIRONMENT>`), in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET`, in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+LangChain's deploy workflow, in its internal monorepo, takes each value from that environment's backend.
 The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap.
-`deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_PROD` or `LANGSMITH_GATEWAY_API_KEY_STAGING` repository secret; `build_preview_branch.yml` reads `LANGSMITH_GATEWAY_API_KEY_PREVIEW`.
 Deploys fail if their gateway key is missing.
+For `open-swe-mda-prod`, the deploy also takes the backend's `LANGSMITH_RUNS_ENDPOINTS`, a JSON array of tracing destinations, each with `api_url`, `api_key` and `workspace_id`.
+The workflow requires both `https://dev.api.smith.langchain.com` (workspace `d6684905-655c-429b-bd14-ba302d94c03b`) and `https://api.smith.langchain.com` (workspace `ebbaf2eb-769b-4505-aca2-d11de10372a4`), and forwards the compact JSON as `LANGSMITH_RUNS_ENDPOINTS` in `mda/.env`.
+Missing or invalid configuration fails the prod deploy without printing credentials; staging and preview do not receive these replicas.
+Updating only the backend's `LANGSMITH_RUNS_ENDPOINTS` in Terraform does not configure MDA tracing.
+For a manual prod deploy, include the same `LANGSMITH_RUNS_ENDPOINTS` in the project `.env` alongside its other deployment secrets.
 The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform.
 To deploy one by hand from the repository root, with `mda/.env` holding that deployment's backend URL, gateway key and `MDA_SERVICE_SECRET`:
 
@@ -197,7 +204,7 @@ cd mda
 uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
-`deploy_mda.yml` and `build_preview_branch.yml` write the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
+The deploy workflow writes the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
 Each turn's root trace carries that commit as `revision_id`, an `environment` derived from the CLI-injected `MDA_DEPLOYMENT_NAME` (`open-swe-mda-prod` reports `production`), and the backend's current `LANGCHAIN_REVISION_ID` as `LANGSMITH_AGENT_VERSION` from the run's catalog, overriding whatever metadata queued work saved.
 
 CI and manual deploys run the CLI from this project's locked environment.
@@ -216,7 +223,7 @@ MDA's dev server also refuses loopback webhooks, so the completion webhook (`COM
 
 Before every run a channel starts, MDA asks the backend who its verified sender is (`resolve_user` in `identity.py`, the backend's `POST /mda/resolve-user`, signed with `MDA_SERVICE_SECRET` as the channel endpoints are).
 The backend maps the sender as every other ingress does (`User.for_person`): a Slack account linked in the sender's own workspace (a link that names no workspace matches no one), a GitHub user by their numeric id, or a Linear user by email.
-A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
+A match runs as that Robin user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
 Anyone else is answered `null`, as is every sender while the backend can't read its users: MDA runs a verified person as their own GitHub, Linear or Slack principal, which owns no user connections, and a bot, an app or a sender the channel couldn't verify as the channel.
 The channel endpoints still gate the run and ask the person to connect their account.
 
@@ -228,16 +235,34 @@ User-owned connections depend on it: any other id there is a person to MDA, so o
 
 ## Linear
 
-The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear.
+The deployment's Linear channel (`channels/linear.py`) is how Robin works in Linear.
 Mentioning the app on an issue, or delegating the issue to it, opens an agent session.
 Each session is its own conversation: the channel starts its runs on the session's own thread, so the answer, Stop, interrupt notices and errors reach the session.
 A reply in the session is the next run there; a new mention on the same issue opens a new session and thread.
 
-The channel verifies each delivery (Linear's signature and timestamp).
-The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token.
-Every handled event goes to the backend's endpoint, `POST /linear/channel/events` (the channel's `on_event` names it): MDA posts `{event: {key, deliveryId, payload}, thread}`, with the payload it validated.
-For a session event the backend indexes the thread and answers with the run's input, context, metadata and webhook; issue and comment events start no conversation, so it answers `null`, after logging them for `listen_events` and running Linear automations.
-The endpoint answers only calls MDA signed with `MDA_SERVICE_SECRET`.
+The channel verifies each delivery (Linear's signature and timestamp), and its handlers decide here what it starts.
+They ask the backend only for what needs Open SWE's data or signing key, through the typed channel API (`runtime_api.linear`, `POST /mda/channel-api/{endpoint}`), which answers only calls MDA signed with `MDA_SERVICE_SECRET`.
+Every handled delivery goes to the event log once per delivery ID, which wakes the threads that listen for Linear events.
+The first call for a delivery carries it, so each event takes at most two calls; `record_linear_delivery` logs one that asks nothing else, such as `Comment.create`.
+
+**Agent sessions** (`rt/linear.py`):
+
+1. `linear_session_facts`, which also logs the delivery: whether the turn's author has signed in to Open SWE with the email Linear knows them by; what the session's thread already works in; the author's and the instance's default repositories; and which repositories Open SWE may work in.
+1. The handler picks the repository (the turn's, the thread's, the issue's, then the defaults) and workspace, and checks the allowlist.
+   When nothing can start, it tells the session why: the author must sign in first, no repository is named, or the one named is outside the allowlist.
+1. `plan_linear_session`: the backend checks the author and the repository again, since the channel's choice grants nothing, indexes the thread and signs its run context.
+1. The handler writes the run's input: the `linear-issue` prompt (`prompts/`) and the backend's input message envelope, copied in `rt/input_messages.py`, with the images the issue and the turn show, fetched only over HTTPS from public addresses (`rt/images.py`).
+   It starts the run with the backend's context, metadata and run-complete webhook.
+
+**Automations** (`rt/linear_automations.py`): an issue created, or one that gained a label, may fire the team's Linear automations.
+
+1. `linear_automation_rules`, which also logs the delivery: the team's enabled automations, their prompts and Linear triggers, and whether the issue's creator is an Open SWE user.
+1. The handler matches the event against them: the event, the labels the issue carries or gained, the project.
+   For each match it writes the run's prompt: the `linear-automation-event` prompt (`prompts/`) with the automation's own, and the issue, fenced as untrusted unless its creator is an Open SWE user (`rt/untrusted.py`).
+1. `plan_linear_automations`, once for every match: for each, the backend checks the automation has a trigger on that team and event, claims it once per delivery within its hourly cap, and signs its run's context.
+1. The handler starts each run on a thread of its own for that automation and delivery, so automations never touch the issue's conversation, and a redelivery starts nothing twice.
+
+The copies in `rt/` are AGENTS.md's exception for channel input.
 
 Threads of Linear sessions belong to the channel, and MDA scopes threads by owner.
 The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`).
@@ -251,13 +276,31 @@ The channel reports failures in the session itself.
 
 ## GitHub
 
-The deployment's GitHub channel (`channels/github.py`) handles `@openswe` mentions on issues: `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only.
-One issue is one conversation, on the channel's own thread, and a new mention interrupts the run in progress, as before.
-Pull requests, reviews, CI, the reviewer and automations stay on the backend.
+The deployment's GitHub channel (`channels/github.py`) receives every delivery of Robin's own GitHub App and forwards each one to the backend before anything else reads it (`forward_to`): the body and GitHub's headers unchanged, signed with `MDA_SERVICE_SECRET`, to the backend's `/mda/github/deliveries`.
+Every event the App is subscribed to reaches the backend that way, typed by the SDK or not.
+The backend logs the delivery once and answers; after answering it picks and runs its own work for it (`openswe/github/work.py`), once per delivery: the merge queue wakeup, the agent thread's pull request state and usage, approvals withdrawn on a push, review guides paused, reviews and re-reviews, walkthroughs, the reviewer's watch, review threads resolved or unresolved, human review requests settled, completed reviews recorded and CI wakeups.
+MDA answers GitHub only once the backend has answered, so a delivery the backend didn't take fails on GitHub and starts nothing; GitHub doesn't send it again on its own, so redeliver it from the App's advanced settings once the backend is back.
 
-The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`.
-The backend forwards the issue events that would start a run to `<deployment>/channels/github/events` exactly as GitHub sent them, instead of starting the run itself.
-Deploy remembers that the webhook stays at the backend once you answer "No" to moving it; without a terminal, `MDA_GITHUB_WEBHOOK_ELSEWHERE` names the backend's URL.
+The channel's handler (`rt/github.py`) takes only the events that may start an agent run (`rt/github_routes.py`), and asks the backend's typed channel API (`runtime_api.github`) only for what needs Robin's data:
+
+- `github_delivery_facts` answers whether a workspace owns the delivery's repository, whether the allowlist takes it, whether the public-repository gate turned its sender away, and the handles that mention Robin; it logs and runs nothing.
+- An issue opened, or a pull request opened, closed or merged, fires the repository's automations (`rt/github_automations.py`): `github_automation_rules` answers the repository's enabled automations, the events each fires on, and whether the issue's or pull request's author is a Robin user; the handler matches them and writes each run's prompt (`prompts/github-automation-event.md.jinja`), fencing the issue or pull request as untrusted unless its author is a user.
+  `act_on_github_delivery` checks each automation fires on the delivery's event in its repository, applies the public-repository gate to pull requests, claims each once per delivery and signs its run on a thread of its own.
+  An automation that fails fires nothing and stops nothing else.
+- A `@robin-agent` mention (or a legacy handle) on an issue, in its title or body or in a comment, starts the coding agent's run on the issue's conversation, the channel's own thread (`rt/github_issues.py`).
+  `github_issue_facts` answers which of the people the prompt quotes are Robin users, whether the sender's email is known, whether a run already took the issue in, and the thread's workspace; the handler writes the run's input: on a new conversation the issue (`prompts/github-issue.md.jinja`) and every comment, read with the App's token (`mda/github-token`), on a later one the person's own message, anyone who isn't a user fenced as untrusted.
+  `act_on_github_delivery` checks the commenter and the public-repository gate again, indexes the thread and answers with the run context with a run token signed for the thread, the run metadata and the run-complete webhook; the handler then reacts 👀 to the comment, as the App.
+  A new mention interrupts the run in progress, as before; while the thread waits on an interrupt it only answers whether Robin acts, so the channel points the issue to the decision.
+- A pull request comment, review or review comment goes to `act_on_github_delivery` to route; its run the backend still writes: it reads the pull request's comments with the person's own token and keeps a private thread's to the comments of its owner.
+
+The channel takes the App's own issues and pull requests too (`include_own_events`), so the agent's own pull requests still fire automations, and the backend gets every delivery either way; the handler skips the App's own comments and reviews.
+Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Robin's failure reply on the issue, as before.
+A handler's backend call that fails starts nothing, and MDA logs why.
+Deploy the backend before MDA: a channel deployed before it forwarded still names the backend's work through `record_github_delivery`, and the backend runs each delivery's work once either way.
+
+The channel uses Robin's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret) and points its webhook at `<deployment>/channels/github/events`.
+A deployment whose deploy kept the App's webhook at the backend (`MDA_GITHUB_WEBHOOK_ELSEWHERE`) keeps it there until it moves: change it once in the App's settings, or run `mda deploy` in a terminal and confirm the move.
+Move it right after deploying this change, since the backend no longer serves `/webhooks/github`.
 
 Without a terminal, deploy brings the App from `MDA_GITHUB_APP_ID`, `MDA_GITHUB_APP_PRIVATE_KEY_FILE`, `MDA_GITHUB_APP_INSTALLATION_ID` and `MDA_GITHUB_WEBHOOK_SECRET`, all or none, and hands them to Agent Auth only.
 Both deploy workflows set them for a deployment that has no App yet: the App and installation IDs are the ones its backend uses, and the key and webhook secret come from the `MDA_GITHUB_APP_PRIVATE_KEY_<ENVIRONMENT>` and `MDA_GITHUB_WEBHOOK_SECRET_<ENVIRONMENT>` repository secrets, the same values as the backend's `GITHUB_APP_PRIVATE_KEY` and `GITHUB_WEBHOOK_SECRET`.
@@ -268,42 +311,72 @@ The channel asks for the App's repository permissions (`app.permissions`), so th
 Deploy renews the token with them only where the App's installation grants them and the App is installed once; its report names the token's permissions, which `MDA_GITHUB_PROXY_CONNECTION` needs in full.
 Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
 
-The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`.
-The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing.
-While the thread waits on an interrupt it only answers whether Open SWE would act, so the channel points the issue to the decision.
-Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
-
 ## Slack
 
 The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake.
-Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
-When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until its first metadata write, by the run or by the backend taking it back, says who sees it), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
+Robin's Slack app keeps its URLs at the backend's `/webhooks/slack`.
+When the first message of a new conversation is one MDA's channel can start, the backend forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
+It claims nothing and remembers nothing: the channel decides what the message starts from the message itself, so nothing changes in the channel when Slack's Events URL points at Trigger Server instead.
 Later messages in that Slack thread, and Slack's Stop, go the same way.
-Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
-The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
+A kitchen channel's untagged messages start conversations too, each Slack thread its own; the backend routes the run to the channel's workspace when it builds it.
+A concierge DM is one conversation for the whole DM: a DM no thread holds yet goes to MDA as a whole, bound for Slack's `0` timestamp to the DM's thread (`uuid5` of `slack:v1:{app}:{team}:{channel}:0`), and each Slack thread a message opens in it is bound to that thread too, so Slack's Stop there and the handler's question find it.
+The handler starts each of the DM's runs on that thread (`thread: {"mode": "persistent", "id": ...}`), so Stop in a Slack thread cancels only the runs that thread started; the run context names the Slack thread the agent answers in.
+Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, whose handler (`rt/slack.py`) decides what it starts, as `/webhooks/slack` decides for the backend's own conversations, and builds the turn's prompt from the Slack thread, read with the deployment's bot token (`rt/slack_prompt.py`, a copy of the backend's builder; `rt/slack_message.py`, of its message parser).
+It asks the backend only for what needs Robin's records: `slack_message_facts` (is the channel external, a DM, a kitchen or code channel; concierge mode; the bot allow-list; a solo follow-up; who holds the conversation) and then `start_slack_turn`.
+A message the backend answers itself isn't the channel's to start (one in a conversation the backend holds or in a code channel, a breakout naming a channel with nothing to do there, a web question with nothing to ask): the handler hands it back to the backend's `act_on_slack_message` with Slack's event, and the backend answers it as `/webhooks/slack` always has, never sending it to MDA again.
+Once Slack's Events URL points at Trigger Server, that is the only way the backend hears those messages.
+`start_slack_turn` gates the turn as the backend gates its own Slack runs (a person without a usable GitHub account gets a reply saying so, and the conversation stays unclaimed), binds a new conversation's Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`) and indexes it as the channel's, writes the thread's metadata, signs the run, and answers what the prompt needs from its records: logins, the people a private thread may quote, the channel's context block, a review card's pull request, where a DM started.
+A `/btw` question, a breakout and a move come back built, as the backend always built them.
+The handler leaves out of the prompt what the thread already holds, from `thread.get_state()`, Agent Server's state as LangGraph's `threads.get_state` reads it (MDA [#1231](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1231)).
+A person's edit of a message the conversation holds goes to the `edit` handler (`/webhooks/slack` forwards it unchanged; once Slack's Events URL points at Trigger Server, Trigger Server does, MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175)): an edit of its text by its author, of a message the thread's state shows the agent got, becomes `start_slack_turn`'s `edit`, which gives the agent the correction as the backend does, a note for the run in progress or a turn of its own.
+An unfurl, another author's or a bot's edit, and a concierge DM's edits start nothing; deletions start nothing, as on the backend.
+Reactions reach the `reaction` handler once Slack's Events URL points at Trigger Server, which hands them to the backend's `/mda/slack/reactions`: it records a feedback reaction on the run that posted the message and treats the summon reaction as its reactor tagging Robin, as `/webhooks/slack` does, and starts no run of MDA's.
+Until then the backend hears reactions itself.
+A mention, a direct message or an explicit request redirects the thread's run in progress (`interrupt`); any other follow-up waits its turn behind it (`enqueue`), as on the backend's own Slack threads.
+The agent replies with Robin's Slack tools (`auto_post=False`), and the channel shows the run's status and Stop.
+
+Every Slack click goes to the channel too: `/webhooks/slack/interactivity` forwards it unchanged to Trigger Server's interactivity URL (`TRIGGER_INTERACTIVITY_URL`), after answering Slack, so the Slack app's Interactivity URL can move to Trigger Server with no code change.
+Only "Explain this" (a message shortcut), code channel views and the options they load (`block_suggestion`), and modals the backend opened itself stay on the backend.
+Once the URL points at Trigger Server, "Explain this" comes to the channel's `shortcut` handler (MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175) with LangSmith Trigger Server forwarding `message_action`), which hands it to `act_on_slack_click` too.
+Where Trigger Server refuses a click (an environment without MDA), the backend acts on it after all.
+A channel's own changes (created, renamed, archived, unarchived, deleted) reach the channel's `channel` handler once Slack's Events URL points at Trigger Server (MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175), LangSmith Trigger Server [#57973](https://github.com/langchain-ai/langchainplus/pull/57973)); it hands them to the backend's `/mda/slack/channel-events`, which keeps the channel directory, incident channels and review guides as `/webhooks/slack` does, and starts no run.
+The handler (`rt/slack_clicks.py`) takes the clicker Trigger Server verified, refuses an option meant for someone else and a Retry by anyone but its requester (an ephemeral reply, nothing started), and updates the clicked message through its `response_url`; Retry removes its button before anything runs.
+The backend's `plan_slack_click` finds the click's conversation from its own bindings, acts on each clicked message once (a call MDA sends again under its `webhook-id` gets its run again), decides a workflow push under its lock, finds the message a Retry sends again, and builds and signs the run, which redirects or waits as a message would.
+A Retry button carries its fields in its value, with no token: Slack signs the click, and only Robin's own message carries the value.
+Every other click, and one in a conversation the backend holds, the handler hands to the backend's `act_on_slack_click` with Slack's payload as Trigger Server forwarded it: the backend acts on it as it always has, as the clicker Trigger Server verified, once per call.
+That covers the review cards (votes, sign-ups, picks, dismissals), act-as approvals, suggested actions, run feedback and older Retry buttons, which carry a token.
+A review card's modals (another channel to send it to, a pick's Decline and Snooze) open through Trigger Server: the button's `action_id` is `mda_modal::<name>:<id>` and its value the view, whose inputs are required, since Trigger Server answers Slack before the backend sees the submission.
+The submission reaches the handler as a click on the button's Slack thread.
+Answers to review clicks, and their updates to the clicked message, go through the click's `response_url`.
 It adds no reaction to the message that starts a run (`reactions=False`).
 
 The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.
 There is no setting: an environment whose Slack app isn't registered with Trigger Server gets a 401, and the backend handles the conversation as before.
 
-A handed-over message never ends in silence.
-When Trigger Server doesn't take a message in a conversation the channel hasn't started a run in yet (it refuses, or the forward gives up), the backend releases the conversation and runs the message itself, as it did before MDA.
-The backend claims a new conversation only once it has gated and remembered the message, so a failure before the hand-off leaves the conversation unclaimed.
-When Trigger Server doesn't take a message in a conversation the channel started, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
-Taking it back is atomic, so the person gets either the run or the error.
-When MDA retries a call to `/slack/channel/events` it got no answer to (same `webhook-id`), the backend builds the run again from the request that call took; any other call for the message gets no run.
-Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`.
+When Trigger Server doesn't take a message (it refuses, or the forward gives up), the backend answers a new conversation's message itself, as it did before MDA, and replies in the Slack thread with an error id for one in a conversation the channel holds.
+When building a turn's run fails, the backend replies in the Slack thread with an error id, as for its own runs.
+A message lost between Trigger Server and the channel (a deployment restart) is lost: an accepted risk, as for every channel.
+When MDA retries `start_slack_turn` (same `webhook-id`), the backend builds the run again, but answers a decline once.
+Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each answer without a run logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
+
+A `/btw` question, a breakout into a new thread and a `/breakout:web` question branch off the conversation they're sent in (`openswe/slack/forks.py`).
+Each runs on a new thread of its own, which belongs to the person who asked.
+When MDA's channel holds that conversation and the person may read its thread (a private thread's owner), the Slack handler starts the new thread with the conversation thread's state, read with `thread.get_state()` (`branches_conversation` on `start_slack_turn`'s answer): it knows what the agent did there, and its first turn adds only the Slack messages the agent never got.
+The new thread is the channel's, so MDA can start its runs; an Agent Server copy of the conversation's thread would keep the conversation as its owner, and MDA would refuse the run (409).
+Otherwise the branch is seeded from the Slack thread as before.
+The original thread and its running work are left alone.
 
 Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):
 
 | Goes to MDA | Stays on the backend, and why |
 |---|---|
-| A person's @mention of Open SWE in a channel, as a new message or in a thread Open SWE isn't in yet | Code channels (one session per channel) and concierge DMs (one per DM): MDA keys a conversation by its Slack thread |
-| A person's DM to Open SWE (a thread per message) | Kitchen channels' untagged messages, routed to a workspace |
-| Every later message in those threads, and Slack's Stop | Bots' messages, breakouts, `/btw`, slash commands |
-| | Every conversation the backend already holds: one never moves |
-| | Reactions (`:x:` stop, feedback), edits, `thread_broadcast` replies and button clicks: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |
+| An @mention of Robin in a channel, by a person or a bot on Robin's allow-list, as a new message or in a thread Robin isn't in yet | Code channels (one session per channel), which MDA can't hold yet |
+| A person's DM to Robin (a thread per message) | Breakouts, `/btw`, slash commands |
+| A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves. Once Slack's Events URL points at Trigger Server, MDA's channel hands their messages back (`act_on_slack_message`) |
+| A new concierge DM, as one conversation on one thread | "Explain this" while Slack's URL points at the backend (MDA's `shortcut` handler takes it after the move); code channel views and the options they load |
+| Every later message in those conversations, and Slack's Stop | Reactions (`:x:` stop, feedback), edits and `thread_broadcast` replies: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |
+| Every click: the agent's options, workflow push approvals and Retry in those conversations start their run in MDA; the backend acts on every other one (`act_on_slack_click`) | Modals the backend opened itself, before their cards opened them through Trigger Server |
 
 `mda deploy` registers each environment's own Slack app with Trigger Server from `MDA_SLACK_BOT_TOKEN_<ENV>` and `MDA_SLACK_SIGNING_SECRET_<ENV>` (repository secrets; an app can be registered to one deployment only).
 Trigger Server keeps an app once registered, so later deploys need neither.

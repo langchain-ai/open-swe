@@ -1007,6 +1007,9 @@ function shownText(row: TranscriptMessageState): string {
     : row.text
 }
 
+/** The attachment marking the plugin context sent with a message (`openswe/threads/runs.py`). */
+const PLUGIN_CONTEXT_MIME = "application/vnd.open-swe.plugin-context"
+
 interface HumanCacheEntry {
   entities: ReadonlyMap<string, StructuredEntity>
   /** `null` when the message is one the transcript deliberately hides. */
@@ -1048,9 +1051,13 @@ function buildHumanMessage(
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
   if (!chunks.length && !taskEvent && !replies) return null
+  const contextLabel = row.attachments.find(
+    (attachment) => attachment.mime_type === PLUGIN_CONTEXT_MIME
+  )?.file_name
   return {
     id: row.messageId,
     ...(taskEvent ? { taskEvent } : {}),
+    ...(contextLabel ? { contextLabel } : {}),
     author:
       parsed.type === "message" && parsed.senderKind === "system"
         ? "system"
@@ -1062,6 +1069,9 @@ function buildHumanMessage(
           structuredSenderId: parsed.sender,
           structuredSenderKind: parsed.senderKind,
           structuredSurface: parsed.surface,
+          ...(parsed.slackMessageUrl
+            ? { slackMessageUrl: parsed.slackMessageUrl }
+            : {}),
           ...(replies ? { replies } : {}),
           structuredSenderName:
             entity?.displayName ??
@@ -1071,7 +1081,7 @@ function buildHumanMessage(
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
-              ? "not an Open SWE user"
+              ? "not a Robin user"
               : undefined,
           structuredSenderIsBot: entity?.senderType === "bot",
         }
@@ -1191,6 +1201,7 @@ function turnMessages(
                 ...message,
                 deliveryStatus: "failed",
                 deliveryError: turn.error ?? undefined,
+                deliveryTurnId: turn.turnId,
               }
             : message
         )

@@ -167,5 +167,5 @@ export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
 
 export function diagnosticsFileName(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  return `open-swe-diagnostics-${stamp}.txt`;
+  return `robin-diagnostics-${stamp}.txt`;
 }

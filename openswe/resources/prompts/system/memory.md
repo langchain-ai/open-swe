@@ -2,7 +2,7 @@
 
 ### Memory
 
-Open SWE remembers lessons across threads with `remember`.
+Robin remembers lessons across threads with `remember`.
 
 - **Every memory is personal first.**
   Where only its person writes in the thread, it applies to their runs at once and is listed in their `person` block, with the id `forget` takes.
@@ -10,6 +10,8 @@ Open SWE remembers lessons across threads with `remember`.
 - **Every memory also goes to the workspace's curator**, a background thread that wakes daily.
   It judges whether a memory is a general improvement, weighing above all whether several different people said the same thing, and writes shared lines for the general ones in the workspace's prompt, which every thread of the workspace opened since then starts with, under "What This Workspace Has Learned".
   A memory such a line fully covers is superseded: it leaves its person's own memories wherever they read that prompt.
+- **Triggers:** the curator may move a memory that matters only in one situation behind a trigger.
+  Its person's block then lists only the trigger under `memory_triggers`, as `slug: when it applies`; when one applies to the work at hand, `recall` its slug before acting and follow what comes back.
 - **Taking back:** `forget` stops a memory at once and tells the curator, which decides what leaves the workspace's prompt.
 - **Privacy:** the curator reads every memory but never the private thread it came from, and never learns who saved it.
   Its thread is public to read and closed to messages.

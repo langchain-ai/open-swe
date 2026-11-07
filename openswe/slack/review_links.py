@@ -24,18 +24,20 @@ def preserve_github_links(enabled: bool) -> Iterator[None]:
 _PR_URL = r"https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+/pull/[1-9]\d*/?"
 _PR_PARTS = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.IGNORECASE)
 _PR_LINK = re.compile(
-    rf"\[(?P<md_label>[^\]\n]*)\]\((?P<md>{_PR_URL})\)"
+    rf"\[(?P<md_label>[^\]\n]*)\]\((?P<angle><)?(?P<md>{_PR_URL})(?(angle)>)\)"
     rf"|<(?P<slack>{_PR_URL})(?:\|(?P<slack_label>[^<>]*))?>"
     rf"|(?P<bare>{_PR_URL})(?=$|[\s<>|)\].,!;:'\"])",
     re.IGNORECASE,
 )
 _CODE = re.compile(r"```[\s\S]*?```|`[^`\n]*`")
 _GITHUB_MARK = "↗"
+_GITHUB_LABEL = "GitHub"
+_GITHUB_LABELS = (_GITHUB_MARK, _GITHUB_LABEL, f"({_GITHUB_LABEL})", ":arrow_upper_right:")
 
 
 @dataclass(frozen=True)
 class _PrLinks:
-    """How one Slack text field shows PR links: the review page, then a ↗ link to GitHub."""
+    """Show the review page followed by a format-appropriate GitHub link."""
 
     mrkdwn: bool
     github_mark: bool = True
@@ -51,7 +53,10 @@ class _PrLinks:
 
     def link(self, match: re.Match[str]) -> str:
         github = match["md"] or match["slack"] or match["bare"]
-        if _GITHUB_MARK in {match["md_label"], match["slack_label"]}:
+        label = match["md_label"] or match["slack_label"]
+        if label in (_GITHUB_MARK, f"({_GITHUB_LABEL})", ":arrow_upper_right:") or (
+            label == _GITHUB_LABEL and match.string[: match.start()].endswith("> (")
+        ):
             return match.group()
         owner, repo, number = cast(re.Match[str], _PR_PARTS.search(github)).groups()
         review = dashboard_review_url(owner, repo, int(number))
@@ -60,11 +65,11 @@ class _PrLinks:
         if not self.github_mark:
             return match.group().replace(github, review)
         if match["md"]:
-            return f"[{match['md_label']}]({review})[{_GITHUB_MARK}]({github})"
+            return f"[{match['md_label']}]({review}) [({_GITHUB_LABEL})]({github})"
         label = match["slack_label"] or f"{repo}#{number}"
         if match["slack"] or self.mrkdwn:
-            return f"<{review}|{label}><{github}|{_GITHUB_MARK}>"
-        return f"[{label}]({review})[{_GITHUB_MARK}]({github})"
+            return f"<{review}|{label}> <{github}|({_GITHUB_LABEL})>"
+        return f"[{label}]({review}) [({_GITHUB_LABEL})]({github})"
 
     def block(self, value: object) -> object:
         if isinstance(value, list):
@@ -72,7 +77,7 @@ class _PrLinks:
         if (
             not isinstance(value, dict)
             or value.get("type") in {"plain_text", "rich_text_preformatted"}
-            or (value.get("type") == "link" and value.get("text") == _GITHUB_MARK)
+            or (value.get("type") == "link" and value.get("text") in _GITHUB_LABELS)
         ):
             return value
         nested = _PLAIN if value.get("type") == "rich_text" or not self.github_mark else self

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -6,7 +6,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { SettingsSection } from "@/components/AppShell"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import {
@@ -50,13 +50,11 @@ function GeneralSection({
   workspaces,
   channelLabel,
   onSaved,
-  rebuildStatus,
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string, channelIds: ReadonlyArray<string>) => string
   onSaved: (saved: WorkspaceRecord) => void
-  rebuildStatus: ReactNode
 }) {
   const [draft, setDraft] = useState<WorkspaceDraft>(() =>
     draftFromWorkspace(record)
@@ -75,6 +73,7 @@ function GeneralSection({
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
         kitchen_channel_ids: draft.kitchenChannelIds,
+        ask_channel_ids: draft.askChannelIds,
         prompt: draft.prompt,
       })
       onSaved(saved)
@@ -100,7 +99,6 @@ function GeneralSection({
         channelLabel={(id) => channelLabel(id, draft.slackChannelIds)}
       />
       <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-space-3">
-        {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-error-secondary">
             {error}
@@ -237,6 +235,12 @@ export function WorkspaceSettingsPanel({
         workspaces={options.data?.workspaces ?? []}
         channelLabel={channelLabel}
         onSaved={onSaved}
+      />
+      <WorkspaceSandboxSection
+        key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
+        record={record.data}
+        onSaved={onSaved}
+        onRebuildStarted={onRebuildStarted}
         rebuildStatus={
           (!repositoryRebuildTimedOut &&
             awaitingRepositoryRebuild(record.data)) ||
@@ -273,12 +277,6 @@ export function WorkspaceSettingsPanel({
             </p>
           ) : null
         }
-      />
-      <WorkspaceSandboxSection
-        key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
-        record={record.data}
-        onSaved={onSaved}
-        onRebuildStarted={onRebuildStarted}
       />
       <WorkspaceProxySection
         key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}

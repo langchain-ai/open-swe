@@ -1,6 +1,7 @@
 Say the work is blocked on the person or complete, together with the reply they get.
 
-The person turned on **Goal mode**: your run keeps going until you call this, or start a wait that wakes the thread again, such as `schedule_thread_wakeup`.
+The person turned on **Goal mode**: your run keeps going until you call this, or until something will wake the thread again, such as `listen_events`, `monitor` or `schedule_thread_wakeup`.
+The thread then shows it waits on them, with `message` as what for.
 `message` is your reply: on Slack this tool posts it as the final reply, so do not also call `slack_reply`; on the web, end the turn with it as your final response.
 
 - `blocked`: you need something only they can provide; `message` asks for it.

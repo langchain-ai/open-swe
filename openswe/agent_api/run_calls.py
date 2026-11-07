@@ -4,13 +4,14 @@ run's token and the request alone, on whichever replica it lands.
 MDA keeps the model loop, its checkpoints, every tool call, and the middleware around
 them; the backend answers the typed API both sides import (``runtime_api``):
 
-- ``prepare`` readies the run's turn: its prompt, model and route, from what the token
+- ``prepare`` readies the run's turn: its prompt and model, from what the token
   says starting the run decided (``RunSettings``), without reaching the sandbox MDA keeps.
   What the turn's start records (its transcript turn, the thread's model and usage) is
   the ``run_started`` report, off the run's path
 - the inbox and skills, and the named calls MDA's middleware makes around a model call
-  (``route_model``, ``model_choice``, ``task_context``, ``incident_context``,
-  ``refresh_github_proxy``, ``reply_on_behalf``) and at the run's end (``run_ended``,
+  (``reminders``, ``model_choice``, ``incident_context``, ``refresh_github_proxy``,
+  ``reply_on_behalf``), to move its Slack conversation (``slack_move``, ``slack_moved``),
+  and at the run's end (``run_ended``, or ``model_failed`` when a model call fails it,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``)
 - the reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key
@@ -24,7 +25,9 @@ calls, so its tool calls and replies land under the subagent.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+import time
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
@@ -49,23 +52,27 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
-from runtime_api.catalog import ModelSpec
+from runtime_api.catalog import JOINED_TASK_CONTEXT, ModelSpec
 from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
     BROWSER,
     FINISH_SCOUT_PLAN,
+    GOAL,
     INBOX,
     INBOX_RECEIVED,
     INCIDENT_CONTEXT,
     MODEL_CHOICE,
+    MODEL_FAILED,
     MODEL_RESULT,
     PREPARE,
     REFRESH_GITHUB_PROXY,
+    REMINDERS,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
     RUN_STARTED,
     SANDBOX_UNREACHABLE,
+    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
@@ -75,20 +82,26 @@ from runtime_api.loop import (
     ChosenModel,
     Done,
     GitHubProxyRefreshed,
+    Goal,
+    GoalChange,
+    GoalRead,
     Inbox,
     InboxItems,
     InboxRead,
     InboxReceipt,
     IncidentContext,
+    ModelFailed,
     ModelResult,
+    PersonMessage,
     Prepare,
     Prepared,
+    RefreshGitHubProxy,
+    Reminders,
     ReplyOnBehalf,
     Report,
     Route,
     Routed,
     RunEnded,
-    RunNotice,
     RunStarted,
     SandboxGone,
     ScoutPlanEnd,
@@ -96,6 +109,8 @@ from runtime_api.loop import (
     ToolCallReport,
     ToolResultReport,
 )
+from runtime_api.model_errors import LAST_MODEL_ERROR_KEY
+from runtime_api.models import chosen_model
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -110,14 +125,24 @@ from runtime_api.operations import (
 )
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxy, SandboxProxyRequest
-from runtime_api.skills import SKILLS, RunSkills
+from runtime_api.skills import SKILLS, RunSkills, SkillsRequest
+from runtime_api.slack import (
+    SLACK_MOVE,
+    SLACK_MOVED,
+    SlackMoved,
+    SlackMovePlan,
+    SlackMoveRequest,
+    SlackMoveResult,
+)
 from runtime_api.tool_search import (
     RESOLVE,
     SEARCH,
+    TOOL_SET,
     TOOL_SPECS,
+    KeptTools,
     ResolvedTool,
+    ToolIndex,
     ToolLookup,
-    ToolMatch,
     ToolMatches,
     ToolNames,
     ToolSearch,
@@ -127,8 +152,13 @@ from runtime_api.tool_search import (
 from openswe.agent_api import file_calls
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.operations import Operation
-from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
-from openswe.agent_api.run_catalog import chosen_model
+from openswe.agent_api.report_receipts import (
+    Claim,
+    Claimed,
+    Recorded,
+    Recording,
+    ReportReceipts,
+)
 from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.run_state import (
@@ -148,20 +178,29 @@ from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
-from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.input_messages import run_context
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
+from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.settle_review_check import settle_review_check
-from openswe.middleware.stale_workspace import stale_workspace_notice
+from openswe.middleware.stale_workspace import StaleWorkspaceReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
+from openswe.reminders import Reminder
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
-from openswe.sandboxes.lifecycle import mda_proxy_config, take_stale_boot
+from openswe.sandboxes.lifecycle import (
+    mda_proxy_config,
+    refresh_thread_github_proxy,
+    take_stale_boot,
+)
+from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
+from openswe.threads.goal import ThreadGoals
 from openswe.threads.inbox import ThreadInbox
+from openswe.threads.store import THREADS
 from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
@@ -169,6 +208,45 @@ logger = logging.getLogger(__name__)
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
+# The runs a batch of reports writes what its reporters queued for, once it recorded
+# them all, by run; None writes it as each report is recorded.
+_batch_flushes: ContextVar[dict[str | None, RunnableConfig] | None] = ContextVar(
+    "batch_flushes", default=None
+)
+# Operations that can make the run's thread a task's coordinator mid-run, after its catalog
+# was planned without the task: their answer hands the run the task's context.
+_JOINS_TASK: Final = frozenset({"manage_baby_sit"})
+# Each run's thread files, by its thread and grant, until they expire: building them reads
+# the thread and the run's skill stores, which every files call did.
+_FILES_TTL_SECONDS: Final = 6 * 60 * 60
+_FILES_LIMIT: Final = 512
+_files: dict[tuple[str, str], tuple[float, BackendProtocol]] = {}
+
+
+async def _run_files(
+    kind: RunKind, run: RemoteRun, config: RunnableConfig
+) -> BackendProtocol | None:
+    """The thread's files as ``run``'s tools reach them, built once per run."""
+    global _files
+    key = (run.thread_id, run.grant_id)
+    now = time.monotonic()
+    kept = _files.get(key)
+    if kept is not None and now < kept[0]:
+        return kept[1]
+    files = await kind.files(config)
+    if files is None:
+        return None
+    if len(_files) >= _FILES_LIMIT:
+        _files = {k: kept for k, kept in _files.items() if kept[0] > now}
+        while len(_files) >= _FILES_LIMIT:
+            del _files[next(iter(_files))]
+    _files[key] = (now + _FILES_TTL_SECONDS, files)
+    return files
+
+
+def _forget_files(run: RemoteRun) -> None:
+    """Build ``run``'s files again on its next call: its sandbox changed."""
+    _files.pop((run.thread_id, run.grant_id), None)
 
 
 class _CarriedEvents(BaseModel):
@@ -257,7 +335,6 @@ class TokenRun:
         self.run = run
         self.run_id = run_id
         self.config = self._config()
-        self._files: BackendProtocol | None = None
 
     @classmethod
     async def answer(
@@ -304,19 +381,18 @@ class TokenRun:
         return await in_graph_context({**self.config, "run_name": name}, run)
 
     async def thread_files(self) -> BackendProtocol:
-        if self._files is None:
-            files = await self.kind.files(self.config)
-            if files is None:
-                raise RuntimeError("This run has no files on the backend")
-            self._files = files
-        return self._files
+        files = await _run_files(self.kind, self.run, self.config)
+        if files is None:
+            raise RuntimeError("This run has no files on the backend")
+        return files
 
-    async def skills(self, _request: RunRequest) -> RunSkills:
-        """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
+    async def skills(self, request: SkillsRequest) -> RunSkills:
+        """Every skill the run may load but those the runtime serves itself: each store's
+        skill folders and their ``SKILL.md``."""
 
         async def listed() -> RunSkills:
             stores = await self.kind.skills(self.config)
-            return RunSkills() if stores is None else await stores.listed()
+            return RunSkills() if stores is None else await stores.listed(request.served)
 
         return await in_graph_context(
             {**self.config, "run_name": "skills"}, lambda _runtime: listed()
@@ -351,7 +427,8 @@ class TokenRun:
 
         A report carries only what it is about: the ``messages`` it adds and the run
         state (``held``) its recorders read. What a recorder queued is written before the
-        call answers, so the next call may reach another process.
+        call answers, so the next call may reach another process: a batch of reports
+        writes it once, after the last (``reports``).
         """
         state: dict[str, object] = {**held, "messages": list(messages)}
         carried = [m for m in self.kind.reporters if isinstance(m, CarriedAcrossProcesses)]
@@ -361,6 +438,11 @@ class TokenRun:
                 await middleware.aresume_run(cast(AgentState, dict(state)), runtime)
             with within_namespace(report.namespace):
                 result = await record(state, runtime)
+            batch = _batch_flushes.get()
+            if batch is not None:
+                # The batch writes it with the rest of its reports, once they are recorded.
+                batch.setdefault(self.run_id, self.config)
+                return result
             for middleware in carried:
                 await middleware.aflush_run(runtime)
             return result
@@ -402,7 +484,7 @@ class TokenRun:
         if request.in_sandbox:
             # MDA opened the sandbox before preparing; the thread is bound to it from here on.
             await self._sandbox.bind(request)
-        notices = self._turn_notices()
+        await self._report_stale_workspace()
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(self.run.thread_id).receive(events=events)
@@ -418,7 +500,7 @@ class TokenRun:
                 github_proxy=None
                 if expires_at is None
                 else GitHubProxyRefreshed(expires_at=expires_at),
-                notices=notices,
+                notices=[],
                 sender=self.kind.sender(self.config, self.run.settings),
             )
 
@@ -428,11 +510,9 @@ class TokenRun:
         )
         return result.model_copy(update={"events": [jsonable(e) for e in emitted]})
 
-    def _turn_notices(self) -> list[RunNotice]:
-        """What the turn's transcript shows from binding its sandbox: a stale workspace image."""
-        stale = take_stale_boot(self.run.thread_id)
-        data = None if stale is None else stale_workspace_notice(self.run.thread_id, stale)
-        return [] if data is None else [RunNotice(kind="workspace_stale", data=data)]
+    async def _report_stale_workspace(self) -> None:
+        if stale := take_stale_boot(self.run.thread_id):
+            await StaleWorkspaceReporter.report(self.run.thread_id, stale)
 
     def _as_invocation(self, invocation_id: str | None) -> None:
         """Record as the invocation a report names, which need not be this token's."""
@@ -493,11 +573,11 @@ class TokenRun:
                 content=f"{request.name} is not one of this run's operations", status="error"
             )
         cfg = RunConfig.from_config(self.config)
-        client = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
+        client = PluginChatTools.of_run(cfg, self.run.thread_id)
         offered = (
             next((t for t in client.tools if t.name == request.name), None) if client else None
         )
-        return await Operation(
+        result = await Operation(
             offered or await self.kind.tool(self.config, request.name), request
         ).run(
             config=self.config,
@@ -507,6 +587,25 @@ class TokenRun:
             ready=self._ready,
             notify=not self.kind.reviews,
         )
+        if request.name not in _JOINS_TASK or result.status == "error":
+            return result
+        joined = await self._task_context_message()
+        if joined is None:
+            return result
+        return result.model_copy(update={"state": {**result.state, JOINED_TASK_CONTEXT: joined}})
+
+    async def _task_context_message(self) -> str | None:
+        """The context of the task the run's thread belongs to now, if it belongs to one."""
+        try:
+            coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
+        except Exception:
+            logger.warning(
+                "Could not read the task the thread joined",
+                extra={"agent_thread_id": self.run.thread_id},
+                exc_info=True,
+            )
+            return None
+        return coordination.context_message() if coordination is not None else None
 
     def _operation_state(self, request: RunOperation) -> dict[str, object]:
         """The graph state an operation reads, as the call carries it."""
@@ -530,20 +629,18 @@ class TokenRun:
             tools=[tool.model_copy(update={"grant": self.run.grant(tool.name)}) for tool in specs]
         )
 
+    async def tool_set(self, _request: RunRequest) -> KeptTools:
+        """Every tool the run may call, as its token names the set, for the run to search
+        and resolve itself; the grant of each it calls it still reads from here."""
+        kept = await self._tool_set()
+        # What the token names it by: digesting a set again would cost what it saves.
+        digest = cast(str, self.run.settings.tools)
+        return KeptTools(digest=digest, tools=kept.tools, excluded=kept.excluded)
+
     async def search_tools(self, request: ToolSearch) -> ToolMatches:
         """The run's tools that best match what the model looks for."""
         matches = (await self._tool_set()).search(request.query, request.limit)
-        return ToolMatches(
-            matches=[
-                ToolMatch(
-                    name=tool.name,
-                    description=tool.description,
-                    parameters=tool.parameters,
-                    code_name=tool.code_name,
-                )
-                for tool in matches
-            ]
-        )
+        return ToolMatches(matches=[ToolIndex.match(tool) for tool in matches])
 
     async def resolve_tool(self, request: ToolLookup) -> ResolvedTool:
         """The tool the run calls as ``request.name``, with the run's grant of it."""
@@ -559,42 +656,53 @@ class TokenRun:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
+        _forget_files(self.run)
         await self._sandbox.tell_gone(sandbox_id=request.sandbox_id, reason=request.reason)
         return Done()
 
     async def route_model(self, request: Routed) -> Route:
-        """The route the person's latest request takes."""
+        """Deprecated: an MDA deployment from before it classified routes itself asks here."""
         selection = await classify_route(messages_from_dict(request.humans))
         return Route(route=selection.route, persist=selection.persist)
 
+    async def reminders(self, request: PersonMessage) -> Reminders:
+        """The reminders a person's message calls for."""
+        [message] = messages_from_dict([request.message])
+        found = await Reminder.called_for(message)
+        return Reminders(messages=dump_messages(as_messages(found)))
+
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
-        return chosen_model(request.model_id, request.effort)
+        """A model a person asked for. MDA now answers this itself from the catalog's
+        models; kept for one release, for MDA deployments that still ask."""
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional()
+        return chosen_model(request.model_id, request.effort, fallback_model_id=fallback_model_id)
 
     async def task_context(self, _request: RunRequest) -> TaskContext:
-        """The task the thread belongs to, as each model call tells the model."""
+        """Deprecated: an MDA deployment from before ``LoopRules.task_context`` asks here."""
 
         async def read() -> TaskContext:
             coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
-            if coordination is None:
-                return TaskContext()
-            return TaskContext(
-                instructions=coordination.instructions,
-                message=await coordination.context_message(),
-            )
+            return TaskContext() if coordination is None else coordination.task_context()
 
         return await in_graph_context(
             {**self.config, "run_name": "task_context"}, lambda _runtime: read()
         )
 
-    async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
+    async def refresh_github_proxy(self, request: RefreshGitHubProxy) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
         if cfg.auth_provider == "langsmith":
             return GitHubProxyRefreshed()
-        # Where MDA may write the sandbox's proxy, a review's narrowing decides that it does
-        # not, as it does for the catalog. Otherwise it keeps the thread's own scope.
-        expires_at = await self._sandbox.refresh_github_proxy(
-            narrowed=ENV.MDA_GITHUB_PROXY_CONNECTION.is_set()
-        )
+        turn = self.run.settings.agent
+        if turn is not None and turn.coordinator_thread_id is not None:
+            # A task worker works in its coordinator's sandbox, whose token keeps the
+            # coordinator's own scope.
+            expires_at = await refresh_thread_github_proxy(
+                turn.coordinator_thread_id,
+                workspace_slug=cfg.workspace_slug,
+                force_refresh=request.force_refresh,
+            )
+            return GitHubProxyRefreshed(expires_at=expires_at)
+        expires_at = await self._sandbox.refresh_github_proxy(force_refresh=request.force_refresh)
         return GitHubProxyRefreshed(expires_at=expires_at)
 
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
@@ -625,6 +733,36 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
+    async def goal(self, request: GoalRead) -> Goal:
+        """The thread's goal, with what will wake the thread again when asked."""
+        kept = await ThreadGoals.current(self.run.thread_id)
+        if kept is None:
+            return Goal()
+        return Goal(
+            state=kept.state,
+            reason=kept.reason,
+            objective=None if kept.objective is None else run_context("goal", kept.objective),
+            ask=kept.ask,
+            updated_at_ms=kept.updated_at_ms,
+            waits=[wait.kind for wait in await ThreadGoals.waits(self.run.thread_id)]
+            if request.waits
+            else [],
+        )
+
+    async def set_goal(self, request: GoalChange) -> Done:
+        await ThreadGoals.change(
+            self.run.thread_id, request.state, request.reason, request=request.request
+        )
+        return Done()
+
+    async def slack_move(self, request: SlackMoveRequest) -> SlackMovePlan:
+        """Check a move of the run's own Slack conversation into a new Slack thread."""
+        return await self.in_run("slack_move", lambda: prepare_channel_move(request))
+
+    async def slack_moved(self, request: SlackMoved) -> SlackMoveResult:
+        """Record where the run's thread went once MDA handed it to the new Slack thread."""
+        return await self.in_run("slack_moved", lambda: record_channel_move(request))
+
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
         self._as_invocation(request.invocation_id)
@@ -635,6 +773,20 @@ class TokenRun:
 
         await self._reporting(
             request, "run_ended", ended, messages=messages_from_dict(request.replies)
+        )
+        return Done()
+
+    async def model_failed(self, request: ModelFailed) -> Done:
+        """Leave why a model call failed the run on its thread, for the failure reply."""
+        await THREADS.update(
+            self.run.thread_id,
+            {
+                LAST_MODEL_ERROR_KEY: {
+                    "run_id": self.run_id,
+                    "error_type": request.error_type,
+                    "code": request.code,
+                }
+            },
         )
         return Done()
 
@@ -665,7 +817,10 @@ class TokenRun:
 
         async def read() -> IncidentContext:
             incident = await self._incident()
-            return IncidentContext(instructions=await incident.context(humans))
+            instructions = await incident.context(humans)
+            return IncidentContext(
+                instructions=run_context("incident", instructions) if instructions.strip() else ""
+            )
 
         return await in_graph_context(
             {**self.config, "run_name": "incident_context"}, lambda _runtime: read()
@@ -708,39 +863,84 @@ class TokenRun:
         """Record the run's reports and notices in order, each key once.
 
         Stops at the first it cannot take now, so none is recorded before one made
-        before it: one that failed, or one another delivery is still recording.
+        before it: one that failed, or one another delivery is still recording. The
+        batch's keys are claimed together, what its reports queued for the transcript
+        is written once they are all recorded, and their replies are kept together.
         """
         receipts = ReportReceipts(self.run.thread_id)
+        claims = await receipts.claim(
+            item.key for item in request.items if REPORTED[item.endpoint] != "idempotent"
+        )
         replies: list[dict[str, JsonValue]] = []
-        for item in request.items:
-            claim = (
-                await receipts.claim(item.key) if REPORTED[item.endpoint] != "idempotent" else None
-            )
-            if isinstance(claim, Recording):
-                break
-            if isinstance(claim, Recorded):
-                replies.append(claim.reply)
-                continue
-            try:
-                with traced_under(item.trace):
-                    answered = await TokenRun.answer(
-                        self.kind, self.run, item.endpoint, item.request.model_dump(mode="json")
+        taken: dict[str, tuple[Claimed, dict[str, JsonValue]]] = {}
+        refused: str | None = None
+        flushes: dict[str | None, RunnableConfig] = {}
+        batch = _batch_flushes.set(flushes)
+        try:
+            for item in request.items:
+                claim = claims.get(item.key) if REPORTED[item.endpoint] != "idempotent" else None
+                if isinstance(claim, Recording):
+                    break
+                if isinstance(claim, Recorded):
+                    replies.append(claim.reply)
+                    continue
+                if item.key in taken:
+                    replies.append(taken[item.key][1])
+                    continue
+                try:
+                    with traced_under(item.trace):
+                        answered = await TokenRun.answer(
+                            self.kind, self.run, item.endpoint, item.request.model_dump(mode="json")
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "An MDA report was not recorded",
+                        extra={"endpoint": item.endpoint, "report_key": item.key},
                     )
-            except BaseException as exc:
+                    refused = f"{type(exc).__name__}: {exc}"
+                    break
+                reply = _json_object.validate_python(answered)
                 if claim is not None:
-                    await asyncio.shield(receipts.release(claim))
-                if not isinstance(exc, Exception):
-                    raise
-                logger.exception(
-                    "An MDA report was not recorded",
-                    extra={"endpoint": item.endpoint, "report_key": item.key},
-                )
-                return ReportsTaken(replies=replies, refused=f"{type(exc).__name__}: {exc}")
-            reply = _json_object.validate_python(answered)
-            if claim is not None:
-                await receipts.keep(claim, item.key, reply)
-            replies.append(reply)
-        return ReportsTaken(replies=replies)
+                    taken[item.key] = (claim, reply)
+                replies.append(reply)
+            await self._flush_reporters(flushes.values())
+        except BaseException:
+            # Cancelled: what was recorded keeps its reply, and the rest is given up.
+            await asyncio.shield(self._settle(receipts, claims, taken))
+            raise
+        finally:
+            _batch_flushes.reset(batch)
+        await self._settle(receipts, claims, taken)
+        return ReportsTaken(replies=replies, refused=refused)
+
+    async def _flush_reporters(self, configs: Iterable[RunnableConfig]) -> None:
+        """Write what a batch's reports queued, once for each run they were about."""
+        carried = [m for m in self.kind.reporters if isinstance(m, CarriedAcrossProcesses)]
+
+        async def flushed(runtime: Runtime) -> None:
+            for middleware in carried:
+                await middleware.aflush_run(runtime)
+
+        for config in configs if carried else ():
+            try:
+                await in_graph_context({**config, "run_name": "reports_flushed"}, flushed)
+            except Exception:
+                # The reports are recorded; their run's writer goes on writing them.
+                logger.exception("Writing what MDA reports queued failed")
+
+    @staticmethod
+    async def _settle(
+        receipts: ReportReceipts,
+        claims: Mapping[str, Claim],
+        taken: Mapping[str, tuple[Claimed, dict[str, JsonValue]]],
+    ) -> None:
+        """Keep the replies of the reports recorded, and give up the keys of the rest."""
+        await receipts.keep([(claim, key, reply) for key, (claim, reply) in taken.items()])
+        await receipts.release(
+            claim
+            for key, claim in claims.items()
+            if isinstance(claim, Claimed) and key not in taken
+        )
 
 
 # Every call a run makes, answered from its token and request.
@@ -751,20 +951,27 @@ CALLS.serve(SKILLS, TokenRun.skills)
 CALLS.serve(TOOL_SPECS, TokenRun.tool_specs)
 CALLS.serve(SEARCH, TokenRun.search_tools)
 CALLS.serve(RESOLVE, TokenRun.resolve_tool)
+CALLS.serve(TOOL_SET, TokenRun.tool_set)
 CALLS.serve(INBOX, TokenRun.inbox)
 CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
 CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
+CALLS.serve(REMINDERS, TokenRun.reminders)
 CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 CALLS.serve(INCIDENT_CONTEXT, TokenRun.incident_context)
 CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
+CALLS.serve(GOAL, TokenRun.goal)
+CALLS.serve(SET_GOAL, TokenRun.set_goal)
+CALLS.serve(SLACK_MOVE, TokenRun.slack_move)
+CALLS.serve(SLACK_MOVED, TokenRun.slack_moved)
 CALLS.serve(RUN_STARTED, TokenRun.run_started)
 CALLS.serve(RUN_ENDED, TokenRun.run_ended)
+CALLS.serve(MODEL_FAILED, TokenRun.model_failed)
 CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)

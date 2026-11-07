@@ -1,9 +1,11 @@
 """One person's To Review list.
 
-First the pull requests Open SWE assigned them, then those its unclaimed deadline
-may pick them for, then those linked in Slack threads that mention them, either by
-their GitHub URL or by this deployment's review page. A pull request they already
-approved or requested changes on drops off.
+First other people's ready pull requests waiting on them: those Open SWE assigned
+them, those GitHub asks them to review, those its unclaimed deadline may pick them
+for, and those linked in Slack threads that mention them, either by their GitHub
+URL or by this deployment's review page. Then their own drafts, then speculative
+reviews of others' recently reviewed pull requests. A pull request they already
+approved or requested changes on drops off, unless GitHub asks them to review it again.
 """
 
 import asyncio
@@ -19,8 +21,9 @@ from fastapi import HTTPException
 from openswe.dashboard.profiles import PROFILES
 from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.http import GitHubClient, GitHubError
-from openswe.github.pull_request_status import OpenPullRequest
+from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_requests
 from openswe.github.pull_request_status import ReviewAssignment as Assignment
+from openswe.github.pull_requests import PullRequest
 from openswe.github.repos import accessible_repo_full_names
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.tentative import TentativeReviewers
@@ -30,9 +33,17 @@ from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
-_ORDER: tuple[Assignment, ...] = ("assigned", "tentative", "mentioned")
+_ORDER: tuple[Assignment, ...] = (
+    "assigned",
+    "requested",
+    "tentative",
+    "mentioned",
+    "draft",
+    "speculative",
+)
 MENTION_WINDOW = timedelta(days=30)
 MENTION_LIMIT = 50
+SPECULATIVE_LIMIT = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +53,7 @@ class QueuedPullRequest:
     ref: GitHubPrRef
     assignment: Assignment
     request: HumanReviewRequest | None = None
+    listed: OpenPullRequest | None = None
 
     @property
     def key(self) -> str:
@@ -56,6 +68,22 @@ class QueuedPullRequest:
         pr = request.pull_request
         ref = GitHubPrRef(owner=pr.owner, repo=pr.repo, number=pr.number, url=pr.url)
         return cls(ref, assignment, request)
+
+    @classmethod
+    def of_listing(cls, row: OpenPullRequest, assignment: Assignment) -> Self:
+        owner, repo = row.repo.split("/", 1)
+        url = f"https://github.com/{row.repo}/pull/{row.number}"
+        listed = row.model_copy(update={"assignment": assignment})
+        return cls(
+            GitHubPrRef(owner=owner, repo=repo, number=row.number, url=url),
+            assignment,
+            listed=listed,
+        )
+
+    @classmethod
+    def of_pull_request(cls, pr: PullRequest, assignment: Assignment) -> Self:
+        ref = GitHubPrRef(owner=pr.owner, repo=pr.repo, number=pr.number, url=pr.url)
+        return cls(ref, assignment)
 
 
 class ReviewQueue:
@@ -120,6 +148,35 @@ class ReviewQueue:
             if (ref := parse_github_pr_url(url)) is not None
         ]
 
+    async def searched(
+        self, scope: Literal["review-requested", "drafts"], assignment: Assignment
+    ) -> list[QueuedPullRequest]:
+        """Open PRs GitHub asks this person to review that are ready, or their own drafts."""
+        try:
+            listing = await list_open_pull_requests(
+                self.github,
+                self.login,
+                ",".join(sorted(self.repositories)),
+                lightweight=True,
+                scope=scope,
+            )
+        except HTTPException:
+            logger.warning("Could not search GitHub for To Review", extra={"scope": scope})
+            return []
+        return [
+            QueuedPullRequest.of_listing(row, assignment)
+            for row in listing.pull_requests
+            if row.draft is (assignment == "draft")
+        ]
+
+    async def speculative(self) -> list[QueuedPullRequest]:
+        readable = await accessible_repo_full_names(self.login)
+        wanted = [name for name in readable if self._wanted(name)]
+        candidates = await PullRequest.review_candidates(
+            wanted, self.user.id, limit=SPECULATIVE_LIMIT
+        )
+        return [QueuedPullRequest.of_pull_request(pr, "speculative") for pr in candidates]
+
     async def readable(self, full_name: str) -> bool:
         owner, name = full_name.split("/", 1)
         try:
@@ -156,6 +213,8 @@ class ReviewQueue:
     async def _row(self, queued: QueuedPullRequest) -> tuple[OpenPullRequest, str] | None:
         """The row and the PR's author, or ``None`` for a closed PR this person wrote."""
         ref = queued.ref
+        if (listed := queued.listed) is not None:
+            return listed, listed.author or ""
         if (request := queued.request) is not None:
             pr = request.pull_request
             row = OpenPullRequest(
@@ -174,6 +233,8 @@ class ReviewQueue:
         user = payload.get("user")
         author = user.get("login") if isinstance(user, Mapping) else None
         if not isinstance(author, str) or author.lower() == self.login.lower():
+            return None
+        if queued.assignment == "speculative" and payload.get("draft") is not False:
             return None
         created, updated, title = (payload.get(k) for k in ("created_at", "updated_at", "title"))
         row = OpenPullRequest(
@@ -196,6 +257,8 @@ class ReviewQueue:
             if found is None:
                 return None
             row, author = found
+            if queued.listed is not None:
+                return row
             states = await latest_review_states(pull, author)
         if states is None:
             if queued.assignment == "assigned":
@@ -212,18 +275,24 @@ class ReviewQueue:
     async def rows(
         self, sort: Literal["created", "updated"], direction: Literal["asc", "desc"]
     ) -> list[OpenPullRequest]:
-        """Every row, assigned first, then tentative, then mentioned, each group sorted."""
-        assigned, unclaimed, mentioned = await asyncio.gather(
-            self.assigned(), self.unclaimed(), self.mentioned()
+        """Every row in ``_ORDER``'s groups, each group sorted."""
+        assigned, unclaimed, mentioned, requested, drafts, speculative = await asyncio.gather(
+            self.assigned(),
+            self.unclaimed(),
+            self.mentioned(),
+            self.searched("review-requested", "requested"),
+            self.searched("drafts", "draft"),
+            self.speculative(),
         )
         queued = [q for q in [*assigned, *mentioned] if self._wanted(q.repo_full_name)]
         allowed, tentative = await asyncio.gather(
             self.accessible({q.repo_full_name for q in queued}), self.tentative(unclaimed)
         )
-        allowed |= {t.repo_full_name.lower() for t in tentative}
+        known = [*requested, *drafts, *speculative, *tentative]
+        allowed |= {item.repo_full_name.lower() for item in known}
         seen: set[str] = set()
         distinct: list[QueuedPullRequest] = []
-        for item in sorted([*queued, *tentative], key=lambda item: _ORDER.index(item.assignment)):
+        for item in sorted([*queued, *known], key=lambda item: _ORDER.index(item.assignment)):
             if item.repo_full_name.lower() in allowed and item.key not in seen:
                 seen.add(item.key)
                 distinct.append(item)
