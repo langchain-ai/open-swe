@@ -10,9 +10,10 @@ from openswe.slack.dm import is_dm_channel, note_for_concierge, open_dm
 from openswe.slack.payloads import SlackButtonValue, SlackChannelContext, SlackInteraction
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.responses import WebhookResponse, accepted, ignored
+from openswe.source_context import SourceContext
 from openswe.tasks.store import TaskMembership
 from openswe.threads.plan_api import fetch_thread_metadata
-from openswe.threads.summary import assert_thread_postable, thread_is_owner
+from openswe.threads.summary import assert_thread_postable, thread_is_bot_triggered, thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     decide_workflow_push_approval,
@@ -60,12 +61,17 @@ async def handle_button(
         return await refuse("This workflow approval is not associated with an agent thread.")
     try:
         metadata = await fetch_thread_metadata(thread_id)
-        assert_thread_postable(metadata, login)
+        if thread_is_bot_triggered(metadata):
+            await SourceContext.from_metadata(metadata).assert_workflow_push_approver(login)
+        else:
+            assert_thread_postable(metadata, login)
+            if not thread_is_owner(metadata, login):
+                return await refuse(
+                    "Only the thread owner can answer this workflow approval request."
+                )
     except HTTPException:
         logger.info("Workflow approval target is not promptable", extra={"thread_id": thread_id})
         return await refuse("You cannot answer this workflow approval request.")
-    if not thread_is_owner(metadata, login):
-        return await refuse("Only the thread owner can answer this workflow approval request.")
     if button.thread_id and thread_id != source_id:
         if is_dm_channel(channel_context):
             eligible = await open_dm(user_id) == channel_id

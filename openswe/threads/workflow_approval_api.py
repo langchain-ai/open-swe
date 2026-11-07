@@ -13,6 +13,7 @@ from openswe.threads.plan_api import fetch_thread_metadata
 from openswe.threads.summary import (
     _assert_thread_promptable,
     repo_config_from_metadata,
+    thread_is_bot_triggered,
     thread_is_readable,
     thread_source,
 )
@@ -50,7 +51,10 @@ async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    if thread_is_bot_triggered(metadata):
+        await SourceContext.from_metadata(metadata).assert_workflow_push_approver(session["sub"])
+    else:
+        _assert_thread_promptable(metadata, session["sub"])
     decision = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
@@ -75,7 +79,10 @@ async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    if thread_is_bot_triggered(metadata):
+        await SourceContext.from_metadata(metadata).assert_workflow_push_approver(session["sub"])
+    else:
+        _assert_thread_promptable(metadata, session["sub"])
     decision = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )

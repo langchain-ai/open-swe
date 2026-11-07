@@ -486,6 +486,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     assert result.status == "error"
     payload = json.loads(str(result.content))
     assert payload["workflow_approval_status"] == "approval_required"
+    assert "human participant with a linked GitHub account" in payload["error"]
     assert payload["files"] == [".github/workflows/ci.yml"]
     assert payload["diff_stats"] == {"files": 1, "additions": 1, "deletions": 1}
     assert payload["approval_url"].endswith("?workflowApproval=" + payload["fingerprint"])
