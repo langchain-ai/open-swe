@@ -157,17 +157,31 @@ def _texts(run_input: Mapping[str, Any]) -> str:
     return "\n".join(str(message["content"]) for message in run_input["messages"])
 
 
+@pytest.mark.parametrize("ask", [True, False])
 @pytest.mark.parametrize(("interrupts", "strategy"), [(True, "interrupt"), (False, "enqueue")])
 @pytest.mark.usefixtures("slack_reads")
 def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
-    monkeypatch: pytest.MonkeyPatch, interrupts: bool, strategy: str
+    monkeypatch: pytest.MonkeyPatch, interrupts: bool, strategy: str, ask: bool
 ) -> None:
+    contexts: list[bool] = []
+
+    def context(**modes: bool) -> str:
+        contexts.append(modes["ask"])
+        return "channel guidance"
+
+    monkeypatch.setattr(slack.slack_prompt, "thread_constant_context", context)
     backend = _backend(
-        monkeypatch, SlackTurnStarted(run=_RUN, interrupts=interrupts, prompt=_PROMPT)
+        monkeypatch,
+        SlackTurnStarted(
+            run=_RUN,
+            interrupts=interrupts,
+            prompt=_PROMPT.model_copy(update={"ask_channel": ask}),
+        ),
     )
 
     result = asyncio.run(slack.start_turn(_event(), _thread()))
 
+    assert contexts == [ask]
     [facts] = backend.asked_facts
     assert (facts.app_id, facts.team_id, facts.channel_id) == ("A1", "T1", "C1")
     assert facts.explicit_mention

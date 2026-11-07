@@ -302,6 +302,7 @@ def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
+    monkeypatch.setattr(slack_webhooks.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
         slack_webhooks.SlackLiveMessage, "enabled_for", AsyncMock(return_value=False)
     )

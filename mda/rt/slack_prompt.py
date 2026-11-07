@@ -520,13 +520,15 @@ def channel_identity(
     return identity
 
 
-def thread_constant_context(*, review_guide: bool, concierge: bool, kitchen: bool) -> str:
+def thread_constant_context(
+    *, review_guide: bool, concierge: bool, kitchen: bool, ask: bool = False
+) -> str:
     """Guidance that holds for the whole thread, which the model is told once."""
     return "\n\n".join(
         section
         for section in (
             CONCIERGE_CONTEXT if concierge else "",
-            KITCHEN_CONTEXT if kitchen else NON_KITCHEN_CONTEXT,
+            prompt("slack-ask") if ask else KITCHEN_CONTEXT if kitchen else NON_KITCHEN_CONTEXT,
         )
         if section
     )

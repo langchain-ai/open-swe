@@ -12,6 +12,7 @@ A thread can override its own model, for example by asking the agent to switch t
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
+  Workspace editors let admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode; Ask channels validate bug reports, propose bot-authored fixes, and identify a human validator.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
 - **Bots** (`/agents/bots`): bots allowed to trigger Robin from Slack.

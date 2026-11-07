@@ -269,16 +269,16 @@ describe("WorkspaceSettingsPanel", () => {
     expect(
       screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
     ).toContain("C2")
-    const secondKitchen = screen.getByRole("switch", {
-      name: "Kitchen mode for Slack channel 2",
+    const secondMode = screen.getByRole("combobox", {
+      name: "Channel type for Slack channel 2",
     })
-    fireEvent.click(secondKitchen)
-    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    fireEvent.click(secondMode)
+    fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+    expect(secondMode.textContent).toContain("Ask")
     expect(
-      screen
-        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
-        .getAttribute("aria-checked")
-    ).toBe("false")
+      screen.getByRole("combobox", { name: "Channel type for Slack channel 1" })
+        .textContent
+    ).toContain("Mention-only")
     await act(async () => finish({ channels: [], refreshing: false }))
     expect(channel.textContent).toBe("Slack channel 1")
   })
@@ -379,6 +379,7 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        ask_channel_ids: [],
         prompt: "Run make test.",
       })
     )

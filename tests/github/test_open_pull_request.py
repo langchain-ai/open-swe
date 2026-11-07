@@ -445,7 +445,9 @@ async def _passthrough_body(body: str, _state: dict[str, Any] | None = None) -> 
 
 
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=False))
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
+    monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
     # Footer stamping has its own test; here the body under assertion stays the caller's.
     monkeypatch.setattr(opr, "_stamp_attribution_footer", _passthrough_body)
@@ -732,3 +734,75 @@ def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_
     assert "sign in with GitHub again" in result["error"]
     assert asyncio.run(profiles.get_valid_access_token("johannes117")) is None
     assert asyncio.run(profiles.has_access_token_record("johannes117")) is True
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed):
+    _set_config(monkeypatch, {"thread_id": "thread-1", "github_login": "alice", "draft_prs": False})
+    _stub_token(monkeypatch)
+    monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=True))
+    monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="app-token")
+    )
+    client = _FakeClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get=None if allowed else _FakeResponse(403, {"message": "Forbidden"}),
+    )
+    _install_client(monkeypatch, client)
+
+    async def requester_token(author: str | None = None) -> tuple[str, str]:
+        assert author is None
+        return "requester-token", "user"
+
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", requester_token)
+    asyncio.run(
+        opr._open_pull_request(
+            owner="langchain-ai",
+            repo="open-swe",
+            head="feature",
+            base="main",
+            title="fix: x",
+            body="body",
+            draft=True,
+            author="other-participant",
+        )
+    )
+    if allowed:
+        assert client.post_calls[0]["headers"]["Authorization"] == "Bearer app-token"
+        assert client.post_calls[0]["json"]["draft"] is True
+        assert "Requested by @alice" in client.post_calls[0]["json"]["body"]
+        assert "other than the requester" in client.post_calls[0]["json"]["body"]
+    else:
+        assert not client.post_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid", [True, False])
+async def test_link_pr_accepts_a_continuation_participant(
+    monkeypatch: pytest.MonkeyPatch, valid: bool
+) -> None:
+    _set_config(monkeypatch, {"thread_id": "thread-1", "background_task_completion": True})
+    _stub_token(monkeypatch)
+    token = AsyncMock(return_value=("participant-token", "user"))
+    if not valid:
+        token.side_effect = opr.PrAuthorNotAParticipant("alice", ["bob"])
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", token)
+    monkeypatch.setattr(
+        opr,
+        "_fetch_pr_details",
+        AsyncMock(
+            return_value={
+                "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
+                "number": 3,
+            }
+        ),
+    )
+    monkeypatch.setattr(opr, "_record_pr_telemetry", AsyncMock())
+    result = await opr.link_pull_request(
+        "https://github.com/langchain-ai/open-swe/pull/3", author="alice"
+    )
+    assert result["success"] is valid
+    if not valid:
+        assert "has not participated" in result["error"]
+    token.assert_awaited_once_with("alice")

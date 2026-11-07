@@ -690,6 +690,9 @@ async def test_breakout_preserves_requester_and_credential_scope(
     )
     saved_slack = dict(config["configurable"]["slack_thread"])
     monkeypatch.setattr(
+        "openswe.credential_scope.WORKSPACES.is_ask_channel", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
         slack_breakout_tool.User,
         "for_login",
         AsyncMock(

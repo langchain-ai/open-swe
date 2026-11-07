@@ -421,6 +421,7 @@ async def _start_turn(
             review_guide=prompt.review_guide,
             concierge=facts.concierge,
             kitchen=turn.kitchen_channel,
+            ask=prompt.ask_channel,
         ),
         dispatched_timestamps=dispatched,
         run_described_person_ids={

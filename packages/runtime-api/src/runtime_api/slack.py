@@ -135,6 +135,7 @@ class SlackTurnPrompt(BaseModel):
     turn_sections: list[str] = Field(default_factory=list)
     # A review guide's thread: its constant guidance is the guide's own.
     review_guide: bool = False
+    ask_channel: bool = False
 
 
 class SlackTurnRun(BaseModel):
