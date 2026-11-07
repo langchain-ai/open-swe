@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Final, Self, cast
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import SubAgent
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, configure_trace_policy
 from langchain_core.language_models import BaseChatModel
 from managed_deepagents import (
     DeepAgentDefinition,
@@ -80,10 +80,15 @@ from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.slack_move import SlackMoveMiddleware
 from rt.task_retry import task_retry
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 from runtime_api.catalog import Catalog, ModelSpec
 
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
+
+# Middleware that sets no trace policy of its own, such as the SDK's channel middleware,
+# would otherwise trace every model request's full payload on each wrapper span.
+configure_trace_policy(MIDDLEWARE_TRACE_POLICY)
 
 # What a graph built for no run's models, such as a read's, is declared with.
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
