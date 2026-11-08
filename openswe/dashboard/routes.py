@@ -26,6 +26,7 @@ from openswe.incidents.routes import router as incidents_router
 from openswe.mcp.routes import router as mcp_router
 from openswe.merge_queue.routes import router as merge_queue_router
 from openswe.notifications.routes import router as notifications_router
+from openswe.page_commands.routes import router as page_commands_router
 from openswe.plugins.routes import router as plugins_router
 from openswe.projects.routes import router as projects_router
 from openswe.review.conversation import router as review_conversation_router
@@ -79,6 +80,7 @@ router.include_router(bridge_router)
 router.include_router(claude_code_router)
 router.include_router(ui_invalidations_router)
 router.include_router(plugins_router)
+router.include_router(page_commands_router)
 router.include_router(merge_queue_router)
 
 router.include_router(notifications_router)

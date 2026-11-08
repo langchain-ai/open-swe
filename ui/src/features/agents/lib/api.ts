@@ -148,6 +148,26 @@ export interface ThreadBrowser {
   expires_at: string
 }
 
+/** A tool the page offers Robin, as a message's `page_tools` carries it. */
+export interface PageToolOffer {
+  name: string
+  description: string
+  parameters: object
+}
+
+/** A command Robin queued for this tab's page, under the page's own name for its tool. */
+export interface PageCommand {
+  position: number
+  tool: string
+  arguments: Record<string, unknown>
+}
+
+export interface PageQueue {
+  /** The invalidation topic the queue changes under. */
+  topic: string
+  commands: Array<PageCommand>
+}
+
 export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -591,5 +611,14 @@ export const agentsApi = {
     agentsRequest<ThreadBrowser>(
       `/threads/${encodeURIComponent(threadId)}/browser`,
       { method: "POST" }
+    ),
+  pageCommands: (pageSession: string) =>
+    agentsRequest<PageQueue>(
+      `/page-sessions/${encodeURIComponent(pageSession)}/commands`
+    ),
+  recordPageCommand: (pageSession: string, position: number, result: unknown) =>
+    agentsRequest<void>(
+      `/page-sessions/${encodeURIComponent(pageSession)}/commands/${position}/result`,
+      { method: "POST", body: JSON.stringify({ result }) }
     ),
 }

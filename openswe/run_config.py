@@ -31,6 +31,7 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from openswe.invocation import resolve_invocation_id
 from openswe.openai_responses.client_tools import ClientToolSpec
+from openswe.page_commands.offers import PageSession
 from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,8 @@ class RunConfig(BaseModel):
     offload_conversation: bool = False
     client_tools: list[ClientToolSpec] = Field(default_factory=list)
     plugin_chat: PluginChatConfig | None = None
+    # The dashboard page the message came from, which the run queues page commands for.
+    page: PageSession | None = None
     source: str | None = None
     task: str | None = None
     environment: str | None = None

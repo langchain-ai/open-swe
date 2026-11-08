@@ -54,6 +54,7 @@ from openswe.input_messages import (
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
+from openswe.page_commands.offers import PageSession
 from openswe.plugins.records import PluginChat
 from openswe.projects.store import PROJECT_ID_KEY, PROJECTS, ProjectError
 from openswe.prompts import prompt
@@ -1250,6 +1251,12 @@ async def _enrich_run_start_command(
     review_page_pr_url = client_configurable.get("review_chat_pr_url")
     if isinstance(review_page_pr_url, str):
         overrides["review_page_pr_url"] = review_page_pr_url
+    if (page_tools := client_configurable.get("page_tools")) is not None:
+        page_owner = await User.for_person(ThreadIdentity(login).person)
+        if page_owner is not None:
+            overrides["page"] = PageSession.offered(
+                client_configurable.get("page_session"), page_owner.id, page_tools
+            ).model_dump(mode="json")
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )

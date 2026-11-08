@@ -23,6 +23,7 @@ import { Navigator } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
+import { useReviewPageTools } from "./useReviewPageTools"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
@@ -83,6 +84,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
   useCollapseAppSidebar(pr)
+  useReviewPageTools(pr)
   const sidebar = useSidebarControls()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)

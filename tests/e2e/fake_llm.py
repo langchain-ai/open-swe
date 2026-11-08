@@ -1202,6 +1202,62 @@ REVIEW_CHAT_COMMENTS_MARKER = "E2E_REVIEW_CHAT_COMMENTS"
 REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
 REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
 REVIEW_CHAT_FILE = "zeta.py"
+# The review page's own tools queue commands for the page, then read back what the
+# page found once it has carried them out.
+REVIEW_PAGE_TOOLS_MARKER = "E2E_REVIEW_PAGE_TOOLS"
+REVIEW_PAGE_STEPS_MARKER = "E2E_REVIEW_PAGE_STEPS"
+REVIEW_PAGE_TOOLS_COMMENT = "Could ZETA_44 get a descriptive name?"
+
+
+def _tool_result(messages: list[BaseMessage], call_id: str) -> Any:
+    """What the tool call ``call_id`` returned, parsed from its JSON."""
+    return next(
+        (
+            json.loads(_text(message.content))
+            for message in reversed(messages)
+            if isinstance(message, ToolMessage) and message.tool_call_id == call_id
+        ),
+        None,
+    )
+
+
+def _page_steps_step(messages: list[BaseMessage]) -> AIMessage:
+    """Says how far the page got with the walkthrough commands."""
+    progress = _tool_result(messages, "call-page-steps-queue") or {}
+    return AIMessage(
+        content=(
+            f"The page ran {progress.get('executed_through')} of"
+            f" {progress.get('queued_through')} walkthrough commands."
+        )
+    )
+
+
+def _page_queue_step(messages: list[BaseMessage]) -> AIMessage:
+    """Says where each command was queued, how far the page got and what it listed."""
+    positions = ", ".join(
+        str((_tool_result(messages, call_id) or {}).get("position"))
+        for call_id in (
+            "call-page-files",
+            "call-page-show",
+            "call-page-filter",
+            "call-page-highlight",
+            "call-page-draft",
+        )
+    )
+    progress = _tool_result(messages, "call-page-queue") or {}
+    listed = next(
+        (r["result"] for r in progress.get("results", []) if r["tool"] == "review_list_files"),
+        {},
+    )
+    paths = ", ".join(file["path"] for file in listed.get("files", []))
+    return AIMessage(
+        content=(
+            f"Queued page commands at positions {positions}. The page ran"
+            f" {progress.get('executed_through')} of {progress.get('queued_through')};"
+            f" it lists {paths}."
+        )
+    )
+
 
 _IMPLEMENT_STEPS: tuple[StepSpec, ...] = (
     _tool_step(
@@ -1278,6 +1334,62 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content="The review draft is ready."),
     ),
     "review_chat_plain": (StepSpec(content="The pull request adds two constant modules."),),
+    "review_page_tools": (
+        _tool_step("Reading the page.", "page_review_list_files", {}, "call-page-files"),
+        _tool_step(
+            "Showing the constant.",
+            "page_review_show_code",
+            {"path": REVIEW_CHAT_FILE, "start_line": 40, "line": 44},
+            "call-page-show",
+        ),
+        _tool_step(
+            "Narrowing the files.",
+            "page_review_filter_files",
+            {"filter": "zeta"},
+            "call-page-filter",
+        ),
+        _tool_step(
+            "Highlighting the name.",
+            "page_review_highlight_text",
+            {"query": "ZETA_44"},
+            "call-page-highlight",
+        ),
+        _tool_step(
+            "Drafting a comment.",
+            "page_review_draft_comment",
+            {"path": REVIEW_CHAT_FILE, "line": 44, "body": REVIEW_PAGE_TOOLS_COMMENT},
+            "call-page-draft",
+        ),
+        _tool_step(
+            "Checking the page.",
+            "read_page_queue",
+            {"since": 0, "wait_for": 5},
+            "call-page-queue",
+        ),
+        _dynamic_step(_page_queue_step),
+    ),
+    "review_page_steps": (
+        _tool_step("Opening the step.", "page_review_show_step", {"index": 1}, "call-page-step"),
+        _tool_step(
+            "Marking the step viewed.",
+            "page_review_mark_step_viewed",
+            {"index": 1},
+            "call-page-step-viewed",
+        ),
+        _tool_step(
+            "Leaving alpha.py for you.",
+            "page_review_mark_file_viewed",
+            {"path": "alpha.py", "viewed": False},
+            "call-page-file-unviewed",
+        ),
+        _tool_step(
+            "Checking the page.",
+            "read_page_queue",
+            {"since": 0, "wait_for": 3},
+            "call-page-steps-queue",
+        ),
+        _dynamic_step(_page_steps_step),
+    ),
     # Parent turn: delegate to two general-purpose subagents in one step so the
     # transcript renders a subagent card grid. The subagents run this same fake
     # model; their task description carries the marker that selects the
@@ -1834,6 +1946,8 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
     ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),
+    ScriptRule("review_page_tools", lambda ctx: REVIEW_PAGE_TOOLS_MARKER in ctx.last_text),
+    ScriptRule("review_page_steps", lambda ctx: REVIEW_PAGE_STEPS_MARKER in ctx.last_text),
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(

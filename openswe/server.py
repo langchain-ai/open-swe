@@ -289,6 +289,7 @@ from openswe.tools.manage_review_approval_mode import manage_review_approval_mod
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
 from openswe.tools.note_on_diff import note_on_diff
+from openswe.tools.page_commands import PageTools
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
@@ -2268,7 +2269,12 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
     initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-    surface.base_tools = [*main_tools, *(client_tools.tools if client_tools else [])]
+    page_tools = PageTools.of_run(cfg)
+    surface.base_tools = [
+        *main_tools,
+        *(client_tools.tools if client_tools else []),
+        *(page_tools.tools if page_tools else []),
+    ]
     surface.model_call_limit = (
         incident_session.policy.max_model_calls
         if incident_session is not None
@@ -2319,7 +2325,14 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         reminders=sender_preferences.experimental_memory
         and _registered_tool_name(remember) in reserved_tool_names - excluded_tools,
         client_tools=client_tools is not None,
-        client_prompt=client_tools.instructions if client_tools is not None else "",
+        client_prompt="\n\n".join(
+            part
+            for part in (
+                client_tools.instructions if client_tools is not None else "",
+                page_tools.instructions if page_tools is not None else "",
+            )
+            if part
+        ),
         refresh_github_proxy=True,
         incident=incident_session is not None,
         offload_conversation=cfg.offload_conversation,

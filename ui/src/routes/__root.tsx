@@ -30,6 +30,7 @@ import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
 import { useSession } from "@/lib/session"
 import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
+import { PageCommandRunner } from "@/features/agents/components/PageCommandRunner"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -98,6 +99,7 @@ function AccountGate({ children }: { children: React.ReactNode }) {
   return (
     <>
       <InvalidationStream />
+      <PageCommandRunner />
       <AppNotifications />
       <VersionMismatchBanner />
       <AppCommandProvider>{children}</AppCommandProvider>

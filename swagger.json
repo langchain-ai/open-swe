@@ -5211,6 +5211,62 @@
         "title": "OutputTokensDetails",
         "type": "object"
       },
+      "PageCommand": {
+        "description": "A command waiting for the page, under the page's own name for its tool.",
+        "properties": {
+          "arguments": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "tool",
+          "arguments"
+        ],
+        "title": "PageCommand",
+        "type": "object"
+      },
+      "PageCommandOutcome": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "PageCommandOutcome",
+        "type": "object"
+      },
+      "PageQueueView": {
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/PageCommand"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "commands"
+        ],
+        "title": "PageQueueView",
+        "type": "object"
+      },
       "PauseChange": {
         "additionalProperties": false,
         "properties": {
@@ -15873,6 +15929,118 @@
         "summary": "Api Update Organization Skill",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/page-sessions/{page_session}/commands": {
+      "get": {
+        "description": "The commands this tab's page has yet to carry out, in order.",
+        "operationId": "api_page_commands_dashboard_api_page_sessions__page_session__commands_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_session",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageQueueView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Page Commands",
+        "tags": [
+          "dashboard",
+          "page-commands"
+        ]
+      }
+    },
+    "/dashboard/api/page-sessions/{page_session}/commands/{position}/result": {
+      "post": {
+        "description": "Record what the page's next command returned once the page has carried it out.",
+        "operationId": "api_record_page_command_dashboard_api_page_sessions__page_session__commands__position__result_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "title": "Position",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_session",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Session",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageCommandOutcome"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Record Page Command",
+        "tags": [
+          "dashboard",
+          "page-commands"
         ]
       }
     },

@@ -131,6 +131,10 @@ class Topic(BaseTopic):
     APP_PREVIEWS: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the build of an app that thread's agent is previewing."""
 
+    PAGE_COMMANDS: ClassVar[KeyedTopic[str]]
+    """Keyed by ``<owner users.id>/<page session>``: the commands Robin queued for one
+    browser tab's page, and which of them it has carried out."""
+
     PLUGIN_DOCUMENTS: ClassVar[KeyedTopic[str]]
     """Keyed: one plugin's collection in one scope, ``<digest>/<owner>/<repo>`` for documents
     shared through a repository and ``<digest>/user/<user id>`` for one person's, the digest
@@ -305,3 +309,18 @@ class RecipientTopic(KeyedTopic[str]):
 
 
 Topic.NOTIFICATIONS = RecipientTopic("notifications")
+
+
+class OwnedTopic(KeyedTopic[str]):
+    """Keys that start with the ``users.id`` of the only person who may hear them."""
+
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        from openswe.dashboard.oauth import session_user_id
+
+        user_id = session_user_id(session)
+        if user_id is None:
+            return set()
+        return {key for key in keys if key.partition("/")[0] == str(user_id)}
+
+
+Topic.PAGE_COMMANDS = OwnedTopic("page-commands")

@@ -15,6 +15,7 @@ import {
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { usePageToolBridge } from "@/features/agents/lib/pageToolBridge"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { reportError } from "@/lib/errorReporting"
 import { productAnalytics } from "@/lib/analytics"
@@ -64,6 +65,7 @@ export function useSubmitAgentMessage(threadId: string) {
   const source = useThreadSource()
   const review = useContext(ReviewChatActionsContext)
   const embedded = useContext(EmbeddedThreadContext)
+  const pageTools = usePageToolBridge()
 
   return useMutation({
     meta: { errorTitle: "Couldn't send message" },
@@ -112,7 +114,13 @@ export function useSubmitAgentMessage(threadId: string) {
         vars.model_selection_changed
       )
       const surface = useThreadRunConfig.getState().byThread[threadId]
-      await Promise.all([embedded?.run?.prepare?.(), surface?.prepare?.()])
+      const [offered] = await Promise.all([
+        pageTools.offer(),
+        embedded?.run?.prepare?.(),
+        surface?.prepare?.(),
+      ])
+      // Robin queues commands for this tab's page from this message on.
+      if (offered.length) pageTools.sent()
 
       void source
         .startRun({
@@ -124,6 +132,9 @@ export function useSubmitAgentMessage(threadId: string) {
           },
           configurable: {
             ...configurable,
+            ...(offered.length
+              ? { page_tools: offered, page_session: pageTools.session }
+              : {}),
             ...embedded?.run?.configurable,
             ...surface?.configurable,
             ...(review
