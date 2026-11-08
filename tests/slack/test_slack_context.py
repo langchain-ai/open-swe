@@ -577,8 +577,14 @@ async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
     assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
 
 
-async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(slack_file_mention):
+@pytest.mark.parametrize("ask_channel", [False, True])
+async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(
+    slack_file_mention, monkeypatch, ask_channel
+):
     request, threads, captured = slack_file_mention
+    monkeypatch.setattr(
+        slack_webhooks.WORKSPACES, "is_ask_channel", AsyncMock(return_value=ask_channel)
+    )
 
     prepared, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
 

@@ -1293,7 +1293,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel and not review_guide else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
-            prompt("runs/slack-ask")
+            prompt("runs/slack-ask-channel")
             if ask_channel
             else (_KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT),
         )
