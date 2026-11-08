@@ -22,6 +22,7 @@ class SlackAlertLogger:
         message: str,
         *,
         details: Mapping[str, object],
+        slack_message: str | None = None,
         cooldown: timedelta = timedelta(minutes=1),
     ) -> bool:
         """Log locally and post within the channel-wide cooldown shared by all replicas."""
@@ -32,7 +33,7 @@ class SlackAlertLogger:
         try:
             if not await event_claims.claim("slack-alert", channel, ttl=cooldown):
                 return False
-            text = f"⚠️ *{escape(message, quote=False)}*"
+            text = f"⚠️ *{escape(slack_message or message, quote=False)}*"
             detail_text = "\n".join(
                 f"*{escape(key, quote=False)}:* {escape(str(value), quote=False)}"
                 for key, value in details.items()

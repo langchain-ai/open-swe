@@ -85,8 +85,16 @@ async def test_operational_alert_failure_does_not_break_the_run(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("image_age", "expected_age"),
+    [
+        (timedelta(hours=6, minutes=17), "6h 17m"),
+        (timedelta(days=2, hours=3, minutes=4), "2d 3h 4m"),
+        (None, "unknown (capture timestamp missing or invalid)"),
+    ],
+)
 async def test_stale_workspace_alerts_skip_fresh_images(
-    slack_api, memory_event_claims, monkeypatch, caplog
+    slack_api, memory_event_claims, monkeypatch, caplog, image_age, expected_age
 ) -> None:
     monkeypatch.delenv("SLACK_ALERTS_CHANNEL_ID", raising=False)
     slack_api.respond({"ok": True, "ts": "2.0"})
@@ -99,10 +107,14 @@ async def test_stale_workspace_alerts_skip_fresh_images(
     )
     await StaleWorkspaceReporter.report("thread-1", workspace)
     assert not slack_api.calls
-    workspace.last_captured_at = (datetime.now(UTC) - timedelta(hours=6)).isoformat()
+    workspace.last_captured_at = (
+        (datetime.now(UTC) - image_age).isoformat() if image_age is not None else None
+    )
     await StaleWorkspaceReporter.report("thread-1", workspace)
     assert not slack_api.calls
-    assert "Run booted a stale workspace image" in caplog.text
+    [record] = [r for r in caplog.records if r.name == "openswe.slack.alerts"]
+    assert record.getMessage() == "Run booted a stale workspace image"
+    assert record.__dict__["Image age"] == expected_age
     monkeypatch.setenv("SLACK_ALERTS_CHANNEL_ID", "C_DEPLOYMENT_ALERTS")
     claim = AsyncMock(wraps=event_claims.claim)
     monkeypatch.setattr(event_claims, "claim", claim)
@@ -111,7 +123,8 @@ async def test_stale_workspace_alerts_skip_fresh_images(
     )
     [(_, params)] = slack_api.calls
     assert params["channel"] == "C_DEPLOYMENT_ALERTS"
-    assert "⚠️ *Run booted a stale workspace image*" in params["text"]
+    assert params["text"] == f"⚠️ *Run booted a stale workspace image (age: {expected_age})*"
+    assert params["blocks"][0]["text"]["text"] == params["text"]
     assert "Workspace" not in params["text"]
     details = params["blocks"][1]
     assert details["type"] == "context"
