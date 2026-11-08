@@ -310,6 +310,19 @@ async def test_merging_default_branch_skips_approval_for_its_workflows(
     middleware = guard.WorkflowPushGuardMiddleware()
     assert await middleware._change_for_request(request) is None
 
+    publisher = tmp_path / "publisher"
+    await backend.git(f"clone -q {shlex.quote(str(origin))} {shlex.quote(str(publisher))}")
+    publisher_backend = _GitBackend(publisher)
+    await publisher_backend.git("config user.email test@example.com")
+    await publisher_backend.git("config user.name Test")
+    (publisher / "app.py").write_text("main advanced\n")
+    await publisher_backend.git("add app.py")
+    await publisher_backend.git("commit -qm 'advance main'")
+    await publisher_backend.git("push -q origin main")
+    default_sha = await publisher_backend.git("rev-parse HEAD")
+    assert (await backend.aexecute(f"git cat-file -e {default_sha}")).exit_code != 0
+    assert await middleware._change_for_request(request) is None
+
     await backend.git("config remote.origin.pushurl https://github.com/example/other.git")
     assert await middleware._change_for_request(request) is not None
     await backend.git("config --unset remote.origin.pushurl")
