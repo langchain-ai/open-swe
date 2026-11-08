@@ -4,7 +4,7 @@ import type { AgentThread } from "./types"
 import {
   cloudSidebarThread,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByAge,
+  groupSidebarThreadsByDay,
   sortSidebarThreads,
 } from "./sidebarThreads"
 
@@ -73,15 +73,15 @@ describe("sortSidebarThreads", () => {
   })
 })
 
-describe("groupSidebarThreadsByAge", () => {
-  it("buckets and sorts by creation even when an older thread is active today", () => {
+describe("groupSidebarThreadsByDay", () => {
+  it("buckets by local creation day, even when an older thread is active today", () => {
     const now = new Date(2026, 5, 10, 15)
     const at = (day: number, hour: number) =>
       new Date(2026, 5, day, hour).getTime()
     const thread = (id: string, createdAt: number, updatedAt: number) =>
       cloudSidebarThread(cloudThread({ id, createdAt, updatedAt }))
 
-    const groups = groupSidebarThreadsByAge(
+    const groups = groupSidebarThreadsByDay(
       [
         thread("busy", at(1, 9), at(10, 14)),
         thread("fresh", at(10, 8), at(10, 9)),
@@ -92,12 +92,24 @@ describe("groupSidebarThreadsByAge", () => {
       now
     )
 
+    const label = (day: number) =>
+      new Date(2026, 5, day).toLocaleDateString([], {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })
     expect(
-      groups.map((group) => [group.label, group.threads.map((item) => item.id)])
+      groups.map((group) => [
+        group.key,
+        group.label,
+        group.threads.map((item) => item.id),
+      ])
     ).toEqual([
-      ["Today", ["fresh"]],
-      ["Yesterday", ["yesterday"]],
-      ["Older", ["old", "older", "busy"]],
+      ["today", "Today", ["fresh"]],
+      ["yesterday", "Yesterday", ["yesterday"]],
+      ["2026-06-03", label(3), ["old"]],
+      ["2026-06-02", label(2), ["older"]],
+      ["2026-06-01", label(1), ["busy"]],
     ])
   })
 })

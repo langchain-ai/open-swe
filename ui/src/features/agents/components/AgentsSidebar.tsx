@@ -97,7 +97,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByAge,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -647,12 +647,10 @@ export function AgentsSidebar({
     </>
   )
 
-  // Date mode gives each age bucket its own section; otherwise, and before any
-  // thread loads, one Recents section keeps the view menu reachable.
-  const ageGroups =
-    prefs.organize === "date" ? groupSidebarThreadsByAge(recents) : []
-  const recentGroups = ageGroups.length
-    ? ageGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
+  const dayGroups =
+    prefs.organize === "date" ? groupSidebarThreadsByDay(recents) : []
+  const recentGroups = dayGroups.length
+    ? dayGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
 
   const macFolders = new Set(
