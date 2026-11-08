@@ -669,7 +669,7 @@ The environment comes from the backend's `DD_ENV` at runtime, shared with Segmen
 RUM skips initialization if the backend telemetry configuration cannot be loaded.
 Session Replay masks all content and telemetry strips query strings and fragments.
 `VITE_` values are public in the bundle; use a client token, never an API or application key.
-The dashboard also reports two custom duration vitals, `thread_load` and `agent_run`, with their phase breakdown in the vital context (RUM Explorer: `@type:vital @vital.name:thread_load`); see [docs/DEVELOPMENT.md](DEVELOPMENT.md#profiling-thread-load-and-streaming) for what they measure.
+The dashboard also reports three custom duration vitals, `thread_load`, `thread_list_load`, and `agent_run`, with their phase breakdown in the vital context (RUM Explorer: `@type:vital @vital.name:thread_load`); see [docs/DEVELOPMENT.md](DEVELOPMENT.md#profiling-thread-load-and-streaming) for what they measure.
 
 </details>
 

@@ -328,11 +328,12 @@ The GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for deskto
 
 ## Profiling thread load and streaming
 
-The dashboard records two performance spans, in every build, with the same code path locally and in production (`ui/src/lib/perf/`):
+The dashboard records three performance spans, in every build, with the same code path locally and in production (`ui/src/lib/perf/`):
 
 | Span | Starts | Steps | Ends |
 |---|---|---|---|
 | `thread_load` | The navigation to `/agents/:threadId` (or the document's time origin on a full page load, `cold=true`) | `detail` (thread summary, `GET /threads/:id`), `hydrate` (SDK state fetch, `GET /threads/:id/state`), `paint` | First frame after the transcript rendered |
+| `thread_list_load` | A sidebar list mounts, its filters change, or a folder opens | `data`, `paint` | After a frame with the list or its error state; `scope` distinguishes `pinned`, `recents`, `repositories`, and `folder`, `cached` distinguishes warm loads, `items` counts results, and `outcome` distinguishes success/error. Background refreshes and pagination do not start another span. |
 | `agent_run` | Pressing send (`joined=true` when the run was started elsewhere, e.g. a queued message) | `accepted`, `stream_open`, `first_event`, `generation_start` (first assistant message, so the run is visibly producing thinking or a tool call), `first_text` (first streamed assistant text) | The run's streaming phase ends (`reason`: success, error, interrupt, stopped) |
 
 Each span carries attributes: request time-to-first-byte and the backend's `Server-Timing` phases for the detail and state requests (`detail_srv_thread_get_ms`, `state_srv_get_state_ms`, …), whether the detail came from the sidebar cache, message and chunk counts, time spent in `streamMessagesToUi` (`build_ms`), protocol event and text-delta counts, the lag between the server's event timestamp and receipt (`lag_avg_ms`, includes clock skew, read as a trend), and, in development builds only, React commit time for the transcript while streaming (`commit_ms`).
@@ -345,7 +346,11 @@ Every span is also a User Timing mark and measure named `osw:*`, so it appears o
 Compare cold and warm loads separately (`cold`, `detail_cached`), and reload a few times per change: single samples are noisy.
 
 **In production.**
-With Datadog RUM configured, ended spans are sent as custom duration vitals named `thread_load` and `agent_run`, attributes in the vital context and `client` (`web` or `desktop`) in the global context.
+With Datadog RUM configured, ended spans are sent as custom duration vitals named `thread_load`, `thread_list_load`, and `agent_run`, attributes in the vital context and `client` (`web` or `desktop`) in the global context.
+Use `@type:vital @vital.name:thread_list_load @context.client:desktop` for desktop list loading, and replace the vital name with `thread_load` for opening an individual thread.
+Filter list measurements by `@context.outcome:success` and compare each `@context.scope` separately.
+Spans completed before RUM finishes initializing are replayed from the bounded local buffer.
+Desktop RUM sessions use local storage because the `open-swe://app` origin cannot use ordinary browser session cookies; web sessions retain the SDK's cookie default.
 Abandoned spans (navigated away, hydration failed) stay local only.
 The backend side of the same picture is the `Server-Timing` header on `GET /dashboard/api/threads/{id}` and `/state` (logged as `thread state timings`) and the `open_swe_dashboard_thread_ttft` histogram, which measures the same thing as `first_text` rather than the first token of any kind.
 

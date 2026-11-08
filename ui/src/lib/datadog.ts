@@ -153,6 +153,9 @@ export async function initializeDatadogRum(
     trackUserInteractions: true,
     trackResources: true,
     trackLongTasks: true,
+    ...(typeof window !== "undefined" && window.openSweDesktop
+      ? { sessionPersistence: "local-storage" as const }
+      : {}),
     beforeSend: sanitizeEventUrls,
     defaultPrivacyLevel: "mask",
     enablePrivacyForActionName: true,

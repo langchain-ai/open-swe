@@ -45,6 +45,7 @@ import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
+import { useThreadListLoad } from "@/lib/perf/threadListLoad"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
@@ -676,22 +677,35 @@ function sidebarPageParams({
   }
 }
 
-export function useSidebarPinnedThreads({ enabled = true } = {}) {
-  return useQuery({
+export function useSidebarPinnedThreads({
+  enabled = true,
+  measure = false,
+} = {}) {
+  const query = useQuery({
     queryKey: agentThreadKeys.pinned,
     queryFn: () => agentsApi.listPinnedThreads(),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    refetchInterval: (query) => sidebarRefreshInterval(query.state.data),
+    refetchInterval: (current) => sidebarRefreshInterval(current.state.data),
     meta: {
       invalidatedBy: (data) =>
         taskWorkerTopics(data as Array<AgentThread> | undefined),
     },
   })
+  useThreadListLoad({
+    scope: "pinned",
+    identity: "pinned",
+    enabled: enabled && measure,
+    pending: query.isPending,
+    failed: query.isError,
+    items: query.data?.length ?? 0,
+  })
+  return query
 }
 
 export function useSidebarRepos({
+  measure = false,
   includeAutomations = false,
   includeResolved = false,
   owned = false,
@@ -699,6 +713,7 @@ export function useSidebarRepos({
   includeSlack = true,
   enabled = true,
 }: {
+  measure?: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
@@ -708,7 +723,7 @@ export function useSidebarRepos({
 }) {
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
-  return useQuery({
+  const query = useQuery({
     queryKey: agentThreadKeys.repos({
       ...params,
       includeClaudeCode,
@@ -723,6 +738,15 @@ export function useSidebarRepos({
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
   })
+  useThreadListLoad({
+    scope: "repositories",
+    identity: JSON.stringify({ ...params, includeClaudeCode, includeSlack }),
+    enabled: enabled && measure,
+    pending: query.isPending,
+    failed: query.isError,
+    items: query.data?.length ?? 0,
+  })
+  return query
 }
 
 function useCachedAgentThread(threadId?: string): AgentThread | undefined {
@@ -812,6 +836,14 @@ function useSidebarThreadPages(
   const query = useInfiniteThreadsPages(params, {
     enabled: enabled && hydrated,
     pollWhileRunning: true,
+  })
+  useThreadListLoad({
+    scope: params.project || params.repo ? "folder" : "recents",
+    identity: JSON.stringify(params),
+    enabled,
+    pending: query.isPending,
+    failed: query.isError,
+    items: query.data?.pages.flatMap((page) => page.items).length ?? 0,
   })
   return {
     items: query.data?.pages.flatMap((page) => page.items) ?? [],

@@ -259,7 +259,10 @@ export function AgentsSidebar({
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
-  const pinnedQuery = useSidebarPinnedThreads({ enabled: true })
+  const pinnedQuery = useSidebarPinnedThreads({
+    enabled: true,
+    measure: !prefs.collapsedSectionKeys.includes("pinned"),
+  })
   const recentsQuery = useSidebarRecents({
     repoMode,
     includeAutomations,
@@ -271,6 +274,11 @@ export function AgentsSidebar({
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
+    measure:
+      workspaceOrganize ||
+      !prefs.collapsedSectionKeys.includes("repos") ||
+      (!prefs.collapsedSectionKeys.includes("pinned") &&
+        prefs.pinnedRepoKeys.length > 0),
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
