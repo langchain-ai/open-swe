@@ -297,6 +297,29 @@ test("opens only dashboard links from the configured backend", () => {
     assert.equal(desktopDeepLinkUrl(url, backend), null);
 });
 
+test("opens dashboard links on the origins the backend names", () => {
+  const backend = "https://openswe.langchain.dev";
+  const origins = ["https://robin.langchain.dev", backend];
+  assert.equal(
+    desktopDeepLinkUrl(
+      "https://robin.langchain.dev/agents/thread-1?tab=plan#latest",
+      backend,
+      origins,
+    ),
+    `${APP_URL}agents/thread-1?tab=plan#latest`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl("https://robin.langchain.dev/review", backend),
+    null,
+  );
+  for (const url of [
+    "http://robin.langchain.dev/agents/thread-1",
+    "https://robin.langchain.dev/dashboard/api/auth/callback?code=secret",
+    "https://other.langchain.dev/agents/thread-1",
+  ])
+    assert.equal(desktopDeepLinkUrl(url, backend, origins), null);
+});
+
 test("keeps static file resolution inside the bundled UI root", () => {
   const root = path.resolve("/tmp/open-swe-ui");
   assert.equal(

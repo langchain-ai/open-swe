@@ -2423,6 +2423,13 @@
       },
       "DesktopEnvironments": {
         "properties": {
+          "dashboard_origins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dashboard Origins",
+            "type": "array"
+          },
           "environments": {
             "items": {
               "$ref": "#/components/schemas/DesktopEnvironment"
@@ -2432,7 +2439,8 @@
           }
         },
         "required": [
-          "environments"
+          "environments",
+          "dashboard_origins"
         ],
         "title": "DesktopEnvironments",
         "type": "object"

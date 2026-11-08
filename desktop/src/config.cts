@@ -202,13 +202,19 @@ function localCallbackUrl(navigationUrl, backendUrl) {
   }
 }
 
-function desktopDeepLinkUrl(value, backendUrl) {
+/**
+ * The app URL for a dashboard link the app opens itself: a thread or review on the
+ * backend's origin, or on one of `dashboardOrigins`, the origins that backend says
+ * serve its dashboard (its canonical domain and aliases).
+ */
+function desktopDeepLinkUrl(value, backendUrl, dashboardOrigins = []) {
   try {
     const target = new URL(value);
     const backend = new URL(backendUrl);
     if (
       !["http:", "https:"].includes(target.protocol) ||
-      target.origin !== backend.origin ||
+      (target.origin !== backend.origin &&
+        !dashboardOrigins.includes(target.origin)) ||
       !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
     )
       return null;

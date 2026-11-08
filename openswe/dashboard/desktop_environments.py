@@ -1,4 +1,8 @@
-"""Alternate backends the desktop app offers to switch to until it restarts."""
+"""What the desktop app learns from the backend before signing in.
+
+The alternate backends it offers to switch to until it restarts, and the origins
+that serve this dashboard, whose links it opens as its own.
+"""
 
 import logging
 from urllib.parse import urlsplit
@@ -7,6 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from openswe.config import ENV
+from openswe.utils.dashboard_links import PublicOrigin
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,8 @@ class DesktopEnvironment(BaseModel):
 
 class DesktopEnvironments(BaseModel):
     environments: list[DesktopEnvironment]
+    # The dashboard's own origin first, then its aliases (``DASHBOARD_ALIAS_URLS``).
+    dashboard_origins: list[str]
 
 
 def alternative_environments() -> list[DesktopEnvironment]:
@@ -46,4 +53,6 @@ def alternative_environments() -> list[DesktopEnvironment]:
 
 @router.get("/desktop/environments")
 async def api_desktop_environments() -> DesktopEnvironments:
-    return DesktopEnvironments(environments=alternative_environments())
+    return DesktopEnvironments(
+        environments=alternative_environments(), dashboard_origins=PublicOrigin.all()
+    )

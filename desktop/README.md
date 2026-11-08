@@ -66,7 +66,8 @@ When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview
 Choosing one switches only until the app restarts; the stored backend URL stays the same.
 Nothing is configured on the desktop side.
 
-On macOS, Universal Links open agent and review pages in the app only when the URL's origin matches the configured backend.
+On macOS, Universal Links open agent and review pages in the app only when the URL's origin is the configured backend's, or one of the dashboard origins that backend lists (its canonical domain and aliases, from `/dashboard/api/desktop/environments`).
+The app claims `robin.langchain.dev` and `openswe.langchain.dev` (`entitlements.mac.plist`).
 Links for other deployments open in the default browser instead.
 Associated domains are fixed in the signed app, so macOS may still launch Robin before it hands a mismatched link back to the browser.
 

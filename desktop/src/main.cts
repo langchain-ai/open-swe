@@ -69,13 +69,13 @@ const {
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
+const { DesktopEnvironments } = require("./desktop-environments.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
-  desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
   desktopDeepLinkUrl,
@@ -134,6 +134,7 @@ let backendUrl = null;
 // one of its alternate environments, which lasts until the app restarts.
 let primaryBackendUrl = null;
 let alternativeEnvironments = [];
+const desktopEnvironments = new DesktopEnvironments();
 let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
@@ -1158,13 +1159,11 @@ async function loadAlternativeEnvironments() {
   if (!url) return;
   let environments = [];
   try {
-    const response = await fetch(desktopEnvironmentsUrl(url), {
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (response.ok)
-      environments = parseDesktopEnvironments(await response.json());
-  } catch (error) {
-    console.warn("Could not read the alternate environments", error);
+    environments = parseDesktopEnvironments(
+      await desktopEnvironments.response(url),
+    );
+  } catch {
+    // Logged where the request fails.
   }
   if (url !== primaryBackendUrl) return;
   alternativeEnvironments = environments;
@@ -1175,6 +1174,7 @@ async function loadAlternativeEnvironments() {
 async function connectToBackend(url) {
   const previousUrl = backendUrl;
   backendUrl = url;
+  void desktopEnvironments.response(url).catch(() => {});
   if (previousUrl && previousUrl !== url)
     await session.defaultSession.clearStorageData({ origin: APP_URL });
   createMenu();
@@ -1691,7 +1691,12 @@ function handleNavigation(window, event, url) {
     return;
   }
   const targetUrl = backendUrl
-    ? localCallbackUrl(url, backendUrl) || desktopDeepLinkUrl(url, backendUrl)
+    ? localCallbackUrl(url, backendUrl) ||
+      desktopDeepLinkUrl(
+        url,
+        backendUrl,
+        desktopEnvironments.knownDashboardOrigins(backendUrl),
+      )
     : null;
   if (targetUrl) {
     event.preventDefault();
@@ -1910,6 +1915,7 @@ function configurePermissions() {
 
 const desktopLinks = new DesktopLinks({
   backendUrl: () => backendUrl,
+  dashboardOrigins: (url: string) => desktopEnvironments.dashboardOrigins(url),
   openApp: openDesktopLink,
   openExternal: (url: string) => shell.openExternal(url),
 });
