@@ -9,11 +9,13 @@ hub asks the outbox which subscribed topics were invalidated in the gap.
 import asyncio
 import contextlib
 import logging
+import math
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 
 from openswe.database.notifications import LISTENER
 from openswe.ui_invalidations import outbox
+from openswe.ui_invalidations.topics import BaseTopic
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +27,34 @@ _PRUNE_INTERVAL_SECONDS = 3600.0
 
 
 class Stream:
-    """One reader's topics, and the ones invalidated since it last drained."""
+    """One reader's topics, and the ones invalidated since it last drained.
 
-    __slots__ = ("_changed", "_wake", "topics")
+    A topic with a minimum interval (``BaseTopic.min_interval``) is sent at once,
+    then held until that interval has passed since it was last sent, so a burst of
+    changes reaches the reader as its first change and the state after its last.
+    """
+
+    __slots__ = ("_changed", "_held_until", "_intervals", "_wake", "topics")
 
     def __init__(self, topics: frozenset[str]) -> None:
         self.topics = topics
         self._changed: set[str] = set()
         self._wake = asyncio.Event()
+        self._intervals = {
+            topic: interval for topic in topics if (interval := BaseTopic.min_interval(topic)) > 0
+        }
+        self._held_until: dict[str, float] = {}
+
+    def hold_fresh(self, ages: Mapping[str, float]) -> None:
+        """Hold each topic with an interval until that long after the reader's data for it.
+
+        A reader reconnects whenever its topics change, so without this every
+        reconnect would resend what the previous stream sent a moment ago.
+        """
+        now = time.monotonic()
+        for topic, interval in self._intervals.items():
+            if topic in ages:
+                self._held_until[topic] = now - ages[topic] + interval
 
     def mark(self, topics: Iterable[str]) -> None:
         self._changed.update(topic for topic in topics if topic in self.topics)
@@ -40,15 +62,34 @@ class Stream:
             self._wake.set()
 
     async def drain(self, timeout: float) -> set[str]:
-        """Whatever changed, waiting up to ``timeout`` for something to; empty on timeout."""
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(self._wake.wait(), timeout=timeout)
-        return self.take()
+        """What may be sent, waiting up to ``timeout`` for something to be; empty on timeout."""
+        deadline = time.monotonic() + timeout
+        while (remaining := deadline - time.monotonic()) > 0:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._wake.wait(), timeout=min(remaining, self._next_release())
+                )
+            if ready := self.take():
+                return ready
+        return set()
 
     def take(self) -> set[str]:
-        changed, self._changed = self._changed, set()
+        """What changed and may be sent now; a held topic stays until its interval passes."""
+        now = time.monotonic()
+        ready = {topic for topic in self._changed if self._held_until.get(topic, 0.0) <= now}
+        self._changed -= ready
         self._wake.clear()
-        return changed
+        for topic in self._intervals.keys() & ready:
+            self._held_until[topic] = now + self._intervals[topic]
+        return ready
+
+    def _next_release(self) -> float:
+        """Seconds until the first changed topic may be sent; infinite when none changed."""
+        now = time.monotonic()
+        return min(
+            (max(self._held_until.get(topic, 0.0) - now, 0.0) for topic in self._changed),
+            default=math.inf,
+        )
 
 
 class Hub:

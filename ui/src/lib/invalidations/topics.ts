@@ -18,6 +18,7 @@ type KeyedTopic =
   | "review-styles"
   | "incidents"
   | "pull-requests"
+  | "pull-request-checks"
   | "thread-queues"
   | "thread-browsers"
   | "thread-background-work"

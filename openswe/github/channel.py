@@ -170,7 +170,7 @@ async def record_github_delivery(
         refs=refs,
     )
     if refs.pull_request is not None:
-        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
+        await Topic.for_pull_request_event(delivery.event).invalidate(key=refs.pull_request)
     facts = await _repository_facts(delivery)
     if work := delivery_work(delivery.event, delivery.payload, facts):
         await _accept_work(call, delivery, work)
@@ -332,7 +332,7 @@ async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> Non
     fields = {"github_event": delivery.event, "github_delivery": delivery.delivery_id}
     if pull_request is not None:
         try:
-            await Topic.PULL_REQUESTS.invalidate(key=pull_request)
+            await Topic.for_pull_request_event(delivery.event).invalidate(key=pull_request)
         except Exception:
             logger.warning(
                 "Refreshing a pull request's dashboard state failed", extra=fields, exc_info=True

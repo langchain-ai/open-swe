@@ -66,6 +66,7 @@ def _parse_subscriptions(values: list[str]) -> dict[str, float]:
 async def _stream(ages: dict[str, float], denied: list[str]) -> AsyncGenerator[str]:
     """``hello`` names what was invalidated while the reader was away; it is synchronized after."""
     with HUB.subscribe(frozenset(ages)) as stream:
+        stream.hold_fresh(ages)
         windows = {topic: age + REPLAY_MARGIN_SECONDS for topic, age in ages.items()}
         try:
             stream.mark(await outbox.invalidated_since(windows))

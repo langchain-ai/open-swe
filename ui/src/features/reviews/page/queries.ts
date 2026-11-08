@@ -7,6 +7,7 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
 import {
+  reviewChecksOptions,
   reviewDetailQuery,
   reviewDiffOptions,
   reviewKeys,
@@ -44,7 +45,7 @@ export const reviewQueries = {
     queryOptions({
       queryKey: reviewKeys.checks(pr),
       queryFn: () => api.getReviewChecks(pr.owner, pr.repo, pr.number),
-      ...sharedReviewOptions(pr),
+      ...reviewChecksOptions(pr),
     }),
   conversation: (pr: PullRequestRef) =>
     queryOptions({
