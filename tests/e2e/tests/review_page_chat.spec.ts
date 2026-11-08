@@ -772,7 +772,8 @@ test.describe("review page", () => {
 
     const diff = diffColumn(page);
     const second = diff.locator('[data-column-number="2"]').first();
-    await second.scrollIntoViewIfNeeded();
+    // Centered, so dragging across it never nears an edge and autoscrolls.
+    await second.evaluate((line) => line.scrollIntoView({ block: "center" }));
     const from = await second.boundingBox();
     const to = await diff
       .locator('[data-column-number="3"]')
@@ -790,7 +791,9 @@ test.describe("review page", () => {
       .getByRole("button", { name: "Ask Open SWE" })
       .click();
     await expect(cards.getByRole("listitem")).toHaveCount(4);
-    await expect(cards.getByRole("listitem").nth(3)).toContainText("ALPHA_2");
+    await expect(cards.getByRole("listitem").nth(3)).toContainText(
+      "alpha.py:2–3",
+    );
 
     await cards
       .getByRole("listitem")
