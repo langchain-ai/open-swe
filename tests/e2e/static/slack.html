@@ -79,6 +79,8 @@
       let pickedChannel = false;
       let selectedIsCodeChannel = false;
       let knownCodeChannels = 0;
+      let resetGeneration = 0;
+      let resetting = false;
 
       async function loadUsers() {
         const users = await (await fetch("/mock/users")).json();
@@ -216,8 +218,9 @@
         await pollMessages();
       }
 
-      async function pollState() {
+      async function pollState(generation = resetGeneration) {
         const state = await (await fetch(`/mock/slack/state?channel=${encodeURIComponent(selectedChannel)}`)).json();
+        if (generation !== resetGeneration) return;
         if (!state.channels.some((channel) => channel.id === selectedChannel)) selectedChannel = state.selected_channel;
         const codeChannels = state.channels.filter((channel) => channel.code_channel);
         if (codeChannels.length > knownCodeChannels) {
@@ -247,14 +250,20 @@
         renderChrome(active);
       }
 
-      async function pollMessages() {
-        const url = selectedIsCodeChannel || pickedChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages";
+      async function pollMessages(generation = resetGeneration) {
+        const url = selectedIsCodeChannel || pickedChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages?current_thread=true";
         const messages = await (await fetch(url)).json();
+        if (generation !== resetGeneration) return;
         renderMessages(messages);
       }
 
       async function poll() {
-        try { await pollState(); await pollMessages(); } catch (_) {}
+        if (resetting) return;
+        const generation = resetGeneration;
+        try {
+          await pollState(generation);
+          if (generation === resetGeneration) await pollMessages(generation);
+        } catch (_) {}
       }
 
       $("send").addEventListener("click", async () => {
@@ -267,12 +276,27 @@
       });
       $("text").addEventListener("keydown", (event) => { if (event.key === "Enter") $("send").click(); });
       $("reset").addEventListener("click", async () => {
-        await fetch("/control/reset", { method: "POST" });
-        selectedChannel = "CDEMO01";
-        selectedIsCodeChannel = false;
-        knownCodeChannels = 0;
-        $("text").value = "<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL";
-        await poll();
+        resetting = true;
+        resetGeneration += 1;
+        $("send").disabled = true;
+        $("text").disabled = true;
+        $("reset").disabled = true;
+        $("thread").replaceChildren();
+        try {
+          await fetch("/control/reset", { method: "POST" });
+          selectedChannel = "CDEMO01";
+          pickedChannel = false;
+          selectedIsCodeChannel = false;
+          knownCodeChannels = 0;
+          $("text").value = "<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL";
+          await pollState();
+          await pollMessages();
+        } finally {
+          resetting = false;
+          $("send").disabled = false;
+          $("text").disabled = false;
+          $("reset").disabled = false;
+        }
       });
       loadUsers().then(poll);
       setInterval(poll, 700);

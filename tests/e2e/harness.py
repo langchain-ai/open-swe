@@ -1133,12 +1133,17 @@ async def mock_users() -> JSONResponse:
 
 
 @app.get("/mock/slack/messages")
-async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse:
+async def slack_messages(
+    channel: str = "", thread_ts: str = "", current_thread: bool = False
+) -> JSONResponse:
     selected_channel = channel or CURRENT_THREAD["channel"]
     assert selected_channel is not None
+    selected_thread = thread_ts or (CURRENT_THREAD["thread_ts"] if current_thread else "")
     msgs = (
-        fakes.slack_thread(selected_channel, thread_ts)
-        if thread_ts
+        fakes.slack_thread(selected_channel, selected_thread)
+        if selected_thread
+        else []
+        if current_thread
         else fakes.slack_messages(selected_channel)
     )
     return JSONResponse(
