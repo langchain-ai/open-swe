@@ -1648,9 +1648,10 @@ async def dispatch_pending_follow_ups(
 class _SlackWebHandoff:
     def __init__(self, thread_id: str, metadata: Mapping[str, object]) -> None:
         self.thread_id = thread_id
+        slack_thread = SourceContext.from_metadata(metadata).slack_thread
         self.location = (
-            SourceContext.from_metadata(metadata).slack_location
-            if metadata.get("source") == "slack"
+            slack_thread.location
+            if metadata.get("source") == "slack" and slack_thread and not slack_thread.is_dm
             else None
         )
 

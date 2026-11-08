@@ -213,13 +213,18 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
 
 
 @pytest.mark.parametrize("source", ["slack", "dashboard"])
+@pytest.mark.parametrize("channel, thread_ts", [("C1", "1.0"), ("D1", "1.0"), ("D1", "0")])
 async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
-    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, source: str
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    channel: str,
+    thread_ts: str,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     metadata = {
         "source": source,
-        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+        "source_context": {"slack_thread": {"channel_id": channel, "thread_ts": thread_ts}},
     }
     slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "text": "Fix it"}]})
     slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0", "text": "Notice"}})
@@ -227,8 +232,8 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
     await _SlackWebHandoff("t1", metadata).notify()
 
     posts = [params for method, params in slack_api.calls if method == "chat.postMessage"]
-    if source != "slack":
-        assert not posts
+    if source != "slack" or channel == "D1":
+        assert not slack_api.calls
         return
     [posted] = posts
     assert posted["channel"] == "C1"

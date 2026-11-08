@@ -2000,7 +2000,10 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
     goal_worker = bool(task_coordination and task_coordination.is_worker)
-    goal_mode = bool(profile_login) and not goal_worker and sender_preferences.goal_mode
+    sender_goal_mode = sender_preferences.goal_mode and not (
+        cfg.slack_thread is not None and cfg.slack_thread.is_dm
+    )
+    goal_mode = bool(profile_login) and not goal_worker and sender_goal_mode
     try:
         if cfg.source != "incidents_agent" and postgres.configured():
             indexed = await THREADS.get(thread_id)
@@ -2013,7 +2016,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         goal_mode = await ThreadGoals.for_run(
             thread_id,
             sender=profile_login,
-            sender_goal_mode=sender_preferences.goal_mode,
+            sender_goal_mode=sender_goal_mode,
             worker=goal_worker,
         )
     except Exception:

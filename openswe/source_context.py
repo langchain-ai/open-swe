@@ -56,6 +56,13 @@ class SlackThreadRef(BaseModel):
         return None
 
     @property
+    def is_dm(self) -> bool:
+        """Whether this thread belongs to a direct message with the bot."""
+        from openswe.slack.dm import is_dm_channel
+
+        return self.channel_id.startswith("D") or is_dm_channel(self.channel_context)
+
+    @property
     def is_concierge(self) -> bool:
         """Whether this is the single conversation for a bot DM."""
         from openswe.slack.dm import is_concierge_thread
