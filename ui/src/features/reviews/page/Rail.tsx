@@ -22,7 +22,6 @@ import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { AgentMark } from "./AgentMark"
 import { Discussion } from "./Discussion"
-import { History } from "./History"
 import { openFindingCounts } from "./findings"
 import {
   reviewQueries,
@@ -33,7 +32,7 @@ import {
 import { useReviewPage, type RailTab } from "./store"
 import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
-const TABS: ReadonlyArray<RailTab> = ["chat", "discussion", "history"]
+const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
 
 /** The right column: the agent you can talk to about this PR, and the people who already did. */
 export function Rail({
@@ -54,7 +53,7 @@ export function Rail({
       selectedIndex={TABS.indexOf(tab)}
       onChange={(index: number) => setRailTab(TABS[index] ?? "chat")}
       data-review-rail
-      aria-label="Chat, discussion and history"
+      aria-label="Chat and discussion"
       className="flex h-full min-h-0 flex-col bg-surface-level-1"
     >
       <div className="flex h-11 shrink-0 items-center gap-space-2 border-b border-default px-space-3">
@@ -69,7 +68,6 @@ export function Rail({
                 : undefined
             }
           />
-          <TabLabel label="History" className="pb-0" />
         </TabList>
         <span className="flex-1" />
         {tab === "chat" && chat?.thread_id && (
@@ -100,16 +98,13 @@ export function Rail({
           />
         )}
       </div>
-      {/* Chat and discussion stay mounted: the chat registers drafted comments the diff shows, and keeps its stream. */}
+      {/* Both stay mounted: the chat registers drafted comments the diff shows, and keeps its stream. */}
       <TabPanels className="flex min-h-0 flex-1 flex-col">
         <TabPanel unmount={false} className="min-h-0 flex-1">
           <ReviewChatPanel pr={pr} />
         </TabPanel>
         <TabPanel unmount={false} className="min-h-0 flex-1">
           <Discussion pr={pr} />
-        </TabPanel>
-        <TabPanel className="min-h-0 flex-1">
-          <History pr={pr} />
         </TabPanel>
       </TabPanels>
     </TabGroup>

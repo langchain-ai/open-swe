@@ -69,41 +69,6 @@ export interface ReviewThread {
   comments: [ThreadComment, ...Array<ThreadComment>]
 }
 
-export interface HistoryForcePush {
-  kind: "force_push"
-  ref: "head" | "base"
-  author: ConversationAuthor | null
-  created_at: string
-  /** Null once GitHub no longer has the commit. */
-  before: string | null
-  after: string | null
-}
-
-export interface HistoryBaseChange {
-  kind: "base_change"
-  author: ConversationAuthor | null
-  created_at: string
-  previous: string
-  current: string
-}
-
-export interface HistoryStateChange {
-  kind: "state"
-  author: ConversationAuthor | null
-  created_at: string
-  state: "draft" | "ready" | "closed" | "reopened" | "merged"
-}
-
-export type HistoryEvent =
-  | ConversationCommit
-  | HistoryForcePush
-  | HistoryBaseChange
-  | HistoryStateChange
-
-export interface History {
-  events: Array<HistoryEvent>
-}
-
 export interface Conversation {
   items: Array<ConversationItem>
   threads: Array<ReviewThread>
@@ -148,10 +113,6 @@ export function getReviewConversation(
   pr: PullRequestRef
 ): Promise<Conversation> {
   return read<Conversation>(`${reviewPath(pr)}/conversation`)
-}
-
-export function getReviewHistory(pr: PullRequestRef): Promise<History> {
-  return read<History>(`${reviewPath(pr)}/history`)
 }
 
 export function postReviewConversationComment(
