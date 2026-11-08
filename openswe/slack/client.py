@@ -1436,6 +1436,12 @@ async def _post_slack_callback(
         or not parsed.path.startswith(path_prefix)
     ):
         return False
+    text, blocks = await pr_review_links(payload.get("text", ""), payload.get("blocks"))
+    payload = {**payload}
+    if "text" in payload:
+        payload["text"] = text
+    if blocks is not None:
+        payload["blocks"] = blocks
     request = httpx2.Request(
         "POST",
         response_url,

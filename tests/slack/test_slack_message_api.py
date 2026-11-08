@@ -77,6 +77,34 @@ async def test_interaction_response_failure_does_not_log_capability_url(
     assert "test-response" not in caplog.text
 
 
+async def test_review_claim_callback_opens_robin_and_preserves_delivery_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
+    url = "https://github.com/acme/app/pull/7"
+    target = "https://openswe.example/agents/reviews/acme/app/7"
+    payload = {
+        "response_type": "ephemeral",
+        "replace_original": False,
+        "text": f"You're down to review <{url}|app#7>. Auto-merge is off; a person must merge it.",
+    }
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        assert json.loads(request.content) == {
+            **payload,
+            "text": f"You're down to review <{target}|app#7> <{url}|(GitHub)>. Auto-merge is off; a person must merge it.",
+        }
+        return httpx2.Response(200, text="ok")
+
+    with patch.object(
+        slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+    ):
+        assert await slack_utils.respond_to_slack_interaction(
+            "https://hooks.slack.com/actions/test", payload
+        )
+    assert payload["text"].startswith(f"You're down to review <{url}|app#7>")
+
+
 @pytest.mark.parametrize("status", ["Thinking…", ""])
 async def test_concierge_status_does_not_create_slack_threads(slack_api: SlackAPI, status: str):
     assert await slack_utils.set_slack_thread_status("D1", "0", status)
@@ -371,7 +399,7 @@ async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(
     ]
 
 
-@pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
+@pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command", "interaction"])
 @pytest.mark.parametrize("angled", [False, True])
 async def test_review_links_default_to_open_swe_without_changing_code_or_button_values(
     slack_api: SlackAPI,
@@ -411,9 +439,15 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
         with patch.object(
             slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
         ):
-            assert await slack_utils.replace_slack_command_message(
-                "https://hooks.slack.com/commands/test", text, blocks=blocks
-            )
+            if delivery == "command":
+                assert await slack_utils.replace_slack_command_message(
+                    "https://hooks.slack.com/commands/test", text, blocks=blocks
+                )
+            else:
+                assert await slack_utils.respond_to_slack_interaction(
+                    "https://hooks.slack.com/actions/test",
+                    {"response_type": "ephemeral", "text": text, "blocks": blocks},
+                )
     payload = slack_api.calls[0][1]
     code = f"`{url}`\n```bash\n{url}\n```\n{unchanged}"
     fallback_target = f"<{target}>" if angled else target

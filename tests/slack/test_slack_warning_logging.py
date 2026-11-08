@@ -55,7 +55,10 @@ async def test_plain_slack_post_does_not_log_warning_error(
 
 
 @pytest.mark.asyncio
-async def test_operational_alerts_share_a_channel_cooldown(slack_api, memory_event_claims) -> None:
+async def test_operational_alerts_share_a_channel_cooldown(
+    slack_api, memory_event_claims, monkeypatch
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
     slack_api.respond({"ok": True, "ts": "2.0"})
     results = await asyncio.gather(
         *(
@@ -66,8 +69,12 @@ async def test_operational_alerts_share_a_channel_cooldown(slack_api, memory_eve
     assert results.count(True) == 1
     assert len(slack_api.calls) == 1
     memory_event_claims.held.clear()
-    assert await SlackAlertLogger("C1").warning("Another issue", details={})
+    url = "https://github.com/acme/app/pull/7"
+    assert await SlackAlertLogger("C1").warning("Another issue", details={"pull_request": url})
     assert len(slack_api.calls) == 2
+    details = slack_api.calls[-1][1]["blocks"][1]["elements"][0]["text"]
+    assert "https://openswe.example/agents/reviews/acme/app/7" in details
+    assert f"<{url}|(GitHub)>" in details
 
 
 @pytest.mark.asyncio

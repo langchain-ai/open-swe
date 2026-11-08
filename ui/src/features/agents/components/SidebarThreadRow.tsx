@@ -47,6 +47,7 @@ import type {
 } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { parsePullRequestReference } from "@/features/reviews/search"
 import { RenameThreadDialog } from "@/features/agents/components/RenameThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
@@ -801,6 +802,15 @@ function ThreadHoverCard({
   const onAMac = runsOnAMac(item.thread)
   const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
+  const reference = parsePullRequestReference(item.pr?.url ?? "")
+  const prContent = item.pr && (
+    <>
+      <PullRequestIcon state={item.pr.state} live={live} />
+      <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
+    </>
+  )
+  const prClassName =
+    "pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
 
   return (
     <div className="flex min-w-0 flex-col gap-space-2">
@@ -832,18 +842,29 @@ function ThreadHoverCard({
           <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
         </div>
       )}
-      {item.pr && (
-        <a
-          href={item.pr.url}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
-        >
-          <PullRequestIcon state={item.pr.state} live={live} />
-          <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
-        </a>
-      )}
+      {item.pr &&
+        (reference ? (
+          <Link
+            {...reviewPageRoute(reference)}
+            onClick={(event) => {
+              noteReviewOpenedFromSidebar(reference)
+              event.stopPropagation()
+            }}
+            className={prClassName}
+          >
+            {prContent}
+          </Link>
+        ) : (
+          <a
+            href={item.pr.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className={prClassName}
+          >
+            {prContent}
+          </a>
+        ))}
     </div>
   )
 }

@@ -9,6 +9,7 @@ from openswe import event_claims
 from openswe.config import ENV
 from openswe.slack.blocks import block_payload, context, section
 from openswe.slack.http import SlackClient
+from openswe.slack.review_links import pr_review_links
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +40,15 @@ class SlackAlertLogger:
                 for key, value in details.items()
                 if value is not None
             )
+            text, blocks = await pr_review_links(
+                text,
+                block_payload([section(text), *([context(detail_text)] if detail_text else [])]),
+            )
             async with SlackClient.bot() as client:
                 await client.chat_postMessage(
                     channel=channel,
                     text=text,
-                    blocks=block_payload(
-                        [section(text), *([context(detail_text)] if detail_text else [])]
-                    ),
+                    blocks=blocks,
                     unfurl_links=False,
                     unfurl_media=False,
                 )
