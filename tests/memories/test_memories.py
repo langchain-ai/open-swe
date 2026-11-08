@@ -4,7 +4,7 @@ import pytest
 
 from openswe.database import postgres
 from openswe.input_messages import person_introduction
-from openswe.memories.store import MEMORIES, MemoryRow, Scope
+from openswe.memories.store import MEMORIES, MemoryRow, MemoryTrigger, Scope
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 from openswe.workspaces.rows import WorkspaceRow
@@ -155,25 +155,77 @@ async def test_a_triggered_memory_leaves_context_until_recalled(registry_db: Non
         return row.id
 
     broad, api, deploy = await save("broad"), await save("api only"), await save("deploy")
-    await MEMORIES.set_trigger(workspace.slug, "repo:org/api", "Working in org/api.")
-    await MEMORIES.set_trigger(workspace.slug, "task:deploy", "Deploying.")
-    for slug, memory in (("repo:org/api", api), ("repo:org/api", deploy), ("task:deploy", deploy)):
+    repo, web = await save("whole repo"), await save("web only")
+    await MEMORIES.set_trigger(workspace.slug, "repo/org/mono/api", "Working in api.")
+    await MEMORIES.set_trigger(workspace.slug, "repo/org/mono/web", "Working in web.")
+    await MEMORIES.set_trigger(workspace.slug, "repo/org/mono", "Working in org/mono.")
+    await MEMORIES.set_trigger(workspace.slug, "task/deploy", "Deploying.")
+    for slug, memory in (
+        ("repo/org/mono/api", api),
+        ("repo/org/mono/api", deploy),
+        ("repo/org/mono/web", web),
+        ("repo/org/mono", repo),
+        ("task/deploy", deploy),
+    ):
         assert await MEMORIES.link_trigger(workspace.slug, slug, memory, linked=True)
-    assert not await MEMORIES.link_trigger(workspace.slug, "repo:org/web", broad, linked=True)
+    assert not await MEMORIES.link_trigger(workspace.slug, "repo/org/other", broad, linked=True)
+    shared = await MEMORIES.save(
+        scope="workspace",
+        body="shared",
+        person=person.id,
+        workspace=workspace.slug,
+        thread_id=None,
+        from_private_thread=False,
+    )
+    assert not await MEMORIES.link_trigger(workspace.slug, "task/deploy", shared.id, linked=True)
+    assert await MEMORIES.link_trigger(workspace.slug, "task/deploy", shared.id, linked=False)
 
     assert [m.id for m in await MEMORIES.personal(person.id)] == [broad]
     assert [t.line for t in await MEMORIES.triggers(person.id)] == [
-        "repo:org/api: Working in org/api.",
-        "task:deploy: Deploying.",
+        "repo/org/mono: Working in org/mono.",
+        "repo/org/mono/api: Working in api.",
+        "repo/org/mono/web: Working in web.",
+        "task/deploy: Deploying.",
     ]
-    assert [m.id for m in await MEMORIES.recall(person.id, "repo:org/api")] == [deploy, api]
-    assert [m.id for m in await MEMORIES.recall(person.id, "task:deploy")] == [deploy]
+    # A path recalls what is stored there and above it, never what sits beside or below it.
+    assert [m.id for m in await MEMORIES.recall(person.id, "repo/org/mono/api")] == [
+        repo,
+        deploy,
+        api,
+    ]
+    assert [m.id for m in await MEMORIES.recall(person.id, "repo/org/mono/api/db")] == [
+        repo,
+        deploy,
+        api,
+    ]
+    assert [m.id for m in await MEMORIES.recall(person.id, "repo/org/mono")] == [repo]
+    assert [m.id for m in await MEMORIES.recall(person.id, "repo/org/mon")] == []
+    assert [m.id for m in await MEMORIES.recall(person.id, "task/deploy")] == [deploy]
+
+    # Guidance at a path reaches every thread, most general path first.
+    assert await MEMORIES.set_guidance(workspace.slug, "repo/org/mono/api", "Api line.")
+    assert await MEMORIES.set_guidance(workspace.slug, "repo/org/mono", "Mono line.")
+    assert not await MEMORIES.set_guidance(workspace.slug, "repo/org/none", "No trigger.")
+    assert [t.path for t in await MEMORIES.shared_triggers(workspace.slug)] == [
+        "repo/org/mono",
+        "repo/org/mono/api",
+    ]
+    assert [
+        g.guidance for g in await MEMORIES.recall_guidance(workspace.slug, "repo/org/mono/api")
+    ] == [
+        "Mono line.",
+        "Api line.",
+    ]
+    assert [
+        g.guidance for g in await MEMORIES.recall_guidance(workspace.slug, "repo/org/mono/web")
+    ] == ["Mono line."]
+    assert MemoryTrigger.path_of(" Repo:Org/Mono/ ") == "repo/org/mono"
 
     # A memory stays held back while any trigger still links it.
-    assert await MEMORIES.delete_trigger(workspace.slug, "repo:org/api")
+    assert await MEMORIES.delete_trigger(workspace.slug, "repo/org/mono/api")
     assert {m.id for m in await MEMORIES.personal(person.id)} == {broad, api}
     curated = await MEMORIES.for_curator(workspace.slug, "pending")
-    assert {m.id: m.triggers for m in curated}[deploy] == ["task:deploy"]
+    assert {m.id: m.triggers for m in curated}[deploy] == ["task/deploy"]
 
     participant = ThreadParticipant(
         identity=CollaboratorIdentity("Ada", "Ada", "ada@example.com"),
@@ -182,18 +234,19 @@ async def test_a_triggered_memory_leaves_context_until_recalled(registry_db: Non
         memory_triggers=tuple(t.line for t in await MEMORIES.triggers(person.id)),
     )
     introduction = person_introduction(participant.as_person())["content"]
-    assert "task:deploy: Deploying." in introduction
-    assert "repo:org/api" not in introduction
+    assert f"broad (memory {broad})" in introduction
+    assert "task/deploy: Deploying." in introduction
+    assert "repo/org/mono/api" not in introduction
     assert "deploy (" not in introduction
 
     private = await save("private deployment", private=True)
-    assert await MEMORIES.link_trigger(workspace.slug, "task:deploy", private, linked=True)
+    assert await MEMORIES.link_trigger(workspace.slug, "task/deploy", private, linked=True)
     public = {deploy}
     for i in range(50):
         memory = await save(f"deployment {i}")
-        assert await MEMORIES.link_trigger(workspace.slug, "task:deploy", memory, linked=True)
+        assert await MEMORIES.link_trigger(workspace.slug, "task/deploy", memory, linked=True)
         public.add(memory)
-    assert {m.id for m in await MEMORIES.recall(person.id, "task:deploy")} == public
+    assert {m.id for m in await MEMORIES.recall(person.id, "task/deploy")} == public
     assert {
-        m.id for m in await MEMORIES.recall(person.id, "task:deploy", include_private=True)
+        m.id for m in await MEMORIES.recall(person.id, "task/deploy", include_private=True)
     } == public | {private}

@@ -134,7 +134,9 @@ class ThreadParticipant:
         if self.memories:
             person["personal_memories"] = "\n".join(f"- {memory}" for memory in self.memories)
         if self.memory_triggers:
-            person["memory_triggers"] = "\n".join(f"- {line}" for line in self.memory_triggers)
+            person["personal_memory_triggers"] = "\n".join(
+                f"- {line}" for line in self.memory_triggers
+            )
         return person
 
 

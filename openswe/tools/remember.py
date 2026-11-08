@@ -94,10 +94,10 @@ async def forget(memory_id: str) -> dict[str, object]:
 
 @expose_mcp()
 @access(_ANYWHERE)
-async def recall(trigger_slug: str) -> dict[str, object]:
+async def recall(path: str) -> dict[str, object]:
     """Implement the `recall` tool."""
     try:
-        slug = MemoryTrigger.slug_of(trigger_slug)
+        parsed = MemoryTrigger.path_of(path)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     login = await resolve_github_login(as_json_object(get_config()))
@@ -105,14 +105,18 @@ async def recall(trigger_slug: str) -> dict[str, object]:
     if person is None:
         return {"ok": False, "error": "Could not tell whose memories to recall."}
     run_access = await resolve_access(RunConfig.from_runtime())
-    memories = await MEMORIES.recall(
-        person.id,
-        slug,
-        include_private=run_access.private,
-        curated_in=(
-            RunConfig.from_runtime().workspace_slug
-            if person.typed_preferences.experimental_memory
-            else None
-        ),
+    curated_in = (
+        RunConfig.from_runtime().workspace_slug
+        if person.typed_preferences.experimental_memory
+        else None
     )
-    return {"ok": True, "trigger_slug": slug, "memories": [memory.line for memory in memories]}
+    guidance = await MEMORIES.recall_guidance(curated_in, parsed) if curated_in else []
+    memories = await MEMORIES.recall(
+        person.id, parsed, include_private=run_access.private, curated_in=curated_in
+    )
+    return {
+        "ok": True,
+        "path": parsed,
+        "workspace": [entry.model_dump() for entry in guidance],
+        "personal": [memory.line for memory in memories],
+    }

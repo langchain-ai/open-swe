@@ -79,6 +79,7 @@ _TOOL_MODULES = {
     "publish_workspace_prompt": ".curator",
     "list_memory_triggers": ".curator",
     "set_memory_trigger": ".curator",
+    "set_memory_trigger_guidance": ".curator",
     "delete_memory_trigger": ".curator",
     "link_memory_trigger": ".curator",
     "save_user_settings": ".save_user_settings",
@@ -185,6 +186,7 @@ __all__ = [
     "publish_workspace_prompt",
     "list_memory_triggers",
     "set_memory_trigger",
+    "set_memory_trigger_guidance",
     "delete_memory_trigger",
     "link_memory_trigger",
     "save_user_settings",
@@ -269,6 +271,7 @@ if TYPE_CHECKING:
         publish_workspace_prompt,
         read_workspace_prompt,
         set_memory_trigger,
+        set_memory_trigger_guidance,
     )
     from openswe.tools.discover_managed_tools import discover_managed_tools
     from openswe.tools.expedite_pr_approval import expedite_pr_approval

@@ -1,11 +1,12 @@
 """Tools only a workspace's curator thread has: read memories, decide them, publish a prompt,
-and name the triggers that recall memories in place of their bodies."""
+and name the triggers that recall memories and guidance in place of their bodies."""
 
 from uuid import UUID
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.memories.curator import WorkspaceCurator
 from openswe.memories.store import (
+    MAX_TRIGGER_GUIDANCE_CHARS,
     MAX_TRIGGER_SUMMARY_CHARS,
     MAX_WORKSPACE_PROMPT_CHARS,
     MEMORIES,
@@ -68,10 +69,10 @@ async def list_memory_triggers() -> dict[str, object]:
 
 @audit_tool()
 @access(_CURATOR)
-async def set_memory_trigger(slug: str, summary: str) -> dict[str, object]:
+async def set_memory_trigger(path: str, summary: str) -> dict[str, object]:
     """Implement the `set_memory_trigger` tool."""
     try:
-        parsed = MemoryTrigger.slug_of(slug)
+        parsed = MemoryTrigger.path_of(path)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     text = " ".join(summary.split())
@@ -80,30 +81,55 @@ async def set_memory_trigger(slug: str, summary: str) -> dict[str, object]:
     if len(text) > MAX_TRIGGER_SUMMARY_CHARS:
         return {"ok": False, "error": f"summary exceeds {MAX_TRIGGER_SUMMARY_CHARS} characters"}
     await MEMORIES.set_trigger(WorkspaceCurator.for_run().slug, parsed, text)
-    return {"ok": True, "slug": parsed, "summary": text}
+    return {"ok": True, "path": parsed, "summary": text}
 
 
 @audit_tool()
 @access(_CURATOR)
-async def delete_memory_trigger(slug: str) -> dict[str, object]:
+async def set_memory_trigger_guidance(path: str, guidance: str) -> dict[str, object]:
+    """Implement the `set_memory_trigger_guidance` tool."""
+    try:
+        parsed = MemoryTrigger.path_of(path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    text = guidance.strip()
+    if len(text) > MAX_TRIGGER_GUIDANCE_CHARS:
+        return {"ok": False, "error": f"guidance exceeds {MAX_TRIGGER_GUIDANCE_CHARS} characters"}
+    if not await MEMORIES.set_guidance(WorkspaceCurator.for_run().slug, parsed, text):
+        return {"ok": False, "error": "This workspace has no trigger at that path."}
+    return {"ok": True, "path": parsed, "guidance": text}
+
+
+@audit_tool()
+@access(_CURATOR)
+async def delete_memory_trigger(path: str) -> dict[str, object]:
     """Implement the `delete_memory_trigger` tool."""
-    if not await MEMORIES.delete_trigger(WorkspaceCurator.for_run().slug, slug.strip().lower()):
-        return {"ok": False, "error": "This workspace has no trigger with that slug."}
-    return {"ok": True, "slug": slug}
+    try:
+        parsed = MemoryTrigger.path_of(path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not await MEMORIES.delete_trigger(WorkspaceCurator.for_run().slug, parsed):
+        return {"ok": False, "error": "This workspace has no trigger at that path."}
+    return {"ok": True, "path": parsed}
 
 
 @audit_tool()
 @access(_CURATOR)
-async def link_memory_trigger(slug: str, memory_id: str, linked: bool = True) -> dict[str, object]:
+async def link_memory_trigger(path: str, memory_id: str, linked: bool = True) -> dict[str, object]:
     """Implement the `link_memory_trigger` tool."""
+    try:
+        parsed_path = MemoryTrigger.path_of(path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     try:
         parsed = UUID(memory_id)
     except ValueError:
         return {"ok": False, "error": "memory_id is not a memory id"}
     workspace = WorkspaceCurator.for_run().slug
-    if not await MEMORIES.link_trigger(workspace, slug.strip().lower(), parsed, linked=linked):
+    if not await MEMORIES.link_trigger(workspace, parsed_path, parsed, linked=linked):
         return {
             "ok": False,
-            "error": "This workspace has no such trigger, or no memory with that id you may decide.",
+            "error": "This workspace has no such trigger, or no personal memory with that id "
+            "you may decide.",
         }
-    return {"ok": True, "slug": slug, "memory_id": memory_id, "linked": linked}
+    return {"ok": True, "path": parsed_path, "memory_id": memory_id, "linked": linked}

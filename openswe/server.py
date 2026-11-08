@@ -100,7 +100,7 @@ from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.runtime import MCPTools, catalog_note
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
-from openswe.memories.store import MEMORIES
+from openswe.memories.store import CURATOR_SOURCE, MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -251,6 +251,7 @@ from openswe.tools import (
     search_pull_requests,
     send_announcement,
     set_memory_trigger,
+    set_memory_trigger_guidance,
     share_project,
     slack_add_reaction,
     slack_attach_html,
@@ -698,6 +699,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "publish_workspace_prompt",
         "list_memory_triggers",
         "set_memory_trigger",
+        "set_memory_trigger_guidance",
         "delete_memory_trigger",
         "link_memory_trigger",
         "record_incident_report",
@@ -755,6 +757,7 @@ AGENT_TOOLS: Final = (
     publish_workspace_prompt,
     list_memory_triggers,
     set_memory_trigger,
+    set_memory_trigger_guidance,
     delete_memory_trigger,
     link_memory_trigger,
     save_user_settings,
@@ -1643,6 +1646,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
             recent_threads=await recent_threads,
+            curated_workspace=(cfg.workspace_slug or "") if self._source == CURATOR_SOURCE else "",
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
@@ -1702,12 +1706,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-            memory = (
-                await MEMORIES.workspace_prompt(workspace.slug)
-                if workspace
+            curated = (
+                workspace
                 and self._profile_login
                 and (await User.preferences_for_login(self._profile_login)).experimental_memory
-                else ""
+            )
+            memory, shared_triggers = (
+                await asyncio.gather(
+                    MEMORIES.workspace_prompt(workspace.slug),
+                    MEMORIES.shared_triggers(workspace.slug),
+                )
+                if workspace and curated
+                else ("", [])
             )
         return construct_system_prompt(
             agent_workspace=cfg.repo_explicitly_none is True,
@@ -1719,6 +1729,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_instructions=workspace.instructions if workspace else None,
             workspace_repos=workspace.repos if workspace else None,
             workspace_memory=memory,
+            workspace_memory_triggers=[trigger.line for trigger in shared_triggers],
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
