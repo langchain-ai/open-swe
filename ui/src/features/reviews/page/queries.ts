@@ -14,7 +14,10 @@ import {
   statusRef,
   type PullRequestRef,
 } from "@/features/reviews/lib/reviewKeys"
-import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
+import {
+  getReviewConversation,
+  getReviewHistory,
+} from "@/features/reviews/lib/conversationApi"
 import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
 import {
   DIFF_WORKER_HIGHLIGHTER_OPTIONS,
@@ -50,6 +53,12 @@ export const reviewQueries = {
     queryOptions({
       queryKey: reviewKeys.conversation(pr),
       queryFn: () => getReviewConversation(pr),
+      ...sharedReviewOptions(pr),
+    }),
+  history: (pr: PullRequestRef) =>
+    queryOptions({
+      queryKey: reviewKeys.history(pr),
+      queryFn: () => getReviewHistory(pr),
       ...sharedReviewOptions(pr),
     }),
 }

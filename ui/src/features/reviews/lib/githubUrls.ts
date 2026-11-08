@@ -10,6 +10,8 @@ export const githubUrls = {
     `${githubUrls.repo(pr)}/pull/${pr.number}${suffix}`,
   branch: (pr: PullRequestRef, ref: string) =>
     `${githubUrls.repo(pr)}/tree/${ref}`,
+  compare: (pr: PullRequestRef, before: string, after: string) =>
+    `${githubUrls.repo(pr)}/compare/${before}..${after}`,
   file: (pr: PullRequestRef, sha: string, path: string) =>
     `${githubUrls.repo(pr)}/blob/${sha}/${path}`,
   /** Apps have no user page; their bot account lives under /apps. */

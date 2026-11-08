@@ -16,7 +16,7 @@ import {
 import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
 import { findEntry, isRenderable, type DiffEntry } from "./diffEntries"
 
-export type RailTab = "chat" | "discussion"
+export type RailTab = "chat" | "discussion" | "history"
 export type DiffOrder = "files" | "guide"
 export type NavigatorLayout = "tabs" | "stacked"
 
