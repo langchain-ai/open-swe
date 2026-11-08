@@ -503,7 +503,7 @@ async def _request_review(
                     exc_info=True,
                 )
                 readiness_note = (
-                    "Could not confirm delivery of the author-only Mark ready button. "
+                    "Could not confirm delivery of the review-page link. "
                     "Ask the author to use Ready for review on GitHub."
                 )
         return _failure(
