@@ -19,7 +19,7 @@ Pick the tool by how many notifications you need:
 - One, when a condition holds: use `monitor` with `interval`, which works like Playwright's `waitForFunction`.
   `command` is then a check: it runs every `interval` seconds until it exits 0, and its output at that moment is the one event, after which the monitor ends.
   For example, a server up: `command="curl -fsS localhost:3000/health"`, `interval=5`; a file written: `command="test -s out/report.json"`, `interval=10`.
-  For CI on a pull request, `listen_events` with `check_suite.completed` wakes you when GitHub reports, without polling.
+  For CI, notice individual failures promptly and use a bounded wait that resumes even if notifications are missing.
   Write no polling loop yourself: in Goal mode `execute` and `background_execute` refuse commands that wait by sleeping.
 
 Silence is not success.
@@ -52,8 +52,8 @@ Args:
   Optional.
 - description: A short, specific name shown on every event, e.g. "errors in deploy.log".
   Required for `start`.
-- timeout: Seconds before the monitor is stopped, 1 to 86400.
-  Defaults to 3600.
+- timeout: Required explicit deadline in seconds, 1 to 86400.
+  A terminal notification wakes the thread even if no output matched before the deadline.
 - interval: Seconds between runs of `command` as a check, 5 to 3600.
   Optional; without it `command` runs once and every line it prints can be an event.
   Each check runs for at most `interval` seconds or a minute, whichever is longer, and `timeout` still bounds the wait: a check that never passes ends the monitor as timed out.

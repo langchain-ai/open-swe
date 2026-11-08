@@ -62,6 +62,7 @@ from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
+from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH
 from openswe.workspaces.refresh import run_workspace_refresh_tick
 
@@ -74,6 +75,7 @@ _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
+WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 
 
 def _text(job: Job, key: str) -> str | None:

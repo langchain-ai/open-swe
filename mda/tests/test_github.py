@@ -733,13 +733,17 @@ async def test_a_comment_starts_on_the_pull_requests_own_thread(backend: _Backen
     assert (run.get("thread"), run.get("multitask_strategy")) == (thread, "interrupt")
 
 
-def test_the_handler_takes_only_the_events_that_may_start_an_agent_run() -> None:
-    """Every other delivery only goes to the backend, which the channel forwards each
-    one to before any handler runs."""
+def test_the_channel_subscribes_to_agent_and_ci_events() -> None:
+    """CI events must be declared for the App manifest to subscribe to them."""
     from channels.github import channel
 
     events = set(cast(list[str], channel.provider_config["events"]))
-    assert events == AGENT_EVENT_KEYS
+    assert events == AGENT_EVENT_KEYS | {
+        "check_run.completed",
+        "check_suite.completed",
+        "workflow_run.completed",
+        "status",
+    }
     assert {
         "issues.opened",
         "issue_comment.created",
@@ -773,6 +777,13 @@ def test_the_channel_forwards_every_delivery_to_the_backend(
 
     assert declared["forward_to"] == ["https://backend.example/mda/github/deliveries"]
     assert declared["include_own_events"] is True
+
+
+@pytest.mark.parametrize("event", ["check_run", "check_suite", "workflow_run", "status"])
+async def test_ci_deliveries_need_no_agent_routing(backend: _Backend, event: str) -> None:
+    payload = {} if event == "status" else {"action": "completed"}
+    assert await github.on_event(_event(event, payload), _THREAD) is None
+    assert backend.calls == []
 
 
 async def test_a_delivery_that_starts_nothing_only_asks_the_facts(backend: _Backend) -> None:

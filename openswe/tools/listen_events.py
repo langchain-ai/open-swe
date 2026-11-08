@@ -95,6 +95,8 @@ async def listen_events(
     instructions: str = "",
     expires_in_hours: int = _DEFAULT_HOURS,
     subscription_id: str = "",
+    *,
+    timeout_seconds: int | None = None,
 ) -> dict[str, object]:
     """Implement the `listen_events` tool."""
     cfg = RunConfig.from_runtime()
@@ -113,6 +115,13 @@ async def listen_events(
             "success": True,
             "cancelled": await EventSubscription.cancel(thread_id, cancelled_id),
         }
+
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or not 60 <= timeout_seconds <= 3600
+    ):
+        return _error("timeout_seconds must be between 60 and 3600 (1 minute to 1 hour)")
 
     admin_only = sorted(ADMIN_ONLY_SOURCES.intersection(sources or ()))
     if admin_only and not (await resolve_access(cfg)).admin_thread:
@@ -176,11 +185,20 @@ async def listen_events(
         run_config={key: value for key, value in dumped.items() if key in _CARRIED_CONFIG_KEYS},
         expires_at=datetime.now(UTC) + timedelta(hours=expires_in_hours),
     ).create()
+    try:
+        timeout_at = await subscription.schedule_timeout(timeout_seconds)
+    except Exception:
+        await subscription.delete()
+        raise
     logger.info(
         "Event subscription saved",
         extra={"event_subscription_id": str(subscription.id), "agent_thread_id": thread_id},
     )
-    return {"success": True, "subscription": _describe(subscription)}
+    return {
+        "success": True,
+        "subscription": _describe(subscription),
+        "timeout_at": timeout_at.isoformat(),
+    }
 
 
 async def list_event_types(

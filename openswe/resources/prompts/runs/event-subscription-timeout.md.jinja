@@ -1,0 +1,8 @@
+The bounded wait for subscription `{{ subscription_id }}` on {{ target }} has reached its deadline.
+This callback runs regardless of whether matching events arrived; it is not evidence that the external work succeeded or failed.
+Check the current state directly, act on failures promptly, and decide whether further waiting is useful.
+{% if instructions %}
+
+Subscription task and reporting destination:
+{{ instructions }}
+{% endif %}

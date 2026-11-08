@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 type MonitorAction = Literal["start", "output", "stop", "list"]
 
-DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
 MIN_INTERVAL_SECONDS = 5
 MAX_INTERVAL_SECONDS = 3600
@@ -52,11 +51,12 @@ async def monitor(
     command: str = "",
     filter: str = "",
     description: str = "",
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
     monitor_id: str = "",
     start_line: int | None = None,
     end_line: int | None = None,
     interval: int | None = None,
+    *,
+    timeout: int | None = None,
 ) -> dict[str, JsonValue]:
     """Implement the `monitor` tool."""
     if action == "start":
@@ -87,6 +87,8 @@ async def monitor(
             if stopped.get("status") != "running":
                 await _track(thread_id, finished=[monitor_id])
             return {"success": True, **stopped}
+        if timeout is None:
+            return _error("timeout is required for start")
         window = await ThreadMonitorBudget(langgraph_client(), thread_id).start()
         state = await monitors.start(
             f"{ID_PREFIX}-{uuid.uuid4()}",

@@ -51,7 +51,7 @@ from runtime_api.github import (
 
 from rt.github_automations import SubjectEvent
 from rt.github_issues import IssueMention, is_login
-from rt.github_routes import route
+from rt.github_routes import AGENT_EVENT_KEYS, route
 from rt.input_messages import RunInput
 from rt.intake import ask_backend
 
@@ -67,6 +67,8 @@ async def on_event[Payload: GitHubPayload](
     event: GitHubEvent[Payload], thread: GitHubChannelThread
 ) -> GitHubEventResult:
     """Start the delivery's automations, a pull request comment's run and an issue's run."""
+    if event.key not in AGENT_EVENT_KEYS:
+        return None
     delivery = GitHubDelivery(
         event=event.name,
         delivery_id=event.delivery_id,

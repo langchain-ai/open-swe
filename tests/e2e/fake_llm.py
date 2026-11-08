@@ -1029,6 +1029,7 @@ def _goal_step(messages: list[BaseMessage]) -> AIMessage:
             "listen_events",
             {
                 "action": "subscribe",
+                "timeout_seconds": 300,
                 "pr_url": pr_url,
                 "event_types": [
                     "pull_request_review",

@@ -41,5 +41,12 @@ channel = channels.github(
     include_own_events=True,
     # Every delivery, typed or not, the agent's own included, before any handler runs.
     forward_to=[backend_endpoint("/mda/github/deliveries")],
-    on_event=cast(GitHubHandlers, dict.fromkeys(AGENT_EVENT_KEYS, on_event)),
+    on_event=cast(
+        GitHubHandlers,
+        dict.fromkeys(
+            AGENT_EVENT_KEYS
+            | {"check_run.completed", "check_suite.completed", "workflow_run.completed", "status"},
+            on_event,
+        ),
+    ),
 )
