@@ -1,6 +1,6 @@
 {{ request }}
 
-That is your Goal mode goal, set from the person's request when Goal mode started.
+That is your Goal mode goal, set from the person's request.
 For a code change, the work is ready once all of the following hold for the PR's current head:
 
 1. The branch is pushed and the draft PR is open or updated.
@@ -19,10 +19,10 @@ For a code change, the work is ready once all of the following hold for the PR's
    Leave the ones that need the person's judgment unanswered and list them.
 1. The last review round ran on the PR's current head; any push after it needs another round.
 
-Then call `report_work_state` with `complete` and a message giving the PR link, the review page link (the `review_url` that `request_pr_review` returns) for the walkthrough, how many review rounds ran, what you changed or declined from other reviewers' comments, and any findings or caveats left for them.
-A review or comment that arrives after that is handled the same way: fix what is clearly right and push, then report again only if it changes what they should know.
+Then call `goal_set_state` with `state="waiting_on_user"` and `reason="ready"`, and reply with the PR link, the review page link (the `review_url` that `request_pr_review` returns) for the walkthrough, how many review rounds ran, what you changed or declined from other reviewers' comments, and any findings or caveats left for them.
+A review or comment that arrives after that is handled the same way: fix what is clearly right and push, then, only if it changes what they should know, call `goal_set_state` again with `expected_state="waiting_on_user"` and reply with what changed.
 Keep the PR a draft: they mark it ready for review, and then you are told to put it up for human review.
 Hold human-review requests and expedited-approval nominations until then.
 
-For anything else, the work is ready once the request is done; call `report_work_state` with `complete` and the outcome.
-If the request turns out to mean something else, rewrite this objective with `update_goal`.
+For anything else, the goal is complete once the request is done; call `goal_set_state` with `state="complete"`, and reply with the outcome.
+Rewrite this objective with `goal_set_objective` only when the person asks you to change it.

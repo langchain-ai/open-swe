@@ -73,6 +73,7 @@ from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
+from openswe.threads.goal import ThreadGoals
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
@@ -1166,7 +1167,8 @@ async def _maybe_post_slack_completion_reply(
 
     Only fires for first reviews (gated by the caller). No-op if the reviewer
     thread has no ``slack_thread`` metadata — i.e. the review wasn't started
-    from Slack.
+    from Slack — or when that Slack thread belongs to the goal the PR's thread
+    works toward, which hears only from its own agent until the goal says so.
     """
     metadata = await get_thread_metadata(thread_id)
     slack_ref = get_thread_slack_ref(metadata)
@@ -1175,6 +1177,8 @@ async def _maybe_post_slack_completion_reply(
     channel_id = slack_ref.get("channel_id")
     thread_ts = slack_ref.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        return
+    if await ThreadGoals.quiets_slack_thread(owner, repo, pr_number, (channel_id, thread_ts)):
         return
 
     if surfaced_count == 0:

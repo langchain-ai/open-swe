@@ -247,11 +247,12 @@ def kept_route(value: object) -> RouteName | None:
 
 
 class WorkStateRules(Nudging):
-    """Goal mode: the person wants the run to keep working until it calls ``tool`` to say
-    it is blocked or complete. A turn that ends while the thread's goal neither says so
-    nor waits on anything is sent back with ``nudge``; as Codex blocks a goal, three such
-    turns in a row that do nothing, or that run only failing commands, pause it. Its
-    commands wait with the thread's wait tools, never ``sleep``."""
+    """Goal mode: the person wants the run to keep working until it calls ``tool`` to set
+    the thread's goal waiting on them, blocked or with the work ready. A turn that ends
+    while the goal neither waits on them nor on anything else is sent back with ``nudge``;
+    as Codex blocks a goal, three such turns in a row that do nothing, or that run only
+    failing commands, pause it. Its commands wait with the thread's wait tools, never
+    ``sleep``."""
 
     tool: str
     waits: list[str] = []

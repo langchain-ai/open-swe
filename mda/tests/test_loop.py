@@ -616,7 +616,7 @@ _WORK_NUDGE = (
 _GOAL_RULES = LoopRules(
     reply=_REPLY,
     work_state=WorkStateRules(
-        tool="report_work_state",
+        tool="goal_set_state",
         nudge=[_WORK_NUDGE],
         nudge_sender=_WORK_GUARD,
         max_nudges=3,
@@ -679,6 +679,7 @@ def _turn(kind: str) -> list[BaseMessage]:
         ),
         (Goal(state="working"), "working", {"goal_failing_turns": 2}, True, None),
         (Goal(state="waiting_on_user", reason="ready"), "asked", {}, False, None),
+        (Goal(state="complete"), "asked", {}, False, None),
         (Goal(), "asked", {}, False, None),
         (BackendCallError("down"), "asked", {}, False, None),
     ],
@@ -725,8 +726,11 @@ async def test_only_consecutive_failing_turns_count_toward_pausing_the_goal(
     [
         (Goal(state="waiting"), "system", True, "working"),
         (Goal(state="paused", reason="stopped"), "system", False, None),
+        (Goal(state="paused", reason="error"), "system", True, "working"),
         (Goal(state="paused", reason="stopped"), "human", True, "working"),
         (Goal(state="waiting_on_user", reason="blocked"), "human", True, "working"),
+        (Goal(state="complete"), "system", True, None),
+        (Goal(state="complete"), "human", True, "working"),
         (Goal(), "human", True, "working"),
     ],
 )
@@ -745,6 +749,26 @@ async def test_what_comes_in_moves_the_goal_before_the_model_answers_it(
     assert [body["state"] for name, body in calls if name == "set_goal"] == (
         [] if moved is None else [moved]
     )
+
+
+async def test_a_request_after_the_goal_completed_starts_it_over_from_that_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "goal": Goal(state="complete"),
+        "set_goal": Done(),
+    }
+    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
+    asked = HumanMessage(
+        content='<input-message sender="u" surface="web" kind="human">Fix the logout</input-message>',
+        id="in-1",
+    )
+
+    await RunLoop(backend).before_model(_state(asked))
+
+    assert [(body["state"], body["request"]) for name, body in calls if name == "set_goal"] == [
+        ("working", "Fix the logout")
+    ]
 
 
 async def test_a_goal_starts_from_the_request_and_its_objective_stays_in_view(

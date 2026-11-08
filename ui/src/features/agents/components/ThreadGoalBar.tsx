@@ -63,6 +63,8 @@ function describe(goal: AgentThreadGoal): {
       return goal.reason === "ready"
         ? { intent: "success", title: "Ready for you", body: goal.ask }
         : { intent: "warning", title: "Waiting on you", body: goal.ask }
+    case "complete":
+      return { intent: "success", title: "Goal complete", body: goal.objective }
     case "paused":
       return {
         intent: "neutral",

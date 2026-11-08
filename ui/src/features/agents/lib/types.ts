@@ -380,7 +380,7 @@ export interface AgentGoalWait {
 
 /** Where a Goal mode thread's work stands (`openswe/threads/goal.py`). */
 export interface AgentThreadGoal {
-  state: "working" | "waiting" | "waiting_on_user" | "paused"
+  state: "working" | "waiting" | "waiting_on_user" | "paused" | "complete"
   reason:
     | "blocked"
     | "ready"

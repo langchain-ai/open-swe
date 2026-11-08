@@ -3126,7 +3126,8 @@
               "working",
               "waiting",
               "waiting_on_user",
-              "paused"
+              "paused",
+              "complete"
             ],
             "title": "State",
             "type": "string"

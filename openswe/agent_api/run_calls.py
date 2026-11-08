@@ -217,6 +217,8 @@ _batch_flushes: ContextVar[dict[str | None, RunnableConfig] | None] = ContextVar
 # Operations that can make the run's thread a task's coordinator mid-run, after its catalog
 # was planned without the task: their answer hands the run the task's context.
 _JOINS_TASK: Final = frozenset({"manage_baby_sit"})
+# Calls that change the work, after which a goal owes a completion check before it completes.
+_EDITS_WORK: Final = frozenset({"write_file", "edit_file", "delete", "open_pull_request"})
 # Each run's thread files, by its thread and grant, until they expire: building them reads
 # the thread and the run's skill stores, which every files call did.
 _FILES_TTL_SECONDS: Final = 6 * 60 * 60
@@ -565,6 +567,14 @@ class TokenRun:
                 await recorder.atool_finished(result)
 
         await self._reporting(request, "tool_result", record)
+        turn = self.run.settings.agent
+        if (
+            request.name in _EDITS_WORK
+            and result.status != "error"
+            and turn is not None
+            and turn.goal_mode
+        ):
+            await ThreadGoals.edited(self.run.thread_id)
         return Done()
 
     async def operation(self, request: RunOperation) -> OperationResult:

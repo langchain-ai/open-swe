@@ -931,16 +931,35 @@ def _goal_call(content: str, name: str, args: ToolArgs, call_id: str) -> AIMessa
     return AIMessage(content=content, tool_calls=[{"name": name, "args": args, "id": call_id}])
 
 
-def _goal_report(messages: list[BaseMessage], call_id: str, outcome: str) -> AIMessage:
+def _goal_report(
+    messages: list[BaseMessage], call_id: str, outcome: str, *, expected_state: str = "working"
+) -> AIMessage:
+    """Set the goal ready and reply with the outcome, both in ``call_id``'s turn."""
     nudges = sum(
         isinstance(m, HumanMessage) and _WORK_STATE_GUARD_SENDER in _text(m.content)
         for m in messages
     )
-    return _goal_call(
-        "",
-        "report_work_state",
-        {"state": "complete", "message": f"Goal complete: {outcome} Nudged {nudges} times."},
-        call_id,
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "goal_set_state",
+                "args": {
+                    "expected_state": expected_state,
+                    "state": "waiting_on_user",
+                    "reason": "ready",
+                },
+                "id": call_id,
+            },
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": f"Goal complete: {outcome} Nudged {nudges} times.",
+                    "response_type": "final",
+                },
+                "id": f"{call_id}-reply",
+            },
+        ],
     )
 
 
@@ -1027,6 +1046,7 @@ def _goal_step(messages: list[BaseMessage]) -> AIMessage:
             messages,
             "call-goal-reviewer-report",
             f"fixed the bug {GOAL_REVIEWER_BOT} found on {pr_url}.",
+            expected_state="waiting_on_user",
         )
     return AIMessage(content="Reported again.")
 

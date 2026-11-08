@@ -200,9 +200,12 @@ from openswe.tools import (
     expose_port,
     fetch_url,
     forget,
-    get_goal,
     get_human_review_status,
     get_thread,
+    goal_create,
+    goal_get,
+    goal_set_objective,
+    goal_set_state,
     http_request,
     link_memory_trigger,
     link_pull_request,
@@ -238,7 +241,6 @@ from openswe.tools import (
     reorder_sidebar_threads,
     reorder_thread_pins,
     report_platform_issue,
-    report_work_state,
     request_human_review,
     request_pr_review,
     request_rollout_check,
@@ -271,7 +273,6 @@ from openswe.tools import (
     trigger_automation,
     unshare_project,
     update_automation,
-    update_goal,
     update_project,
     web_search,
     write_database_rows,
@@ -656,9 +657,10 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "background_task",
         "monitor",
         # Only the parent's own turn can say where the work stands.
-        "report_work_state",
-        "get_goal",
-        "update_goal",
+        "goal_create",
+        "goal_get",
+        "goal_set_objective",
+        "goal_set_state",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
@@ -795,9 +797,10 @@ AGENT_TOOLS: Final = (
     recreate_sandbox,
     report_platform_issue,
     schedule_thread_wakeup,
-    report_work_state,
-    get_goal,
-    update_goal,
+    goal_create,
+    goal_get,
+    goal_set_objective,
+    goal_set_state,
     request_rollout_check,
     listen_events,
     list_event_types,
@@ -1076,7 +1079,10 @@ _NOT_FROM_CODE = (
 # Everyday tools code mode still offers the model directly. Every other tool it calls
 # from code, where the run's tools can differ from person to person and run to run without
 # changing the tools offered to the model, which the provider's prompt cache keys on.
-_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"}
+_GOAL_TOOLS: Final = frozenset({"goal_create", "goal_get", "goal_set_objective", "goal_set_state"})
+_DIRECT_IN_CODE_MODE = (
+    SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"} | _GOAL_TOOLS
+)
 
 
 def callable_from_code(name: str) -> bool:
@@ -1627,8 +1633,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
-            goal_mode=bool(self._profile_login)
-            and (await User.preferences_for_login(self._profile_login)).goal_mode,
+            goal_mode=self._turn.goal_mode,
             implementation_walkthrough_enabled=(
                 await cached_workspace_settings(workspace_slug(cfg))
             ).get("implementation_walkthrough_enabled")
@@ -2001,7 +2006,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
-    work_state_tool = _registered_tool_name(report_work_state)
+    work_state_tool = _registered_tool_name(goal_set_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -2099,7 +2104,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if goal_mode else (report_work_state, get_goal, update_goal)),
+        *(() if goal_mode else (goal_get, goal_set_objective, goal_set_state)),
+        *((goal_create,) if goal_worker else ()),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
@@ -2276,7 +2282,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
                 {
                     *CARD_TOOLS,
                     *(GUIDE_REPLY_TOOLS if guide is not None else ()),
-                    *((work_state_tool,) if goal_mode else ()),
                 }
             ),
             nudges=reply_nudge(reply_tool, no_reply_tool),

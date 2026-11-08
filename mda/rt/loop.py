@@ -772,7 +772,8 @@ class RunLoop:
             or (requests and goal.state != "working")
             or (woken and goal.state in {"waiting", "paused"})
         ):
-            started = goal.state is None
+            # A request after the goal completed starts it over from that request.
+            started = goal.state in {None, "complete"}
             await self._set_goal(
                 GoalChange(
                     run_id=run_id(),
@@ -811,7 +812,8 @@ class RunLoop:
         or three in a row that ran only failing commands, pause it instead.
         """
         goal = await self._read_goal(GoalRead(run_id=run_id(), waits=True))
-        if goal is None or goal.state in {None, "waiting_on_user", "paused"} or goal.waits:
+        resting = {None, "waiting_on_user", "paused", "complete"}
+        if goal is None or goal.state in resting or goal.waits:
             update.update({_EMPTY_TURNS: 0, _FAILING_TURNS: 0})
             if goal is not None and goal.waits and goal.state in {"working", "waiting"}:
                 await self._set_goal(GoalChange(run_id=run_id(), state="waiting"))

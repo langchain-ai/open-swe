@@ -288,7 +288,7 @@ class ChosenModel(RunRequest):
     effort: str | None = None
 
 
-GoalState = Literal["working", "waiting", "waiting_on_user", "paused"]
+GoalState = Literal["working", "waiting", "waiting_on_user", "paused", "complete"]
 
 
 class GoalRead(RunRequest):

@@ -355,6 +355,10 @@ async def run_operation(
             )
 
         return await called(backend, spec.name, arguments, runtime, refused)
+    work_state = backend.run.catalog.loop.work_state
+    if work_state is not None and spec.name == work_state.tool:
+        # The goal reads the edits reported before this call, which may still be on their way.
+        await backend.outbox.drain()
     # Read before code mode reports the call: a pause for a grant runs the code again,
     # which reports the call under a new id, so a report made first would never finish.
     try:
