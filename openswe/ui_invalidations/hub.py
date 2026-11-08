@@ -12,7 +12,6 @@ import logging
 import time
 from collections.abc import Iterable, Iterator
 
-from openswe.database import postgres
 from openswe.database.notifications import LISTENER
 from openswe.ui_invalidations import outbox
 
@@ -85,9 +84,6 @@ class Hub:
             stream.mark(topics)
 
     async def start(self) -> None:
-        if not postgres.configured():
-            logger.info("UI invalidations disabled: PostgreSQL is not configured")
-            return
         self._started_at = time.monotonic()
         self._stop.clear()
         await LISTENER.listen(outbox.CHANNEL, self._on_notify, self._on_connected)

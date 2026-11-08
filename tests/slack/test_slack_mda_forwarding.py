@@ -40,6 +40,9 @@ from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _EVENTS_URL = mda_forwarding.TRIGGER_EVENTS_URL
 _MDA_THREAD = str(uuid.uuid4())
 _DM_THREAD = str(uuid.uuid4())

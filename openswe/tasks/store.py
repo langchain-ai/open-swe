@@ -138,8 +138,6 @@ class Task(Base):
     @classmethod
     async def of_thread(cls, thread_id: str) -> Task | None:
         """The task ``thread_id`` works on, as coordinator or worker."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             membership = await session.get(TaskMembership, thread_id)
             return None if membership is None else await session.get(cls, membership.task_id)
@@ -280,8 +278,6 @@ class TaskMembership(Base):
 
     @classmethod
     async def context_for_thread(cls, thread_id: str) -> TaskContext | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             membership = await session.get(cls, thread_id)
             if membership is None:
@@ -322,8 +318,6 @@ class TaskDelegation(Base):
 
     @classmethod
     async def get(cls, worker_thread_id: str) -> TaskDelegation | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.get(cls, worker_thread_id)
 
@@ -389,7 +383,7 @@ async def sidebar_memberships(
     thread_ids: Sequence[str], *, workers_of: bool = False
 ) -> dict[str, SidebarTaskMembership]:
     """Read authoritative task relationships in batches, without thread metadata."""
-    if not thread_ids or not postgres.configured():
+    if not thread_ids:
         return {}
     memberships: dict[str, SidebarTaskMembership] = {}
     async with postgres.session() as session:

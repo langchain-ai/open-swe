@@ -14,6 +14,8 @@ from openswe.tasks import events, store
 from openswe.threads import runs
 from tests.conftest import MemoryEventClaims, serve_runs_from
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture(autouse=True)
 def _failure_reply_claims(memory_event_claims: MemoryEventClaims) -> MemoryEventClaims:

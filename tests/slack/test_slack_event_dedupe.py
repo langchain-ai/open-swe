@@ -13,6 +13,8 @@ from openswe.slack import routes as slack_routes
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common as webhook_common
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 class _FakeClaims:
     def __init__(self) -> None:

@@ -231,9 +231,6 @@ class RoomListener:
             self._publish(room, RoomEvent(room, "update"))
 
     async def start(self) -> None:
-        if not postgres.configured():
-            logger.info("Plugin rooms disabled: PostgreSQL is not configured")
-            return
         await LISTENER.listen(CHANNEL, self._on_notify, self._on_connected)
 
     async def stop(self) -> None:

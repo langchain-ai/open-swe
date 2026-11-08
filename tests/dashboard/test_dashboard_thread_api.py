@@ -36,6 +36,8 @@ from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
 _FABLE = "anthropic:claude-fable-5-1"
@@ -331,7 +333,6 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
         thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
     )
     monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="public"))
-    monkeypatch.setattr(thread_runs, "postgres", SimpleNamespace(configured=lambda: False))
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
@@ -960,7 +961,6 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
-    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: True)
 
     recorded = uuid7()
     appended: list[str] = []

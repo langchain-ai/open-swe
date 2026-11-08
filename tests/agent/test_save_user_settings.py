@@ -13,6 +13,8 @@ from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeUserRecords
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture
 def requester(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:

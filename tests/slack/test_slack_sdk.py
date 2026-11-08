@@ -13,6 +13,8 @@ from openswe.slack.channels import PAYLOAD_TTL, SlackChannel
 from openswe.slack.client import convert_mentions_to_slack_format, remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.mark.parametrize(
     ("text", "expected"),
@@ -205,6 +207,7 @@ async def test_read_thread_tool_outside_slack_reads_public_channels_only(
     assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
     slack_api.respond(_PUBLIC_CHANNEL)
+    await SlackChannel.load("C1", use_cache=False)
     slack_api.respond(
         {
             "ok": True,

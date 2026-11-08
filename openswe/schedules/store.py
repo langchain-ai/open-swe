@@ -33,7 +33,6 @@ from openswe.dashboard.repo_access import (
     require_repo_access_for_workspace,
 )
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.database import postgres
 from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
 from openswe.github.http import github_reauth_message
@@ -1402,8 +1401,6 @@ async def _claim_delivery(
 
 async def slack_channel_watched(channel_id: str) -> bool:
     """Whether an enabled automation has a Slack trigger on ``channel_id``."""
-    if not postgres.configured():
-        return False
     try:
         async with transaction() as conn:
             row = await conn.execute(

@@ -16,6 +16,9 @@ from openswe.slack import routes
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _SIGNING_SECRET = "incidents-test-signing-secret"
 
 
@@ -28,6 +31,7 @@ def handler(monkeypatch):
 
 @pytest.fixture
 def client(monkeypatch) -> TestClient:
+    monkeypatch.setattr(channels.SlackChannel, "observe", AsyncMock())
     monkeypatch.setattr(common, "SLACK_SIGNING_SECRET", _SIGNING_SECRET)
     app = FastAPI()
     app.include_router(routes.router)

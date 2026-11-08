@@ -87,7 +87,6 @@ from openswe.dashboard.options import (
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-from openswe.database import postgres
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
@@ -2005,7 +2004,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     goal_mode = bool(profile_login) and not goal_worker and sender_goal_mode
     try:
-        if cfg.source != "incidents_agent" and postgres.configured():
+        if cfg.source != "incidents_agent":
             indexed = await THREADS.get(thread_id)
             title = indexed.metadata.get("title") if indexed is not None else None
             await Task.for_thread(

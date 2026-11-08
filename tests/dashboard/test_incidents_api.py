@@ -13,6 +13,8 @@ from openswe.dashboard import oauth, routes
 from openswe.threads import handlers, listing, proxy
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:

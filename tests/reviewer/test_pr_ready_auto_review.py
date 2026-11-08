@@ -286,7 +286,6 @@ async def test_walkthrough_generation_includes_drafts_without_starting_an_assess
     payload = _pr_payload(action=action, draft=draft)
     payload["repository"]["full_name"] = "lc/repo"
     payload["pull_request"]["body"] = "Made by [Open SWE](https://example.com)"
-    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: True)
     monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="default"))
     monkeypatch.setattr(
         workspace_settings_cache,

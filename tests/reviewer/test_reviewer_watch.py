@@ -9,7 +9,7 @@ from openswe.github import webhook as github_webhooks
 from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 
-pytestmark = pytest.mark.usefixtures("no_local_threads")
+pytestmark = pytest.mark.usefixtures("no_local_threads", "registry_db")
 
 
 @pytest.fixture(autouse=True)
@@ -131,7 +131,6 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
     saved_assessments: list[PublishedAssessment] = []
 
     with (
-        patch("openswe.github.webhook.postgres.configured", return_value=True),
         patch.object(PublishedAssessment, "latest", AsyncMock(return_value=assessment)),
         patch.object(
             PublishedAssessment, "save", autospec=True, side_effect=saved_assessments.append
@@ -260,7 +259,6 @@ async def test_head_update_triggers_re_review_run_when_watching(
         approved=True,
     )
     with (
-        patch("openswe.github.webhook.postgres.configured", return_value=True),
         patch.object(PublishedAssessment, "latest", AsyncMock(return_value=assessment)),
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
         patch(

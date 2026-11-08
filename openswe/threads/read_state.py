@@ -1,6 +1,5 @@
 """Each person's read position in a thread, independent of its shared metadata."""
 
-from openswe.database import postgres
 from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject
 
@@ -10,10 +9,10 @@ class ThreadReadStates(UserRecords):
         super().__init__("thread_read_state")
 
     async def saved(self, login: str, thread_id: str) -> JsonObject | None:
-        return await self.get(login, key=thread_id) if postgres.configured() else None
+        return await self.get(login, key=thread_id)
 
     async def for_threads(self, login: str, thread_ids: list[str]) -> dict[str, JsonObject]:
-        return await self.for_keys(login, thread_ids) if postgres.configured() else {}
+        return await self.for_keys(login, thread_ids)
 
     async def set(
         self,

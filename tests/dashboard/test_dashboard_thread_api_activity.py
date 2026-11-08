@@ -8,10 +8,12 @@ from fastapi import FastAPI
 
 from openswe.dashboard.oauth import require_session
 from openswe.threads import handlers as thread_api
-from openswe.threads import listing, read_state, routes
+from openswe.threads import listing, routes
 from openswe.threads.principals import Principal, require_principal
 from openswe.threads.runtimes import MdaRun
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class FakeThreads:
@@ -132,7 +134,6 @@ class TestThreadReadState:
         monkeypatch.setattr(
             routes, "RUNTIMES", SimpleNamespace(runs_on=lambda runtime: self.client.runs)
         )
-        monkeypatch.setattr(read_state, "postgres", SimpleNamespace(configured=lambda: True))
         self.session = {"sub": "octocat"}
         self.app = FastAPI()
         self.app.include_router(routes.router, prefix="/dashboard/api")

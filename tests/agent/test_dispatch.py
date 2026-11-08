@@ -12,6 +12,9 @@ from openswe.slack import thinking as slack_thinking
 from openswe.users import User
 from tests.conftest import serve_runs_from
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 dispatch = importlib.import_module("openswe.dispatch")
 
 _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"

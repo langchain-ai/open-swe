@@ -30,6 +30,9 @@ from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords, serve_threads_from
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 

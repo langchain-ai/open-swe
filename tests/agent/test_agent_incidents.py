@@ -36,6 +36,9 @@ from tests.agent.test_agent_assembly_context import (
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 CHANNEL = {
     "id": "C1",
     "name": "inc-test",

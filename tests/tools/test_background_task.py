@@ -10,6 +10,8 @@ from openswe.tools.background_task import background_task
 from openswe.workspaces import refresh
 from openswe.workspaces.store import RefreshStep, Workspace
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture
 def admin(monkeypatch: pytest.MonkeyPatch) -> Any:

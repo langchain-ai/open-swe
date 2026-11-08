@@ -12,7 +12,6 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, Field, model_validator
 
-from openswe.database import postgres
 from openswe.projects.store import NO_PROJECTS, PROJECT_ID_KEY, PROJECTS, ProjectFiling
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
@@ -123,7 +122,7 @@ class SidebarOrders:
         self.records = UserRecords("thread_order")
 
     async def saved(self, login: str, scope: SidebarOrderScope) -> SidebarThreadOrder:
-        if scope.key == "all" or not postgres.configured():
+        if scope.key == "all":
             return SidebarThreadOrder()
         record = await self.records.get(login, key=scope.key)
         return SidebarThreadOrder.model_validate(record or {})

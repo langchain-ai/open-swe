@@ -6,6 +6,9 @@ from fastapi import HTTPException
 
 from openswe.threads import handlers, listing, plan_api, summary, workflow_approval_api
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _ADMINS = {"admin"}
 
 

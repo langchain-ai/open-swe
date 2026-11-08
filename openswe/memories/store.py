@@ -340,7 +340,7 @@ class Memories:
     ) -> list[PersonalMemory]:
         """``person``'s personal memories no trigger holds back, newest first; none for no
         person."""
-        if person is None or not postgres.configured():
+        if person is None:
             return []
         return await self._personal_where(
             *self._applying(person, curated_in), ~self._triggered(), limit=_PERSONAL_LIMIT
@@ -350,7 +350,7 @@ class Memories:
         self, person: UUID | None, *, curated_in: str | None = None
     ) -> list[MemoryTrigger]:
         """The triggers holding back ``person``'s personal memories, in place of them."""
-        if person is None or not postgres.configured():
+        if person is None:
             return []
         async with postgres.session() as session:
             rows = await session.execute(
@@ -485,8 +485,6 @@ class Memories:
 
     async def shared_triggers(self, workspace: str) -> list[MemoryTrigger]:
         """The workspace's triggers that carry guidance, for every thread of it to list."""
-        if not postgres.configured():
-            return []
         async with postgres.session() as session:
             rows = await session.execute(
                 select(MemoryTriggerRow.path, MemoryTriggerRow.summary)
@@ -594,8 +592,6 @@ class Memories:
 
     async def workspace_prompt(self, workspace: str) -> str:
         """The workspace's latest curated prompt; empty before its curator publishes one."""
-        if not postgres.configured():
-            return ""
         async with postgres.session() as session:
             prompt = await session.scalar(
                 select(WorkspacePromptVersion.prompt)

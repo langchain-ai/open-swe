@@ -9,6 +9,9 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import agent_catalog
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",

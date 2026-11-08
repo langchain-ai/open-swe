@@ -13,7 +13,6 @@ from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, Valid
 
 from openswe.baby_sit import handle_ci_webhook
 from openswe.bridge.worktree_branch import BRANCH_PREFIX
-from openswe.database import postgres
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
@@ -498,7 +497,7 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     from openswe.workspaces.store import WORKSPACES
 
     event = PullRequestEvent.parse(payload)
-    if event is None or event.identity is None or not postgres.configured():
+    if event is None or event.identity is None:
         return
     owner, repo, number = event.identity
     pull = event.pull_request
@@ -586,7 +585,7 @@ async def settle_human_review_on_close(payload: dict[str, Any]) -> None:
     """Mark a closed PR's open review card merged or closed, whoever closed the PR."""
     event = PullRequestEvent.parse(payload)
     identity = event.identity if event is not None else None
-    if identity is None or not postgres.configured():
+    if identity is None:
         return
     await close_for_pull_request(*identity)
 
@@ -855,11 +854,7 @@ async def _process_github_head_update(
             "Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref
         )
         return
-    previous_assessment = (
-        await PublishedAssessment.latest(context.owner, context.name, pr_number)
-        if postgres.configured()
-        else None
-    )
+    previous_assessment = await PublishedAssessment.latest(context.owner, context.name, pr_number)
     previous_base_sha = metadata.get("last_reviewed_base_sha")
     if (
         isinstance(last_reviewed_sha, str)
@@ -893,21 +888,20 @@ async def _process_github_head_update(
         await common.set_reviewer_thread_metadata(
             thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
         )
-        if postgres.configured():
-            try:
-                await Walkthrough.carry_forward(
-                    repo_config["owner"],
-                    repo_config["name"],
-                    pr_number,
-                    from_sha=last_reviewed_sha,
-                    to_sha=head_sha,
-                )
-            except Exception:
-                common.logger.warning(
-                    "Could not carry the review walkthrough forward",
-                    exc_info=True,
-                    extra={"pr_number": pr_number, "scout_head_sha": head_sha},
-                )
+        try:
+            await Walkthrough.carry_forward(
+                repo_config["owner"],
+                repo_config["name"],
+                pr_number,
+                from_sha=last_reviewed_sha,
+                to_sha=head_sha,
+            )
+        except Exception:
+            common.logger.warning(
+                "Could not carry the review walkthrough forward",
+                exc_info=True,
+                extra={"pr_number": pr_number, "scout_head_sha": head_sha},
+            )
         # The old head's check disappears once the head moves (GitHub only
         # shows checks on the current head), so even though no re-review runs,
         # surface a settled check on the new head.
@@ -1395,7 +1389,6 @@ async def process_github_pr_comment(
         and payload.get("action") == "submitted"
         and str(event.get("state") or "").lower() == "approved"
         and event_body.startswith(REVIEW_BODY_PREFIX)
-        and postgres.configured()
         and await HumanReviewRequest.is_expedited_approver(
             repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
         )
@@ -1448,7 +1441,7 @@ async def process_github_pr_comment(
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     pr_author = _PrAuthorEvent.author_of(payload)
     author_logins: set[str] = set()
-    if postgres.configured() and repo is not None:
+    if repo is not None:
         try:
             stored = await PullRequest.get(repo.owner, repo.name, pr_number)
             pull_request = (
@@ -1822,8 +1815,6 @@ class _HumanReviewEvent(BaseModel):
 
 async def settle_human_reviews(payload: dict[str, Any]) -> None:
     """Re-check the open standard review requests of the pull requests an event names."""
-    if not postgres.configured():
-        return
     try:
         event = _HumanReviewEvent.model_validate(payload)
     except ValidationError:
@@ -1841,8 +1832,6 @@ class _StatusEvent(BaseModel):
 
 async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
     """A finished commit status names only a SHA, so re-check the repository's open requests."""
-    if not postgres.configured():
-        return
     try:
         event = _StatusEvent.model_validate(payload)
     except ValidationError:

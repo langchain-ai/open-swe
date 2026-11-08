@@ -41,6 +41,9 @@ from tests.github_channel import (
 )
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 THREAD = uuid.UUID("00000000-0000-4000-8000-0000000000aa")
 
 

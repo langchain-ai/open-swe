@@ -10,6 +10,9 @@ from openswe.utils.thread_settings import THREAD_SETTINGS_KEY, ThreadSettings
 from openswe.webhooks import common as webhook_common
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION = "anthropic:claude-opus-5-5"
 

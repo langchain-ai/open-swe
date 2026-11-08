@@ -25,6 +25,8 @@ from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
     return "https://smith/x"

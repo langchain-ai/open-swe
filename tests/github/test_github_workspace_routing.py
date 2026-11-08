@@ -13,6 +13,8 @@ from openswe.workspaces.routing import WorkspaceLookupError
 from tests.conftest import register_github_logins
 from tests.github_channel import deliver_github_event
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
     return {

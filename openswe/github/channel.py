@@ -47,7 +47,6 @@ from runtime_api.github import (
 )
 
 from openswe import event_claims
-from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.github.app import REPO_INSTALLATIONS
@@ -209,9 +208,7 @@ class _CommentChannel:
 
     async def once(self) -> bool:
         # MDA may send the call again after an answer it didn't get.
-        return not postgres.configured() or await event_claims.claim(
-            _COMMENT_CLAIMS, self._act.delivery_id, ttl=_WORK_CLAIM_TTL
-        )
+        return await event_claims.claim(_COMMENT_CLAIMS, self._act.delivery_id, ttl=_WORK_CLAIM_TTL)
 
 
 async def _route_comment(act: ActOnGitHubDelivery) -> GitHubThreadRun | None:
@@ -344,10 +341,7 @@ async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> Non
         facts = await _repository_facts(delivery)
         work = delivery_work(delivery.event, delivery.payload, facts)
         if not work or (
-            postgres.configured()
-            and not await event_claims.claim(
-                _WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL
-            )
+            not await event_claims.claim(_WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL)
         ):
             return
     except Exception:
@@ -364,9 +358,7 @@ async def _accept_work(
 ) -> None:
     """Run the work after answering, in the order given, once per delivery: GitHub sends
     a delivery again when someone redelivers it."""
-    if postgres.configured() and not await event_claims.claim(
-        _WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL
-    ):
+    if not await event_claims.claim(_WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL):
         return
     tasks = _tasks(delivery)
     for name in dict.fromkeys(work):

@@ -26,14 +26,13 @@ from openswe.utils.dashboard_links import PUBLIC_ORIGIN_HEADER
 
 
 @pytest.mark.parametrize(
-    ("configured", "unavailable", "status"),
-    [(True, False, 401), (True, True, 200), (False, False, 200)],
+    ("unavailable", "status"),
+    [(False, 401), (True, 200)],
 )
 def test_me_reauthenticates_only_a_confirmed_missing_account(
-    monkeypatch: pytest.MonkeyPatch, configured: bool, unavailable: bool, status: int
+    monkeypatch: pytest.MonkeyPatch, unavailable: bool, status: int
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
-    monkeypatch.setattr(auth_routes.postgres, "configured", lambda: configured)
     monkeypatch.setattr(
         auth_routes.User,
         "for_session",

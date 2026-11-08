@@ -9,6 +9,9 @@ import pytest
 
 from openswe.tools import read_only_sql as query_tool
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 sql_tool = import_module("openswe.tools.read_only_sql")
 
 

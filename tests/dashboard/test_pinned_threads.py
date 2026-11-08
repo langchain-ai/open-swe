@@ -17,6 +17,8 @@ from openswe.threads import listing, pins, routes, summary
 from openswe.tools import threads as threads_tool
 from openswe.users.models import User
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 class ThreadAPI:
     def __init__(self) -> None:

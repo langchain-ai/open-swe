@@ -20,6 +20,9 @@ from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurfa
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads.inbox import ThreadInbox
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
@@ -368,6 +371,7 @@ async def test_dm_runs_only_use_goal_mode_when_a_goal_is_already_active(
         slack_thread={"channel_id": channel, "thread_ts": thread_ts},
     )
     with (
+        patch("openswe.server.THREADS.get", AsyncMock(return_value=None)),
         patch.object(
             ThreadGoals, "current", AsyncMock(return_value=Goal() if explicit_goal else None)
         ),

@@ -8,6 +8,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 async def test_list_channels_keeps_cursor_on_empty_page(slack_api: SlackAPI) -> None:
     slack_api.respond({"ok": True, "channels": [], "response_metadata": {"next_cursor": "more"}})
