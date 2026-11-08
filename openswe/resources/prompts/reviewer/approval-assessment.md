@@ -13,11 +13,14 @@ Include an `assessment` in `publish_review` for the exact full `head_sha` you in
   This is a judgment, not a calibrated probability.
 - `decision`: `would_approve` only when the applicable approval criteria are satisfied.
   `would_approve_conditionally` when the only thing keeping the PR from approval is that a person has to agree with its stated condition, such as removing a feature or renaming a concept, and everything else satisfies the criteria.
-  Use it only when that condition entirely, completely and unambiguously captures every part of the change the criteria do not already cover, so a person who approves the condition alone, without reading the diff, has approved everything that needed a human; anything a reader of the condition would not expect means `needs_human_review`.
+  To decide, net the diff out: go through every changed hunk and set aside each one an approval criterion covers; what remains is the part only a person can approve.
+  Use `would_approve_conditionally` only when that remainder is one logical change that a single sentence can describe, and that sentence entirely, completely and unambiguously captures it, so a person who approves the sentence alone, without reading the diff, has approved everything that needed a human.
+  Two or more unrelated changes needing a human, or anything a reader of the sentence would not expect, means `needs_human_review`.
   Otherwise `needs_human_review`.
-- `approval_condition`: only with `would_approve_conditionally`, one succinct statement of that condition (at most 200 characters), such as "Remove the legacy `foo` exporter and its settings" or "Rename `Workspace` to `Project` throughout".
+- `approval_condition`: only with `would_approve_conditionally`, that one sentence (at most 200 characters), such as "Remove the legacy `foo` exporter and its settings" or "Rename `Workspace` to `Project` throughout".
+  Write it from the netted-out remainder, in your own words; never copy the PR title or description, which also describe what the criteria cover.
   It is what the person approves, often in place of reading the diff, so name exactly what changes.
-- `auto_approved`: only with `would_approve_conditionally`, the rest of the change you believe the approval criteria already cover, naming the criteria and the files or kinds of change each covers (at most 500 characters), such as "Tests for the removal (tests-only); docs no longer mention `foo` (documentation)".
+- `auto_approved`: only with `would_approve_conditionally`, what you set aside while netting out, naming the criteria and the files or kinds of change each covers (at most 500 characters), such as "Tests for the removal (tests-only); docs no longer mention `foo` (documentation)".
   It is shown beside the condition, so a person can see what they are not being asked to judge.
 - `explanation`: one or two sentences naming the applicable approval criteria, evidence, and any uncertainty.
   Do not claim checks passed unless you verified them.

@@ -793,7 +793,7 @@ function OpenSweRow({
                 : verdict.decision === "would_approve"
                   ? "would approve"
                   : verdict.decision === "would_approve_conditionally"
-                    ? "would approve subject to human approval"
+                    ? "needs approval of one change"
                     : "needs human review"
               : null,
             bugs || flags
