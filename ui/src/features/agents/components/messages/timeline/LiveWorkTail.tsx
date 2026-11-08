@@ -14,6 +14,12 @@ const LINE_HEIGHT_REM = 1.25
  * A folded live run's latest thoughts and tool calls, never taller than
  * `WorkTail.MAX_LINES`. Each new entry grows in at the bottom and pushes the
  * oldest up under a fade at the top edge; the fold row opens the whole log.
+ *
+ * Once the tail has filled its budget it holds that full height while mounted:
+ * a new entry grows in from zero height as the entries it displaces leave at
+ * once, a thought's newest paragraph can be shorter than its last, and thought
+ * heights are estimates. The chat is pinned to the bottom, so any shrink would
+ * jerk the conversation above; the shortfall shows under the top fade instead.
  */
 export function LiveWorkTail({
   tail,
@@ -26,8 +32,11 @@ export function LiveWorkTail({
   // Entries already there when the tail mounts (a reload mid-run, or folding
   // the log again) show at once; only entries that arrive afterwards animate.
   const [settledKeys] = useState(() => new Set(shown.map((entry) => entry.key)))
+  const [filled, setFilled] = useState(tail.previous !== null)
+  if (tail.previous && !filled) setFilled(true)
   if (shown.length === 0) return null
 
+  const budget = `${WorkTail.MAX_LINES * LINE_HEIGHT_REM}rem`
   return (
     <div
       aria-label="Recent activity"
@@ -37,7 +46,7 @@ export function LiveWorkTail({
         tail.previous &&
           "[mask-image:linear-gradient(to_bottom,transparent,black_2.5rem)]"
       )}
-      style={{ maxHeight: `${WorkTail.MAX_LINES * LINE_HEIGHT_REM}rem` }}
+      style={filled ? { height: budget } : { maxHeight: budget }}
     >
       {shown.map((entry) => (
         <div
