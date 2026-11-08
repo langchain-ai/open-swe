@@ -7,6 +7,8 @@ import { afterEach, expect, it, vi } from "vitest"
 
 import { SidebarThreadRow } from "./SidebarThreadRow"
 import { cloudSidebarThread } from "../lib/sidebarThreads"
+import { agentThreadKeys } from "../lib/queries"
+import { projectKeys } from "@/features/projects/lib/projects"
 import type { AgentThread } from "../lib/types"
 
 import { AgentsShell } from "./AgentsSidebar"
@@ -30,7 +32,12 @@ const stub = vi.hoisted(() => {
       updatedAt: "2026-09-10T00:00:00Z",
     },
     pinned: { data: [] },
-    emptyList: { data: undefined, isPending: false, isError: false, items: [] },
+    emptyList: {
+      data: undefined,
+      isPending: false,
+      isError: false,
+      items: [] as Array<AgentThread>,
+    },
     pages: {
       data: undefined,
       hasNextPage: false,
@@ -95,11 +102,11 @@ vi.mock("@/lib/theme", () => ({ useTheme: () => stub.theme }))
 
 vi.mock("@/features/agents/lib/queries", async (actual) => ({
   ...((await actual()) as object),
-  useSidebarActiveThread: () => stub.activeThread,
+  useSidebarActiveThread: ({ activeThreadId }: { activeThreadId?: string }) =>
+    activeThreadId ? stub.activeThread : undefined,
   useSidebarPinnedThreads: () => stub.pinned,
   useSidebarRecents: () => stub.emptyList,
   useSidebarRepos: () => stub.emptyList,
-  useSidebarRepoThreads: () => stub.emptyList,
   useInfiniteThreadsPages: () => stub.pages,
   useSeedAgentThreadDetails: () => stub.noop,
   // Faithful to TanStack Query: a fresh wrapper object every render, with a
@@ -131,6 +138,8 @@ window.matchMedia = ((query: string) => ({
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
+  stub.emptyList.items = []
   vi.clearAllMocks()
 })
 
@@ -169,6 +178,77 @@ it("registers the active thread's commands once and then stops", async () => {
   )
 
   expect(probeRenders).toBeLessThanOrEqual(RENDER_BUDGET)
+})
+
+it("keeps a project thread out of No project even when the unscoped page is cached", () => {
+  localStorage.setItem(
+    "open-swe.agents.sidebar-prefs",
+    JSON.stringify({ organize: "repo" })
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { enabled: false, retry: false } },
+  })
+  const thread: AgentThread = {
+    ...stub.activeThread,
+    status: "idle",
+    projectId: "project-1",
+    branch: "main",
+    model: "gpt-5",
+    viewed: true,
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [],
+  }
+  stub.emptyList.items = [
+    {
+      ...thread,
+      id: "unfiled",
+      title: "Unfiled chat",
+      projectId: null,
+      repo: "",
+      repoFullName: "",
+    },
+  ]
+  client.setQueryData(projectKeys.all, [
+    {
+      id: "project-1",
+      name: "Example project",
+      workspace: "default",
+      repo_full_name: null,
+      role: "owner",
+      members: [],
+      created_at: "2026-09-10T00:00:00Z",
+      updated_at: "2026-09-10T00:00:00Z",
+    },
+  ])
+  client.setQueryData(
+    agentThreadKeys.infinitePages({
+      limit: 10,
+      hierarchy: true,
+      resolved: false,
+      scope: "interactive",
+      owned: true,
+      sortBy: "created_at",
+    }),
+    {
+      pages: [{ items: [thread], hasMore: false, limit: 10, offset: 0 }],
+      pageParams: [0],
+    }
+  )
+  render(
+    <QueryClientProvider client={client}>
+      <AppCommandProvider>
+        <AgentsShell user={USER}>
+          <div />
+        </AgentsShell>
+      </AppCommandProvider>
+    </QueryClientProvider>
+  )
+
+  expect(screen.getByRole("button", { name: "Example project" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "No project" })).toBeTruthy()
+  expect(screen.getByRole("link", { name: /Unfiled chat/ })).toBeTruthy()
+  expect(screen.queryByRole("link", { name: /Thread/ })).toBeNull()
 })
 
 it("renames an unopened thread from its context menu and discards cancelled drafts", async () => {

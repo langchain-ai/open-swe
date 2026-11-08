@@ -1138,7 +1138,7 @@ function RepoGroup({
     enabled: !collapsed && Boolean(group.project || group.repoFullName),
   })
   const cloudThreads = withoutNestedWorkers([
-    ...repo.items.map((thread) =>
+    ...(group.project || group.repoFullName ? repo.items : []).map((thread) =>
       thread.id === group.activeThread?.id ? group.activeThread : thread
     ),
     ...(group.activeThread &&
