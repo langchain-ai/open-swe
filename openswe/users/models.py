@@ -39,7 +39,9 @@ from openswe.users.authorization import (
     is_authorized_github_login,
 )
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
+from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
+from openswe.utils.search import FuzzySearch
 
 if TYPE_CHECKING:
     from openswe.dashboard.langsmith_login import LangSmithAccount
@@ -192,6 +194,26 @@ class User(Base):
                 .limit(1)
             )
 
+    async def requires_github_link(self) -> bool:
+        """Require proof of GitHub when a LangSmith email matches an existing person."""
+        email = self._identity_field("langsmith", "email").strip().lower()
+        if self.github_login or not email:
+            return False
+        github_people = select(UserIdentity.user_id).where(UserIdentity.provider == "github")
+        async with postgres.session() as session:
+            return bool(
+                await session.scalar(
+                    select(UserIdentity.user_id)
+                    .where(
+                        UserIdentity.user_id != self.id,
+                        UserIdentity.user_id.in_(github_people),
+                        UserIdentity.provider != "langsmith",
+                        func.lower(UserIdentity.email) == email,
+                    )
+                    .limit(1)
+                )
+            )
+
     @classmethod
     async def for_person(cls, person: PersonIdentity) -> Self | None:
         """The person an ingress named, or ``None``.
@@ -278,6 +300,42 @@ class User(Base):
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
 
+    async def can_read_repository(self, repository: str) -> bool:
+        """Whether this person can read ``repository`` (``owner/repo``) on GitHub.
+
+        A yes is trusted as long as ``accessible_repo_full_names`` trusts its
+        listing, so access lost on GitHub shows within that window and callers
+        that check on every keystroke spend no rate limit; a no is never kept, so
+        access granted there shows at once. An expired sign-in raises.
+        """
+        from openswe.github.repos import ACCESS_FRESH_MS
+
+        if not self.github_login:
+            return False
+        key = f"github-repository-read:{self.id}:{repository.lower()}"
+        readable = await ttl_cache.cached(
+            key,
+            ACCESS_FRESH_MS / 1000,
+            lambda: self._reads_repository(repository),
+            serve_stale=False,
+        )
+        if not readable:
+            ttl_cache.invalidate(key)
+        return readable
+
+    async def _reads_repository(self, repository: str) -> bool:
+        from fastapi import HTTPException
+
+        from openswe.dashboard.repo_access import require_repo_access_for_user
+
+        try:
+            await require_repo_access_for_user(self.github_login, repository)
+        except HTTPException as exc:
+            if exc.status_code in {403, 404}:
+                return False
+            raise
+        return True
+
     async def default_repo(
         self, workspace: str | None = None, *, fallback_global: bool = True
     ) -> dict[str, str] | None:
@@ -333,6 +391,7 @@ class User(Base):
         changes = patch.model_dump(exclude_none=True)
         if not changes:
             return user.typed_preferences
+        await patch.validate_channel(user)
         incoming = bindparam("preferences_patch", changes, type_=JSONB)
         merged = (
             incoming.op("||")(cls.preferences)
@@ -365,18 +424,19 @@ class User(Base):
 
     @classmethod
     async def page(cls, *, offset: int, limit: int, search: str = "") -> tuple[list[Self], int]:
-        """One page of matching people, oldest first, with the total count."""
-        query = select(cls)
+        """One page of people with sign-in identities, oldest first, with the total count."""
+        query = select(cls).where(cls.identities.any())
         if search := search.strip():
+            fuzzy = FuzzySearch(search)
             query = query.where(
                 or_(
-                    cls.display_name.icontains(search, autoescape=True),
+                    fuzzy.condition(cls.display_name),
                     cls.identities.any(
                         or_(
-                            UserIdentity.login.icontains(search, autoescape=True),
-                            UserIdentity.email.icontains(search, autoescape=True),
+                            fuzzy.condition(UserIdentity.login),
+                            fuzzy.condition(UserIdentity.email),
                             (UserIdentity.provider == "slack")
-                            & UserIdentity.external_id.icontains(search, autoescape=True),
+                            & fuzzy.condition(UserIdentity.external_id),
                         )
                     ),
                 )
@@ -422,6 +482,34 @@ class User(Base):
                 .options(selectinload(cls.identities))
             )
             return {external_id: user for user, external_id in rows.tuples()}
+
+    @classmethod
+    async def for_github_logins(cls, logins: Collection[str]) -> dict[str, Self]:
+        """The people behind GitHub ``logins``, keyed by the lowercased login asked for."""
+        wanted = {login.lower() for login in logins}
+        if not wanted or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, func.lower(UserIdentity.login))
+                .join(cls.identities)
+                .where(
+                    UserIdentity.provider == "github",
+                    func.lower(UserIdentity.login).in_(wanted),
+                )
+                .order_by(UserIdentity.last_seen_at)
+            )
+            return {login: user for user, login in rows.tuples()}
+
+    @classmethod
+    async def for_handle(cls, handle: str) -> Self | None:
+        """The person someone named by GitHub login or email address, as when sharing."""
+        handle = handle.strip().removeprefix("@")
+        if not handle:
+            return None
+        if "@" in handle:
+            return await cls.for_email(handle)
+        return await cls.for_login("github", handle)
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
@@ -499,8 +587,10 @@ class User(Base):
         team_id: str = "",
     ) -> Self:
         """Attach another provider account to this person, taking it over if needed."""
-        if provider == "langsmith" or any(i.provider == "langsmith" for i in self.identities):
-            raise UnauthorizedUser("LangSmith accounts cannot be linked to other identities")
+        if provider == "langsmith" or (
+            provider == "github" and any(i.provider == "langsmith" for i in self.identities)
+        ):
+            raise UnauthorizedUser("LangSmith accounts link GitHub only by proving it")
         cls = type(self)
         async with postgres.session() as session:
             upsert = insert(UserIdentity).values(
@@ -526,6 +616,87 @@ class User(Base):
         if stored is None:
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
+
+    async def join_github(self, external_id: str, *, login: str, email: str) -> Self:
+        """Join this LangSmith person and a GitHub account they proved, returning who holds both.
+
+        A GitHub account someone already used keeps its person, so their threads and
+        settings carry over: this person's LangSmith and other identities, and its
+        LangSmith login grant, move there. Otherwise the account joins this person.
+        """
+        from openswe.dashboard.oauth_credentials import OAuthCredential
+
+        if not any(i.provider == "langsmith" for i in self.identities):
+            raise UnauthorizedUser("Only LangSmith accounts link a GitHub account")
+        cls = type(self)
+        async with postgres.session() as session:
+            owner = await session.scalar(
+                select(UserIdentity.user_id).where(
+                    UserIdentity.provider == "github", UserIdentity.external_id == external_id
+                )
+            )
+            target = owner or self.id
+            if target != self.id:
+                if await session.scalar(
+                    select(UserIdentity.user_id).where(
+                        UserIdentity.user_id == target, UserIdentity.provider == "langsmith"
+                    )
+                ):
+                    raise AccountConflict(
+                        "This GitHub account is already linked to another LangSmith account"
+                    )
+                await session.execute(
+                    update(UserIdentity)
+                    .where(UserIdentity.user_id == self.id, UserIdentity.provider != "github")
+                    .values(user_id=target)
+                )
+                await session.execute(
+                    delete(OAuthCredential).where(
+                        OAuthCredential.user_id == target,
+                        OAuthCredential.provider == "langsmith_login",
+                    )
+                )
+                await session.execute(
+                    update(OAuthCredential)
+                    .where(
+                        OAuthCredential.user_id == self.id,
+                        OAuthCredential.provider == "langsmith_login",
+                    )
+                    .values(user_id=target)
+                )
+                logger.info(
+                    "Moved a LangSmith sign-in to the person owning its GitHub account",
+                    extra={"from_user_id": str(self.id), "user_id": str(target)},
+                )
+            await session.execute(
+                delete(UserIdentity).where(
+                    UserIdentity.user_id == target,
+                    UserIdentity.provider == "github",
+                    UserIdentity.external_id != external_id,
+                )
+            )
+            upsert = insert(UserIdentity).values(
+                user_id=target, provider="github", external_id=external_id, login=login, email=email
+            )
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[UserIdentity.provider, UserIdentity.external_id],
+                    set_={
+                        "last_seen_at": func.clock_timestamp(),
+                        **_known(login=login, email=email),
+                    },
+                )
+            )
+            await session.flush()
+            stored = await cls._load(session, target)
+        if stored is None:
+            raise RuntimeError(f"user {target} vanished while linking GitHub")
+        return stored
+
+    @property
+    def session_login(self) -> str:
+        """The ``sub`` of this person's LangSmith session: their GitHub login once linked."""
+        return self.github_login or f"user:{self.id}"
 
     async def rename(self, display_name: str) -> None:
         """Replace a person's display name, for the one backfill that knows better."""
@@ -582,7 +753,9 @@ class User(Base):
         if provider == "langsmith":
             if authorization is None or authorization.sub != external_id:
                 raise UnauthorizedUser("LangSmith sign in requires an authorized account")
-            authorization.require_allowed_org()
+            from openswe.dashboard.langsmith_login import LangSmithLogin
+
+            authorization.require_allowed_org(await LangSmithLogin().allowed_org())
         owner = await session.scalar(
             select(UserIdentity.user_id).where(
                 UserIdentity.provider == provider,
@@ -593,7 +766,6 @@ class User(Base):
         if speculative is not None:
             if provider != "langsmith":
                 await _authorize(provider, login)
-            await cls._require_single_login_kind(session, provider, email)
             await session.execute(insert(cls).values(id=speculative))
         upsert = insert(UserIdentity).values(
             user_id=owner or speculative,
@@ -621,34 +793,6 @@ class User(Base):
                 extra={"user_provider": provider, "user_id": str(claimed)},
             )
         return claimed
-
-    @staticmethod
-    async def _require_single_login_kind(
-        session: AsyncSession, provider: Provider, email: str
-    ) -> None:
-        """Refuse a new GitHub or LangSmith person whose email already signs in the other way."""
-        wanted = email.strip().lower()
-        if provider not in ("github", "langsmith") or not wanted:
-            return
-        other = (
-            UserIdentity.provider == "github"
-            if provider == "langsmith"
-            else UserIdentity.provider == "langsmith"
-        )
-        if await session.scalar(
-            select(UserIdentity.user_id)
-            .where(other, func.lower(UserIdentity.email) == wanted)
-            .limit(1)
-        ):
-            logger.warning(
-                "Refused a second account for the same email",
-                extra={"user_provider": provider},
-            )
-            raise AccountConflict(
-                "This email already has an Open SWE account that signs in with "
-                + ("GitHub" if provider == "langsmith" else "LangSmith")
-                + "; sign in with that instead"
-            )
 
     @classmethod
     async def _load(cls, session: AsyncSession, user_id: UUID) -> Self | None:
@@ -681,4 +825,4 @@ async def _authorize(provider: Provider, login: str) -> None:
             "Refused to create a user for an unauthorized GitHub login",
             extra={"github_login": login},
         )
-        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Open SWE")
+        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Robin")

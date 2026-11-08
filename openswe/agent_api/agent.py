@@ -39,6 +39,7 @@ from openswe.server import (
     record_agent_run,
 )
 from openswe.skill_store.run_skills import RunSkillStores
+from openswe.tools.page_commands import PageTools
 from openswe.tools.review_walkthrough import walkthrough_tools
 from openswe.utils.thread_settings import load_thread_settings
 
@@ -128,6 +129,8 @@ class AgentKind(RunKind):
             if guide is not None and not guide.closed:
                 tools = apply_tool_descriptions(walkthrough_tools(guide.mode))
                 return next((tool for tool in tools if tool.name == name), None)
+        if (page := PageTools.of_run(cfg)) is not None and (tool := page.tool(name)) is not None:
+            return tool
         static = agent_tools_by_name().get(name)
         return static if static is not None else (await integration_tools(config)).get(name)
 

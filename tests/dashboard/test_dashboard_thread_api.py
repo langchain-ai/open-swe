@@ -60,6 +60,71 @@ def _empty_thread_pins(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "list_thread_pin_ids", empty_pins)
 
 
+@pytest.mark.parametrize(
+    ("thread_id", "resolved", "failure", "expected"),
+    [
+        ("parent", True, None, {"parent", "worker"}),
+        ("parent", False, None, {"worker", "private"}),
+        ("worker", True, None, {"worker"}),
+        ("parent", True, "lookup", {"parent"}),
+        ("parent", True, "update", {"parent", "worker"}),
+    ],
+)
+async def test_archive_cascades_only_to_readable_task_workers(
+    monkeypatch, thread_id: str, resolved: bool, failure: str | None, expected: set[str]
+) -> None:
+    from openswe.analytics import emitter
+
+    initial = not resolved
+    metadata: dict[str, dict[str, object]] = {
+        key: {"resolved": initial, "owner_login": "octocat", "visibility": "public"}
+        for key in ("parent", "worker", "private", "unrelated")
+    }
+    metadata["private"].update(owner_login="someone-else", visibility="private")
+    metadata["unrelated"]["resolved"] = False
+
+    async def get(key: str) -> dict[str, object]:
+        return {"thread_id": key, "metadata": dict(metadata[key])}
+
+    async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        if failure == "update" and thread_id == "failing":
+            raise RuntimeError("worker update unavailable")
+        for key, value in metadata.items():
+            state[thread_id][key] = value
+
+    state = metadata
+    if failure == "update":
+        state["failing"] = dict(state["worker"])
+    client = SimpleNamespace(threads=SimpleNamespace(get=get, update=update))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr(handlers, "agent_thread_pr_state_lock", _unlocked)
+    monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
+    monkeypatch.setattr(emitter, "task_marked_complete", AsyncMock())
+    monkeypatch.setattr(emitter, "task_accepted", AsyncMock())
+    memberships = {
+        key: SidebarTaskMembership(key, "task", "worker", "parent")
+        for key in (
+            ("failing", "worker", "private") if failure == "update" else ("worker", "private")
+        )
+    }
+    monkeypatch.setattr(
+        handlers,
+        "sidebar_memberships",
+        AsyncMock(
+            return_value=memberships if thread_id == "parent" else {},
+            side_effect=RuntimeError("worker lookup unavailable") if failure == "lookup" else None,
+        ),
+    )
+
+    await handlers.resolve_dashboard_thread(thread_id, "octocat", resolved=resolved)
+
+    assert {key for key, value in state.items() if value["resolved"]} == expected
+    if resolved and thread_id == "parent" and failure != "lookup":
+        assert state["worker"]["resolved_at_ms"] == state["parent"]["resolved_at_ms"]
+        assert state["worker"]["auto_resolved_by_prs"] is False
+        assert state["worker"]["attention_reason"] is None
+
+
 @pytest.mark.parametrize("start", [True, False])
 async def test_create_session_starts_only_when_requested(monkeypatch, start: bool) -> None:
     create = AsyncMock(return_value="new-thread")
@@ -255,13 +320,11 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("langsmith", [False, True])
-@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
 @pytest.mark.parametrize("local", [False, True])
-async def test_desktop_experience_keeps_authenticated_identity_on_resume(
+async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     monkeypatch: pytest.MonkeyPatch,
     registry_db: None,
     langsmith: bool,
-    experience: str,
     local: bool,
 ) -> None:
     monkeypatch.setattr(
@@ -287,7 +350,6 @@ async def test_desktop_experience_keeps_authenticated_identity_on_resume(
             "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
             "config": {
                 "configurable": {
-                    "experience": experience,
                     **({"sandbox_bridge_id": bridge.bridge_id} if local else {}),
                 }
             },
@@ -297,7 +359,6 @@ async def test_desktop_experience_keeps_authenticated_identity_on_resume(
         "new-tid", subject, command, metadata={}, creating=True
     )
     config = first["params"]["config"]["configurable"]
-    assert config["experience"] == experience
     if langsmith:
         assert config["auth_provider"] == "langsmith"
         assert config["user_id"] == subject.removeprefix("user:")
@@ -322,7 +383,6 @@ async def test_desktop_experience_keeps_authenticated_identity_on_resume(
             "input": {"messages": [{"type": "human", "content": "Continue"}]},
             "config": {
                 "configurable": {
-                    "experience": "coding",
                     "github_login": "admin",
                     "auth_provider": "github",
                 }
@@ -334,7 +394,6 @@ async def test_desktop_experience_keeps_authenticated_identity_on_resume(
         "new-tid", subject, followup, metadata=metadata
     )
     resumed = next_run["params"]["config"]["configurable"]
-    assert resumed["experience"] == experience
     if langsmith:
         assert resumed["auth_provider"] == "langsmith"
         assert resumed["user_id"] == subject.removeprefix("user:")
@@ -522,7 +581,7 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
         return (
-            SimpleNamespace(id=second, github_login=login)
+            SimpleNamespace(id=second, github_login=login, email="second@example.com")
             if (provider, login) == ("github", "second-gh")
             else None
         )
@@ -539,9 +598,17 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "follow up"}]},
-            "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"},
+            "metadata": {
+                "user_id": str(first),
+                "user_email": "first@example.com",
+                "ls_attribution_identifier": "first-gh",
+            },
             "config": {
-                "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"}
+                "metadata": {
+                    "user_id": str(first),
+                    "user_email": "first@example.com",
+                    "ls_attribution_identifier": "first-gh",
+                }
             },
         },
     }
@@ -558,6 +625,8 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
     assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+    assert enriched["params"]["metadata"]["user_email"] == "second@example.com"
+    assert enriched["params"]["config"]["metadata"]["user_email"] == "second@example.com"
 
 
 @pytest.mark.parametrize("relayed", [False, True])
@@ -794,7 +863,6 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
                     "invocation_id": "stolen",
                     "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
-                    "experience": "agent_workspace",
                     "agent_model_id": _VISION_MODEL,
                     "agent_effort": "medium",
                 }
@@ -823,7 +891,6 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
-    assert configurable["experience"] == "coding"
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
@@ -1236,10 +1303,7 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
 
 
 @pytest.mark.parametrize("readable", [True, False])
-@pytest.mark.parametrize("experience", [None, "coding", "agent_workspace"])
-async def test_slack_link_search_checks_thread_access(
-    monkeypatch, readable: bool, experience: thread_listing.DashboardThreadExperience | None
-) -> None:
+async def test_slack_link_search_checks_thread_access(monkeypatch, readable: bool) -> None:
     thread = {"thread_id": "linked", "metadata": {"visibility": "private"}}
     monkeypatch.setattr(
         thread_listing, "lookup_slack_link_thread_id", AsyncMock(return_value="linked")
@@ -1258,12 +1322,9 @@ async def test_slack_link_search_checks_thread_access(
         "octocat",
         query="https://example.slack.com/archives/C123/p1788431248678809",
         scope="interactive",
-        experience=experience,
     )
 
-    assert page["items"] == (
-        [{"id": "linked"}] if readable and experience != "agent_workspace" else []
-    )
+    assert page["items"] == ([{"id": "linked"}] if readable else [])
     assert page["hasMore"] is False
 
 
@@ -1279,7 +1340,9 @@ async def test_pr_link_search_finds_exact_associations_outside_participation(mon
     monkeypatch.setattr(
         thread_listing,
         "_summarize_threads",
-        AsyncMock(side_effect=lambda client, rows: [{"id": row["thread_id"]} for row in rows]),
+        AsyncMock(
+            side_effect=lambda client, rows, **kwargs: [{"id": row["thread_id"]} for row in rows]
+        ),
     )
 
     page = await thread_listing.list_dashboard_threads_page(
@@ -1329,51 +1392,6 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
-
-
-@pytest.mark.parametrize("experience", [None, "coding", "agent_workspace"])
-@pytest.mark.parametrize("status", [None, "finished"])
-async def test_experience_filter_precedes_pagination_search_and_repo_aggregation(
-    monkeypatch: pytest.MonkeyPatch,
-    experience: thread_listing.DashboardThreadExperience | None,
-    status: str | None,
-) -> None:
-    monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
-    threads = _make_threads(5, resolved_before=0)
-    for index, thread in enumerate(threads):
-        metadata = cast(dict[str, object], thread["metadata"])
-        metadata.update(latest_run_status="success", repo_owner="acme", repo_name=f"repo{index}")
-        if index < 2:
-            metadata["experience"] = "agent_workspace"
-        elif index == 2:
-            metadata["experience"] = "coding"
-    cast(dict[str, object], threads[4]["metadata"]).update(
-        visibility="private", owner_login="someone-else", experience="agent_workspace"
-    )
-
-    async def search(*, offset: int, limit: int, **_: object) -> list[dict[str, object]]:
-        return threads[offset : offset + limit]
-
-    monkeypatch.setattr(
-        thread_listing,
-        "langgraph_client",
-        lambda: SimpleNamespace(threads=SimpleNamespace(search=search)),
-    )
-    monkeypatch.setattr(thread_listing, "workspace_for_repo", AsyncMock(return_value=None))
-    expected = ["t2", "t3"] if experience == "coding" else ["t0", "t1"]
-    if experience is None:
-        expected += ["t2", "t3"]
-    for offset, thread_id in enumerate(expected):
-        page = await thread_listing.list_dashboard_threads_page(
-            "octocat", experience=experience, query="Thread", status=status, limit=1, offset=offset
-        )
-        assert [item["id"] for item in page["items"]] == [thread_id]
-        assert page["items"][0]["experience"] == (
-            "agent_workspace" if thread_id in ("t0", "t1") else "coding"
-        )
-        assert page["hasMore"] is (offset + 1 < len(expected))
-    repos = await thread_listing.list_dashboard_thread_repos("octocat", experience=experience)
-    assert [repo["repoFullName"] for repo in repos] == [f"acme/repo{key[1:]}" for key in expected]
 
 
 async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
@@ -1454,18 +1472,6 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     all_threads = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
     assert [item["id"] for item in all_threads["items"]] == ["t3", "t4"]
     assert [worker["id"] for worker in all_threads["items"][0]["taskWorkers"]] == ["t0", "t2"]
-    cast(dict[str, object], threads[3]["metadata"])["experience"] = "agent_workspace"
-    coding = await thread_listing.list_dashboard_threads_page(
-        "octocat", hierarchy=True, experience="coding"
-    )
-    assert [item["id"] for item in coding["items"]] == ["t0", "t2", "t4"]
-    assert coding["items"][0]["taskMembership"]["coordinatorThreadId"] is None
-    cast(dict[str, object], threads[0]["metadata"])["experience"] = "agent_workspace"
-    workspace = await thread_listing.list_dashboard_threads_page(
-        "octocat", hierarchy=True, experience="agent_workspace", query="Thread 3"
-    )
-    assert [item["id"] for item in workspace["items"]] == ["t3"]
-    assert [worker["id"] for worker in workspace["items"][0]["taskWorkers"]] == ["t0"]
     cast(dict[str, object], threads[3]["metadata"]).update(
         visibility="private", owner_login="someone-else"
     )
@@ -1796,7 +1802,7 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(
         order.append("dispatch")
         return {"run_id": "replacement-run"}
 
-    async def fake_summary(thread: dict[str, object]) -> dict[str, object]:
+    async def fake_summary(thread: dict[str, object], **kwargs: object) -> dict[str, object]:
         return {"thread_id": "thread-1"}
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())

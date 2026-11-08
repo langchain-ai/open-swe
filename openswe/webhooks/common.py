@@ -4,7 +4,8 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Collection, Mapping, Sequence
+import re
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -47,16 +48,13 @@ from openswe.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
     derive_pr_state,  # noqa: F401
-    describe_open_swe_tags,  # noqa: F401
     extract_pr_context,  # noqa: F401
-    fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
     fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
     sanitize_github_comment_body,  # noqa: F401
-    verify_github_signature,
 )
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
@@ -182,7 +180,6 @@ __all__ = [
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "FEEDBACK_REACTIONS",
-    "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
     "LANGGRAPH_URL",
     "OPEN_SWE_TAGS",
@@ -193,16 +190,12 @@ __all__ = [
     "SLACK_SIGNING_SECRET",
     "SlackThreadMappingError",
     "AGENT_VERSION_METADATA",
-    "describe_open_swe_tags",
     "mentions_open_swe",
     "GH_PR_AGENT_STATE_ACTIONS",
     "GH_PR_FIRST_REVIEW_ACTIONS",
     "GH_PR_WATCH_TOGGLE_ACTIONS",
     "SUPPORTED_GH_COMMENT_ACTIONS",
-    "SUPPORTED_GH_EVENTS",
     "SUPPORTED_GH_ISSUE_ACTIONS",
-    "SUPPORTED_GH_PULL_REQUEST_ACTIONS",
-    "build_github_issue_comments_text",
     "build_queued_finding_reply_prompt",
     "build_reviewer_configurable",
     "draft_review_enabled_for_author",
@@ -248,7 +241,6 @@ __all__ = [
     "extract_repo_from_text",
     "fetch_github_pr_metadata",
     "fetch_image_block",
-    "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
     "fetch_pr_review_threads",
@@ -298,7 +290,6 @@ __all__ = [
     "update_agent_thread_pr_state",
     "update_slack_message",
     "upsert_agent_thread_metadata",
-    "verify_github_signature",
     "verify_slack_signature",
     "workspace_for_repo_config",
 ]
@@ -326,7 +317,6 @@ if ENV.DEBUG_TRACEMALLOC.optional():
     )
 
 
-GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
 SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
 SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
 SLACK_BOT_USERNAME = ENV.SLACK_BOT_USERNAME.get()
@@ -352,16 +342,6 @@ PUBLIC_REPO_ORG_GATE: str = ENV.PUBLIC_REPO_ORG_GATE.get().strip()
 
 ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
-)
-
-_GITHUB_BOT_MESSAGE_PREFIXES = (
-    "🔐 **GitHub Authentication Required**",
-    "✅ **Pull Request Created**",
-    "✅ **Pull Request Updated**",
-    "**Pull Request Created**",
-    "**Pull Request Updated**",
-    "🤖 **Agent Response**",
-    "❌ **Agent Error**",
 )
 
 
@@ -769,9 +749,7 @@ async def get_slack_repo_config(
     explicit = False
 
     try:
-        resolved_thread_id = thread_id or await resolve_slack_thread_id(
-            langgraph_client, channel_id, thread_ts
-        )
+        resolved_thread_id = thread_id or await resolve_slack_thread_id(channel_id, thread_ts)
         thread = await langgraph_client.threads.get(resolved_thread_id)
         thread_repo_config = _repo_in_thread_metadata(thread_metadata(thread))
         if thread_repo_config:
@@ -1025,12 +1003,12 @@ async def post_account_link_prompt(
     if reason == "revoked":
         text = (
             "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
-            f"account. Re-connect it in <{settings_url}|your Open SWE settings>, then tag me again."
+            f"account. Re-connect it in <{settings_url}|your Robin settings>, then tag me again."
         )
     else:
         text = (
             "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            f"connect your Slack account in <{settings_url}|your Open SWE settings>, then tag me "
+            f"connect your Slack account in <{settings_url}|your Robin settings>, then tag me "
             "again."
         )
     try:
@@ -1045,30 +1023,7 @@ async def post_account_link_prompt(
 
 
 GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
-SUPPORTED_GH_EVENTS = frozenset(
-    [
-        "issue_comment",
-        "issues",
-        "pull_request",
-        "pull_request_review_comment",
-        "pull_request_review_thread",
-        "pull_request_review",
-        "push",
-        *GITHUB_CI_EVENTS,
-    ]
-)
 SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
-SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
-    [
-        "opened",
-        "edited",
-        "ready_for_review",
-        "converted_to_draft",
-        "closed",
-        "reopened",
-        "synchronize",
-    ]
-)
 GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.
@@ -1103,23 +1058,6 @@ SUPPORTED_GH_COMMENT_ACTIONS = {
 }
 
 
-def build_github_issue_comments_text(
-    comments: list[dict[str, Any]], *, trusted: Collection[str]
-) -> str:
-    lines: list[str] = []
-    for comment in comments:
-        body = comment.get("body", "")
-        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
-            continue
-        author = comment.get("author", "unknown")
-        formatted_body = format_github_comment_body_for_prompt(author, body, trusted=trusted)
-        lines.append(f"\n**{author}:**\n{formatted_body}\n")
-
-    if not lines:
-        return ""
-    return "\n\n## Comments:\n" + "".join(lines)
-
-
 async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:
     """Reject private-thread follow-ups before reading credentials or dispatching."""
     return (await ThreadRecord.read(thread_id)).authorize(github_login)
@@ -1135,11 +1073,14 @@ async def trigger_or_queue_run(
     repo_config: dict[str, str],
     pr_number: int,
     token_repositories: Sequence[str] | None = None,
+    start: Callable[[str, dict[str, object], Any], Awaitable[bool]] | None = None,
 ) -> bool:
     """Return whether a new agent run was created or queued for a busy thread.
 
     ``token_repositories`` is recorded if this creates the thread; a thread that
-    must be narrowed but could not record it is not started.
+    must be narrowed but could not record it is not started. ``start`` starts the
+    run instead of the backend, with the thread, its configurable and its input:
+    MDA's GitHub channel, for a pull request's own thread.
     """
     record = await ThreadRecord.read(thread_id)
     record.authorize(github_login)
@@ -1175,6 +1116,8 @@ async def trigger_or_queue_run(
     slack_thread = SourceContext.from_metadata(record.metadata).slack_thread
     if slack_thread is not None:
         configurable["slack_thread"] = slack_thread.dump()
+    if start is not None:
+        return await start(thread_id, configurable, input)
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
@@ -1305,7 +1248,7 @@ async def track_review_check_run(
             token=token,
             conclusion="neutral",
             title="Superseded by a newer review",
-            summary="A newer Open SWE review run replaced this one.",
+            summary="A newer Robin review run replaced this one.",
         )
     ]
     await set_reviewer_thread_metadata(
@@ -1394,11 +1337,19 @@ async def fetch_open_pr_for_branch(
         ).open_pull_for_branch(head_ref)
 
 
-def _normalized_diff_hash(diff_text: str) -> str:
-    normalized = "\n".join(
-        line.rstrip() for line in diff_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    ).strip()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+def _normalized_diff_hash(diff_text: str) -> str | None:
+    lines: list[str] = []
+    for section in re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE):
+        binary = "\nBinary files " in section or "\nGIT binary patch" in section
+        if binary and not re.search(
+            r"^index [0-9a-f]{40}\.\.[0-9a-f]{40}(?: |$)", section, re.MULTILINE
+        ):
+            return None
+        for line in section.split("\n"):
+            if not binary and line.startswith("index "):
+                continue
+            lines.append(re.sub(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", "@@", line))
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 async def _fetch_compare_diff(
@@ -1440,12 +1391,19 @@ async def is_pr_diff_unchanged_since_last_review(
     last_reviewed_sha: str,
     head_sha: str,
     token: str,
+    last_reviewed_base_sha: str = "",
+    base_sha: str = "",
 ) -> bool:
-    previous_diff = await _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token)
-    current_diff = await _fetch_compare_diff(repo_config, base_ref, head_sha, token=token)
+    previous_diff, current_diff = await asyncio.gather(
+        _fetch_compare_diff(
+            repo_config, last_reviewed_base_sha or base_ref, last_reviewed_sha, token=token
+        ),
+        _fetch_compare_diff(repo_config, base_sha or base_ref, head_sha, token=token),
+    )
     if previous_diff is None or current_diff is None:
         return False
-    return _normalized_diff_hash(previous_diff) == _normalized_diff_hash(current_diff)
+    previous_hash = _normalized_diff_hash(previous_diff)
+    return previous_hash is not None and previous_hash == _normalized_diff_hash(current_diff)
 
 
 async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:

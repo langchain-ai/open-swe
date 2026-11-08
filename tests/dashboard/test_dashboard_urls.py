@@ -52,14 +52,14 @@ def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(
     monkeypatch: pytest.MonkeyPatch, bundled: Path
 ) -> None:
     """A fresh platform deployment has the bundled UI and no LANGGRAPH_URL yet; it must boot."""
-    from openswe.utils import model
+    from openswe.dashboard import options
 
     for name in ("DASHBOARD_BASE_URL", "LANGGRAPH_URL", "OPENAI_API_KEY", "LLM_MODEL_ID"):
         monkeypatch.delenv(name, raising=False)
 
     assert dashboard_links.dashboard_base_url() == "http://localhost:2024"
-    model.validate_local_dev_llm_config()
+    options.validate_local_dev_llm_config()
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://localhost:3000")
     with pytest.raises(ValueError, match="_API_KEY is required"):
-        model.validate_local_dev_llm_config()
+        options.validate_local_dev_llm_config()

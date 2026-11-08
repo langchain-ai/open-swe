@@ -74,7 +74,7 @@ async def _merge(
     except GitHubError as refused:
         return MergeResult(
             "refused",
-            f"GitHub refused the merge: {refused.message}. Open SWE never bypasses branch "
+            f"GitHub refused the merge: {refused.message}. Robin never bypasses branch "
             "protection; ask a maintainer if the rules need someone else's approval.",
         )
     except httpx2.HTTPError:

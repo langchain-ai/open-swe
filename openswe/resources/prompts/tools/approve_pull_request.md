@@ -4,4 +4,4 @@ Call it only when their latest message asks for an approval; it works at any poi
 - `body`: optional review text.
   Leave it empty for the default note.
 
-It fails on a turn nobody in the channel started, such as a pull request update, and when that person has no GitHub account linked to Open SWE.
+It fails on a turn nobody in the channel started, such as a pull request update, and when that person has no GitHub account linked to Robin.

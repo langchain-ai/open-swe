@@ -1,4 +1,4 @@
-import { experienceStore, useExperience } from "@/lib/experience"
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -60,13 +60,6 @@ function ShortcutHint({ shortcut }: { shortcut: string }) {
   return <Kbd className="ml-auto">{label}</Kbd>
 }
 
-function commandMatches(command: AppCommand, query: string): boolean {
-  const haystack = [command.label, ...(command.aliases ?? [])]
-    .join(" ")
-    .toLowerCase()
-  return haystack.includes(query.toLowerCase())
-}
-
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
@@ -77,13 +70,13 @@ export function buildPaletteResults(
   const searchQuery = actionsOnly
     ? normalizedQuery.slice(1).trim()
     : normalizedQuery
-  const commandResults: Array<CommandResult> = commands
-    .filter(
-      (command) =>
-        command.run &&
-        command.showInPalette !== false &&
-        (!searchQuery || commandMatches(command, searchQuery))
+  const commandResults: Array<CommandResult> = new FuzzySearch(searchQuery)
+    .rank(
+      commands,
+      (command) => command.label,
+      (command) => command.aliases?.join(" ") ?? ""
     )
+    .filter((command) => command.run && command.showInPalette !== false)
     .map((command) => ({
       id: `command:${command.id}`,
       kind: "command",
@@ -130,10 +123,8 @@ export function AppCommandPalette({
     const timer = window.setTimeout(() => setDebouncedQuery(threadQuery), 180)
     return () => window.clearTimeout(timer)
   }, [open, threadQuery])
-  const { experience } = useExperience()
   const cloudThreads = useInfiniteThreadsPages(
     {
-      experience,
       limit: 20,
       q: debouncedQuery || undefined,
       scope: prReference ? "all" : "interactive",
@@ -142,20 +133,17 @@ export function AppCommandPalette({
   )
   const pullRequests = usePullRequestSearch(
     query,
-    open && !actionsOnly && !prReference && experience !== "agent_workspace"
+    open && !actionsOnly && !prReference
   )
   const results: Array<PaletteResult> = [
     ...buildPaletteResults(
       commands,
       debouncedQuery === threadQuery
-        ? experienceStore.filter(
-            cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-            experience
-          )
+        ? (cloudThreads.data?.pages.flatMap((page) => page.items) ?? [])
         : [],
       query
     ),
-    ...(prReference && experience !== "agent_workspace"
+    ...(prReference
       ? [
           {
             id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
@@ -168,7 +156,7 @@ export function AppCommandPalette({
           },
         ]
       : []),
-    ...(open && !actionsOnly && !prReference && experience !== "agent_workspace"
+    ...(open && !actionsOnly && !prReference
       ? (pullRequests.data?.pages.flatMap((page) =>
           page.pull_requests.map((pr): PullRequestResult => ({
             id: `pr:${pr.repo}#${pr.number}`,

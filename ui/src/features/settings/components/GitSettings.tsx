@@ -206,7 +206,7 @@ export function GitSettings() {
           field="branch_prefix"
           label="Branch prefix"
           description="Prefix for branches the agent creates."
-          placeholder="open-swe/"
+          placeholder="robin/"
         />
       </SettingsSection>
 
@@ -226,7 +226,7 @@ export function GitSettings() {
         />
         <SettingsRow
           label="Review my drafts"
-          description="Whether Open SWE Review runs on draft pull requests you open."
+          description="Whether Robin Review runs on draft pull requests you open."
           control={
             <Select
               aria-label="Review my drafts"

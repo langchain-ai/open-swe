@@ -278,8 +278,8 @@ export function liveActivityLabel(
     if (!chunk) continue
 
     if (chunk.kind === "reasoning") {
-      const heading = new Thought(chunk.text).heading
-      return heading ? `${heading}…` : "Thinking…"
+      const label = new Thought(chunk.text).liveLabel
+      return label ? `${label}…` : "Thinking…"
     }
     if (chunk.kind === "text") {
       if (chunk.text.trim()) return "Writing response…"

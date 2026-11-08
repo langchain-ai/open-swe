@@ -40,7 +40,6 @@ def test_the_agent_keeps_its_catalogs_loop_and_guards_its_shell() -> None:
 
 def test_mda_keeps_a_proxy_it_writes_fresh_itself() -> None:
     sandbox = SandboxSpec(
-        thread_id="thread-1",
         create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
         github_proxy=ConnectionRef(slug="github", owner="agent"),
     )

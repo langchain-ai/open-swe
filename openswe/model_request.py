@@ -9,9 +9,10 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_typesafe import Choice
 from langsmith import get_current_run_tree, trace, tracing_context
 from langsmith.run_trees import RunTree
+from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import ModelOption
-from openswe.input_messages import input_message_text, input_message_timestamps, message_sender_id
+from openswe.input_messages import input_message_text, input_message_timestamps
 from openswe.prompts import prompt
 from openswe.utils.jev import JevDecision, select_jev_choices
 
@@ -72,11 +73,8 @@ def original_human_task(
             continue
         if slack_event_ts and slack_event_ts not in input_message_timestamps(message.content):
             continue
-        if message_sender_id(message.content, kind="human") is not None:
+        if (provenance := Provenance.of(message)) is not None and provenance.human:
             return input_message_text(message.content)
-        text = message.text
-        if "<dynamic-context" not in text and "<input-message" not in text and text.strip():
-            return text
     return None
 
 

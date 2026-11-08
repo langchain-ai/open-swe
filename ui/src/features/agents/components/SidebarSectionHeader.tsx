@@ -9,7 +9,7 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
+import { FunnelSimpleIcon } from "@phosphor-icons/react/dist/ssr/FunnelSimple"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
@@ -73,7 +73,7 @@ export function SidebarSectionHeader({
   )
 }
 
-/** Children are Macaw `DropdownMenu*` items. */
+/** A section's view options. Children are Macaw `DropdownMenu*` items. */
 export function SidebarSectionMenu({
   label,
   children,
@@ -85,7 +85,7 @@ export function SidebarSectionMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <IconButton
-          icon={DotsThreeIcon}
+          icon={FunnelSimpleIcon}
           label={label}
           size="xs"
           color="secondary"

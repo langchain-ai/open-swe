@@ -39,7 +39,7 @@ import {
   isDatadogRumInitialized,
   subscribeToDatadogInitialization,
 } from "@/lib/datadog"
-import { productAnalytics } from "@/lib/posthog"
+import { productAnalytics } from "@/lib/analytics"
 import { clearCachedRepos } from "@/lib/repoCache"
 import { useTheme } from "@/lib/theme"
 
@@ -192,7 +192,7 @@ export function SidebarUserMenu({
         >
           <DialogTitle>Report an issue</DialogTitle>
           <DialogDescription>
-            Send the Open SWE team a description of what went wrong, what you
+            Send the Robin team a description of what went wrong, what you
             expected, and any steps to reproduce it.
           </DialogDescription>
           <p className="text-xs text-secondary">

@@ -16,7 +16,7 @@ from openswe.human_review.standard import (
     review_blockers,
     target_channel,
 )
-from openswe.slack.client import GitHubPrRef, get_slack_permalink
+from openswe.slack.client import GitHubPrRef
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,41 @@ class DashboardReviewRequest:
     ) -> RequestResult:
         pr = self.pr_ref
         active = await HumanReviewRequest.active_for(pr.owner, pr.repo, pr.number)
+        if active is not None and active.kind == "expedited":
+            if active.slack_message_ts and not self.origin.asked(active):
+                return RequestResult(
+                    success=True,
+                    reused=True,
+                    request_id=str(active.id),
+                    channel=active.slack_channel_id,
+                    permalink=await active.card_url(),
+                    auto_merge=active.auto_merge,
+                )
+            try:
+                result = await ExpeditedReviewNomination(pr, self.origin, self.token).start(
+                    active.slack_channel_id,
+                    active.slack_thread_ts,
+                    inline_summary=inline_summary,
+                    replace_standard=False,
+                )
+            except ExpeditedReviewIneligible as exc:
+                return RequestResult(success=False, error=str(exc))
+            if not result["success"]:
+                return RequestResult(success=False, error=str(result["error"]))
+            approval = await HumanReviewRequest.get(UUID(str(result["approval_id"])))
+            if approval is None or not approval.slack_message_ts:
+                return RequestResult(
+                    success=False,
+                    error="The review card is not posted yet. Check the author's readiness prompt in Slack or retry once the pull request is ready.",
+                )
+            return RequestResult(
+                success=True,
+                reused=approval.id == active.id,
+                request_id=str(approval.id),
+                channel=approval.slack_channel_id,
+                permalink=await approval.card_url(),
+                auto_merge=approval.auto_merge,
+            )
         if active is None and (await get_workspace_settings()).expedited_review_enabled:
             try:
                 async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
@@ -69,17 +104,12 @@ class DashboardReviewRequest:
                                 channel=target.id,
                                 channel_name=target.name,
                                 permalink=(
-                                    await get_slack_permalink(
-                                        approval.slack_channel_id, approval.slack_message_ts
-                                    )
-                                    or ""
-                                    if approval is not None
-                                    else ""
+                                    await approval.card_url() if approval is not None else ""
                                 ),
                             )
             except GitHubAppUnavailable:
                 return RequestResult(
                     success=False,
-                    error="Open SWE cannot reach this repository's GitHub App installation.",
+                    error="Robin cannot reach this repository's GitHub App installation.",
                 )
         return await request_review(pr, self.origin, channel=channel, inline_summary=inline_summary)

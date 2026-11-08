@@ -130,6 +130,8 @@ enum Command {
     Chat(ChatArgs),
     /// Build and deploy a Deep Agent project to LangSmith.
     Deploy(DeployArgs),
+    /// Pull remote instructions and skills into an existing local project.
+    Pull(crate::pull::PullOptions),
     /// Prepare a checked-out Deep Agent project for a LangSmith build job
     /// (Context Hub sync, compile, sandbox bake). Run by the build runner.
     #[command(hide = true)]
@@ -861,6 +863,7 @@ pub fn run() -> ExitCode {
         Command::Dev(args) => run_dev(args),
         Command::Chat(args) => run_chat(args),
         Command::Deploy(args) => run_deploy(args),
+        Command::Pull(args) => run_pull(args),
         Command::Prepare(args) => run_prepare(args, build_artifacts_token),
         Command::Connection(args) => run_connection(args),
         Command::Channel(args) => run_channel(args),
@@ -1139,6 +1142,11 @@ fn run_channel(args: ChannelArgs) -> Result<CommandCompletion> {
     Ok(CommandCompletion::Succeeded)
 }
 
+fn run_pull(mut args: crate::pull::PullOptions) -> Result<CommandCompletion> {
+    args.env_file = deploy::resolve_env_file_flag(args.env_file)?;
+    crate::pull::run(args)
+}
+
 fn run_logs(args: LogsArgs) -> Result<CommandCompletion> {
     // Neither flag: follow only when a human is watching (see `logs::run`).
     let follow = match (args.follow, args.no_follow) {
@@ -1213,6 +1221,46 @@ mod tests {
         let command = Cli::command();
         let matches = command.clone().try_get_matches_from(args).unwrap();
         crate::telemetry::CommandInvocation::from_matches(&command, &matches).unwrap()
+    }
+
+    #[test]
+    fn pull_parses_preview_and_explicit_replacement_options() {
+        let cli = Cli::try_parse_from([
+            "mda",
+            "pull",
+            "./project",
+            "--name",
+            "my-agent",
+            "--agent-environment",
+            "staging",
+            "--workspace-id",
+            "workspace",
+            "--env-file",
+            "custom.env",
+            "--dry-run",
+            "--yes",
+        ])
+        .unwrap();
+        let Command::Pull(args) = cli.command else {
+            panic!("expected pull")
+        };
+        assert_eq!(args.path, PathBuf::from("./project"));
+        assert_eq!(args.name.as_deref(), Some("my-agent"));
+        assert_eq!(args.agent_environment, Some(AgentEnvironment::Staging));
+        assert_eq!(args.workspace_id.as_deref(), Some("workspace"));
+        assert_eq!(args.env_file, Some(PathBuf::from("custom.env")));
+        assert!(args.dry_run);
+        assert!(args.yes);
+        let Command::Pull(defaults) = Cli::try_parse_from(["mda", "pull"]).unwrap().command else {
+            panic!("expected pull")
+        };
+        assert!(!defaults.yes);
+        assert!(!defaults.dry_run);
+        assert_eq!(defaults.path, PathBuf::from("."));
+        assert_eq!(
+            analytics_for(&["mda", "pull", "--yes"]).command_path,
+            "pull"
+        );
     }
 
     #[test]

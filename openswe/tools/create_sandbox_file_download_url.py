@@ -11,7 +11,7 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
-from openswe.short_links.models import ShortLink
+from openswe.short_links.models import ShortLink, is_https_target
 from openswe.tools.access import direct_user_run
 from openswe.users import User
 from openswe.utils.dashboard_links import public_dashboard_api_base_url
@@ -81,8 +81,9 @@ async def create_sandbox_file_download_url(
         raise RuntimeError("LangSmith did not return a download URL")
     url = download.download_url
     # Models copy a short link reliably, unlike hundreds of signed characters; only a public
-    # deployment can serve one to the people and image proxies that follow it.
-    if public_dashboard_api_base_url() is not None:
+    # deployment can serve one to the people and image proxies that follow it, and only
+    # to an https target.
+    if public_dashboard_api_base_url() is not None and is_https_target(url):
         cfg = RunConfig.from_runtime()
         # Only a person's own run is theirs; scheduled and other automatic runs write as the system.
         login = (

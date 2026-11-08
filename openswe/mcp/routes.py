@@ -274,7 +274,7 @@ async def _instance_gateway(gateway: str) -> str:
     """``gateway``, refused unless it is the tool kit this instance uses."""
     configured = await instance_gateway()
     if configured is None or gateway_id(gateway) != gateway_id(configured):
-        raise HTTPException(404, "This Open SWE does not use this tool kit")
+        raise HTTPException(404, "This Robin instance does not use this tool kit")
     return gateway
 
 

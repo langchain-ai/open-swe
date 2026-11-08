@@ -157,6 +157,7 @@ async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:
 class RunTurn:
     turn_id: UUID
     open: bool
+    state: str = ""
 
 
 async def run_turn(thread_id: str, run_id: str) -> RunTurn | None:
@@ -174,7 +175,9 @@ async def run_turn(thread_id: str, run_id: str) -> RunTurn | None:
             {"thread_id": thread_id, "run_id": run_id},
         )
         row = result.mappings().one_or_none()
-    return None if row is None else RunTurn(row["turn_id"], row["state"] in _OPEN_STATES)
+    return (
+        None if row is None else RunTurn(row["turn_id"], row["state"] in _OPEN_STATES, row["state"])
+    )
 
 
 async def superseded_turns(

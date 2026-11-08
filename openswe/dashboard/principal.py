@@ -37,7 +37,7 @@ class DashboardPrincipal:
         external_id = session.get("langsmith_subject")
         if provider == "langsmith" and (
             user_id is None
-            or subject != f"user:{user_id}"
+            or (subject.startswith("user:") and subject != f"user:{user_id}")
             or not isinstance(external_id, str)
             or not external_id
         ):
@@ -51,10 +51,11 @@ class DashboardPrincipal:
 
     @property
     def github_login(self) -> str | None:
-        return self.subject if self.provider == "github" else None
+        """The GitHub login the session acts as; a LangSmith session has one once linked."""
+        return None if self.subject.startswith("user:") else self.subject
 
     def authorize_path(self, path: str, method: str) -> None:
-        if self.provider == "github":
+        if self.github_login is not None:
             return
         prefix = "/dashboard/api/"
         relative = path.removeprefix(prefix).rstrip("/") if path.startswith(prefix) else ""
@@ -65,8 +66,11 @@ class DashboardPrincipal:
             "my-managed-tools",
             "my-credentials/langsmith",
             "threads",
+            "projects",
             "bridges",
             "skills",
+            "github/login",
+            "github/desktop/exchange",
         )
         if any(relative == group or relative.startswith(group + "/") for group in personal):
             return
@@ -78,6 +82,7 @@ class DashboardPrincipal:
             "client-errors",
             "ui-invalidations",
             "auth/logout",
+            "auth/callback",
         }:
             return
         if method in {"GET", "HEAD"}:
@@ -93,23 +98,42 @@ class DashboardPrincipal:
                 return
             if len(parts) == 2 and parts[0] == "plan":
                 return
-        raise HTTPException(403, "This operation requires a GitHub account")
+        raise HTTPException(403, "This operation requires a linked GitHub account")
 
     async def user(self) -> User | None:
         if self.provider == "github":
             return await User.for_session(self.user_id, self.subject)
         user = await User.get(self.user_id) if self.user_id is not None else None
-        if user is None or not any(
-            identity.provider == "langsmith" and identity.external_id == self.langsmith_subject
-            for identity in user.identities
-        ):
+        if (
+            user is None
+            or not any(
+                identity.provider == "langsmith" and identity.external_id == self.langsmith_subject
+                for identity in user.identities
+            )
+        ) and self.langsmith_subject:
+            # Linking GitHub may have moved the LangSmith identity to the account's person.
+            user = await User.for_identity("langsmith", self.langsmith_subject)
+        if user is None:
             raise HTTPException(401, "LangSmith account not found — sign in again")
+        if self.github_login is not None and user.github_login.lower() != self.github_login.lower():
+            raise HTTPException(401, "Your linked GitHub account changed — sign in again")
         return user
 
-    async def authorize(self) -> None:
+    async def authorize(self, *, path: str | None = None) -> None:
         if self.provider == "github":
             return
         from openswe.dashboard.langsmith_login import LangSmithLogin
 
-        await self.user()
+        user = await self.user()
         await LangSmithLogin().authorize_session(self)
+        if user is not None and await user.requires_github_link():
+            relative = (path or "").removeprefix("/dashboard/api/").rstrip("/")
+            if relative not in {
+                "me",
+                "github/login",
+                "github/desktop/exchange",
+                "auth/callback",
+                "auth/desktop/exchange",
+                "auth/logout",
+            }:
+                raise HTTPException(403, "Link GitHub to return to your existing Robin account")

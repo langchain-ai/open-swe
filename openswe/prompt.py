@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from runtime_api.provenance import Provenance
+
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
@@ -127,6 +129,7 @@ def construct_system_prompt(
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
     workspace_memory: str = "",
+    workspace_memory_triggers: list[str] | None = None,
     agent_workspace: bool = False,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
@@ -137,6 +140,11 @@ def construct_system_prompt(
             "system/dashboard-context",
             environment=ENV.OPENSWE_ENV.optional(),
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
+        ),
+        self_awareness_section=prompt(
+            "system/self-awareness",
+            source_repo=ENV.OPENSWE_SOURCE_REPO.get(),
+            source_path=ENV.OPENSWE_SOURCE_PATH.get().strip("/"),
         ),
         default_prompt_section=_load_default_prompt(),
         collaboration_section=_render_collaboration_section(),
@@ -159,8 +167,12 @@ def construct_system_prompt(
         section
         for section in (
             _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
-            prompt("system/workspace-memory", memory=workspace_memory.strip())
-            if workspace_memory.strip()
+            prompt(
+                "system/workspace-memory",
+                memory=workspace_memory.strip(),
+                triggers=workspace_memory_triggers or [],
+            )
+            if workspace_memory.strip() or workspace_memory_triggers
             else "",
         )
         if section
@@ -200,6 +212,8 @@ class TurnContext:
     tool_catalog_note: str = ""
     # The sender's other recent threads, whose activity changes from turn to turn.
     recent_threads: str = ""
+    # The workspace a curator run curates; its instructions stay in view across wakes.
+    curated_workspace: str = ""
 
     def environment(self) -> str:
         environment = prompt(
@@ -255,14 +269,20 @@ class TurnContext:
 
     def messages(self, visible: Collection[str]) -> list[RunMessage]:
         """The blocks the model does not see as they now are, given the ``visible`` context hashes."""
-        blocks = [
-            run_context("environment", self.environment()),
-            run_context("source", self.source_guidance()),
-        ]
+        guidance = {"environment": self.environment(), "source": self.source_guidance()}
         if self.recent_threads:
-            blocks.append(run_context("recent-threads", self.recent_threads))
+            guidance["recent-threads"] = self.recent_threads
+        if self.curated_workspace:
+            guidance["curator"] = prompt("curator/instructions", workspace=self.curated_workspace)
+        blocks = {
+            context_id: run_context(context_id, text) for context_id, text in guidance.items()
+        }
         return [
-            {"role": "user", "content": block}
-            for block in blocks
+            {
+                "role": "user",
+                "content": block,
+                "additional_kwargs": Provenance(kind="context", sender=f"run:{context_id}").stamp(),
+            }
+            for context_id, block in blocks.items()
             if dynamic_context_hash(block) not in visible
         ]

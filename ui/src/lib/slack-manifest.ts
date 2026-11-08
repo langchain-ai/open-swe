@@ -14,6 +14,7 @@ const BASE_BOT_SCOPES = [
   "im:write",
   "mpim:history",
   "mpim:read",
+  "search:read.public",
   "team:read",
   "users:read",
   "users:read.email",
@@ -33,7 +34,7 @@ const BASE_BOT_EVENTS = [
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
 
-export const ASK_COMMAND = "/oswe"
+export const ASK_COMMAND = "/robin"
 
 export interface SlackManifestConfig {
   backendUrl?: string | null
@@ -58,24 +59,22 @@ export function slackAppManifest(
       messages_tab_enabled: true,
       messages_tab_read_only_enabled: false,
     },
-    bot_user: { display_name: "Open SWE", always_online: true },
+    bot_user: { display_name: "Robin", always_online: true },
     shortcuts: [
       {
         name: "Explain This",
         type: "message",
         callback_id: "open_swe_explain",
-        description: "Ask Open SWE to explain this message",
+        description: "Ask Robin to explain this message",
       },
     ],
-    slash_commands: [
-      {
-        command: ASK_COMMAND,
-        url: `${backendUrl}/webhooks/slack/commands`,
-        description: "Ask Open SWE",
-        usage_hint: "[your request or question]",
-        should_escape: false,
-      },
-    ],
+    slash_commands: [ASK_COMMAND, "/oswe"].map((command) => ({
+      command,
+      url: `${backendUrl}/webhooks/slack/commands`,
+      description: "Ask Robin",
+      usage_hint: "[your request or question]",
+      should_escape: false,
+    })),
   }
   if (codeChannelsEnabled) {
     features.code_channels = {
@@ -86,8 +85,8 @@ export function slackAppManifest(
 
   return {
     display_information: {
-      name: "Open SWE",
-      description: "Enables Open SWE to interact with your workspace",
+      name: "Robin",
+      description: "Enables Robin to interact with your workspace",
       background_color: "#000000",
     },
     features,

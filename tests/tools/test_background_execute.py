@@ -27,6 +27,7 @@ from openswe.tasks import service as task_service
 from openswe.tools import threads
 from openswe.tools.background_execute import TASK_ROOT, background_execute, current_backend
 from openswe.utils.background_task_state import update_background_task_state
+from tests.conftest import serve_runs_from
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
@@ -218,6 +219,7 @@ async def test_completion_callback_asks_runner_to_retry_until_delivered(
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     dispatch = AsyncMock(side_effect=RuntimeError("unavailable") if dispatch_fails else None)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
@@ -245,6 +247,7 @@ async def test_completion_callback_cannot_route_outside_its_shared_sandbox(
         "metadata": {"sandbox_id": sandbox_id, "sandbox_host_thread_id": host_id}
     }
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock())
     monkeypatch.setattr(
         background_tasks,
@@ -353,6 +356,7 @@ async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
     dispatch = AsyncMock()
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
@@ -436,7 +440,7 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
             "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
         ) as ensure_cron,
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("make test")
 
     assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
     assert ensure_cron.await_count == int(not callback)
@@ -464,7 +468,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
-        result = await background_execute("sleep 10")
+        result = await background_execute("make test")
 
     assert result == {
         "success": False,
@@ -636,6 +640,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[]))
     set_status = AsyncMock()
@@ -685,6 +690,7 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
@@ -729,16 +735,22 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     )
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_thread"}
     delete_crons.assert_awaited_once_with("thread-1")
 
 
-@pytest.mark.parametrize("launch_fails", [False, True])
-async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
-    launch_fails: bool,
+@pytest.mark.parametrize(
+    ("launch_fails", "status_after_launch"),
+    [(False, "running"), (False, "completed"), (True, "running")],
+)
+async def test_a_callback_launch_is_tracked_exactly_while_it_runs(
+    launch_fails: bool, status_after_launch: str
 ) -> None:
+    """A reconcile during launch untracks the unknown task; a fast task's callback may
+    untrack it before launch returns. Either way it is tracked only while it runs."""
     tracked: set[str] = set()
 
     async def update(
@@ -751,11 +763,13 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         tracked.update(running)
         tracked.difference_update(finished)
 
-    async def launch(backend: object, action: str, **fields: object) -> dict[str, str]:
-        assert len(tracked) == 1, "the runner starts inside this call"
+    async def launch(backend: object, action: str, **fields: object) -> dict[str, object]:
+        if action == "status":
+            return {"task_id": fields["task_id"], "status": status_after_launch}
+        await update(None, "thread-1", finished=list(tracked))
         if launch_fails:
             raise RuntimeError("active task limit reached")
-        return {"task_id": next(iter(tracked)), "status": "running"}
+        return {"task_id": fields["task_id"], "status": "running"}
 
     with (
         patch(
@@ -769,10 +783,10 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),
         patch("openswe.tools.background_execute.langgraph_client"),
     ):
-        result = await background_execute("true")
+        result = await background_execute("make test")
 
     assert result["success"] is not launch_fails
-    assert bool(tracked) is not launch_fails
+    assert bool(tracked) is (not launch_fails and status_after_launch == "running")
 
 
 async def test_reattach_reconciles_tracked_tasks() -> None:

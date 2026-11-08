@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from functools import partial
 
-import httpx
+import httpx2
 import pytest
 from githubkit import GitHub
 
@@ -12,10 +12,10 @@ from openswe.github import sdk
 
 def mock_github_sdk(
     monkeypatch: pytest.MonkeyPatch,
-    handler: Callable[[httpx.Request], httpx.Response],
+    handler: Callable[[httpx2.Request], httpx2.Response],
 ) -> None:
     monkeypatch.setattr(
-        sdk, "GitHub", partial(GitHub, async_transport=httpx.MockTransport(handler))
+        sdk, "GitHub", partial(GitHub, async_transport=httpx2.MockTransport(handler))
     )
 
     def sign(*args: object, **kwargs: object) -> str:

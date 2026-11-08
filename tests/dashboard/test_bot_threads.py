@@ -41,6 +41,9 @@ def bot_thread(monkeypatch):
             module, "fetch_thread_metadata", AsyncMock(return_value=thread["metadata"])
         )
     monkeypatch.setattr(summary, "is_admin", lambda email, login=None: login in _ADMINS)
+    monkeypatch.setattr(
+        "openswe.dashboard.admin.is_admin", lambda email, login=None: login in _ADMINS
+    )
     return thread, client
 
 
@@ -56,7 +59,7 @@ def test_bot_thread_is_readable_and_still_promptable_from_slack(bot_thread):
 
 
 @pytest.mark.parametrize("login", ["bob", "admin"])
-async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypatch):
+async def test_dashboard_cannot_steer_a_bot_thread(bot_thread, login, monkeypatch):
     _, client = bot_thread
     session = {"sub": login}
     operations = [
@@ -68,8 +71,6 @@ async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypat
         lambda: plan_api.update_plan(
             "bot-thread", plan_api.PlanUpdate(html="<p>edit</p>"), session
         ),
-        lambda: workflow_approval_api.approve_workflow_push("bot-thread", "fp", session),
-        lambda: workflow_approval_api.reject_workflow_push("bot-thread", "fp", session),
     ]
     for operation in operations:
         with pytest.raises(HTTPException) as exc:
@@ -81,6 +82,47 @@ async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypat
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
     await handlers.cancel_dashboard_thread("bot-thread", login)
     assert client.threads.update.await_args.kwargs["metadata"]["latest_run_status"] == "interrupted"
+
+
+@pytest.mark.parametrize("approved", [True, False])
+@pytest.mark.parametrize("login", ["bob", "admin"])
+async def test_only_admin_decides_bot_thread_workflow_push(
+    bot_thread, monkeypatch, login, approved
+):
+    decide = AsyncMock(return_value=({}, True))
+    resume = AsyncMock()
+    monkeypatch.setattr(workflow_approval_api, "decide_workflow_push_approval", decide)
+    monkeypatch.setattr(workflow_approval_api, "dispatch_agent_run", resume)
+    operation = (
+        workflow_approval_api.approve_workflow_push
+        if approved
+        else workflow_approval_api.reject_workflow_push
+    )
+    if login != "admin":
+        with pytest.raises(HTTPException) as exc:
+            await operation("bot-thread", "fp", {"sub": login})
+        assert exc.value.status_code == 403
+        decide.assert_not_awaited()
+        resume.assert_not_awaited()
+        return
+
+    result = await operation("bot-thread", "fp", {"sub": login, "email": "admin@example.com"})
+    assert result == {"status": "approved" if approved else "rejected", "fingerprint": "fp"}
+    decide.assert_awaited_once_with("bot-thread", "fp", approved=approved, actor=login)
+    if approved:
+        assert resume.await_args.args[0] == "bot-thread"
+        config = resume.await_args.args[2]
+        assert config["github_login"] is None
+        assert config["user_email"] is None
+        assert config["source"] == "slack"
+        assert config["slack_thread"]["triggering_bot_id"] == "B123"
+        assert resume.await_args.kwargs["context"] == {
+            "sender_id": "system:workflow-push-approval",
+            "surface": "automation",
+            "kind": "system",
+        }
+    else:
+        resume.assert_not_awaited()
 
 
 async def test_summary_names_the_starting_bot(bot_thread, monkeypatch):

@@ -1,7 +1,7 @@
 """What the runtime tells the backend happened, sent in batches the backend acknowledges.
 
 The runtime gathers its reports (the run's start, each reply and tool call, each
-inbox receipt, the run's end) and its notices (work the backend does for the run whose answer the run never
+inbox receipt, the run's end or the model error it failed with) and its notices (work the backend does for the run whose answer the run never
 reads) and sends them in the order it made them, as many as are waiting in one
 ``reports`` call. Each item carries a key unique in its thread, and the backend
 records a key once, so a batch sent again after its answer was lost records
@@ -22,6 +22,7 @@ from runtime_api.endpoint import LOOP_CALL_SECONDS, Delivery, Endpoint
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
     INBOX_RECEIVED,
+    MODEL_FAILED,
     MODEL_RESULT,
     RUN_ENDED,
     RUN_STARTED,
@@ -31,6 +32,7 @@ from runtime_api.loop import (
     TOOL_RESULT,
     TOOL_STARTED,
     InboxReceipt,
+    ModelFailed,
     ModelResult,
     RunEnded,
     RunStarted,
@@ -96,6 +98,11 @@ class Ended(Sent):
     request: RunEnded
 
 
+class Failed(Sent):
+    endpoint: Literal["model_failed"]
+    request: ModelFailed
+
+
 type Item = Annotated[
     ToolStarted
     | ToolFinished
@@ -105,7 +112,8 @@ type Item = Annotated[
     | SandboxNoticed
     | ScoutPlanNoticed
     | Started
-    | Ended,
+    | Ended
+    | Failed,
     Field(discriminator="endpoint"),
 ]
 _item: TypeAdapter[Item] = TypeAdapter(Item)
@@ -125,6 +133,7 @@ REPORTED: Final[Mapping[str, Delivery]] = {
         FINISH_SCOUT_PLAN,
         RUN_STARTED,
         RUN_ENDED,
+        MODEL_FAILED,
     )
 }
 

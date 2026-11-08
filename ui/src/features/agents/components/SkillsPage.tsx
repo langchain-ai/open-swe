@@ -110,7 +110,7 @@ export function SkillsPage() {
   return (
     <EditorScreen
       title="Skills"
-      description="Reusable instructions Open SWE loads when a task matches their description."
+      description="Reusable instructions Robin loads when a task matches their description."
       actions={
         <>
           {error && (
@@ -233,7 +233,7 @@ export function SkillsPage() {
               }
               disabled={!canEdit}
               required={canEdit}
-              placeholder="What this skill does and when Open SWE should use it"
+              placeholder="What this skill does and when Robin should use it"
             />
           </div>
           <TextEditor

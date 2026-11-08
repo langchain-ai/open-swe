@@ -24,8 +24,8 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
-from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
-from openswe.github.forwarding import ForwardJob
+from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
+from openswe.github.branch_config import refresh_required_checks
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -56,14 +56,13 @@ from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_ag
 from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
-from openswe.slack.mda_forwarding import SWEEP_JOB as SLACK_LOST_REQUESTS
-from openswe.slack.mda_forwarding import schedule_sweep as schedule_slack_lost_requests
-from openswe.slack.mda_forwarding import sweep_lost_requests
+from openswe.slack.mda_forwarding import RETIRED_SWEEP_JOB as SLACK_LOST_REQUESTS
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
+from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH
 from openswe.workspaces.refresh import run_workspace_refresh_tick
 
@@ -75,6 +74,8 @@ RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
+WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -210,13 +211,6 @@ async def _slack_channel_directory(_job: Job) -> None:
     await sync_directory()
 
 
-@WORKER.register(SLACK_LOST_REQUESTS)
-async def _slack_lost_requests(_job: Job) -> None:
-    reported = await sweep_lost_requests()
-    if reported:
-        logger.info("Reported lost Slack messages", extra={"reported": reported})
-
-
 @WORKER.register(REPORT_RECEIPT_PURGE)
 async def _report_receipt_purge(_job: Job) -> None:
     logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
@@ -228,12 +222,6 @@ async def _tool_sets_purge(_job: Job) -> None:
 
 
 WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
-
-
-@WORKER.register(GITHUB_CHANNEL_FORWARD)
-async def _github_channel_forward(job: Job) -> None:
-    # Retried, like a lost lease, without harm: MDA dedupes by X-GitHub-Delivery.
-    await ForwardJob.model_validate(job.payload).run()
 
 
 @WORKER.register(WAKE_THREAD_JOB)
@@ -267,7 +255,9 @@ async def start_jobs() -> None:
         import_agent_server_threads,
         start_queue,
         ensure_directory_sync,
-        schedule_slack_lost_requests,
+        # Retired: MDA's Slack channel builds its turns from the event, and nothing is
+        # remembered for it to miss.
+        lambda: queue.cancel_key(SLACK_LOST_REQUESTS),
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),

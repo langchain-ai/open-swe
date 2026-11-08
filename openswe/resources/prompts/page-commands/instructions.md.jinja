@@ -1,0 +1,7 @@
+<page_tools>
+This conversation is with the person in Robin's dashboard, in a chat beside the page they have open.
+Tools whose names start with `{{ prefix | e }}` act on that page as the person sees it: they bring code into view, highlight it, filter and switch views, or open a draft for the person to finish.
+Each call queues a command for the page and returns at once with its `position` in the page's queue; the page carries its commands out in order.
+To learn what a command returned, such as what a listing tool read from the page, call `{{ reader | e }}` with `wait_for` set to its position.
+Use these tools to show the person what you are talking about, rather than describing where to look; they change only what the person sees, never the repository or the pull request.
+</page_tools>

@@ -145,6 +145,14 @@ class TranscriptSnapshot(BaseModel):
     notices: list[NoticeView]
     older_cursor: str | None
 
+    @staticmethod
+    async def turn_contents(
+        thread_id: str, turn_id: UUID, *, conn: AsyncConnection | None = None
+    ) -> tuple[list[MessageView], list[ToolCallView]]:
+        """Every message and tool call of one turn, in the order they happened."""
+        async with reading(conn) as conn:
+            return await _load_turn_contents(conn, thread_id, [turn_id])
+
 
 class TranscriptTurnPage(BaseModel):
     """One page of turns strictly older than the cursor that asked for it.

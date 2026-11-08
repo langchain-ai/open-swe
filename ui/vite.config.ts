@@ -300,6 +300,9 @@ const config = defineConfig({
     __OPEN_SWE_BUNDLE_BUILT_AT__: JSON.stringify(BUNDLE_BUILD_AT),
   },
   server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
+  // The build's shell prerender starts a preview server; it must not fail when
+  // the dev server already holds DEV_PORT.
+  preview: { strictPort: false },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [

@@ -14,6 +14,13 @@ from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackI
 from tests.conftest import MemoryEventClaims
 
 
+@pytest.fixture(autouse=True)
+def _backend_acts_on_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These drive the backend's own handling of a click, which ``act_on_slack_click``
+    runs for each click MDA's Slack channel hands it."""
+    monkeypatch.setattr(slack_routes, "_answered_here", lambda _interaction: True)
+
+
 def _request(payload: dict[str, Any]) -> Request:
     body = urlencode({"payload": json.dumps(payload)}).encode()
 
@@ -157,7 +164,6 @@ async def test_option_interaction_schedules_update_only_for_authorized_actor(
     update = AsyncMock()
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )
@@ -213,7 +219,6 @@ async def test_next_in_a_review_guide_counts_only_for_its_reader(
     advance = AsyncMock()
     guide = SimpleNamespace(is_reader=AsyncMock(return_value=reader))
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(slack_routes.common, "is_code_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
@@ -271,7 +276,6 @@ async def test_code_channel_view_action_routes_to_channel_session(
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(slack_routes.common, "is_code_channel", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )
@@ -317,7 +321,6 @@ async def test_code_channel_external_select_returns_registered_suggestions(
     options = [{"text": {"type": "plain_text", "text": "open-swe"}, "value": "open-swe"}]
     get_suggestions = AsyncMock(return_value=options)
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
     monkeypatch.setattr(slack_routes.common, "get_block_suggestions", get_suggestions)
 
     result = await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())
@@ -397,6 +400,7 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     assert request.turn_context == ("" if message_ts else retry.prompt("runs/slack-retry").strip())
     assert request.event_ts != message_ts
     assert request.original_message_ts == message_ts
+    assert request.source_message_ts == message_ts
     assert request.explicit_request
     assert request.code_channel == (thread_ts == "0" and channel_id.startswith("C"))
     assert request.concierge_mode == (channel_id.startswith("D") and thread_ts == "0")

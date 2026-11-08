@@ -145,10 +145,16 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize(
     ("scenario", "expected"),
-    [("recovered-tool", "failed-model"), ("ambiguous", "root"), ("no-message", "root")],
+    [
+        ("recovered-tool", "failed-model"),
+        ("ambiguous", "root"),
+        ("no-message", "root"),
+        ("missing", None),
+        ("lookup-error", None),
+    ],
 )
 async def test_error_url_follows_terminal_failure(
-    monkeypatch: pytest.MonkeyPatch, legacy: bool, scenario: str, expected: str
+    monkeypatch: pytest.MonkeyPatch, legacy: bool, scenario: str, expected: str | None
 ) -> None:
     thread_url = "https://smith.example/o/tenant/projects/p/pid/t/thread"
     monkeypatch.setattr(ls_utils, "get_langsmith_trace_url", AsyncMock(return_value=thread_url))
@@ -161,6 +167,10 @@ async def test_error_url_follows_terminal_failure(
         queries.append(kwargs)
 
         async def results() -> AsyncIterator[SimpleNamespace]:
+            if scenario == "lookup-error":
+                raise RuntimeError("lookup failed")
+            if scenario == "missing":
+                return
             if legacy and len(queries) == 1:
                 return
             for run_id, order, error in [
@@ -186,18 +196,21 @@ async def test_error_url_follows_terminal_failure(
     )
 
     terminal_error = None if scenario == "no-message" else "model timed out"
-    assert await ls_utils.get_langsmith_error_url("thread", "invocation", terminal_error) == (
-        f"https://smith.example/o/tenant/projects/p/pid/r/{expected}"
+    link = await ls_utils.get_langsmith_error_url("thread", "invocation", terminal_error)
+    assert link == ls_utils.LangSmithErrorLink(
+        f"https://smith.example/o/tenant/projects/p/pid/r/{expected}" if expected else thread_url,
+        is_fallback=expected is None,
     )
-    assert len(queries) == (2 if legacy else 1)
-    for query_args in queries:
+    assert len(queries) == (
+        1 if scenario == "lookup-error" else 2 if legacy or scenario == "missing" else 1
+    )
+    for field, query_args in zip(("invocation_id", "prepare_run_id"), queries, strict=False):
         assert query_args["project_ids"] == ["pid"]
         assert query_args["has_error"] is True
         assert query_args["min_start_time"] == start
         assert ls_utils._langsmith_metadata_filter("thread_id", "thread") in str(
             query_args["filter"]
         )
-        field = "prepare_run_id" if legacy and query_args is queries[-1] else "invocation_id"
         assert ls_utils._langsmith_metadata_filter(field, "invocation") in str(query_args["filter"])
 
 

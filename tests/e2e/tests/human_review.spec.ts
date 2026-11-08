@@ -364,7 +364,6 @@ test.describe("Human review in Slack", () => {
   test("the agent posts a card in the review channel; two sign up; it merges two hours after one approval", async ({
     page,
     request,
-    baseURL,
   }) => {
     test.setTimeout(240_000);
     await setReviewChannel(request);
@@ -390,7 +389,7 @@ test.describe("Human review in Slack", () => {
       .toBe(1);
     await expect
       .poll(async () =>
-        (await channelMessages(request, "C_DEMO", asked.thread_ts)).map(
+        (await channelMessages(request, "CDEMO01", asked.thread_ts)).map(
           (m) => m.text,
         ),
       )
@@ -414,9 +413,8 @@ test.describe("Human review in Slack", () => {
     const review = (card.blocks ?? [])
       .flatMap((block) => block.elements ?? [])
       .find((element) => element.action_id === "open_swe_option_select_review");
-    expect(review?.url).toBe(
-      `${baseURL}/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
-    );
+    // Trigger Server forwards no URL button's click, so the answer links the PR instead.
+    expect(review?.url).toBeUndefined();
     await shootCard(page, "open");
     await loginAs(page, ALICE);
     await page.goto(
@@ -604,7 +602,7 @@ test.describe("Human review in Slack", () => {
     );
   });
 
-  test("approved pull requests still offer Slack review requests", async ({
+  test("approved pull requests do not offer Slack review requests", async ({
     page,
     request,
   }) => {
@@ -622,9 +620,13 @@ test.describe("Human review in Slack", () => {
       .getByRole("listitem")
       .filter({ hasText: `Already approved` });
     await expect(row).toBeVisible();
+    await expect(row.getByText("Approved", { exact: true })).toBeVisible();
     await expect(
       row.getByRole("button", { name: "Request review in Slack" }),
-    ).toBeEnabled();
+    ).toHaveCount(0);
+    await expect(
+      row.getByRole("combobox", { name: "Review channel" }),
+    ).toHaveCount(0);
   });
 
   test("conflicted pull requests can request a review from the dashboard", async ({
@@ -785,7 +787,7 @@ test.describe("Human review in Slack", () => {
     expect((await latestRequest(request)).picks).toEqual([]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
-      .toContain("picked by Open SWE");
+      .toContain("picked by Robin");
     await shootCard(page, "assigned");
 
     await loginAs(page, BOB);
@@ -807,25 +809,7 @@ test.describe("Human review in Slack", () => {
         name: "GitHub-only review request",
         exact: true,
       }),
-    ).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "Show my GitHub review requests" })
-      .click();
-    await expect(
-      page.getByRole("button", {
-        name: "GitHub-only review request",
-        exact: true,
-      }),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Back to Open SWE assignments" })
-      .click();
-    await expect(
-      page.getByRole("button", {
-        name: "GitHub-only review request",
-        exact: true,
-      }),
-    ).toHaveCount(0);
 
     // 4. Bob is the only reviewer, so his approval merges it at once.
     await approveOnGitHub(request, seeded.number, BOB.login);
@@ -1017,7 +1001,7 @@ test.describe("Human review in Slack", () => {
       return views.at(-1)!;
     };
     const snoozeModal = await openModal("Snooze");
-    expect(snoozeModal.callback_id).toBe("human_review_snooze");
+    expect(snoozeModal.callback_id).toMatch(/^mda_modal::human_review_snooze:/);
     expect(
       snoozeModal.blocks[0].element.options.map((item) => item.value),
     ).toEqual(SNOOZE_LENGTHS);
@@ -1025,7 +1009,7 @@ test.describe("Human review in Slack", () => {
 
     // 4. Decline asks why, with every reason to choose from.
     const modal = await openModal("Decline");
-    expect(modal.callback_id).toBe("human_review_decline");
+    expect(modal.callback_id).toMatch(/^mda_modal::human_review_decline:/);
     expect(modal.blocks[0].element.options.map((item) => item.value)).toEqual(
       DECLINE_REASONS,
     );
@@ -1147,7 +1131,7 @@ test.describe("Human review in Slack", () => {
         cardText(await reviewCard(request, await latestRequest(request))),
       )
       .toContain(
-        "Review request: dismissed by Open SWE: posted with the wrong summary",
+        "Review request: dismissed by Robin: posted with the wrong summary",
       );
   });
 

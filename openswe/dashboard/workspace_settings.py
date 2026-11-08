@@ -16,6 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
+from runtime_api.models import gateway_overrides, resolve_gateway_enabled
 
 from openswe.audit_logs.context import bind_workspace, current_audit_log
 from openswe.audit_logs.middleware import audit_endpoint
@@ -35,7 +36,6 @@ from openswe.dashboard.options import (
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.run_config import RunConfig
 from openswe.ui_invalidations import Topic
-from openswe.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from openswe.utils.time import now_iso
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
@@ -325,7 +325,7 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
-    # Approval criteria moved to each repository's .open-swe/APPROVALS.md and its review style's mode.
+    # Approval criteria moved to each repository's .open-swe/auto-approve-rules/ and its review style's mode.
     "approval_policy",
     "review_auto_approve",
 )

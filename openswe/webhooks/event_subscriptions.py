@@ -1,7 +1,7 @@
 """Agent threads listening for event log rows in their workspace."""
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid7
 
@@ -30,6 +30,7 @@ from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_L
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.input_messages import Fields
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, LoggedEvent, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
@@ -321,7 +322,51 @@ class EventSubscription(Base):
             await session.execute(delete(cls).where(cls._expired()))
             session.add(self)
             await session.flush()
-            return await session.get_one(cls, self.id, populate_existing=True)
+            created = await session.get_one(cls, self.id, populate_existing=True)
+        await cls._changed(self.thread_id)
+        return created
+
+    async def schedule_timeout(self, timeout_seconds: int) -> datetime:
+        due_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
+        await queue.schedule(
+            "event_subscription_timeout",
+            {
+                "thread_id": self.thread_id,
+                "subscription_id": str(self.id),
+                "run_config": self.run_config,
+                "content": prompt(
+                    "runs/event-subscription-timeout",
+                    subscription_id=str(self.id),
+                    target=self.target,
+                    instructions=self.instructions,
+                ),
+            },
+            due_at=due_at,
+            key=f"event_subscription_timeout:{self.id}",
+            metadata={"thread_id": self.thread_id},
+        )
+        return due_at
+
+    @classmethod
+    async def wake_on_timeout(cls, job: queue.Job) -> None:
+        thread_id = str(job.payload["thread_id"])
+        config = job.payload["run_config"]
+        if not isinstance(config, dict):
+            raise ValueError("Event subscription timeout has no run config")
+        match = EventMatch(
+            thread_id=thread_id,
+            subscription_id=UUID(str(job.payload["subscription_id"])),
+            source="workspace",
+            delivery_id=f"event_subscription_timeout:{job.id}",
+            content=str(job.payload["content"]),
+            run_config=config,
+        )
+        async with postgres.session() as session:
+            await match.record(session)
+        try:
+            await EventMatch.deliver(thread_id, "enqueue")
+        except NotFoundError:
+            await cls.forget(thread_id)
 
     @classmethod
     async def for_thread(cls, thread_id: str) -> list[Self]:
@@ -342,7 +387,18 @@ class EventSubscription(Base):
                 .where(cls.thread_id == thread_id, cls.id == subscription_id)
                 .returning(cls.id)
             )
-            return deleted is not None
+        if deleted is not None:
+            await cls._changed(thread_id)
+        return deleted is not None
+
+    @staticmethod
+    async def _changed(thread_id: str) -> None:
+        """Refresh what the dashboard shows the thread listening for: its background
+        work and the waits its goal rests on."""
+        from openswe.ui_invalidations.topics import Topic
+
+        await Topic.THREAD_BACKGROUND_WORK.invalidate(key=thread_id)
+        await Topic.THREAD_GOALS.invalidate(key=thread_id)
 
     @classmethod
     def _expired(cls) -> ColumnElement[bool]:
@@ -524,11 +580,14 @@ class EventSubscription(Base):
         pull_request_closed = event.event_type == "pull_request.closed"
         if self.one_shot or (self.pull_request_id is not None and pull_request_closed):
             await self.delete()
+        else:
+            await self._changed(self.thread_id)
         return True
 
     async def delete(self) -> None:
         async with postgres.session() as session:
             await session.execute(delete(type(self)).where(type(self).id == self.id))
+        await self._changed(self.thread_id)
 
     async def _claim(self, session: AsyncSession) -> bool:
         """Count a trigger; a one-shot that already fired, or a cancelled one, claims nothing."""

@@ -8,13 +8,31 @@ from openswe.slack.client import (
     slack_image_file_urls,
     slack_message_bot_id,
 )
+from openswe.slack.http import SLACK_REQUEST_ERRORS, slack_error
 from openswe.slack.tools.read_channel_messages import ChannelNotReadable, readable_public_channel
 from openswe.tools import access as tool_access
 
 
 async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Fetch thread messages and resolve author names."""
-    messages = await fetch_slack_thread_messages(channel_id, message_ts)
+    try:
+        messages = await fetch_slack_thread_messages(channel_id, message_ts, complete=True)
+    except SLACK_REQUEST_ERRORS as exc:
+        code = slack_error(exc)
+        error = f"Could not read the source Slack thread (Slack error: {code})."
+        if code == "channel_not_found":
+            error += (
+                " The channel could not be found or accessed; it may be unavailable or "
+                "inaccessible. Upload the needed file directly in this conversation."
+            )
+        if code == "not_in_channel":
+            error += (
+                " Robin is not a member of that channel. Forwarding a message "
+                "does not grant access to its source channel or original files. Ask someone "
+                "with access to invite Robin to the source channel, or upload the needed "
+                "file directly in this conversation."
+            )
+        return {"success": False, "error": error, "slack_error": code}
     if not messages:
         return {"success": False, "messages": []}
 
@@ -66,7 +84,7 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
             return {"success": False, "error": str(exc)}
 
     result = await fetch_and_format_thread(channel_id, message_ts.strip())
-    if not result.get("success"):
+    if not result.get("success") and "error" not in result:
         return {
             "success": False,
             "error": "Could not fetch thread messages. The bot may not have access to "

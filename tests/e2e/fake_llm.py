@@ -71,7 +71,7 @@ EOF
 """.strip()
 
 # The expedited-review change is too big to qualify until the agent excludes what
-# the spec's seeded APPROVALS.md covers: CHANGELOG.md and config.py's trailing
+# the spec's seeded auto-approve rule covers: CHANGELOG.md and config.py's trailing
 # generated block, whose hunk starts at new line 28.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
@@ -101,7 +101,9 @@ HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
-_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
+_SUGGESTED_REVIEWER = re.compile(
+    r"(?:Robin|Open SWE) suggests @(\S+): (.+?) Unless this Slack thread"
+)
 
 # The spec seeds config.py (VALUE_1..VALUE_30) and CHANGELOG.md on main. Drawn:
 # greet.py and config.py's VALUE_2 hunk, four lines. Excluded: 40 more.
@@ -294,6 +296,7 @@ BACKGROUND_WORK_MONITOR_COMMAND = (
     'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
 )
 BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
+BACKGROUND_WORK_LISTENER_INSTRUCTIONS = "Recheck the build when CI finishes."
 INBOX_MARKER = "E2E_INBOX"
 INBOX_EVENT_LINE = "INBOX_EVENT build finished"
 # Prints its event at once, then outlasts the spec without lingering on the host.
@@ -302,6 +305,18 @@ INBOX_FOLLOW_UP = "Please also note the inbox follow-up."
 # The harness holds the run here until the spec has queued what the inbox should bring.
 INBOX_GATE_URL = f"{BASE_URL}/control/inbox-gate"
 _INBOX_GATE_SECONDS = 90.0
+
+# Goal mode: the run keeps going until it reports, rests on a wait without being sent
+# back, and treats another reviewer's comment on its PR as more work.
+GOAL_NUDGE_MARKER = "E2E_GOAL_NUDGE"
+GOAL_WAIT_MARKER = "E2E_GOAL_WAIT"
+GOAL_STALL_MARKER = "E2E_GOAL_STALL"
+GOAL_REVIEWER_MARKER = "E2E_GOAL_REVIEWER"
+GOAL_CHECK_URL = f"{BASE_URL}/control/goal-check"
+GOAL_CHECK_PASSED = "GOAL_CHECK_PASSED"
+GOAL_REVIEWER_BOT = "devin-ai-integration[bot]"
+_WORK_STATE_GUARD_SENDER = 'sender="system:work-state-guard"'
+_NO_REPLY_CONFIRMATION = "The user cannot see anything I do not send to Slack."
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -911,6 +926,133 @@ def _called(messages: list[BaseMessage], call_id: str) -> int | None:
     return None
 
 
+def _goal_call(content: str, name: str, args: ToolArgs, call_id: str) -> AIMessage:
+    if name == "slack_reply":
+        args = {"response_type": "final", **args}
+    return AIMessage(content=content, tool_calls=[{"name": name, "args": args, "id": call_id}])
+
+
+def _goal_report(
+    messages: list[BaseMessage], call_id: str, outcome: str, *, expected_state: str = "working"
+) -> AIMessage:
+    """Set the goal ready and reply with the outcome, both in ``call_id``'s turn."""
+    nudges = sum(
+        isinstance(m, HumanMessage) and _WORK_STATE_GUARD_SENDER in _text(m.content)
+        for m in messages
+    )
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "goal_set_state",
+                "args": {
+                    "expected_state": expected_state,
+                    "state": "waiting_on_user",
+                    "reason": "ready",
+                },
+                "id": call_id,
+            },
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": f"Goal complete: {outcome} Nudged {nudges} times.",
+                    "response_type": "final",
+                },
+                "id": f"{call_id}-reply",
+            },
+        ],
+    )
+
+
+def _arrived_after(messages: list[BaseMessage], call_id: str, needle: str) -> bool:
+    start = _called(messages, call_id)
+    return start is not None and any(
+        isinstance(m, HumanMessage) and needle in _text(m.content) for m in messages[start:]
+    )
+
+
+def _goal_step(messages: list[BaseMessage]) -> AIMessage:
+    """Each Goal mode scenario routes on what its run has done, since a nudge or a wake
+    arrives as a new message and restarts the step count."""
+    request = _text(_script_humans(messages)[0].content)
+    if _called(messages, "call-goal-ack") is None:
+        return _goal_call(
+            "Starting in Goal mode.",
+            "slack_reply",
+            {"message": "Working on it in Goal mode.", "response_type": "progress"},
+            "call-goal-ack",
+        )
+    if GOAL_NUDGE_MARKER in request:
+        if _called(messages, "call-goal-report") is not None:
+            return AIMessage(content="Reported.")
+        if not any(
+            isinstance(m, HumanMessage) and _WORK_STATE_GUARD_SENDER in _text(m.content)
+            for m in messages
+        ):
+            return AIMessage(content="Looked into it; ending the turn without reporting.")
+        return _goal_report(messages, "call-goal-report", "reported after being sent back.")
+    if GOAL_STALL_MARKER in request:
+        return AIMessage(content="Still thinking; ending the turn without a wait.")
+    if GOAL_WAIT_MARKER in request:
+        if _called(messages, "call-goal-monitor") is None:
+            return _goal_call(
+                "Waiting until the check passes.",
+                "monitor",
+                {
+                    "action": "start",
+                    "command": f"curl -fsS {GOAL_CHECK_URL}",
+                    "interval": 5,
+                    "description": "the goal check",
+                    "timeout": 300,
+                },
+                "call-goal-monitor",
+            )
+        if not _arrived_after(messages, "call-goal-monitor", GOAL_CHECK_PASSED):
+            if _called(messages, "call-goal-rest") is None:
+                return _goal_call(
+                    "",
+                    "slack_no_reply_needed",
+                    {
+                        "reason": "Waiting on the check monitor.",
+                        "confirmation": _NO_REPLY_CONFIRMATION,
+                    },
+                    "call-goal-rest",
+                )
+            return AIMessage(content="Resting until the check passes.")
+        if _called(messages, "call-goal-report") is None:
+            return _goal_report(messages, "call-goal-report", "the check passed.")
+        return AIMessage(content="Reported.")
+    pr_url = _pr_url_in(request)
+    if _called(messages, "call-goal-listen") is None:
+        return _goal_call(
+            "Listening for reviews on the PR.",
+            "listen_events",
+            {
+                "action": "subscribe",
+                "timeout_seconds": 300,
+                "pr_url": pr_url,
+                "event_types": [
+                    "pull_request_review",
+                    "pull_request_review_comment",
+                    "issue_comment",
+                ],
+            },
+            "call-goal-listen",
+        )
+    if _called(messages, "call-goal-report") is None:
+        return _goal_report(messages, "call-goal-report", f"{pr_url} is ready.")
+    if not _arrived_after(messages, "call-goal-report", GOAL_REVIEWER_BOT):
+        return AIMessage(content="Reported.")
+    if _called(messages, "call-goal-reviewer-report") is None:
+        return _goal_report(
+            messages,
+            "call-goal-reviewer-report",
+            f"fixed the bug {GOAL_REVIEWER_BOT} found on {pr_url}.",
+            expected_state="waiting_on_user",
+        )
+    return AIMessage(content="Reported again.")
+
+
 def _wait_for_inbox_gate() -> None:
     deadline = time.monotonic() + _INBOX_GATE_SECONDS
     while time.monotonic() < deadline:
@@ -1062,6 +1204,62 @@ REVIEW_CHAT_COMMENTS_MARKER = "E2E_REVIEW_CHAT_COMMENTS"
 REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
 REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
 REVIEW_CHAT_FILE = "zeta.py"
+# The review page's own tools queue commands for the page, then read back what the
+# page found once it has carried them out.
+REVIEW_PAGE_TOOLS_MARKER = "E2E_REVIEW_PAGE_TOOLS"
+REVIEW_PAGE_STEPS_MARKER = "E2E_REVIEW_PAGE_STEPS"
+REVIEW_PAGE_TOOLS_COMMENT = "Could ZETA_44 get a descriptive name?"
+
+
+def _tool_result(messages: list[BaseMessage], call_id: str) -> Any:
+    """What the tool call ``call_id`` returned, parsed from its JSON."""
+    return next(
+        (
+            json.loads(_text(message.content))
+            for message in reversed(messages)
+            if isinstance(message, ToolMessage) and message.tool_call_id == call_id
+        ),
+        None,
+    )
+
+
+def _page_steps_step(messages: list[BaseMessage]) -> AIMessage:
+    """Says how far the page got with the walkthrough commands."""
+    progress = _tool_result(messages, "call-page-steps-queue") or {}
+    return AIMessage(
+        content=(
+            f"The page ran {progress.get('executed_through')} of"
+            f" {progress.get('queued_through')} walkthrough commands."
+        )
+    )
+
+
+def _page_queue_step(messages: list[BaseMessage]) -> AIMessage:
+    """Says where each command was queued, how far the page got and what it listed."""
+    positions = ", ".join(
+        str((_tool_result(messages, call_id) or {}).get("position"))
+        for call_id in (
+            "call-page-files",
+            "call-page-show",
+            "call-page-filter",
+            "call-page-highlight",
+            "call-page-draft",
+        )
+    )
+    progress = _tool_result(messages, "call-page-queue") or {}
+    listed = next(
+        (r["result"] for r in progress.get("results", []) if r["tool"] == "review_list_files"),
+        {},
+    )
+    paths = ", ".join(file["path"] for file in listed.get("files", []))
+    return AIMessage(
+        content=(
+            f"Queued page commands at positions {positions}. The page ran"
+            f" {progress.get('executed_through')} of {progress.get('queued_through')};"
+            f" it lists {paths}."
+        )
+    )
+
 
 _IMPLEMENT_STEPS: tuple[StepSpec, ...] = (
     _tool_step(
@@ -1138,6 +1336,62 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content="The review draft is ready."),
     ),
     "review_chat_plain": (StepSpec(content="The pull request adds two constant modules."),),
+    "review_page_tools": (
+        _tool_step("Reading the page.", "page_review_list_files", {}, "call-page-files"),
+        _tool_step(
+            "Showing the constant.",
+            "page_review_show_code",
+            {"path": REVIEW_CHAT_FILE, "start_line": 40, "line": 44},
+            "call-page-show",
+        ),
+        _tool_step(
+            "Narrowing the files.",
+            "page_review_filter_files",
+            {"filter": "zeta"},
+            "call-page-filter",
+        ),
+        _tool_step(
+            "Highlighting the name.",
+            "page_review_highlight_text",
+            {"query": "ZETA_44"},
+            "call-page-highlight",
+        ),
+        _tool_step(
+            "Drafting a comment.",
+            "page_review_draft_comment",
+            {"path": REVIEW_CHAT_FILE, "line": 44, "body": REVIEW_PAGE_TOOLS_COMMENT},
+            "call-page-draft",
+        ),
+        _tool_step(
+            "Checking the page.",
+            "read_page_queue",
+            {"since": 0, "wait_for": 5},
+            "call-page-queue",
+        ),
+        _dynamic_step(_page_queue_step),
+    ),
+    "review_page_steps": (
+        _tool_step("Opening the step.", "page_review_show_step", {"index": 1}, "call-page-step"),
+        _tool_step(
+            "Marking the step viewed.",
+            "page_review_mark_step_viewed",
+            {"index": 1},
+            "call-page-step-viewed",
+        ),
+        _tool_step(
+            "Leaving alpha.py for you.",
+            "page_review_mark_file_viewed",
+            {"path": "alpha.py", "viewed": False},
+            "call-page-file-unviewed",
+        ),
+        _tool_step(
+            "Checking the page.",
+            "read_page_queue",
+            {"since": 0, "wait_for": 3},
+            "call-page-steps-queue",
+        ),
+        _dynamic_step(_page_steps_step),
+    ),
     # Parent turn: delegate to two general-purpose subagents in one step so the
     # transcript renders a subagent card grid. The subagents run this same fake
     # model; their task description carries the marker that selects the
@@ -1222,6 +1476,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "inbox": tuple(_dynamic_step(_inbox_step) for _ in range(6)),
+    "goal": tuple(_dynamic_step(_goal_step) for _ in range(20)),
     "background_work": (
         _tool_step(
             "Acknowledging the background work request.",
@@ -1247,7 +1502,17 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             },
             "call-background-work-monitor",
         ),
-        StepSpec(content="Started the build and the log monitor."),
+        _tool_step(
+            "Listening for CI to finish.",
+            "listen_events",
+            {
+                "action": "subscribe",
+                "event_types": ["check_suite.completed"],
+                "instructions": BACKGROUND_WORK_LISTENER_INSTRUCTIONS,
+            },
+            "call-background-work-listen",
+        ),
+        StepSpec(content="Started the build, the log monitor and a CI listener."),
     ),
     "iframe": (
         _tool_step(
@@ -1570,6 +1835,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
+                "destination": DEMO_CHANNEL,
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
             },
             "call-breakout",
@@ -1590,7 +1856,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_move_thread",
             {
                 "message": "Continue the existing Open SWE task in this channel.",
-                "channel_id": "C_TARGET",
+                "destination": "CTARGET01",
             },
             "call-move",
         ),
@@ -1676,10 +1942,24 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "goal",
+        lambda ctx: any(
+            marker in ctx.first_text
+            for marker in (
+                GOAL_NUDGE_MARKER,
+                GOAL_WAIT_MARKER,
+                GOAL_STALL_MARKER,
+                GOAL_REVIEWER_MARKER,
+            )
+        ),
+    ),
     ScriptRule("inbox", lambda ctx: INBOX_MARKER in ctx.first_text),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
     ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),
+    ScriptRule("review_page_tools", lambda ctx: REVIEW_PAGE_TOOLS_MARKER in ctx.last_text),
+    ScriptRule("review_page_steps", lambda ctx: REVIEW_PAGE_STEPS_MARKER in ctx.last_text),
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(

@@ -15,6 +15,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
+from runtime_api.provenance import Provenance
 
 from openswe.input_messages import dynamic_context_hash, run_context, visible_dynamic_context_hashes
 from openswe.middleware.trace import OpenSWEMiddleware
@@ -41,7 +42,12 @@ def _rules_messages(state: AgentState, rules: str) -> list[HumanMessage]:
     block = run_context("review-guide", rules)
     if dynamic_context_hash(block) in visible_dynamic_context_hashes(state):
         return []
-    return [HumanMessage(content=block)]
+    return [
+        HumanMessage(
+            content=block,
+            additional_kwargs=Provenance(kind="context", sender="run:review-guide").stamp(),
+        )
+    ]
 
 
 class ReviewGuideMiddleware(OpenSWEMiddleware):
@@ -119,7 +125,10 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
             return {
                 "messages": [
                     *_rules_messages(state, rules),
-                    HumanMessage(content=prompt("review-guide/moved-mid-turn")),
+                    HumanMessage(
+                        content=prompt("review-guide/moved-mid-turn"),
+                        additional_kwargs=Provenance.harness("review_guide").stamp(),
+                    ),
                 ]
             }
         if not workspace.complete:
@@ -174,7 +183,8 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
                         clicked=bool(self._approve_ts),
                         approved=approved.title if approved else "",
                         status=reader.status(workspace.unplanned, workspace.hunks).model_dump(),
-                    )
+                    ),
+                    additional_kwargs=Provenance.harness("review_guide").stamp(),
                 ),
             ],
         }

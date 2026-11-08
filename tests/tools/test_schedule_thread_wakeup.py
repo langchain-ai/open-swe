@@ -45,7 +45,7 @@ def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _noop() -> None:
         return None
 
-    async def _active(client: Any, thread_id: str, fallback: Any) -> Any:
+    async def _active(thread_id: str, fallback: Any) -> Any:
         return fallback
 
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
@@ -180,6 +180,7 @@ def _human_message_key(*messages: dict[str, str]) -> str:
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
     return {
         "id": message_id,
+        "type": "human",
         "content": (
             f'<input-message sender="{sender}" surface="automation" kind="{kind}">\n'
             f"{message_id}\n</input-message>"

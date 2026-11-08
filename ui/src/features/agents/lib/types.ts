@@ -225,6 +225,7 @@ export interface Message {
   timestamp: string
   deliveryStatus?: "sending" | "failed"
   deliveryError?: string
+  deliveryTurnId?: string
   optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
@@ -234,9 +235,15 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  slackMessageUrl?: string
   /** Passages the sender selected and replied to, carried in the message's envelope. */
   replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
+  /**
+   * What the context a plugin sent with this message is called, such as the
+   * open page; the agent read the context itself, which the thread never shows.
+   */
+  contextLabel?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
@@ -366,6 +373,31 @@ export interface AgentBackgroundCommand {
   started_at: number | null
 }
 
+/** One thing a Goal mode thread waits on to wake it again. */
+export interface AgentGoalWait {
+  kind: "wakeup" | "command" | "monitor" | "event" | "review"
+  until: string | null
+  detail: string | null
+}
+
+/** Where a Goal mode thread's work stands (`openswe/threads/goal.py`). */
+export interface AgentThreadGoal {
+  state: "working" | "waiting" | "waiting_on_user" | "paused" | "complete"
+  reason:
+    | "blocked"
+    | "ready"
+    | "stopped"
+    | "requested"
+    | "no_progress"
+    | "failing_commands"
+    | "error"
+    | null
+  objective: string | null
+  ask: string | null
+  waits: Array<AgentGoalWait>
+  updated_at_ms: number
+}
+
 export interface AgentThreadMonitor {
   monitor_id: string
   description: string
@@ -378,10 +410,27 @@ export interface AgentThreadMonitor {
   raw_lines: number
 }
 
-/** The sandbox commands and monitors running for a thread. */
+/** An event subscription that wakes the thread when a matching event arrives. */
+export interface AgentEventListener {
+  subscription_id: string
+  /** The pull request URL, repository, or "workspace" it listens on. */
+  target: string
+  sources: Array<string>
+  event_types: Array<string>
+  instructions: string
+  one_shot: boolean
+  trigger_count: number
+  last_triggered_at: number | null
+  expires_at: number
+  created_at: number | null
+}
+
+/** The sandbox commands, monitors and event listeners keeping a thread busy. */
 export interface AgentBackgroundWork {
   commands: Array<AgentBackgroundCommand>
   monitors: Array<AgentThreadMonitor>
+  /** Absent from servers older than the listing of event subscriptions. */
+  listeners?: Array<AgentEventListener>
 }
 
 /** The last lines a background command or monitor wrote. */
@@ -563,7 +612,6 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
-  experience?: "coding" | "agent_workspace"
   waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
@@ -583,12 +631,15 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  /** The Open SWE project the thread was started in or moved to. */
+  projectId?: string | null
   branch: string
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
   planStatus?: string | null
   adminThread?: boolean
+  concierge?: boolean
   source?: AgentSource
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
@@ -600,8 +651,8 @@ export interface AgentThread {
   automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
-  viewedAt?: number | null
   latestRunId?: string | null
+  viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null

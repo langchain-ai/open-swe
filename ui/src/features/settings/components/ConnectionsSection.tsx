@@ -1,13 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
-import type { LangSmithConnectionStatus, SessionUser } from "@/lib/api"
+import type { SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { api, connectService } from "@/lib/api"
-import { optimisticUpdate } from "@/lib/optimistic"
+import { connectService, loginUrl } from "@/lib/api"
+import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -41,7 +42,7 @@ function SlackRow({ user }: { user: SessionUser }) {
       description={
         connected
           ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
-          : "Sign in with Slack so Open SWE resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
+          : "Sign in with Slack so Robin resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
       }
       control={
         <div className="flex items-center gap-space-2">
@@ -72,91 +73,55 @@ function SlackRow({ user }: { user: SessionUser }) {
   )
 }
 
-export const LANGSMITH_CONNECTION_KEY = ["myLangSmith"]
-
-/** The caller's own LangSmith connection, shared by every feature that calls LangSmith as them. */
-export function useLangSmithConnection() {
-  return useQuery({
-    queryKey: LANGSMITH_CONNECTION_KEY,
-    queryFn: api.getMyLangSmithStatus,
-  })
-}
-
-export function ConnectLangSmithButton({
+/** Link (or relink) the signed-in person's GitHub account, which unlocks coding features. */
+export function LinkGitHubButton({
+  user,
   size = "xs",
   className,
 }: {
+  user: SessionUser
   size?: "xs" | "sm" | "md"
   className?: string
 }) {
   const qc = useQueryClient()
-  const status = useLangSmithConnection()
   const [connecting, setConnecting] = useState(false)
+  const linked = !!user.github_login
   return (
     <Button
       size={size}
-      color="primary"
+      color={linked ? "secondary" : "primary"}
+      variant={linked ? "outlined" : "normal"}
+      leftDecorator={GithubLogoIcon}
       className={className}
       onClick={() => {
         setConnecting(true)
-        void connectService("langsmith", window.location.href)?.finally(() => {
+        void connectService("github", window.location.href)?.finally(() => {
           setConnecting(false)
-          void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+          void qc.invalidateQueries({ queryKey: ["session"] })
         })
       }}
-      disabled={connecting || status.isLoading}
+      disabled={connecting}
     >
-      {connecting ? "Redirecting…" : "Connect LangSmith"}
+      {connecting ? "Redirecting…" : linked ? "Relink" : "Link GitHub"}
     </Button>
   )
 }
 
-function LangSmithRow({ user }: { user: SessionUser }) {
-  const qc = useQueryClient()
-  const status = useLangSmithConnection()
-  const disconnect = useMutation({
-    meta: { errorTitle: "Couldn't disconnect LangSmith" },
-    mutationFn: () => api.disconnectLangSmith(),
-    onMutate: async () => ({
-      undo: await optimisticUpdate<LangSmithConnectionStatus>(
-        qc,
-        LANGSMITH_CONNECTION_KEY,
-        (current) => ({ ...current, connected: false, email: null })
-      ),
-    }),
-    onError: (_e, _v, ctx) => ctx?.undo(),
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
-      void qc.invalidateQueries({ queryKey: ["myManagedTools"] })
-    },
-  })
-  if (!status.data?.available) return null
-  const connected = status.data.connected
+function GitHubRow({ user }: { user: SessionUser }) {
+  const linked = !!user.github_login
   return (
     <SettingsRow
-      label="LangSmith"
+      label="GitHub"
       description={
-        user.auth_provider === "langsmith"
-          ? `Your sign-in account${status.data.email ? `: ${status.data.email}` : ""}. Sign out to change accounts.`
-          : connected
-            ? `Signed in${status.data.email ? ` as ${status.data.email}` : ""}. Open SWE can call LangSmith as you in your private threads.`
-            : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
+        linked
+          ? `Linked to @${user.github_login}. Coding features act as this account.`
+          : "Link your GitHub account to use coding features and return to your existing coding threads."
       }
       control={
         <div className="flex items-center gap-space-2">
-          <StatusPill connected={connected} />
-          {user.auth_provider === "langsmith" ? null : connected ? (
-            <Button
-              color="secondary"
-              variant="outlined"
-              size="xs"
-              onClick={() => disconnect.mutate()}
-              disabled={disconnect.isPending}
-            >
-              Disconnect
-            </Button>
-          ) : (
-            <ConnectLangSmithButton />
+          <StatusPill connected={linked} />
+          {user.auth_provider === "langsmith" && (
+            <LinkGitHubButton user={user} />
           )}
         </div>
       }
@@ -164,10 +129,35 @@ function LangSmithRow({ user }: { user: SessionUser }) {
   )
 }
 
+/** Sends the person back through LangSmith sign-in, which renews the grant their tools use. */
+export function SignInWithLangSmithButton({
+  size = "xs",
+}: {
+  size?: "xs" | "sm" | "md"
+}) {
+  return (
+    <Button as={<a href={loginUrl()} />} size={size} color="primary">
+      Sign in again
+    </Button>
+  )
+}
+
+function LangSmithRow({ user }: { user: SessionUser }) {
+  if (user.auth_provider !== "langsmith") return null
+  return (
+    <SettingsRow
+      label="LangSmith"
+      description={`Your sign-in account${user.email ? `: ${user.email}` : ""}. Robin calls LangSmith as you with it. Sign out to change accounts.`}
+      control={<StatusPill connected />}
+    />
+  )
+}
+
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
     <SettingsSection title="Accounts">
-      {user.auth_provider !== "langsmith" && <SlackRow user={user} />}
+      <GitHubRow user={user} />
+      {hasLinkedGitHub(user) && <SlackRow user={user} />}
       <LangSmithRow user={user} />
     </SettingsSection>
   )

@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   MagnifyingGlassRegularIcon,
   TagRegularIcon,
@@ -118,9 +119,7 @@ export function PullRequestLabels({
           )}
           <div className="mt-space-2 max-h-64 overflow-y-auto">
             {catalog.data?.available
-              .filter((label) =>
-                label.name.toLowerCase().includes(search.toLowerCase())
-              )
+              .filter((label) => new FuzzySearch(search).matches(label.name))
               .map((label) => {
                 const selected = catalog.data.selected.some(
                   (item) => item.name === label.name

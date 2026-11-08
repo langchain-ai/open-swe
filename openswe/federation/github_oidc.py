@@ -16,7 +16,7 @@ from jwt import PyJWKClient
 from pydantic import BaseModel, ConfigDict
 
 from openswe.config import ENV
-from openswe.utils.dashboard_links import dashboard_base_url
+from openswe.utils.dashboard_links import PublicOrigin, dashboard_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,17 @@ def audience() -> str:
     return configured or dashboard_base_url()
 
 
+def audiences() -> list[str]:
+    """Every ``aud`` a workflow may request: ``audience()`` or one of the alias domains.
+
+    The aliases serve this same backend, so a workflow can name whichever domain
+    it was configured with, and moving the canonical domain needs no lockstep
+    change to the workflows.
+    """
+    primary = audience()
+    return [primary, *sorted(PublicOrigin.aliases() - {primary})] if primary else []
+
+
 def _keys() -> PyJWKClient:
     global _jwks
     if _jwks is None:
@@ -81,13 +92,13 @@ def looks_federated(token: str) -> bool:
     return unverified.get("iss") == ISSUER
 
 
-def _verify(token: str, expected_audience: str) -> GitHubActionsClaims:
+def _verify(token: str, expected_audiences: list[str]) -> GitHubActionsClaims:
     key = _keys().get_signing_key_from_jwt(token).key
     claims = jwt.decode(
         token,
         key,
         algorithms=list(_ALGORITHMS),
-        audience=expected_audience,
+        audience=expected_audiences,
         issuer=ISSUER,
         options={"require": ["exp", "iat", "iss", "aud", "sub"]},
     )
@@ -101,7 +112,10 @@ async def verify(token: str, expected_audience: str | None = None) -> GitHubActi
     than the dashboard. Runs in a thread because fetching and caching GitHub's
     keys is synchronous I/O inside PyJWT.
     """
-    expected = audience() if expected_audience is None else expected_audience.strip()
+    if expected_audience is None:
+        expected = audiences()
+    else:
+        expected = [expected_audience.strip()] if expected_audience.strip() else []
     if not expected:
         raise InvalidFederatedToken(
             "federated tokens need an audience: set GITHUB_OIDC_AUDIENCE or DASHBOARD_BASE_URL"

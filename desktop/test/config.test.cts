@@ -65,7 +65,7 @@ test("renamed app retains original production and isolated development profiles"
   const appDataPath = path.join("/tmp", "open-swe-app-data");
   const expected = {
     isDevelopment: true,
-    name: "Open SWE Development",
+    name: "Robin Development",
     appUserModelId: "com.langchain.openswe.dev",
     userDataPath: path.join(appDataPath, "Open SWE Development"),
   };
@@ -81,7 +81,7 @@ test("renamed app retains original production and isolated development profiles"
     resolveAppRuntime({ argv: [], isPackaged: true, appDataPath }),
     {
       isDevelopment: false,
-      name: "Open SWE",
+      name: "Robin",
       appUserModelId: "com.langchain.openswe",
       userDataPath: path.join(appDataPath, "Open SWE"),
     },
@@ -204,8 +204,8 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
     "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
-    connectExchangeUrl("https://backend.example", "langsmith"),
-    "https://backend.example/dashboard/api/langsmith/desktop/exchange",
+    connectExchangeUrl("https://backend.example", "github"),
+    "https://backend.example/dashboard/api/github/desktop/exchange",
   );
 });
 
@@ -274,7 +274,20 @@ test("opens only dashboard links from the configured backend", () => {
     desktopDeepLinkUrl(`${backend}/agents/local/private-thread`, backend),
     `${APP_URL}agents/local/private-thread`,
   );
+  const localBackend = "http://localhost:2024";
+  assert.equal(
+    desktopDeepLinkUrl(
+      `${localBackend}/agents/thread-1?tab=plan#latest`,
+      localBackend,
+    ),
+    `${APP_URL}agents/thread-1?tab=plan#latest`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl("http://localhost:2025/agents/thread-1", localBackend),
+    null,
+  );
   for (const url of [
+    "http://openswe.langchain.dev/agents/thread-1",
     "https://openswe.vercel.app/agents/thread-1",
     `${backend}/dashboard/api/auth/callback?code=secret`,
     `${backend}/assets/app.js`,

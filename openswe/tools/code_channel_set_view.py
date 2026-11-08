@@ -12,7 +12,6 @@ from openswe.slack.code_channels import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.tools.manage_code_channel import resolve_view_content
-from openswe.utils.thread_ops import langgraph_client
 
 
 async def code_channel_set_view(
@@ -34,7 +33,7 @@ async def code_channel_set_view(
     if not cfg.thread_id:
         return {"success": False, "error": "Missing thread_id in config"}
     active = await get_active_slack_thread(
-        langgraph_client(), cfg.thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+        cfg.thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
     if not active or not is_code_channel_session(str(active.get("thread_ts") or "")):
         return {"success": False, "error": "this conversation is not in a Slack code channel"}

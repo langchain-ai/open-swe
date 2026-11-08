@@ -39,7 +39,7 @@ def _recovery_patch_script() -> str:
 
 def _recovery_patch_filename(thread_id: str) -> str:
     safe = "".join(c if c.isalnum() or c in {"-", "_", "."} else "-" for c in thread_id)
-    return f"open-swe-{(safe or 'thread')[:80]}.patch"
+    return f"robin-{(safe or 'thread')[:80]}.patch"
 
 
 def _response_output(result: Any) -> str:

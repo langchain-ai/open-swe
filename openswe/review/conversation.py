@@ -27,7 +27,7 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _OPEN_SWE_MARKER_RE = re.compile(r"<!--\s*open-swe-review(?:er|-comment)\b")
 # Open SWE's GitHub footers point back at this page or ask for GitHub reactions; here they're noise.
 _OPEN_SWE_FOOTER_RES = (
-    re.compile(r"-{3,}\s*\n\*Your feedback helps Open SWE learn\.[^\n]*\*"),
+    re.compile(r"-{3,}\s*\n\*Your feedback helps (?:Robin|Open SWE) learn\.[^\n]*\*"),
     re.compile(r"^React 👍 or 👎.*$", re.MULTILINE),
     re.compile(r"\[Open in Web\]\([^)]*\)(?:\s*•\s*)?"),
 )
@@ -271,7 +271,7 @@ class ReviewThread(BaseModel):
     @staticmethod
     async def states(pull: PullRequestClient) -> dict[int, _ThreadState]:
         """Each thread's node id and resolution, keyed by its first comment's id."""
-        threads = _THREAD_STATES.validate_python(await pull.review_threads())
+        threads = _THREAD_STATES.validate_python(await pull.review_threads(roots_only=True))
         return {
             int(thread.comments.nodes[0].fullDatabaseId): thread
             for thread in threads

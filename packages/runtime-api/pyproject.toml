@@ -1,10 +1,16 @@
 [project]
 name = "open-swe-runtime-api"
 version = "0.0.0"
-description = "The typed contract between Open SWE's backend and its Managed Deep Agents runtime (mda/): every call MDA makes and what it answers."
+description = "The typed contract between Robin's backend and its Managed Deep Agents runtime (mda/): every call MDA makes and what it answers."
 requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.11",
+    # Both sides build the run's chat models from the one table and builder (models.py).
+    "langchain>=1.4.7",
+    "langchain-openai>=1.7.3,<2.0.0",
+    # Jev, the gateway's classifier, which both sides ask (classifier.py).
+    "langchain-typesafe==0.0.1",
+    "httpx2>=2.12.0",
 ]
 
 [build-system]

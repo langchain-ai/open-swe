@@ -212,7 +212,10 @@ class ThreadSearch(BaseModel):
         clauses = ["metadata @> CAST(:filter AS jsonb)"]
         params: dict[str, object] = {"filter": json.dumps(self.metadata)}
         if self.text:
-            clauses.append(f"strpos({_SEARCHABLE}, :text) > 0")
+            clauses.append(
+                f"(strpos({_SEARCHABLE}, :text) > 0 OR "
+                f"(length(:text) >= 3 AND :text ~ '^[[:alpha:] _-]+$' AND public.word_similarity(:text, {_SEARCHABLE}) >= 0.5))"
+            )
             params["text"] = self.text.lower()
         if self.ids is not None:
             clauses.append("thread_id = ANY(:ids)")

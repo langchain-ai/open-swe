@@ -9,6 +9,11 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { toast } from "sonner"
 
+import { useSession } from "@/lib/session"
+import { useOpenPullRequests } from "@/features/reviews/lib/useOpenPullRequests"
+import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
+import type { OpenPullRequest } from "@/lib/api"
+import { awaitsViewer } from "@/features/reviews/lib/reviewers"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { parsePullRequestSelection } from "@/features/reviews/search"
 import { warmReviewPage, type PullRequestRef } from "./queries"
@@ -30,24 +35,76 @@ export interface ReviewQueue {
 export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const queue = useSearch({
+  const explicit = useSearch({
     from: REVIEW_ROUTE,
     shouldThrow: false,
     select: (search) => search.queue,
   })
+  const login = useSession().data?.login ?? ""
+  const pending = useOpenPullRequests(
+    login,
+    [],
+    "updatedAt",
+    "desc",
+    "review-assigned"
+  )
+  const { hasNextPage, isFetching, fetchNextPage } = pending
+  useEffect(() => {
+    if (hasNextPage && !isFetching) void fetchNextPage()
+  }, [hasNextPage, isFetching, fetchNextPage])
+  const rows = pending.data?.pages.flatMap((page) => page.pullRequests) ?? []
   const current = pullRequestKey({
     repo: `${pr.owner}/${pr.repo}`,
     number: pr.number,
   }).toLowerCase()
-  const index = queue?.findIndex((key) => key.toLowerCase() === current) ?? -1
-  const nextKey = index < 0 ? undefined : queue?.[index + 1]
-  const previous = parsePullRequestSelection(queue?.[index - 1])
+  const same = (key: string) => key.toLowerCase() === current
+  const loaded =
+    pending.isSuccess &&
+    !pending.hasNextPage &&
+    !pending.data.pages.some((page) => page.incomplete)
+  const remaining = loaded
+    ? rows
+        .filter((row) => {
+          const live = queryClient.getQueryData<OpenPullRequest | null>(
+            pullRequestStatusQuery(login, row).queryKey
+          )
+          return awaitsViewer(
+            { ...row, ...live, assignment: row.assignment },
+            login
+          )
+        })
+        .map(pullRequestKey)
+    : undefined
+  const ordered = !remaining
+    ? (explicit ?? [])
+    : explicit
+      ? [
+          ...explicit.filter(
+            (key) =>
+              same(key) ||
+              remaining.some((left) => left.toLowerCase() === key.toLowerCase())
+          ),
+          ...remaining.filter(
+            (key) =>
+              !explicit.some(
+                (entry) => entry.toLowerCase() === key.toLowerCase()
+              )
+          ),
+        ]
+      : remaining.some((key) => !same(key))
+        ? [current, ...remaining.filter((key) => !same(key))]
+        : []
+  const queue =
+    ordered.length && !ordered.some(same) ? [current, ...ordered] : ordered
+  const index = queue.findIndex(same)
+  const nextKey = queue[index + 1]
+  const previous = parsePullRequestSelection(queue[index - 1])
   const next = parsePullRequestSelection(nextKey)
   useEffect(() => {
     const upcoming = parsePullRequestSelection(nextKey)
     if (upcoming) warmReviewPage(queryClient, upcoming)
   }, [queryClient, nextKey])
-  if (!queue || index < 0) return null
+  if (index < 0) return null
   const open = (target: PullRequestRef) =>
     void navigate({
       to: REVIEW_ROUTE,

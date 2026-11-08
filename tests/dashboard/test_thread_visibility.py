@@ -70,15 +70,12 @@ async def test_langsmith_identity_is_private_owner_only_and_cannot_inherit_admin
     metadata = {
         "source": "dashboard",
         "visibility": "private",
-        "experience": "agent_workspace",
         "owner_login": subject,
     }
     assert summary.thread_is_readable(metadata, subject)
     assert summary.thread_is_promptable(metadata, subject)
     assert not summary.thread_is_readable(metadata, f"user:{uuid7()}", "admin@example.com")
     assert not summary.thread_is_readable({**metadata, "visibility": "public"}, subject)
-    assert summary.thread_is_readable({**metadata, "experience": "coding"}, subject)
-    assert not summary.thread_is_readable({**metadata, "experience": "unknown"}, subject)
     assert not Principal.of_login(subject, "admin@example.com").admin
     assert not await actor_is_admin(
         RunConfig(auth_provider="langsmith", user_email="admin@example.com")
@@ -123,7 +120,9 @@ def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
     ("is_im", "thread_ts", "listed"),
     [(True, "0", False), (True, "123.456", True), (False, "0", True)],
 )
-def test_only_concierge_dms_are_unlisted(is_im: bool, thread_ts: str, listed: bool):
+async def test_only_concierge_dms_are_unlisted(
+    is_im: bool, thread_ts: str, listed: bool, monkeypatch: pytest.MonkeyPatch
+):
     metadata = {
         "source": "slack",
         "visibility": "private",
@@ -143,6 +142,9 @@ def test_only_concierge_dms_are_unlisted(is_im: bool, thread_ts: str, listed: bo
     assert summary.thread_is_readable(metadata, "alice")
     assert summary.thread_is_promptable(metadata, "alice")
     assert not summary.thread_is_readable(metadata, "bob")
+    monkeypatch.setattr(summary, "get_langsmith_trace_url", AsyncMock(return_value=None))
+    detail = await summary._thread_summary({"thread_id": "concierge", "metadata": metadata})
+    assert detail["concierge"] is (not listed)
 
 
 @pytest.mark.parametrize(

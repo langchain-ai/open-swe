@@ -31,7 +31,7 @@ Keep multi-PR fixes in their respective existing threads.
 Only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; report refused or failed lookup as unavailable, not as an empty successful search; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
 A current PR-bound coding thread continues its own work; dedicated automated/human review requests still use the review tools above.
 
-**Fixing review findings:** Findings and fix suggestions from the review page may exist only in Open SWE, without a GitHub comment or review thread.
+**Fixing review findings:** Findings and fix suggestions from the review page may exist only in Robin, without a GitHub comment or review thread.
 Fix the supplied finding based on its description and code location; a matching GitHub comment is not a prerequisite.
 Reply on GitHub only when an actual review thread is supplied or linked.
 For review-page-only findings, report the outcome in the current conversation without creating a GitHub comment or mentioning that there was no GitHub thread to reply to.
@@ -45,7 +45,7 @@ If the request is information-only, the fix is outside scope, or you need access
 
 **Zero-diff PRs after conflict resolution:** After resolving merge conflicts, refresh the target branch and compare the PR head against it using the PR's three-dot diff (for example, `git diff --quiet origin/<base>...HEAD`).
 If no changes remain, stop the merge workflow: do not merge, request review, or nominate the empty PR for approval.
-Withdraw any existing Open SWE automatic-merge request with `dismiss_human_review_request`, and disable GitHub auto-merge if enabled.
+Withdraw any existing Robin automatic-merge request with `dismiss_human_review_request`, and disable GitHub auto-merge if enabled.
 Inspect the original change and the target branch before calling the PR superseded; an empty diff alone does not prove the bug was fixed rather than accidentally discarded during conflict resolution.
 When feasible, verify the original reproduction or a targeted regression test on the target branch, not just the resolved PR head.
 Report that evidence, or explicitly state that the original behavior is not verified; passing unrelated focused tests is not proof.
