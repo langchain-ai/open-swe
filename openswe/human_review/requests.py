@@ -42,12 +42,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.expedited_review.eligibility import ExcludedHunk
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
 from openswe.slack.dm import DmOrigin
 from openswe.slack.records import lookup_slack_thread_id
+from openswe.ui_invalidations import Topic
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -451,6 +453,8 @@ class HumanReviewRequest(Base):
             )
             before = row.event_state() if row is not None else None
             yield row, {name.lower(): at for name, at in rows if name and at is not None}
+            if row is not None and row.event_state() != before:
+                await row.invalidate(session)
         if row is not None and before is not None:
             await row.log_changes(before)
 
@@ -609,6 +613,13 @@ class HumanReviewRequest(Base):
         if changes:
             await self.log_event("request.updated", changes=changes)
 
+    async def invalidate(self, session: AsyncSession) -> None:
+        """Refresh dashboard readers when this request's transaction commits."""
+        pr = self.pull_request
+        await Topic.PULL_REQUESTS.invalidate(
+            session, key=PullRequestKey.of(pr.owner, pr.repo, pr.number)
+        )
+
     async def save(self) -> Self:
         cls = type(self)
         previous = await cls.get(self.id)
@@ -621,6 +632,8 @@ class HumanReviewRequest(Base):
                 .where(cls.id == self.id)
                 .execution_options(populate_existing=True)
             )
+            if stored is not None:
+                await stored.invalidate(session)
         if stored is None:
             raise RuntimeError(f"human review request {self.id} vanished during save")
         if before is None:
@@ -643,6 +656,8 @@ class HumanReviewRequest(Base):
             before = row.event_state() if row is not None else None
             yield session, row
             deleted = row is not None and (row in session.deleted or inspect(row).deleted)
+            if row is not None and (deleted or row.event_state() != before):
+                await row.invalidate(session)
         if row is not None and before is not None:
             if deleted:
                 await row.log_event("request.discarded", snapshot=before)
@@ -667,6 +682,9 @@ class HumanReviewRequest(Base):
             requests = list(rows)
             before = {row.id: row.event_state() for row in requests}
             yield requests
+            for row in requests:
+                if row.event_state() != before[row.id]:
+                    await row.invalidate(session)
         for row in requests:
             await row.log_changes(before[row.id])
 

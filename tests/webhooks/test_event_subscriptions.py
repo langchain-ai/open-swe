@@ -15,6 +15,7 @@ from openswe.github.comments import (
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.channels import SlackChannel
+from openswe.ui_invalidations import Topic
 from openswe.webhooks import event_log
 from openswe.webhooks.event_log import EventLog, EventRefs, EventVisibility, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
@@ -325,6 +326,14 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
     assert pull is not None
     request.pull_request = pull
     stored = await request.save()
+    topic = Topic.PULL_REQUESTS.keyed("acme/widgets/7")
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+            )
+            == 1
+        )
     async with HumanReviewRequest.locked(stored.id) as (_, row):
         assert row is not None
         row.state = "cancelled"
@@ -347,6 +356,12 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
             await session.flush()
     assert await HumanReviewRequest.get(stored.id) is None
     async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+            )
+            == 3
+        )
         rows = (
             (
                 await conn.execute(

@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
+import { pullRequestTopic } from "../lib/cache"
 import { pullRequestKey } from "../lib/status"
 import { PullRequestActionButton } from "./PullRequestActionButton"
 
@@ -27,7 +28,8 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     enabled: needsReview,
     queryFn: () =>
       api.humanReviewAvailability({ repo: pr.repo, number: pr.number }),
-    staleTime: 60_000,
+    meta: { invalidatedBy: [pullRequestTopic(pr)] },
+    refetchOnWindowFocus: true,
   })
   const [channel, setChannel] = useState<string | null>(null)
   const active = availability.data?.active ?? false
@@ -76,16 +78,14 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       : availability.isPending
         ? "Checking the default Slack review channel…"
         : availability.isError
-          ? "Could not check the default Slack review channel. Choose a review channel manually or retry the review status."
+          ? "Could not check the default Slack review channel. Choose a review channel manually."
           : needsChannel
             ? "No default Slack review channel is configured. Choose a review channel manually to enable this button."
             : null
   const label = requestReview.isPending
     ? "Requesting…"
     : active
-      ? permalink
-        ? "Review requested"
-        : "Retry review status"
+      ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
         : "Request review in Slack"
@@ -107,21 +107,13 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       )}
       <PullRequestActionButton
         label={label}
-        loading={
-          requestReview.isPending ||
-          (active && !permalink && availability.isFetching)
-        }
-        disabled={
-          Boolean(channelHint) ||
-          (active && !permalink && availability.isFetching)
-        }
+        loading={requestReview.isPending}
+        disabled={Boolean(channelHint) || (active && !permalink)}
         onClick={() => {
           if (requestReview.isPending) return
           if (active) {
             if (permalink) {
               window.open(permalink, "_blank", "noopener,noreferrer")
-            } else {
-              void availability.refetch()
             }
           } else if (channelHint) {
             toast.error(channelHint)
@@ -130,15 +122,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           }
         }}
       />
-      {((availability.isError && !active) ||
-        (active && Boolean(permalink))) && (
-        <PullRequestActionButton
-          label="Retry review status"
-          loading={availability.isFetching}
-          disabled={availability.isFetching}
-          onClick={() => void availability.refetch()}
-        />
-      )}
       {channelHint && (
         <Popover>
           <PopoverTrigger asChild>
