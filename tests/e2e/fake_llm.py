@@ -296,6 +296,7 @@ BACKGROUND_WORK_MONITOR_COMMAND = (
     'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
 )
 BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
+BACKGROUND_WORK_LISTENER_INSTRUCTIONS = "Recheck the build when CI finishes."
 INBOX_MARKER = "E2E_INBOX"
 INBOX_EVENT_LINE = "INBOX_EVENT build finished"
 # Prints its event at once, then outlasts the spec without lingering on the host.
@@ -1500,7 +1501,17 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             },
             "call-background-work-monitor",
         ),
-        StepSpec(content="Started the build and the log monitor."),
+        _tool_step(
+            "Listening for CI to finish.",
+            "listen_events",
+            {
+                "action": "subscribe",
+                "event_types": ["check_suite.completed"],
+                "instructions": BACKGROUND_WORK_LISTENER_INSTRUCTIONS,
+            },
+            "call-background-work-listen",
+        ),
+        StepSpec(content="Started the build, the log monitor and a CI listener."),
     ),
     "iframe": (
         _tool_step(

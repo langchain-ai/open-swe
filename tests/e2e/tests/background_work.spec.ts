@@ -7,10 +7,11 @@ import {
 } from "./helpers/dashboard";
 
 // The real agent starts a `background_execute` command and a `monitor` in its
-// (local-provider) sandbox; the thread's right panel lists both in its
-// Background work surface, read live from the sandbox through the dashboard API.
+// (local-provider) sandbox and subscribes to CI events; the thread's right
+// panel lists all three in its Background work surface, read live from the
+// sandbox and the thread's event subscriptions through the dashboard API.
 test.describe("background work panel (real dashboard UI)", () => {
-  test("lists the running monitor and background command", async ({
+  test("lists the running monitor, background command and event listener", async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -51,6 +52,14 @@ test.describe("background work panel (real dashboard UI)", () => {
     await expect(commands).toContainText("echo 'building assets'; sleep 110", {
       timeout: 60_000,
     });
+    const listeners = panel.getByRole("region", { name: "Event listeners" });
+    await expect(listeners).toContainText("check_suite.completed", {
+      timeout: 60_000,
+    });
+    await listeners.getByRole("button", { expanded: false }).first().click();
+    await expect(listeners).toContainText(
+      "Recheck the build when CI finishes.",
+    );
     await commands.getByRole("button", { expanded: false }).first().click();
     await expect(commands.getByLabel("Latest output")).toContainText(
       "building assets",

@@ -1047,6 +1047,14 @@
             "title": "Commands",
             "type": "array"
           },
+          "listeners": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EventListener"
+            },
+            "title": "Listeners",
+            "type": "array"
+          },
           "monitors": {
             "default": [],
             "items": {
@@ -2668,6 +2676,85 @@
           "request"
         ],
         "title": "EntryView",
+        "type": "object"
+      },
+      "EventListener": {
+        "description": "An event subscription that wakes the thread when a matching event arrives.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "number"
+          },
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          },
+          "last_triggered_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Triggered At"
+          },
+          "one_shot": {
+            "title": "One Shot",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "subscription_id": {
+            "title": "Subscription Id",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "trigger_count": {
+            "title": "Trigger Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "subscription_id",
+          "target",
+          "sources",
+          "event_types",
+          "instructions",
+          "one_shot",
+          "trigger_count",
+          "last_triggered_at",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "EventListener",
         "type": "object"
       },
       "ExcludedHunk": {

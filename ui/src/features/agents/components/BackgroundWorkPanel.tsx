@@ -1,6 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
+import { BellRingingIcon } from "@phosphor-icons/react/dist/ssr/BellRinging"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { useEffect, useRef, useState } from "react"
@@ -12,25 +13,34 @@ import {
 } from "@/features/agents/lib/queries"
 import type {
   AgentBackgroundCommand,
+  AgentEventListener,
   AgentThreadMonitor,
 } from "@/features/agents/lib/types"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
-/** Whether the thread has a command or monitor running, so the panel is worth opening. */
+/** Whether the thread has a command, monitor or event listener, so the panel is worth opening. */
 export function useHasBackgroundWork(threadId: string): boolean {
   const work = useAgentThreadBackgroundWork(threadId).data
-  return Boolean(work?.monitors.length || work?.commands.length)
+  return Boolean(
+    work?.monitors.length || work?.commands.length || work?.listeners?.length
+  )
 }
 
 /**
- * The thread's running sandbox monitors and background commands, as a right
- * panel surface. Each row opens to its full command and latest output.
+ * The thread's running sandbox monitors, background commands and event
+ * listeners, as a right panel surface. Each row opens to its details, and a
+ * command's or monitor's latest output.
  */
 export function BackgroundWorkPanel({ threadId }: { threadId: string }) {
   const work = useAgentThreadBackgroundWork(threadId).data
   const monitors = work?.monitors ?? []
   const commands = work?.commands ?? []
-  if (monitors.length === 0 && commands.length === 0) {
+  const listeners = work?.listeners ?? []
+  if (
+    monitors.length === 0 &&
+    commands.length === 0 &&
+    listeners.length === 0
+  ) {
     return (
       <p className="flex flex-1 items-center justify-center px-space-5 text-center text-xs text-secondary">
         Nothing is running in the background.
@@ -64,6 +74,13 @@ export function BackgroundWorkPanel({ threadId }: { threadId: string }) {
           ))}
         </Section>
       )}
+      {listeners.length > 0 && (
+        <Section title="Event listeners" icon={BellRingingIcon}>
+          {listeners.map((listener) => (
+            <ListenerRow key={listener.subscription_id} listener={listener} />
+          ))}
+        </Section>
+      )}
     </div>
   )
 }
@@ -89,15 +106,14 @@ function Section({
 }
 
 function Row({
-  threadId,
-  taskId,
+  output,
   title,
   command,
   summary,
   details,
 }: {
-  threadId: string
-  taskId: string
+  /** The command or monitor whose latest output shows once the row is open. */
+  output: { threadId: string; taskId: string } | null
   title: string
   command: string | null
   summary: string
@@ -111,7 +127,7 @@ function Row({
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label={title}
+        aria-label={`${title}, ${summary}`}
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -163,7 +179,9 @@ function Row({
                 ))}
               </dl>
             )}
-            <Output threadId={threadId} taskId={taskId} />
+            {output && (
+              <Output threadId={output.threadId} taskId={output.taskId} />
+            )}
           </div>
         </div>
       )}
@@ -230,8 +248,7 @@ function MonitorRow({
   }
   return (
     <Row
-      threadId={threadId}
-      taskId={monitor.monitor_id}
+      output={{ threadId, taskId: monitor.monitor_id }}
       title={monitor.description || monitor.command}
       command={monitor.command}
       summary={summary}
@@ -249,12 +266,42 @@ function CommandRow({
 }) {
   return (
     <Row
-      threadId={threadId}
-      taskId={command.task_id}
+      output={{ threadId, taskId: command.task_id }}
       title={command.command ?? command.task_id}
       command={command.command}
       summary={started(command.started_at) ?? "Running"}
       details={[]}
+    />
+  )
+}
+
+function ListenerRow({ listener }: { listener: AgentEventListener }) {
+  const summary = [
+    started(listener.created_at),
+    plural(listener.trigger_count, "event"),
+    listener.last_triggered_at !== null &&
+      `last ${formatRelativeTime(listener.last_triggered_at * 1000)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+  const details: Array<[string, string]> = []
+  if (listener.instructions) details.push(["Task", listener.instructions])
+  if (listener.sources.length > 0) {
+    details.push(["Sources", listener.sources.join(", ")])
+  }
+  details.push(["Fires", listener.one_shot ? "Once" : "On every match"])
+  details.push(["Stops", formatRelativeTime(listener.expires_at * 1000)])
+  return (
+    <Row
+      output={null}
+      title={
+        listener.event_types.length > 0
+          ? listener.event_types.join(", ")
+          : "Any event"
+      }
+      command={listener.target}
+      summary={summary}
+      details={details}
     />
   )
 }

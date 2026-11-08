@@ -1112,6 +1112,15 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     queryKey: agentThreadKeys.backgroundWork(threadId),
     queryFn: () => agentsApi.getThreadBackgroundWork(threadId),
     enabled: Boolean(threadId),
+    // Nothing is published when an event listener expires, so refetch then.
+    refetchInterval: (query) => {
+      const expiries = (query.state.data?.listeners ?? []).map(
+        (listener) => listener.expires_at * 1000 - Date.now()
+      )
+      return expiries.length > 0
+        ? Math.max(Math.min(...expiries), 1_000)
+        : false
+    },
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
