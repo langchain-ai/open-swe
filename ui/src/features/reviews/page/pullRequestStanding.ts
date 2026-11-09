@@ -174,6 +174,13 @@ export function pullRequestStanding(
             ? plural(conversations.current, "open conversation")
             : null
     const approved = status.reviewDecision === "approved"
+    if (status.mergeState === "blocked")
+      return {
+        tone: "blocked",
+        headline: `${approved ? "Approved, but" : "Open, but"} GitHub is blocking the merge.`,
+        details,
+        next: { kind: "merge" },
+      }
     return {
       tone: outstanding ? "waiting" : "ready",
       headline: outstanding
