@@ -28,6 +28,9 @@ from openswe.event_claims import PURGE_JOB as EVENT_CLAIM_PURGE
 from openswe.event_claims import PURGE_SCHEDULE as EVENT_CLAIM_SCHEDULE
 from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
 from openswe.github.branch_config import refresh_required_checks
+from openswe.github.quota import SAMPLE_JOB as GITHUB_QUOTA_SAMPLE
+from openswe.github.quota import SAMPLE_SCHEDULE as GITHUB_QUOTA_SCHEDULE
+from openswe.github.quota import InstallationQuota
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -77,6 +80,7 @@ _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
+WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 
 
@@ -270,6 +274,9 @@ async def start_jobs() -> None:
         lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
         lambda: queue.schedule(EVENT_CLAIM_PURGE, cron=EVENT_CLAIM_SCHEDULE, key=EVENT_CLAIM_PURGE),
         lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
+        lambda: queue.schedule(
+            GITHUB_QUOTA_SAMPLE, cron=GITHUB_QUOTA_SCHEDULE, key=GITHUB_QUOTA_SAMPLE
+        ),
     ]
     for step in steps:
         try:

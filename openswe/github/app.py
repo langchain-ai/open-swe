@@ -1,7 +1,7 @@
 """GitHub App installation token generation."""
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from urllib.parse import quote
@@ -100,82 +100,104 @@ def _app_auth() -> AppAuthStrategy:
     return AppAuthStrategy(GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n"))
 
 
-async def get_github_app_installation_id_for_org(org: str) -> int | None:
-    """Resolve the GitHub App installation for an organization."""
-    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not org.strip():
-        return None
-    try:
-        async with github_sdk(_app_auth()) as client:
-            response = await client.rest(GITHUB_API_VERSION).apps.async_get_org_installation(
-                quote(org.strip(), safe="")
-            )
-        installation_id = response.json().get("id")
-        return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
-    except Exception:
-        logger.warning(
-            "Failed to resolve GitHub App installation", extra={"org": org}, exc_info=True
-        )
-        return None
+class AppInstallations:
+    """Which App installation covers each organization and repository, kept for a while.
 
-
-class RepoInstallations:
-    """Which App installation covers each repository, kept for a while in this process.
-
-    Every ``GitHubClient.as_app(owner, repo)`` asks, so each lookup used to cost a GitHub
-    round trip. A reinstall moves a repository to a new installation: installation
-    webhooks forget every kept answer, and ``as_app`` forgets one whose token fails.
+    Every ``GitHubClient.as_app(owner, repo)`` and every org membership read asks, so each
+    lookup used to cost a GitHub round trip. A reinstall moves an owner to a new
+    installation: installation webhooks forget every kept answer on the replica they
+    reach, and a caller whose token can't be minted forgets its answer and asks again.
+    A failed lookup is never kept.
     """
 
     TTL_SECONDS = 600
-    CACHE_KEY = "github-app-installation:{}/{}"
+    REPO_KEY = "github-app-installation:{}/{}"
+    ORG_KEY = "github-app-installation:{}"
 
     def __init__(self) -> None:
         self._keys: set[str] = set()
 
-    async def lookup(self, owner: str, repo: str) -> int | None:
-        if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
-            return None
+    async def for_repo(self, owner: str, repo: str) -> int | None:
         owner, repo = owner.strip(), repo.strip()
-        key = self.CACHE_KEY.format(owner.lower(), repo.lower())
-        self._keys.add(key)
-        try:
-            return await ttl_cache.cached(
-                key, self.TTL_SECONDS, partial(self._ask_github, owner, repo), serve_stale=False
-            )
-        except Exception:
-            logger.warning(
-                "Failed to resolve GitHub App installation",
-                extra={"owner": owner, "repo": repo},
-                exc_info=True,
-            )
+        if not owner or not repo:
             return None
+        return await self._lookup(
+            self.REPO_KEY.format(owner.lower(), repo.lower()),
+            partial(self._ask_github_for_repo, owner, repo),
+            {"owner": owner, "repo": repo},
+        )
 
-    async def forget(self, owner: str, repo: str) -> None:
-        ttl_cache.invalidate(self.CACHE_KEY.format(owner.strip().lower(), repo.strip().lower()))
+    async def for_org(self, org: str) -> int | None:
+        org = org.strip()
+        if not org:
+            return None
+        return await self._lookup(
+            self.ORG_KEY.format(org.lower()), partial(self._ask_github_for_org, org), {"org": org}
+        )
+
+    async def forget(self, owner: str, repo: str | None = None) -> None:
+        """Forget the kept installation on ``owner/repo``, or on the ``owner`` org."""
+        owner = owner.strip().lower()
+        ttl_cache.invalidate(
+            self.ORG_KEY.format(owner)
+            if repo is None
+            else self.REPO_KEY.format(owner, repo.strip().lower())
+        )
 
     async def forget_all(self) -> None:
         for key in self._keys:
             ttl_cache.invalidate(key)
         self._keys.clear()
 
-    @staticmethod
-    async def _ask_github(owner: str, repo: str) -> int:
+    async def _lookup(
+        self, key: str, ask: Callable[[], Awaitable[int]], extra: Mapping[str, str]
+    ) -> int | None:
+        if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY:
+            return None
+        self._keys.add(key)
+        try:
+            return await ttl_cache.cached(key, self.TTL_SECONDS, ask, serve_stale=False)
+        except Exception:
+            logger.warning(
+                "Failed to resolve GitHub App installation", extra=dict(extra), exc_info=True
+            )
+            return None
+
+    @classmethod
+    async def _ask_github_for_repo(cls, owner: str, repo: str) -> int:
         async with github_sdk(_app_auth()) as client:
             response = await client.rest(GITHUB_API_VERSION).apps.async_get_repo_installation(
                 quote(owner, safe=""), quote(repo, safe="")
             )
-        installation_id = response.json().get("id")
+        return cls._installation_id(response.json())
+
+    @classmethod
+    async def _ask_github_for_org(cls, org: str) -> int:
+        async with github_sdk(_app_auth()) as client:
+            response = await client.rest(GITHUB_API_VERSION).apps.async_get_org_installation(
+                quote(org, safe="")
+            )
+        return cls._installation_id(response.json())
+
+    @staticmethod
+    def _installation_id(payload: object) -> int:
+        installation_id = payload.get("id") if isinstance(payload, dict) else None
         if not isinstance(installation_id, int) or installation_id <= 0:
             raise ValueError("GitHub answered without an installation id")
         return installation_id
 
 
-REPO_INSTALLATIONS = RepoInstallations()
+INSTALLATIONS = AppInstallations()
+
+
+async def get_github_app_installation_id_for_org(org: str) -> int | None:
+    """Resolve the GitHub App installation for an organization."""
+    return await INSTALLATIONS.for_org(org)
 
 
 async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int | None:
     """Resolve the GitHub App installation that can access a repository."""
-    return await REPO_INSTALLATIONS.lookup(owner, repo)
+    return await INSTALLATIONS.for_repo(owner, repo)
 
 
 async def get_github_app_installation_token(
@@ -284,9 +306,10 @@ async def get_github_app_installation_token_with_expiry(
         else:
             logger.debug("Failed to get GitHub App installation token", exc_info=True)
         if raise_errors:
-            retryable = False
+            retryable = gone = False
             if isinstance(exc, RequestFailed):
                 response = exc.response.raw_response
+                gone = response.status_code == 404
                 retryable = (
                     response.status_code == 429
                     or 500 <= response.status_code < 600
@@ -301,5 +324,7 @@ async def get_github_app_installation_token_with_expiry(
                 )
             elif isinstance(exc, RequestError):
                 retryable = isinstance(exc.exc, httpx2.TransportError)
-            raise GitHubAppUnavailable("GitHub App token unavailable", retryable=retryable) from exc
+            raise GitHubAppUnavailable(
+                "GitHub App token unavailable", retryable=retryable, gone=gone
+            ) from exc
         return None, None

@@ -9,9 +9,12 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 - **Retries**: exponential backoff with jitter for retryable HTTP status codes
   and transport errors, gated by method idempotency to prevent duplicate writes.
   See ``github_request`` for the full retry matrix.
-- **Rate-limit awareness**: respects ``Retry-After`` headers and detects
-  GitHub secondary rate limits (403 with ``X-RateLimit-Remaining: 0`` or a
-  "secondary rate limit" body message), backing off before retrying.
+- **Rate-limit awareness**: respects ``Retry-After`` headers and backs off on
+  GitHub secondary rate limits; a spent hourly quota is not retried unless it
+  resets within the longest backoff.
+- **Conditional reads**: ``github_client`` revalidates repeated GETs with their
+  ETag (``openswe.github.revalidation``), and GitHub doesn't count a 304 against
+  the quota.
 """
 
 import asyncio
@@ -20,6 +23,7 @@ import io
 import logging
 import random
 import re
+import time
 import zipfile
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -44,8 +48,8 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
+from openswe.github.revalidation import GITHUB_TRANSPORT
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_base_url
-from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
@@ -62,6 +66,7 @@ DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 _PAGE_SIZE = 100
 _PAGE_CONCURRENCY = 10
+_TEAM_MAX_PAGES = 10
 _FILES_PER_QUERY = 100
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
@@ -84,41 +89,73 @@ def github_headers(token: str) -> dict[str, str]:
     }
 
 
-def _is_secondary_rate_limit(response: httpx2.Response) -> bool:
-    if response.status_code != 403:
-        return False
-    if response.headers.get("X-RateLimit-Remaining") == "0":
-        return True
-    body = (response.text or "").lower()
-    return any(marker in body for marker in _SECONDARY_RATE_LIMIT_MARKERS)
+class _Retry:
+    """Whether ``github_request`` asks GitHub again, and how long it waits first."""
 
+    @classmethod
+    def after_response(cls, response: httpx2.Response, method: str, attempt: int) -> float | None:
+        """Seconds to wait before asking again, or ``None`` when asking again can't help."""
+        if response.status_code in (403, 429) and (reset := cls._quota_reset_in(response)):
+            # The token's hourly quota is spent and GitHub refuses everything until it
+            # resets; asking sooner only adds refusals.
+            return reset if reset <= _MAX_BACKOFF else None
+        if (
+            response.status_code in _ALWAYS_RETRYABLE_STATUS
+            or (
+                response.status_code in _IDEMPOTENT_RETRYABLE_STATUS
+                and method.upper() in _RETRYABLE_TRANSPORT_METHODS
+            )
+            or cls._secondary_rate_limited(response)
+        ):
+            retry_after = cls._retry_after(response)
+            return cls.after_error(attempt) if retry_after is None else retry_after
+        return None
 
-def _is_retryable_response(response: httpx2.Response, method: str) -> bool:
-    if response.status_code in _ALWAYS_RETRYABLE_STATUS:
-        return True
-    if response.status_code in _IDEMPOTENT_RETRYABLE_STATUS:
-        return method.upper() in _RETRYABLE_TRANSPORT_METHODS
-    return _is_secondary_rate_limit(response)
+    @staticmethod
+    def after_error(attempt: int) -> float:
+        """Exponential backoff with jitter."""
+        base = _BASE_BACKOFF * (_BACKOFF_MULTIPLIER**attempt)
+        jitter = base * random.uniform(-_JITTER_FACTOR, _JITTER_FACTOR)
+        return min(base + jitter, _MAX_BACKOFF)
 
+    @staticmethod
+    def _quota_reset_in(response: httpx2.Response) -> float | None:
+        """Seconds until the primary quota resets, when ``response`` says it is spent.
 
-def _retry_after_seconds(response: httpx2.Response) -> float | None:
-    retry_after = response.headers.get("Retry-After")
-    if retry_after:
+        A secondary limit names its own wait in ``Retry-After`` and is not this.
+        """
+        if (
+            response.headers.get("Retry-After") is not None
+            or response.headers.get("X-RateLimit-Remaining") != "0"
+        ):
+            return None
         try:
-            return float(retry_after)
+            reset = float(response.headers.get("X-RateLimit-Reset", ""))
         except ValueError:
             return None
-    return None
+        return max(reset - time.time(), 0.0) or None
 
+    @classmethod
+    def rate_limited(cls, response: httpx2.Response) -> bool:
+        """Whether GitHub refused ``response``'s request for its primary or a secondary limit."""
+        return (
+            response.status_code in (403, 429)
+            and response.headers.get("X-RateLimit-Remaining") == "0"
+        ) or cls._secondary_rate_limited(response)
 
-def _compute_backoff(response: httpx2.Response | None, attempt: int) -> float:
-    if response is not None:
-        retry_after = _retry_after_seconds(response)
-        if retry_after is not None:
-            return min(retry_after, _MAX_BACKOFF)
-    base = _BASE_BACKOFF * (_BACKOFF_MULTIPLIER**attempt)
-    jitter = base * random.uniform(-_JITTER_FACTOR, _JITTER_FACTOR)
-    return min(base + jitter, _MAX_BACKOFF)
+    @staticmethod
+    def _secondary_rate_limited(response: httpx2.Response) -> bool:
+        if response.status_code != 403:
+            return False
+        body = (response.text or "").lower()
+        return any(marker in body for marker in _SECONDARY_RATE_LIMIT_MARKERS)
+
+    @staticmethod
+    def _retry_after(response: httpx2.Response) -> float | None:
+        try:
+            return min(float(response.headers["Retry-After"]), _MAX_BACKOFF)
+        except KeyError, ValueError:
+            return None
 
 
 @asynccontextmanager
@@ -142,7 +179,7 @@ async def github_client(
     async with httpx2.AsyncClient(
         headers=merged_headers or None,
         timeout=timeout or DEFAULT_TIMEOUT,
-        transport=pooled_transport(),
+        transport=GITHUB_TRANSPORT,
     ) as client:
         yield client
 
@@ -168,6 +205,7 @@ async def github_request(
     | Transport error (timeout/reset)   | Retry with backoff             | Raise immediately            |
     | 429 / 503 / secondary rate limit  | Retry with backoff             | Retry with backoff           |
     | 502 / 504 (ambiguous gateway)     | Retry with backoff             | Raise immediately            |
+    | Hourly quota spent (403/429)      | Wait for its reset if under 60 s, else return the refusal     |
 
     429 and 503 are safe to retry for any method: the server explicitly did
     not process the request.  502/504 are ambiguous — the upstream may have
@@ -184,7 +222,7 @@ async def github_request(
         except (httpx2.TimeoutException, httpx2.TransportError) as exc:
             last_exc = exc
             if retry_transport and attempt < max_retries:
-                delay = _compute_backoff(None, attempt)
+                delay = _Retry.after_error(attempt)
                 logger.warning(
                     "GitHub API %s %s raised %s, retrying in %.1fs (attempt %d/%d)",
                     method,
@@ -198,9 +236,9 @@ async def github_request(
                 continue
             raise
 
-        if _is_retryable_response(response, method):
+        delay = _Retry.after_response(response, method, attempt)
+        if delay is not None:
             if attempt < max_retries:
-                delay = _compute_backoff(response, attempt)
                 logger.warning(
                     "GitHub API %s %s returned %d, retrying in %.1fs (attempt %d/%d)",
                     method,
@@ -244,9 +282,11 @@ class GitHubSignInRequired(Exception):
 class GitHubAppUnavailable(Exception):
     """No GitHub App installation token can be minted for the request."""
 
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, gone: bool = False) -> None:
         super().__init__(message)
         self.retryable = retryable
+        # GitHub no longer knows the installation, as after the App is reinstalled.
+        self.gone = gone
 
 
 class RepoFileUnreadableError(RuntimeError):
@@ -328,25 +368,31 @@ class GitHubClient:
         timeout: httpx2.Timeout | float | None = None,
     ) -> AsyncIterator[Self]:
         """Acts as the Open SWE GitHub App: ``installation_id``, else its installation on
-        ``owner/repo``, else the default installation.
+        ``owner/repo``, else on the ``owner`` organization, else the default installation.
 
-        ``permissions`` narrows the token to them, and to ``repo`` alone.
+        ``permissions`` narrows the token to them, and to ``repo`` alone when one is named.
         Raises ``GitHubAppUnavailable`` when no installation token can be minted.
         """
         explicit_installation = installation_id is not None
         # app imports this module.
         from openswe.github.app import (
-            REPO_INSTALLATIONS,
+            INSTALLATIONS,
+            get_github_app_installation_id_for_org,
             get_github_app_installation_id_for_repo,
             get_github_app_installation_token,
         )
 
         token: str | None = None
         for retry in (False, True):
-            if owner is not None and repo is not None and (installation_id is None or retry):
-                installation_id = await get_github_app_installation_id_for_repo(owner, repo)
+            if owner is not None and (installation_id is None or retry):
+                installation_id = await (
+                    get_github_app_installation_id_for_org(owner)
+                    if repo is None
+                    else get_github_app_installation_id_for_repo(owner, repo)
+                )
                 if installation_id is None:
-                    raise GitHubAppUnavailable(f"no GitHub App installation on {owner}/{repo}")
+                    where = owner if repo is None else f"{owner}/{repo}"
+                    raise GitHubAppUnavailable(f"no GitHub App installation on {where}")
             try:
                 token = await get_github_app_installation_token(
                     installation_id=installation_id,
@@ -356,10 +402,10 @@ class GitHubClient:
                 )
                 break
             except GitHubAppUnavailable as exc:
-                # A kept installation may be gone after a reinstall; ask GitHub again once.
-                if retry or exc.retryable or explicit_installation or not owner or not repo:
+                # A kept installation is gone after a reinstall; ask GitHub again once.
+                if retry or not exc.gone or explicit_installation or not owner:
                     raise
-                await REPO_INSTALLATIONS.forget(owner, repo)
+                await INSTALLATIONS.forget(owner, repo)
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
         async with github_client(token=token, timeout=timeout) as http:
@@ -367,6 +413,39 @@ class GitHubClient:
 
     def repo(self, owner: str, name: str) -> RepoClient:
         return RepoClient(self, owner, name)
+
+    async def org_membership_state(self, org: str, login: str) -> str | None:
+        """``login``'s membership state in ``org`` (``active``, ``pending``); ``None`` if none."""
+        try:
+            payload = await self.get(
+                f"orgs/{quote(org, safe='')}/memberships/{quote(login, safe='')}"
+            )
+        except GitHubError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        state = payload.get("state") if isinstance(payload, dict) else None
+        return state if isinstance(state, str) else None
+
+    async def team_members(self, org: str, team_slug: str) -> list[str]:
+        """Logins of the people in ``org/team_slug``, child teams included."""
+        members = await self.pages(
+            f"orgs/{quote(org, safe='')}/teams/{quote(team_slug, safe='')}/members",
+            max_pages=_TEAM_MAX_PAGES,
+        )
+        return [
+            login
+            for member in members
+            if member.get("type", "User") == "User"
+            and isinstance(login := member.get("login"), str)
+        ]
+
+    async def rate_limits(self) -> dict[str, Quota]:
+        """Each quota this client's token spends, by resource (``core``, ``graphql``, …).
+
+        GitHub doesn't count this read against any of them.
+        """
+        return _RATE_LIMITS.validate_python(await self.get("rate_limit")).resources
 
     async def viewer_login(self) -> str:
         """The login of the account this client's token acts as."""
@@ -1149,7 +1228,7 @@ async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
         if (
             response.status_code == 429
             or 500 <= response.status_code < 600
-            or _is_secondary_rate_limit(response)
+            or _Retry.rate_limited(response)
             or (response.status_code == 403 and "Retry-After" in response.headers)
         ):
             status = "transient"
@@ -1177,6 +1256,22 @@ async def or_none[T](read: Awaitable[T]) -> T | None:
 
 def _json_or_none(response: httpx2.Response) -> object:
     return None if response.status_code == 204 or not response.content else response.json()
+
+
+class Quota(BaseModel):
+    """One GitHub rate-limit resource: its hourly budget and what is left of it."""
+
+    limit: int
+    used: int
+    remaining: int
+    reset: int
+
+
+class _RateLimits(BaseModel):
+    resources: dict[str, Quota]
+
+
+_RATE_LIMITS = TypeAdapter(_RateLimits)
 
 
 class TreeEntry(BaseModel):

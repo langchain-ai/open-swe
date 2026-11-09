@@ -49,7 +49,7 @@ from runtime_api.github import (
 from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
-from openswe.github.app import REPO_INSTALLATIONS
+from openswe.github.app import INSTALLATIONS
 from openswe.github.comments import OPEN_SWE_TAGS
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.github.work import delivery_work
@@ -249,7 +249,7 @@ async def _forget_installations() -> None:
     """An installation or its repositories changed: forget everyone's repository listing
     and which installation each repository is in."""
     await forget_cached_repos()
-    await REPO_INSTALLATIONS.forget_all()
+    await INSTALLATIONS.forget_all()
 
 
 def _tasks(

@@ -1,6 +1,7 @@
 """Unit tests for the shared GitHub HTTP helper."""
 
 import asyncio
+import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,9 +14,10 @@ from openswe.github import http as github_http
 from openswe.github.http import (
     GitHubClient,
     GitHubSignInRequired,
-    _compute_backoff,
+    _Retry,
     github_request,
 )
+from openswe.github.revalidation import RevalidatingTransport
 
 
 @pytest.mark.asyncio
@@ -63,8 +65,49 @@ def _make_response(status_code: int, headers: dict[str, str] | None = None) -> h
 class TestComputeBackoff:
     def test_caps_retry_after_at_max(self) -> None:
         resp = _make_response(429, {"Retry-After": "120"})
-        delay = _compute_backoff(resp, attempt=0)
-        assert delay <= 60.0
+        delay = _Retry.after_response(resp, "GET", attempt=0)
+        assert delay is not None and delay <= 60.0
+
+
+@pytest.mark.asyncio
+async def test_github_request_does_not_retry_a_spent_hourly_quota() -> None:
+    spent = httpx2.Response(
+        403,
+        text="API rate limit exceeded for installation ID 1.",
+        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(time.time()) + 1800)},
+    )
+    client = AsyncMock()
+    client.request = AsyncMock(return_value=spent)
+
+    response = await github_request(client, "GET", "https://api.github.com/test")
+
+    assert response.status_code == 403
+    assert client.request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_reads_revalidate_and_never_cross_tokens() -> None:
+    sent: list[tuple[str, str | None]] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        token = request.headers["Authorization"]
+        sent.append((token, request.headers.get("If-None-Match")))
+        if request.headers.get("If-None-Match") == f'"{token}"':
+            return httpx2.Response(304, headers={"ETag": f'"{token}"'})
+        return httpx2.Response(200, json={"for": token}, headers={"ETag": f'"{token}"'})
+
+    transport = RevalidatingTransport(httpx2.MockTransport(handle))
+    url = "https://api.github.com/repos/acme/app/pulls/1"
+    answers = []
+    for token in ("Bearer a", "Bearer a", "Bearer b"):
+        async with httpx2.AsyncClient(
+            transport=transport, headers={"Authorization": token}
+        ) as http:
+            response = await http.get(url)
+            answers.append((response.status_code, response.json()))
+
+    assert answers == [(200, {"for": "Bearer a"})] * 2 + [(200, {"for": "Bearer b"})]
+    assert sent == [("Bearer a", None), ("Bearer a", '"Bearer a"'), ("Bearer b", None)]
 
 
 @pytest.mark.asyncio
@@ -208,12 +251,12 @@ async def test_as_app_looks_up_a_reinstalled_repository_again(
 
     async def mint(*, installation_id: int, **kwargs: object) -> str:
         if installation_id == 123:
-            raise github_http.GitHubAppUnavailable("installation removed")
+            raise github_http.GitHubAppUnavailable("installation removed", gone=True)
         return f"token-{installation_id}"
 
     monkeypatch.setattr(github_app, "get_github_app_installation_id_for_repo", lookup)
     monkeypatch.setattr(github_app, "get_github_app_installation_token", mint)
-    monkeypatch.setattr(github_app.REPO_INSTALLATIONS, "forget", forget)
+    monkeypatch.setattr(github_app.INSTALLATIONS, "forget", forget)
 
     async with GitHubClient.as_app("acme", "app") as github:
         assert github.http.headers["authorization"].endswith("token-456")
