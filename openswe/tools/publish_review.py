@@ -332,6 +332,7 @@ async def _publish_review_async(
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     dry_run = True
+    policy: object = None
     approval_errors = _state_errors(state, "review_approval_errors")
     config_errors = _state_errors(state, "review_config_errors")
     if config_errors:
@@ -678,6 +679,9 @@ async def _publish_review_async(
                 approved=approved,
                 dry_run=dry_run,
                 run_id=langgraph_run_id,
+                policy_sha256=PublishedAssessment.policy_digest(
+                    policy if isinstance(policy, str) else None
+                ),
             ).save()
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
         except Exception:

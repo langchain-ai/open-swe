@@ -1,25 +1,36 @@
 """Published assessments and each reviewer's explicit feedback."""
 
+import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Self
 
+import httpx2
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import BigInteger, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe import event_claims
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.review.publish import ReviewAssessment
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
+from openswe.review.approvals import ApprovalPolicy, approval_mode_for
+from openswe.review.findings import list_findings
+from openswe.review.publish import ReviewAssessment, render_review_body
 from openswe.users.records import UserRecords
+from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
+
+_APPROVAL_CLAIM_SCOPE = "withheld_approval"
+_APPROVAL_CLAIM_TTL = timedelta(days=1)
 
 
 class AssessmentRow(Base):
@@ -52,6 +63,7 @@ class PublishedAssessment(ReviewAssessment):
     approved: bool = False
     dry_run: bool = False
     run_id: str | None = None
+    policy_sha256: str | None = None
 
     @classmethod
     async def get(cls, github_review_id: int) -> Self | None:
@@ -87,6 +99,106 @@ class PublishedAssessment(ReviewAssessment):
             and self.head_sha == head_sha
             and self.decision == "would_approve_conditionally"
         )
+
+    @classmethod
+    async def withheld(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> Self | None:
+        """The latest assessment if it would approve ``head_sha`` but only advised it, as on a draft.
+
+        ``None`` too when the repository no longer approves automatically.
+        """
+        latest = await cls.latest(owner, repo, pr_number)
+        if (
+            latest is None
+            or latest.dry_run
+            or latest.approved
+            or latest.head_sha != head_sha
+            or latest.decision != "would_approve"
+            or await approval_mode_for(owner, repo) != "approve"
+        ):
+            return None
+        return latest
+
+    @staticmethod
+    def policy_digest(policy: str | None) -> str | None:
+        """A fingerprint of the rendered approval policy an assessment was judged against."""
+        return hashlib.sha256(policy.encode()).hexdigest() if policy else None
+
+    async def approve(self, *, reviewer_thread_id: str) -> int | None:
+        """Submit the approval this assessment withheld; the approving review's id, if posted.
+
+        ``None`` when the verdict may no longer hold or GitHub refused it; review again then.
+        """
+        owner, repo, number = self.owner, self.repo, self.pr_number
+        log_extra = {"repository": f"{owner}/{repo}", "pr_number": number}
+        try:
+            async with GitHubClient.as_app(
+                owner, repo, permissions={"contents": "read", "pull_requests": "write"}
+            ) as github:
+                review_id = await self._submit_approval(
+                    github.repo(owner, repo), reviewer_thread_id
+                )
+        except GitHubAppUnavailable:
+            logger.warning("No GitHub App to submit Robin's withheld approval", extra=log_extra)
+            return None
+        if review_id is None:
+            return None
+        await self.model_copy(update={"review_id": review_id, "approved": True}).save()
+        try:
+            await PullRequest(owner=owner, repo=repo, number=number).link_review(
+                reviewer_thread_id=reviewer_thread_id,
+                github_review_id=review_id,
+                head_sha=self.head_sha,
+                finding_count=0,
+            )
+        except Exception:
+            logger.exception("Failed to link Robin's approval to its pull request", extra=log_extra)
+        return review_id
+
+    async def _submit_approval(self, repo: RepoClient, reviewer_thread_id: str) -> int | None:
+        """Post the approval if the draft's verdict still holds for the ready PR at its head."""
+        number = self.pr_number
+        pull = repo.pull_request(number)
+        pr = PullRequestPayload.model_validate(await pull.pull())
+        if pr.state != "open" or pr.draft or pr.head_sha != self.head_sha:
+            return None
+        policy = await (await ApprovalPolicy.fetch(repo)).for_pull(repo, number)
+        if self.policy_sha256 is None or self.policy_digest(policy.render()) != self.policy_sha256:
+            return None
+        findings = await list_findings(reviewer_thread_id, strict=True)
+        if self.settled(findings).decision != "would_approve":
+            return None
+        claim_key = f"{repo.full_name}#{number}@{self.head_sha}".lower()
+        if not await event_claims.claim(_APPROVAL_CLAIM_SCOPE, claim_key, ttl=_APPROVAL_CLAIM_TTL):
+            return None
+        body = render_review_body(
+            pr_number=number,
+            surfaced_count=0,
+            ui_url=dashboard_review_url(self.owner, self.repo, number),
+            assessment=self,
+            approved=True,
+        )
+        try:
+            review = await pull.create_review(
+                {"commit_id": self.head_sha, "event": "APPROVE", "body": body}
+            )
+        except httpx2.HTTPStatusError as exc:
+            # A 5xx may still have created the review, so keep the claim then.
+            if exc.response.status_code < 500:
+                await event_claims.release(_APPROVAL_CLAIM_SCOPE, claim_key)
+            logger.warning(
+                "GitHub refused the approval Robin withheld on a draft",
+                extra={"repository": repo.full_name, "pr_number": number},
+                exc_info=True,
+            )
+            return None
+        review_id = review.get("id") if isinstance(review, dict) else None
+        if not isinstance(review_id, int):
+            logger.error(
+                "GitHub returned no id for Robin's approval",
+                extra={"repository": repo.full_name, "pr_number": number},
+            )
+            return None
+        return review_id
 
     @classmethod
     async def for_viewer(

@@ -1,12 +1,21 @@
 """Tests for the opened / ready_for_review auto-review webhook handlers."""
 
+import json
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx2
 import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.github import http as github_http
 from openswe.github import webhook as github_webhooks
+from openswe.github.http import GitHubClient
+from openswe.review import assessment_feedback
+from openswe.review.approvals import ApprovalPolicy, AutoApproveRule
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -85,7 +94,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
 
 @pytest.mark.asyncio
 async def test_pr_ready_for_review_skips_when_head_already_reviewed(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -117,6 +126,95 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
     set_metadata.assert_awaited_once()
     assert set_metadata.await_args is not None
     assert set_metadata.await_args.kwargs["watch"] is True
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_for_review_submits_approval_withheld_on_draft(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    head = "a" * 40
+    policy = ApprovalPolicy(rules=[AutoApproveRule(path="dead.md", criteria="Dead code.")])
+    await PublishedAssessment(
+        review_id=10,
+        owner="lc",
+        repo="repo",
+        pr_number=7,
+        head_sha=head,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Dead code removal.",
+        policy_sha256=PublishedAssessment.policy_digest(policy.render()),
+    ).save()
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(
+        webhook_common,
+        "get_thread_metadata_safe",
+        AsyncMock(return_value={"kind": "reviewer", "last_reviewed_sha": head}),
+    )
+    monkeypatch.setattr(assessment_feedback, "approval_mode_for", AsyncMock(return_value="approve"))
+    current_policy = AsyncMock(return_value=policy)
+    monkeypatch.setattr(assessment_feedback.ApprovalPolicy, "fetch", current_policy)
+    findings = AsyncMock(return_value=[])
+    monkeypatch.setattr(assessment_feedback, "list_findings", findings)
+    approvals: list[dict[str, Any]] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "POST" and request.url.path.endswith("/pulls/7/reviews"):
+            approvals.append(json.loads(request.content))
+            return httpx2.Response(200, json={"id": 11})
+        if request.method == "GET" and request.url.path.endswith("/pulls/7"):
+            return httpx2.Response(
+                200, json={"number": 7, "state": "open", "draft": False, "head": {"sha": head}}
+            )
+        return httpx2.Response(404, json={})
+
+    @asynccontextmanager
+    async def client(*, token: str, **_kwargs: object) -> AsyncGenerator[httpx2.AsyncClient]:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+            yield http
+
+    monkeypatch.setattr(github_http, "github_client", client)
+
+    @asynccontextmanager
+    async def as_app(*_args: object, **_kwargs: object) -> AsyncGenerator[GitHubClient]:
+        async with GitHubClient.connect(token="app-token") as github:
+            yield github
+
+    monkeypatch.setattr(assessment_feedback.GitHubClient, "as_app", as_app)
+    payload = _pr_payload(action="ready_for_review", draft=False)
+    payload["pull_request"]["head"]["sha"] = head
+
+    mode = AsyncMock(return_value="dry_run")
+    monkeypatch.setattr(assessment_feedback, "approval_mode_for", mode)
+    await github_webhooks.process_github_pr_ready(payload)
+    fake_client.runs.create.assert_not_called()
+    mode.return_value = "approve"
+
+    findings.return_value = [{"id": "f1", "status": "open"}]
+    await github_webhooks.process_github_pr_ready(payload)
+    current_policy.return_value = ApprovalPolicy(
+        rules=[AutoApproveRule(path="docs.md", criteria="Docs only.")]
+    )
+    findings.return_value = []
+    await github_webhooks.process_github_pr_ready(payload)
+    assert approvals == []
+    assert fake_client.runs.create.await_count == 2
+    for call in fake_client.runs.create.await_args_list:
+        assert not call.kwargs["config"]["configurable"].get("re_review")
+
+    fake_client.runs.create.reset_mock()
+    current_policy.return_value = policy
+    await github_webhooks.process_github_pr_ready(payload)
+    await github_webhooks.process_github_pr_ready(payload)
+
+    fake_client.runs.create.assert_not_called()
+    assert len(approvals) == 1
+    assert approvals[0]["event"] == "APPROVE"
+    assert approvals[0]["commit_id"] == head
+    latest = await PublishedAssessment.latest("lc", "repo", 7)
+    assert latest is not None and latest.review_id == 11 and latest.approved
 
 
 @pytest.mark.asyncio

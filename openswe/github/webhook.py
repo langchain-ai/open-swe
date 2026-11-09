@@ -398,15 +398,26 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
             if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
                 if existing_last_reviewed_sha == head_sha and goal_review is None:
                     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
-                    common.logger.info(
-                        "Skipping ready_for_review auto-review for %s/%s#%s: "
-                        "head_sha unchanged from last_reviewed_sha",
-                        repo_config.get("owner"),
-                        repo_config.get("name"),
-                        pr_number,
+                    assessment = await PublishedAssessment.withheld(
+                        repo_config["owner"], repo_config["name"], pr_number, head_sha
                     )
-                    return
-                last_reviewed_sha = existing_last_reviewed_sha
+                    if assessment is None:
+                        common.logger.info(
+                            "Skipping ready_for_review auto-review for %s/%s#%s: "
+                            "head_sha unchanged from last_reviewed_sha",
+                            repo_config.get("owner"),
+                            repo_config.get("name"),
+                            pr_number,
+                        )
+                        return
+                    if review_id := await assessment.approve(reviewer_thread_id=thread_id):
+                        await common.set_reviewer_thread_metadata(
+                            thread_id, extra={"review_assessment_id": review_id}
+                        )
+                        return
+                    # The draft's verdict may no longer hold; review the whole PR again.
+                else:
+                    last_reviewed_sha = existing_last_reviewed_sha
 
     app_token, app_token_expires_at = await common.reviewer_token_for_repo(
         repo_config,
