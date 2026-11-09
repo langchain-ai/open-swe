@@ -435,8 +435,8 @@ ENV.var(
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
 ENV.var(
     "SEGMENT_BROWSER_WRITE_KEY",
-    "Optional public Segment browser source write key, served to the web and desktop UI. "
-    "Unset disables Segment; use a separate source for each deployment environment.",
+    "Optional public Segment source write key for browser and backend capture, served to "
+    "the web and desktop UI. Unset disables Segment; use a separate source per environment.",
     default="",
 )
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")

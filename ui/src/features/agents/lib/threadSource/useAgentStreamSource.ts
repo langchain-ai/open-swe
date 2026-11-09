@@ -23,7 +23,7 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
   // run, so the cancel endpoint runs first and this only detaches.
   const stop = useCancelRun(threadId, stream.disconnect)
   const login = useSession().data?.login
-  const { entries: queueEntries, cancel: cancelQueued } =
+  const { entries: queueEntries, cancel: cancelSubmission } =
     useSubmissionQueue(stream)
   const queued = useMemo<Array<QueuedTurn>>(
     () =>
@@ -47,11 +47,21 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
   }, [stream.messages, stream.toolCalls, threadId])
 
   const startRun = useCallback(
-    async ({ message, configurable, enqueue }: ThreadRunInput) => {
+    async ({
+      message,
+      configurable,
+      enqueue,
+      onAccepted,
+      onRejected,
+    }: ThreadRunInput) => {
       const config = Object.keys(configurable).length
         ? { configurable }
         : undefined
-      const accepted = message ? trackRunAcceptance(message.id) : undefined
+      const accepted = trackRunAcceptance(
+        message?.id ?? null,
+        onAccepted,
+        onRejected
+      )
       let submitError: unknown
       try {
         await stream.submit(
@@ -101,7 +111,7 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     threadId,
     messages,
     queued,
-    cancelQueued,
+    cancelQueued: cancelSubmission,
     isRunning: stream.isLoading,
     isHydrating: stream.isThreadLoading,
     hydration: stream.hydrationPromise,

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
+import type { ThreadRunInput } from "@/features/agents/lib/threadSource/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
 import { AgentsApiError } from "@/features/agents/lib/api"
 import { reportError } from "@/lib/errorReporting"
@@ -18,14 +19,17 @@ import {
 
 const source = {
   isRunning: false,
-  startRun: vi.fn(() => Promise.resolve(undefined)),
+  startRun: vi.fn((_input: ThreadRunInput) => Promise.resolve(undefined)),
 }
 
 vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
   useThreadSource: () => source,
 }))
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
-vi.mock("@/lib/analytics", () => ({ productAnalytics: { track: vi.fn() } }))
+const outcome = vi.hoisted(() => ({ accepted: vi.fn(), failed: vi.fn() }))
+vi.mock("@/lib/analytics", () => ({
+  productAnalytics: { track: vi.fn(), beginAction: vi.fn(() => outcome) },
+}))
 
 const THREAD_ID = "thread-1"
 const SIDEBAR_PARAMS = {
@@ -78,6 +82,8 @@ function sidebarStatus(client: QueryClient) {
 }
 
 beforeEach(() => {
+  outcome.accepted.mockClear()
+  outcome.failed.mockClear()
   source.isRunning = false
   source.startRun.mockReset()
   source.startRun.mockResolvedValue(undefined)
@@ -106,7 +112,8 @@ describe("useSubmitAgentMessage", () => {
         {
           mode,
           has_attachments: false,
-        }
+        },
+        undefined
       )
     }
   )
@@ -137,6 +144,8 @@ describe("useSubmitAgentMessage", () => {
     await result.current.mutateAsync({ content: "/offload", images: [] })
     expect(source.startRun).toHaveBeenCalledWith({
       configurable: { offload_conversation: true },
+      onAccepted: expect.any(Function),
+      onRejected: expect.any(Function),
     })
     expect(pendingMessages(client)).toBeUndefined()
     expect(productAnalytics.track).not.toHaveBeenCalled()
@@ -172,6 +181,9 @@ describe("useSubmitAgentMessage", () => {
       })
     )
     expect(sidebarStatus(client)).toBe("running")
+    expect(outcome.accepted).not.toHaveBeenCalled()
+    source.startRun.mock.calls[0]?.[0].onAccepted?.()
+    expect(outcome.accepted).toHaveBeenCalledOnce()
   })
 
   it("marks the optimistic message failed with the reason when the start rejects", async () => {
@@ -198,6 +210,7 @@ describe("useSubmitAgentMessage", () => {
     )
     expect(sidebarStatus(client)).toBe("error")
     expect(onStartError).toHaveBeenCalledOnce()
+    expect(outcome.failed).toHaveBeenCalledWith(expect.any(AgentsApiError))
     expect(reportError).toHaveBeenCalledWith({
       title: "Couldn't send message",
       error: expect.any(AgentsApiError),

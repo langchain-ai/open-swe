@@ -541,6 +541,10 @@ export function AgentsHome({
       setLocalError("Update Robin Desktop to start without a project.")
       return
     }
+    const action = productAnalytics.beginAction(
+      "start_thread",
+      session.data?.user_id ?? null
+    )
     // Minted here so the seeded thread, the graph's HumanMessage and the
     // transcript row all carry the same message id.
     const messageId = crypto.randomUUID()
@@ -586,7 +590,12 @@ export function AgentsHome({
     // folder is new.
     const runProjectId =
       localRun && localCheckout
-        ? await folderProject(localCheckout, localThreads.data)
+        ? await folderProject(localCheckout, localThreads.data).catch(
+            (error: unknown) => {
+              action.failed(error)
+              throw error
+            }
+          )
         : selectedProject?.id
     if (runProjectId) configurable.project_id = runProjectId
 
@@ -628,6 +637,7 @@ export function AgentsHome({
           })
         )
       } catch (error) {
+        action.failed(error)
         // Nothing in the cloud refers to the checkout this prepared.
         if (prepared)
           void desktop
@@ -647,6 +657,7 @@ export function AgentsHome({
         }
         return
       }
+      action.accepted()
       productAnalytics.track(
         "agents_thread_created",
         {

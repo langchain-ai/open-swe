@@ -83,30 +83,75 @@ Private events, such as a person's own threads, record only who acted, the sourc
 Delivery is best effort, not a durable export or historical backfill.
 Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.
 
-### Optional Segment UI tracking
+### Optional Segment usage tracking
 
-Set `SEGMENT_BROWSER_WRITE_KEY` on the connected backend to enable Segment in both the web and desktop UI.
-This is a public browser-source key, returned by `/dashboard/api/analytics/config`, not a backend credential.
-Without a key, Segment is not loaded and sends nothing; there is no bundled fallback key.
-Use a dedicated source for this app and separate sources for production and non-production deployments.
+Set the existing `SEGMENT_BROWSER_WRITE_KEY` on the connected backend to enable both web/desktop UI capture and queued backend lifecycle/runtime activity delivery into the same Segment source.
+This public source write key is returned by `/dashboard/api/analytics/config`; no additional key or frontend build setting is needed.
+Without it, neither path captures Segment events and the UI SDK is not loaded; there is no bundled fallback key.
+Deployments that already configure this key begin exporting backend lifecycle and runtime activity when this update deploys, without a separate backend opt-in.
+The shared public write key does not authenticate event origin: clients can submit arbitrary event names, user IDs and properties, including records labeled as backend activity.
+Treat Segment data as directional product analytics, not authoritative billing, audit, authorization or outcome records; use the PostgreSQL analytics behind `/usage` for authoritative captured lifecycle data.
+
+Use dedicated Robin sources and separate production from non-production deployments.
 Configure cloud-mode destinations in Segment; no destination SDKs, remote plugins or Signals are loaded in the UI.
-For warehouse separation, map this source to its own dataset rather than sharing another app's event tables.
+For warehouse separation, map these sources to their own dataset rather than sharing another app's event tables.
+A backend and downloaded UI deployment enables this coverage; no native desktop shell release is required.
+Existing PostHog capture and PostgreSQL analytics, including `/usage`, keep their existing behavior and identity semantics.
+
+#### Browser intent and feature use
 
 The UI sends `page` events on initial load and pathname navigation, named by the matched route template (dynamic parameters become `:id`).
 Query-only changes do not count as page views.
-It also tracks `agents_thread_created` after the backend accepts a new thread, with `run_target` (`local` or `cloud`) and `has_attachments`, and `agents_message_submitted` when a follow-up is submitted, with `mode` (`new_turn`, `queue` or `steer`) and `has_attachments`.
-Submission does not imply acceptance or run completion.
-Events carry `product: open-swe`, `environment` from `DD_ENV`, `platform` (`web` or `desktop`), optional `desktop_version`, and `schema_version: 1`.
-Users identify by their Open SWE user UUID, with email and GitHub login only as identify traits; sign-out resets identity.
-No cross-product identity linking is performed.
+`agents_thread_created` still means an accepted new thread, with `run_target` (`local` or `cloud`) and `has_attachments`.
+`agents_message_submitted` still means a follow-up attempt, with `mode` (`new_turn`, `queue` or `steer`) and `has_attachments`; it excludes offloading.
 
-Only allowlisted properties and normalized route context leave the UI; raw URLs, queries, referrers, page titles, prompts, local paths, tool content and SDK campaign enrichment are removed.
-IP context is set to `0.0.0.0`; disable any unwanted IP enrichment in the destination as well.
+`agents_action_started` and `agents_action_completed` add bounded `action`, `result` (`accepted` or `failed`) and `failure_kind` properties for thread starts, follow-ups, queue/steer/offload/cancel, project membership and filing, thread sharing, integration connection, MCP saves/deletes, automations, explicit preference saves and review request/submission/rerun.
+Acceptance is the API's acceptance, not successful agent completion; a later stream failure does not rewrite an accepted action.
+OAuth redirects only record the start when the browser cannot observe the outcome.
+`agents_feature_opened` records intentional panel/tab opens for terminal, browser, files, diff, artifacts, background work, apps and review surfaces, not automatic panel opens or background reads.
+Autosaved instructions are not counted as explicit settings saves.
+
+Browser events carry `product: open-swe`, `environment` from `DD_ENV`, `platform` (`web` or `desktop`), optional `desktop_version`, and `schema_version: 1`.
+Users identify by canonical Robin `users.id`, with email and GitHub login only as identify traits.
+Actions retain their starting actor across asynchronous work; sign-out or account changes discard pending events and prevent results being attributed to the next account.
 Identity persists in localStorage (with an in-memory fallback), including on the desktop custom scheme.
-Early events queue in memory up to 100 entries with their original timestamp and route; logout or account changes discard them.
-Delivery is best effort, not an audit log or a reliable count of completed runs.
-The backend only serves configuration: existing PostHog capture and PostgreSQL analytics are unchanged.
-A UI update is sufficient; no native desktop shell release is required.
+Early events queue in memory up to 100 entries with their original timestamp and route.
+Browser delivery is best effort and may be blocked or lost.
+The backend emits lifecycle events for observed run outcomes, but records in the shared Segment source cannot prove backend origin.
+
+#### Backend activity and outcomes
+
+`agents_request_started` distinguishes `human_request`, `automatic_work` and `unknown` using stamped message provenance, not message roles or content.
+`agents_tool_executed` records reported tool results as `agent_work`, with a finite built-in tool name (otherwise `external` or `unknown`) and `is_error`; it does not imply human intent or include arguments/results.
+These events use report receipt time unless a request's signed current invocation supplies its start time.
+Carried reports never borrow a later invocation's owner or start time.
+
+Existing lifecycle events are exported as `agents_<event_name>` with dots replaced by underscores:
+
+- `agents_run_started`, `agents_run_completed`, `agents_run_failed`, `agents_run_canceled`, and `agents_run_cost_recorded`, including available token counts, bounded failure/cancellation classifications and configured/effective model identifiers.
+- PR opening, observation, run linking, merge, close, reopen and distance measurements; review publication and finding observations.
+- Task completion, acceptance and rework requests, and submitted user feedback.
+
+Lifecycle events retain their original event ID and occurrence time.
+Cost events are observations: select the highest `observation_revision` per `run_id`, rather than summing revisions or adding terminal token counts to cost-event token counts.
+Unavailable/partial observations are not zero-cost completed runs.
+Opaque `thread_id`, lifecycle `run_id` and `runtime_run_id` support joins between request, tool and lifecycle data; a runtime run ID is not an invocation ID.
+
+Backend `userId` is a verified canonical `users.id`, never an internal analytics person UUID.
+Immutable provider identities bridge existing lifecycle identities where available; unresolved events retain an opaque `anonymousId` with `identity_quality: unresolved` instead of being dropped or guessed from a handle/email alone.
+`attribution_role` distinguishes a proven human actor from a signed run owner; ownership is not proof of human initiation.
+Tool reports lack invocation provenance and may remain anonymous; use their runtime join to request activity when available.
+
+The existing outbox attempts to schedule minimized lifecycle payloads after ingestion; optional Segment scheduling failures are logged without failing or retrying successful PostgreSQL analytics delivery.
+Runtime activity capture is also fail-soft and schedules directly into the job queue.
+Segment network delivery uses a separate two-slot worker on that queue, isolated from operational job capacity, with bounded retries and stable `messageId` values.
+Each reported tool result adds one minimized job; scheduling is best effort, and database contention or export backlog can still delay or lose capture.
+Retries are not exactly-once delivery, an unlimited retry guarantee, or historical backfill; enabling a key does not replay already acknowledged events.
+
+Both paths export only allowlisted property keys and values.
+Raw URLs, queries, referrers, page titles, prompts, local paths, repository names, tool content, raw errors and SDK campaign enrichment are excluded; backend subject identifiers are opaque.
+IP context is set to `0.0.0.0`; disable any unwanted IP enrichment in the destination as well.
+No cross-product identity linking is performed.
 
 ## 1. Create the deployment
 

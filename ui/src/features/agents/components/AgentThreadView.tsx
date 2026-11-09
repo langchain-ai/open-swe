@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { LogoMark } from "@/components/Branding"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
@@ -341,6 +342,17 @@ export function AgentThreadView({
         (followUpBehavior === "queue") !== (options?.alternate === true)
       const enqueue = isStreaming && queue
       const offload = content.trim() === "/offload"
+      const analyticsActorId = session.data?.user_id ?? null
+      const analyticsAction = productAnalytics.beginAction(
+        offload
+          ? "offload"
+          : enqueue
+            ? "queue"
+            : isStreaming
+              ? "steer"
+              : "new_turn",
+        analyticsActorId
+      )
       const messageId = crypto.randomUUID()
       // A message that goes straight into the transcript sits at the top while
       // the reply fills in below it. A queued one stays in the queue until its
@@ -359,6 +371,8 @@ export function AgentThreadView({
           images,
           replies,
           client_message_id: messageId,
+          analyticsActorId,
+          analyticsAction,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
@@ -368,6 +382,7 @@ export function AgentThreadView({
             : {}),
         })
       } catch (error) {
+        analyticsAction.failed(error)
         restoreAutoSelection()
         throw error
       }
@@ -379,6 +394,7 @@ export function AgentThreadView({
       followUpBehavior,
       isStreaming,
       sendMessage,
+      session.data?.user_id,
     ]
   )
 
@@ -502,12 +518,19 @@ export function AgentThreadView({
   const withdrawQueued = useCallback(
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
-      if (source.kind === "stream") {
-        if (!(await source.cancelQueued(entry.turnId))) {
-          throw new Error("The queued message could not be cancelled.")
+      const action = productAnalytics.beginAction("queue_cancel")
+      try {
+        if (source.kind === "stream") {
+          if (!(await source.cancelQueued(entry.turnId))) {
+            throw new Error("The queued message could not be cancelled.")
+          }
+        } else {
+          await agentsApi.cancelRun(thread.id, entry.runId)
         }
-      } else {
-        await agentsApi.cancelRun(thread.id, entry.runId)
+        action.accepted()
+      } catch (error) {
+        action.failed(error)
+        throw error
       }
       restoreQueuedAutoSelection(entry.message.id)
     },

@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 /**
  * Typed client for the open-swe dashboard backend.
  *
@@ -188,40 +189,42 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const requestId = newRequestId()
-  const res = await fetch(dashboardApiUrl(path), {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
-      ...init.headers,
-    },
-  }).catch((cause: unknown) => {
-    throw networkError(cause, requestId)
-  })
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const body = await res.json()
-      if (body?.detail)
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
-    } catch {
-      /* ignore */
+  return productAnalytics.mutation(path, init.method, async () => {
+    const requestId = newRequestId()
+    const res = await fetch(dashboardApiUrl(path), {
+      ...init,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+        ...dashboardForwardedHeaders(),
+        ...init.headers,
+      },
+    }).catch((cause: unknown) => {
+      throw networkError(cause, requestId)
+    })
+    if (!res.ok) {
+      let message = res.statusText
+      try {
+        const body = await res.json()
+        if (body?.detail)
+          message =
+            typeof body.detail === "string"
+              ? body.detail
+              : JSON.stringify(body.detail)
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(
+        res.status,
+        message,
+        requestId,
+        res.headers.get("Retry-After")
+      )
     }
-    throw new ApiError(
-      res.status,
-      message,
-      requestId,
-      res.headers.get("Retry-After")
-    )
-  }
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+    if (res.status === 204) return undefined as T
+    return (await res.json()) as T
+  })
 }
 
 let activePrDetails = 0
@@ -2198,6 +2201,7 @@ export function connectService(
   provider: "slack" | "github",
   redirectTo?: string
 ) {
+  const action = productAnalytics.beginAction("integration_connect")
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
     const target =
@@ -2212,5 +2216,14 @@ export function connectService(
       `${API_BASE}/dashboard/api/${provider}/login${query}`
     )
   }
-  return pending
+  return pending?.then(
+    (result) => {
+      action.accepted()
+      return result
+    },
+    (error: unknown) => {
+      action.failed(error)
+      throw error
+    }
+  )
 }

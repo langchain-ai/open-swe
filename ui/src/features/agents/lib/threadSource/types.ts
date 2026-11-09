@@ -29,6 +29,8 @@ export interface ThreadRunInput {
    * server makes it a run of its own that starts when the thread goes idle.
    */
   enqueue?: boolean
+  onAccepted?: () => void
+  onRejected?: (error: unknown) => void
 }
 
 interface ThreadSourceShared {

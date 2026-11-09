@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
@@ -186,6 +187,7 @@ export function ReviewButton({
     <Popover
       open={open}
       onOpenChange={(value) => {
+        if (value && !open) productAnalytics.featureOpened("review")
         if (!submit.isPending) setOpen(value)
       }}
     >

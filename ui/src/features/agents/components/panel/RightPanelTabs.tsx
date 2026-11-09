@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   GlobeRegularIcon,
@@ -129,7 +130,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       available: props.terminalAvailable,
       disabledReason: "Terminals are only available from a running workspace.",
       unavailableHint: "Available once the workspace is running.",
-      onClick: props.onAddTerminal,
+      onClick: () => {
+        productAnalytics.featureOpened("terminal")
+        props.onAddTerminal?.()
+      },
     },
     {
       label: "Changes",
@@ -139,7 +143,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       disabledReason:
         "Changes are only available for threads with a repository.",
       unavailableHint: "Available for Git repositories.",
-      onClick: props.onAddDiff,
+      onClick: () => {
+        productAnalytics.featureOpened("diff")
+        props.onAddDiff?.()
+      },
     },
     {
       label: "Files",
@@ -149,7 +156,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       available: props.terminalAvailable,
       disabledReason: "Files are only available from a running workspace.",
       unavailableHint: "Available once the workspace is running.",
-      onClick: props.onAddFiles,
+      onClick: () => {
+        productAnalytics.featureOpened("files")
+        props.onAddFiles?.()
+      },
     },
     ...(props.onAddBrowser
       ? [
@@ -163,7 +173,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
             disabledReason:
               "The browser is available once this thread's agent has started.",
             unavailableHint: "Available once the thread starts.",
-            onClick: props.onAddBrowser,
+            onClick: () => {
+              productAnalytics.featureOpened("browser")
+              props.onAddBrowser?.()
+            },
           },
         ]
       : []),
@@ -177,7 +190,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
             disabledReason:
               "Nothing is running in the background for this thread.",
             unavailableHint: "Available while a command or monitor runs.",
-            onClick: props.onAddBackgroundWork,
+            onClick: () => {
+              productAnalytics.featureOpened("background")
+              props.onAddBackgroundWork?.()
+            },
           },
         ]
       : []),
@@ -191,7 +207,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
             available: true,
             disabledReason: "",
             unavailableHint: "",
-            onClick: props.onAddApp,
+            onClick: () => {
+              productAnalytics.featureOpened("app")
+              props.onAddApp?.()
+            },
           },
         ]
       : []),
@@ -609,7 +628,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           role="tab"
                           aria-selected={active}
                           className="h-auto min-w-0 shrink cursor-pointer px-0 text-inherit hover:bg-transparent dark:hover:bg-transparent"
-                          onClick={() => props.onActivate(surface)}
+                          onClick={() => {
+                            productAnalytics.featureOpened(
+                              surface.kind === "preview"
+                                ? "browser"
+                                : surface.kind
+                            )
+                            props.onActivate(surface)
+                          }}
                         >
                           <span className="truncate">{title}</span>
                         </Button>

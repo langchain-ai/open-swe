@@ -176,6 +176,7 @@ from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
+from openswe.analytics.segment_activity import SegmentActivity
 from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
@@ -338,6 +339,7 @@ class TokenRun:
         self.run = run
         self.run_id = run_id
         self.config = self._config()
+        self.activity = SegmentActivity(run)
 
     @classmethod
     async def answer(
@@ -540,6 +542,7 @@ class TokenRun:
         await self._reporting(
             request, "run_started", record, messages=messages_from_dict(request.humans)
         )
+        await self.activity.request_started(request, carried=carried)
         return Done()
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
@@ -575,6 +578,7 @@ class TokenRun:
             and turn.goal_mode
         ):
             await ThreadGoals.edited(self.run.thread_id)
+        await self.activity.tool_executed(request, is_error=result.status == "error")
         return Done()
 
     async def operation(self, request: RunOperation) -> OperationResult:

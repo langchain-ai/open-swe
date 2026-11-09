@@ -44,6 +44,50 @@ it.each([202, 204, 503])(
   }
 )
 
+it("reports offload acceptance as soon as the command responds, before the stream settles", async () => {
+  const tracker = createRunAcceptanceTracker(
+    vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ type: "success", result: { run_id: "offload-run" } })
+      )
+  )
+  const onAccepted = vi.fn()
+  const onRejected = vi.fn()
+  const settled = tracker.track(null, onAccepted, onRejected)
+  await tracker.fetch("http://localhost/threads/one/commands", {
+    method: "POST",
+    body: JSON.stringify({ method: "run.start", params: { input: null } }),
+  })
+  await vi.waitFor(() => expect(onAccepted).toHaveBeenCalledOnce())
+  expect(onRejected).not.toHaveBeenCalled()
+  expect(await settled()).toEqual({ accepted: true })
+  expect(onAccepted).toHaveBeenCalledOnce()
+})
+
+it("reports protocol rejection even when the HTTP request succeeds", async () => {
+  const tracker = createRunAcceptanceTracker(
+    vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ type: "error", message: "private error" })
+      )
+  )
+  const onAccepted = vi.fn()
+  const onRejected = vi.fn()
+  const settled = tracker.track("message", onAccepted, onRejected)
+  await tracker.fetch("http://localhost/threads/one/commands", {
+    method: "POST",
+    body: JSON.stringify({
+      method: "run.start",
+      params: { input: { messages: [{ id: "message" }] } },
+    }),
+  })
+  await vi.waitFor(() => expect(onRejected).toHaveBeenCalledOnce())
+  expect(onAccepted).not.toHaveBeenCalled()
+  expect(await settled()).toEqual({ accepted: false })
+})
+
 it("keeps the reason the server gave for refusing a start", async () => {
   const detail = "This thread is read-only."
   const fetcher = vi

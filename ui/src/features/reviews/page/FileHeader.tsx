@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
@@ -144,7 +145,10 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           size="xs"
           aria-label={`${plural(findings.length, "open finding")} from Robin; go to the worst`}
           type="button"
-          onClick={() => showFinding(worst.id, findingTarget(worst))}
+          onClick={() => {
+            productAnalytics.featureOpened("findings")
+            showFinding(worst.id, findingTarget(worst))
+          }}
           className="h-auto shrink-0 gap-space-1 border-0 px-space-1 hover:bg-surface-level-1-hover"
           style={{ color: findingGroupColor[worst.group] }}
           title={`${plural(findings.length, "open finding")} from Robin; go to the worst`}

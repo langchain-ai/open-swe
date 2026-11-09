@@ -348,7 +348,7 @@ async def cancel_matching(metadata: Mapping[str, JsonValue]) -> int:
         return result.rowcount
 
 
-async def claim_due(limit: int) -> list[Job]:
+async def claim_due(limit: int, *, kinds: list[str] | None = None) -> list[Job]:
     """Take up to ``limit`` due jobs no other worker holds."""
     async with transaction() as conn:
         rows = (
@@ -359,6 +359,8 @@ async def claim_due(limit: int) -> list[Job]:
                         SELECT id, locked_until AS lapsed_lease FROM job
                         WHERE due_at <= clock_timestamp()
                             AND (locked_until IS NULL OR locked_until < clock_timestamp())
+                            AND (CAST(:kinds AS text[]) IS NULL
+                                 OR kind = ANY(CAST(:kinds AS text[])))
                         ORDER BY due_at
                         LIMIT :limit
                         FOR UPDATE SKIP LOCKED
@@ -370,7 +372,7 @@ async def claim_due(limit: int) -> list[Job]:
                         due.lapsed_lease
                     """
                 ),
-                {"limit": limit, "ttl": CLAIM_TTL},
+                {"limit": limit, "ttl": CLAIM_TTL, "kinds": kinds},
             )
         ).mappings()
         return [Job.from_row(row) for row in rows]

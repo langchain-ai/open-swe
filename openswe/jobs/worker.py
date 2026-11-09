@@ -21,7 +21,8 @@ _HEARTBEAT_SECONDS: Final = 10.0
 class JobWorker:
     """Claims due jobs and runs each through the handler registered for its kind."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_in_flight: int = _MAX_IN_FLIGHT) -> None:
+        self._max_in_flight = max_in_flight
         self._handlers: dict[str, JobHandler] = {}
         self._running: set[asyncio.Task[None]] = set()
         self._stop = asyncio.Event()
@@ -36,9 +37,11 @@ class JobWorker:
 
         return decorate
 
-    async def run_due(self, limit: int = _MAX_IN_FLIGHT) -> int:
+    async def run_due(self, limit: int | None = None) -> int:
         """Run what is due now and wait for it; how many jobs ran."""
-        jobs = await claim_due(limit)
+        jobs = await claim_due(
+            self._max_in_flight if limit is None else limit, kinds=list(self._handlers)
+        )
         await asyncio.gather(*(self._run(job) for job in jobs))
         return len(jobs)
 
@@ -97,8 +100,8 @@ class JobWorker:
         while not self._stop.is_set():
             started = 0
             try:
-                room = _MAX_IN_FLIGHT - len(self._running)
-                for job in await claim_due(room) if room > 0 else []:
+                room = self._max_in_flight - len(self._running)
+                for job in await claim_due(room, kinds=list(self._handlers)) if room > 0 else []:
                     task = asyncio.create_task(self._run(job), name=f"job:{job.kind}")
                     self._running.add(task)
                     task.add_done_callback(self._running.discard)

@@ -36,12 +36,18 @@ def _worker(ran: list[Job], *, fail: bool = False) -> JobWorker:
 
 async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
     ran: list[Job] = []
+    unrelated = await queue.schedule("other", due_at=_PAST - timedelta(seconds=1))
     await queue.schedule("probe", {"n": 1}, due_at=_PAST)
 
-    counts = await asyncio.gather(*(_worker(ran).run_due() for _ in range(4)))
+    counts = await asyncio.gather(*(_worker(ran).run_due(limit=1) for _ in range(4)))
 
     assert sum(counts) == 1
     assert [job.payload for job in ran] == [{"n": 1}]
+    assert [job.id for job in await queue.find({})] == [unrelated.id]
+    assert await queue.claim_due(1, kinds=["probe"]) == []
+    [other] = await queue.claim_due(1)
+    assert other.id == unrelated.id
+    await other.finish()
     assert await queue.find({}) == []
 
 

@@ -27,12 +27,13 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
   const stop = useCancelRun(threadId)
 
   const startRun = useCallback(
-    async ({ message, configurable, enqueue }: ThreadRunInput) => {
+    async ({ message, configurable, enqueue, onAccepted }: ThreadRunInput) => {
       runTracker.submitted()
       await postRunStart(
         threadId,
         runStartCommand({ threadId, message, configurable, enqueue })
       )
+      onAccepted?.()
       runTracker.created()
     },
     [runTracker, threadId]

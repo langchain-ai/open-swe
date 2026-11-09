@@ -9,7 +9,14 @@ const NOT_ACCEPTED: RunAcceptance = { accepted: false }
 
 /** Match command acceptance to its submitted human message, not stream completion. */
 export function createRunAcceptanceTracker(fetcher: typeof fetch) {
-  const submissions = new Map<string, { response?: Promise<RunAcceptance> }>()
+  const submissions = new Map<
+    string | null,
+    {
+      response?: Promise<RunAcceptance>
+      onAccepted?: () => void
+      onRejected?: (error: unknown) => void
+    }
+  >()
   const trackedFetch = Object.assign((...args: Parameters<typeof fetch>) => {
     const [input, init] = args
     const response = fetcher(...args)
@@ -22,11 +29,17 @@ export function createRunAcceptanceTracker(fetcher: typeof fetch) {
     if (!isRecord(command) || (isCommand && command.method !== "run.start"))
       return response
     const params = isCommand ? command.params : command
-    if (!isRecord(params) || !isRecord(params.input)) return response
-    const messages = params.input.messages
-    if (!Array.isArray(messages)) return response
+    if (!isRecord(params)) return response
+    const messages =
+      isRecord(params.input) && Array.isArray(params.input.messages)
+        ? params.input.messages
+        : [{ id: null }]
     for (const message of messages) {
-      if (!isRecord(message) || typeof message.id !== "string") continue
+      if (
+        !isRecord(message) ||
+        (typeof message.id !== "string" && message.id !== null)
+      )
+        continue
       const submission = submissions.get(message.id)
       if (!submission) continue
       submission.response = response
@@ -51,13 +64,26 @@ export function createRunAcceptanceTracker(fetcher: typeof fetch) {
             : NOT_ACCEPTED
         })
         .catch(() => NOT_ACCEPTED)
+        .then((acceptance) => {
+          if (acceptance.accepted) submission.onAccepted?.()
+          else submission.onRejected?.(acceptance.refusal)
+          return acceptance
+        })
     }
     return response
   }, fetcher)
   return {
     fetch: trackedFetch,
-    track(messageId: string) {
-      const submission: { response?: Promise<RunAcceptance> } = {}
+    track(
+      messageId: string | null,
+      onAccepted?: () => void,
+      onRejected?: (error: unknown) => void
+    ) {
+      const submission: {
+        response?: Promise<RunAcceptance>
+        onAccepted?: () => void
+        onRejected?: (error: unknown) => void
+      } = { onAccepted, onRejected }
       submissions.set(messageId, submission)
       return async (): Promise<RunAcceptance> => {
         try {

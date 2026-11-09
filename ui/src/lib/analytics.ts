@@ -4,7 +4,70 @@ import type { SessionUser } from "./api"
 import { posthogAnalytics } from "./posthog"
 import { TelemetryConfig } from "./telemetry-config"
 
+const ACTIONS = [
+  "start_thread",
+  "new_turn",
+  "queue",
+  "steer",
+  "offload",
+  "cancel",
+  "queue_cancel",
+  "project_create",
+  "project_update",
+  "project_delete",
+  "project_share",
+  "project_unshare",
+  "project_move_thread",
+  "thread_share",
+  "integration_connect",
+  "integration_disconnect",
+  "mcp_save",
+  "mcp_delete",
+  "automation_create",
+  "automation_update",
+  "automation_delete",
+  "automation_run",
+  "settings_save",
+  "review_request",
+  "review_submit",
+  "review_rerun",
+] as const
+export type ProductActionName = (typeof ACTIONS)[number]
+const FEATURES = [
+  "terminal",
+  "browser",
+  "files",
+  "file",
+  "diff",
+  "agents",
+  "background",
+  "app",
+  "artifact",
+  "review",
+  "walkthrough",
+  "findings",
+] as const
+export type ProductFeature = (typeof FEATURES)[number]
+type ActionResult = "accepted" | "failed"
+type FailureKind =
+  | "none"
+  | "network"
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "conflict"
+  | "validation"
+  | "server"
+  | "unknown"
+
 type ProductEvents = {
+  agents_action_started: { action: ProductActionName }
+  agents_action_completed: {
+    action: ProductActionName
+    result: ActionResult
+    failure_kind: FailureKind
+  }
+  agents_feature_opened: { feature: ProductFeature }
   agents_thread_created: {
     run_target: "local" | "cloud"
     has_attachments: boolean
@@ -185,7 +248,99 @@ export class ProductAnalytics {
     actorId: string | null | undefined = this.#person?.user_id
   ): void {
     if (!actorId || actorId !== this.#person?.user_id) return
+    if (
+      ![
+        "agents_thread_created",
+        "agents_message_submitted",
+        "agents_action_started",
+        "agents_action_completed",
+        "agents_feature_opened",
+      ].includes(name)
+    )
+      return
     this.#capture("track", name, properties)
+  }
+
+  beginAction(
+    action: ProductActionName,
+    actorId: string | null | undefined = this.#person?.user_id
+  ): ProductAction {
+    this.track("agents_action_started", { action }, actorId)
+    return new ProductAction(this, action, actorId ?? null)
+  }
+
+  featureOpened(feature: ProductFeature): void {
+    this.track("agents_feature_opened", { feature })
+  }
+
+  async mutation<T>(
+    path: string,
+    method: string | undefined,
+    send: () => Promise<T>
+  ): Promise<T> {
+    const action = ProductAnalytics.mutationAction(path, method)
+    if (!action) return send()
+    const pending = this.beginAction(action)
+    try {
+      const result = await send()
+      pending.accepted()
+      return result
+    } catch (error) {
+      pending.failed(error)
+      throw error
+    }
+  }
+
+  private static mutationAction(
+    path: string,
+    method = "GET"
+  ): ProductActionName | undefined {
+    const route = path.split("?", 1)[0] ?? ""
+    const routes: ReadonlyArray<readonly [string, RegExp, ProductActionName]> =
+      [
+        ["PUT", /^\/me\/preferences$/, "settings_save"],
+        ["POST", /^\/projects$/, "project_create"],
+        ["PATCH", /^\/projects\/[^/]+$/, "project_update"],
+        ["DELETE", /^\/projects\/[^/]+$/, "project_delete"],
+        ["PUT", /^\/projects\/[^/]+\/members$/, "project_share"],
+        ["DELETE", /^\/projects\/[^/]+\/members\/[^/]+$/, "project_unshare"],
+        ["PUT", /^\/projects\/[^/]+\/threads\/[^/]+$/, "project_move_thread"],
+        ["DELETE", /^\/projects\/threads\/[^/]+$/, "project_move_thread"],
+        ["POST", /^\/threads\/[^/]+\/share-to-workspace$/, "thread_share"],
+        ["POST", /^\/(?:admin\/)?threads\/[^/]+\/cancel$/, "cancel"],
+        ["POST", /^\/schedules$/, "automation_create"],
+        ["PATCH", /^\/schedules\/[^/]+$/, "automation_update"],
+        ["DELETE", /^\/schedules\/[^/]+$/, "automation_delete"],
+        ["POST", /^\/schedules\/[^/]+\/trigger$/, "automation_run"],
+        [
+          "POST",
+          /^\/my-managed-tools\/[^/]+\/connect\/[^/]+$/,
+          "integration_connect",
+        ],
+        [
+          "DELETE",
+          /^\/my-managed-tools\/[^/]+\/services\/[^/]+$/,
+          "integration_disconnect",
+        ],
+        ["PUT", /^\/(?:my-mcps|mcps)\/[^/]+$/, "mcp_save"],
+        ["DELETE", /^\/(?:my-mcps|mcps)\/[^/]+$/, "mcp_delete"],
+        ["PUT", /^\/workspaces\/[^/]+\/mcps\/[^/]+$/, "mcp_save"],
+        ["DELETE", /^\/workspaces\/[^/]+\/mcps\/[^/]+$/, "mcp_delete"],
+        [
+          "POST",
+          /^\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/human-review$/,
+          "review_request",
+        ],
+        ["POST", /^\/reviews\/[^/]+\/[^/]+\/\d+\/re-review$/, "review_rerun"],
+        [
+          "POST",
+          /^\/reviews\/[^/]+\/[^/]+\/\d+\/submit-review$/,
+          "review_submit",
+        ],
+      ]
+    return routes.find(
+      ([verb, pattern]) => method === verb && pattern.test(route)
+    )?.[2]
   }
 
   #capture(
@@ -235,11 +390,87 @@ export class ProductAnalytics {
     }
   }
 
+  private static allowedProperty(
+    type: string,
+    name: unknown,
+    key: string,
+    value: unknown
+  ): boolean {
+    if (key === "product") return value === "open-swe"
+    if (key === "environment")
+      return (
+        typeof value === "string" &&
+        [
+          "",
+          "local",
+          "development",
+          "dev",
+          "test",
+          "staging",
+          "production",
+          "prod",
+        ].includes(value)
+      )
+    if (key === "platform") return value === "web" || value === "desktop"
+    if (key === "schema_version") return value === 1
+    if (key === "desktop_version")
+      return (
+        typeof value === "string" &&
+        /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(value) &&
+        value.length < 64
+      )
+    if (type !== "track") return false
+    if (name === "agents_feature_opened")
+      return key === "feature" && FEATURES.some((feature) => feature === value)
+    if (
+      name === "agents_action_started" ||
+      name === "agents_action_completed"
+    ) {
+      if (key === "action") return ACTIONS.some((action) => action === value)
+      if (name !== "agents_action_completed") return false
+      if (key === "result") return value === "accepted" || value === "failed"
+      return (
+        key === "failure_kind" &&
+        typeof value === "string" &&
+        [
+          "none",
+          "network",
+          "unauthorized",
+          "forbidden",
+          "not_found",
+          "conflict",
+          "validation",
+          "server",
+          "unknown",
+        ].includes(value)
+      )
+    }
+    if (name === "agents_thread_created") {
+      if (key === "run_target") return value === "local" || value === "cloud"
+      return key === "has_attachments" && typeof value === "boolean"
+    }
+    if (name === "agents_message_submitted") {
+      if (key === "mode")
+        return value === "new_turn" || value === "queue" || value === "steer"
+      return key === "has_attachments" && typeof value === "boolean"
+    }
+    return false
+  }
+
   #sanitize(ctx: Context): Context {
     const event = ctx.event
     const path = event.context?.page?.path
+    const library = event.context?.library
     event.context = {
       ip: "0.0.0.0",
+      ...(library?.name === "analytics.js" &&
+      typeof library.version === "string" &&
+      /^(?:(?:npm:)?next-)?\d+\.\d+\.\d+(?:-[a-z0-9.]+)?$/.test(
+        library.version
+      ) &&
+      library.version.length < 64
+        ? { library: { name: library.name, version: library.version } }
+        : {}),
       page: { path: typeof path === "string" ? path : "/" },
     }
     if (event.type === "identify") {
@@ -252,21 +483,60 @@ export class ProductAnalytics {
       }
     }
     if (event.properties) {
-      const allowed = new Set([
-        "product",
-        "environment",
-        "platform",
-        "desktop_version",
-        "schema_version",
-        "run_target",
-        "has_attachments",
-        "mode",
-      ])
       event.properties = Object.fromEntries(
-        Object.entries(event.properties).filter(([key]) => allowed.has(key))
+        Object.entries(event.properties).filter(([key, value]) =>
+          ProductAnalytics.allowedProperty(event.type, event.event, key, value)
+        )
       )
     }
     return ctx
+  }
+}
+
+export class ProductAction {
+  #settled = false
+  constructor(
+    private readonly analytics: ProductAnalytics,
+    private readonly action: ProductActionName,
+    private readonly actorId: string | null | undefined
+  ) {}
+
+  accepted(): void {
+    this.finish("accepted", "none")
+  }
+
+  failed(error: unknown): void {
+    const status =
+      typeof error === "object" && error !== null && "status" in error
+        ? error.status
+        : undefined
+    const failure: FailureKind =
+      status === 401
+        ? "unauthorized"
+        : status === 403
+          ? "forbidden"
+          : status === 404
+            ? "not_found"
+            : status === 409
+              ? "conflict"
+              : status === 400 || status === 422
+                ? "validation"
+                : typeof status === "number" && status >= 500
+                  ? "server"
+                  : status === 0 || error instanceof TypeError
+                    ? "network"
+                    : "unknown"
+    this.finish("failed", failure)
+  }
+
+  private finish(result: ActionResult, failure_kind: FailureKind): void {
+    if (this.#settled) return
+    this.#settled = true
+    this.analytics.track(
+      "agents_action_completed",
+      { action: this.action, result, failure_kind },
+      this.actorId
+    )
   }
 }
 

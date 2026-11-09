@@ -20,6 +20,7 @@ from openswe.agent_api.tool_sets import PURGE_JOB as TOOL_SETS_PURGE
 from openswe.agent_api.tool_sets import PURGE_SCHEDULE as TOOL_SETS_SCHEDULE
 from openswe.agent_api.tool_sets import purge_tool_sets
 from openswe.agent_cost import run_agent_cost_refresh
+from openswe.analytics.segment import SEGMENT_JOB, SegmentDelivery
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
@@ -38,7 +39,7 @@ from openswe.human_review.standard import run_deadline, settle_pull_request, set
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
-from openswe.jobs.worker import WORKER
+from openswe.jobs.worker import WORKER, JobWorker
 from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
 from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
 from openswe.memories.curator import WorkspaceCurator
@@ -85,6 +86,8 @@ SESSION_COST: Final = "session_cost"
 RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
+SEGMENT_WORKER: Final = JobWorker(max_in_flight=2)
+SEGMENT_WORKER.register(SEGMENT_JOB)(SegmentDelivery.deliver)
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
