@@ -1517,7 +1517,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "action": "subscribe",
                 "timeout_seconds": 300,
                 "event_types": ["check_suite.completed"],
-                "timeout_seconds": 300,
                 "instructions": BACKGROUND_WORK_LISTENER_INSTRUCTIONS,
             },
             "call-background-work-listen",
