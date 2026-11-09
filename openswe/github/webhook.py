@@ -22,7 +22,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequestPayload
 from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import settle_pull_request, settle_repository
+from openswe.human_review.settling import SettleTarget
 from openswe.input_messages import (
     EnvelopeData,
     PersonIdentity,
@@ -1822,7 +1822,7 @@ async def settle_human_reviews(payload: dict[str, Any]) -> None:
         return
     owner, repo = event.repository.owner.login, event.repository.name
     for number in event.numbers:
-        await settle_pull_request(owner, repo, number)
+        await SettleTarget.queue(owner, repo, number)
 
 
 class _StatusEvent(BaseModel):
@@ -1839,4 +1839,4 @@ async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
         return
     if event.state == "pending":
         return
-    await settle_repository(event.repository.owner.login, event.repository.name)
+    await SettleTarget.queue(event.repository.owner.login, event.repository.name)

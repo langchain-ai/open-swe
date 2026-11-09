@@ -66,8 +66,8 @@ from openswe.human_review.requests import (
     AUTO_ASSIGN_ASKED,
     HumanReviewParticipant,
     HumanReviewRequest,
-    RequestKind,
 )
+from openswe.human_review.settling import SETTLED_KINDS
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -103,7 +103,6 @@ AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 DeadlineStep = Literal["unclaimed", "pick_expiry", "auto_merge"]
-SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)

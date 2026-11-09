@@ -32,7 +32,9 @@ from openswe.github.quota import SAMPLE_JOB as GITHUB_QUOTA_SAMPLE
 from openswe.github.quota import SAMPLE_SCHEDULE as GITHUB_QUOTA_SCHEDULE
 from openswe.github.quota import InstallationQuota
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
-from openswe.human_review.standard import run_deadline
+from openswe.human_review.settling import SETTLE_JOB as HUMAN_REVIEW_SETTLE
+from openswe.human_review.settling import SettleTarget
+from openswe.human_review.standard import run_deadline, settle_pull_request, settle_repository
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
@@ -187,6 +189,17 @@ async def _human_review_deadline(job: Job) -> object:
     if request_id is None or step is None:
         return None
     return await run_deadline(request_id, step)
+
+
+@WORKER.register(HUMAN_REVIEW_SETTLE)
+async def _human_review_settle(job: Job) -> None:
+    target = SettleTarget.from_job(job)
+    if target is None:
+        return
+    if target.number is None:
+        await settle_repository(target.owner, target.repo)
+    else:
+        await settle_pull_request(target.owner, target.repo, target.number)
 
 
 @_sandbox_work(RECONCILE)

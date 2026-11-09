@@ -12,6 +12,8 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.human_review.settling import SETTLE_JOB
+from openswe.jobs import queue
 from openswe.slack.pr_links import linked_pull_requests
 from openswe.users import User, UserIdentity, UserPreferences
 from tests.support.slack_api import SlackAPI
@@ -229,14 +231,18 @@ async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_expla
         failing_checks=["unit tests"],
         unresolved_threads=0,
     )
+    wake.side_effect = RuntimeError("thread owner unavailable")
     await first.update_blocked_reactions(snapshot)
     assert {"warning", "construction"} <= reactions
-    assert wake.await_count == 1
+    assert [job.kind for job in await queue.find({})] == [SETTLE_JOB]
+    wake.side_effect = None
+    await first.update_blocked_reactions(snapshot)
+    assert wake.await_count == 2
     args = wake.await_args.args
     assert args[:3] == ("C1", "1.0", "U1")
     assert urls[0] in args[3] and "unit tests" in args[3]
     await first.update_blocked_reactions(snapshot)
-    assert wake.await_count == 1
+    assert wake.await_count == 2
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
     snapshot.check_state = "success"
@@ -251,7 +257,7 @@ async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_expla
     assert "white_check_mark" not in reactions
     snapshot.check_state = "failure"
     await second.update_blocked_reactions(snapshot)
-    assert wake.await_count == 2
+    assert wake.await_count == 3
     assert urls[1] in wake.await_args.args[3]
     snapshot.draft = True
     await second.update_blocked_reactions(snapshot)
