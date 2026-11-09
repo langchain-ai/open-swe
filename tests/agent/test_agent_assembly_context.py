@@ -19,6 +19,7 @@ from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads.inbox import ThreadInbox
+from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -665,13 +666,13 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     ("thread_scope", "source", "channel_reads", "thread_reads"),
     [
         ("private", "slack", True, True),
-        ("public", "slack", False, True),
+        ("public", "slack", True, True),
         ("bot", "slack", True, True),
         ("private", "dashboard", True, True),
         ("public", "dashboard", False, False),
     ],
 )
-async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
+async def test_slack_read_bindings_remain_available_with_slack_context(
     thread_scope: str,
     source: str,
     channel_reads: bool,
@@ -710,6 +711,79 @@ async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
     gp = next(item for item in subagents if item.name == "general-purpose")
     assert ("slack_read_channel_messages" in (gp.tools or ())) is channel_reads
     assert ("slack_read_thread_messages" in (gp.tools or ())) is thread_reads
+
+
+async def test_bot_and_human_slack_turns_have_identical_code_tools(
+    saved_thread_scope: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    slack_api: SlackAPI,
+) -> None:
+    from langchain_quickjs._ptc import render_ptc_prompt
+
+    from openswe.run_config import RunConfig
+    from openswe.server import callable_from_code
+    from openswe.tools import access as tool_access
+
+    slack_thread = {
+        "channel_id": "C123",
+        "thread_ts": "1700000000.000100",
+        "triggering_bot_id": "B1",
+    }
+    saved_thread_scope.update(
+        visibility="public", owner_type="system", source_context={"slack_thread": slack_thread}
+    )
+    bot_config = _base_config()
+    bot_config["configurable"].update(source="slack", slack_thread=slack_thread, github_login=None)
+    human_config = _base_config()
+    human_config["configurable"].update(
+        source="slack", slack_thread={"channel_id": "C123", "thread_ts": "1700000000.000100"}
+    )
+    bot = cast(ToolSurface, (await _agent_catalog(bot_config))["surface"])
+    human = cast(ToolSurface, (await _agent_catalog(human_config))["surface"])
+    await bot.prepare()
+    await human.prepare()
+    assert list(bot.tools) == list(human.tools)
+    bot_code_tools = [tool for name, tool in bot.tools.items() if callable_from_code(name)]
+    human_code_tools = [tool for name, tool in human.tools.items() if callable_from_code(name)]
+    assert [tool.name for tool in bot_code_tools] == [tool.name for tool in human_code_tools]
+    assert render_ptc_prompt(bot_code_tools) == render_ptc_prompt(human_code_tools)
+    assert not {"save_user_settings", "read_user_settings"} & human.tools.keys()
+
+    cfg = RunConfig.from_config(human_config)
+    monkeypatch.setattr(tool_access, "configurable", lambda: cfg)
+    resolved = await tool_access.resolve_access()
+    assert not resolved.channel_history
+    assert resolved.mode(tool_access.Policy(trusted="thread_history")) == "full"
+    channel_read = human.tools["slack_read_channel_messages"]
+    assert await channel_read.ainvoke({"channel_id": "C123"}) == {
+        "ok": False,
+        "error": tool_access._REFUSED,
+    }
+    assert not slack_api.calls
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "text": "Thread alert"}]})
+    result = await human.tools["slack_read_thread_messages"].ainvoke(
+        {"channel_id": "C123", "message_ts": "1700000000.000100"}
+    )
+    assert result["success"] is True
+    assert "Thread alert" in result["formatted"]
+
+    cfg = RunConfig.from_config(bot_config)
+    slack_api.respond(
+        {
+            "ok": True,
+            "channel": {
+                "id": "C123",
+                "is_channel": True,
+                "is_private": False,
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
+            },
+        }
+    )
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0", "text": "Channel alert"}]})
+    result = await bot.tools["slack_read_channel_messages"].ainvoke({"channel_id": "C123"})
+    assert result["success"] is True
+    assert "Channel alert" in result["formatted"]
 
 
 @pytest.fixture

@@ -2138,7 +2138,13 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
-    static_tools = permitted(static_tools, tool_access)
+    permitted_tools = permitted(static_tools, tool_access)
+    static_tools = [
+        tool
+        for tool in static_tools
+        if tool in permitted_tools
+        or (cfg.slack_context and _registered_tool_name(tool) in SOURCE_FREE_SLACK_TOOLS)
+    ]
     if not cfg.slack_context:
         # An automation run has no Slack thread, but its prompt may ask it to
         # report to a channel.
