@@ -85,3 +85,12 @@ it("explains itself off a pull request page", () => {
   expect(open).not.toHaveBeenCalled()
   expect(alert).toHaveBeenCalled()
 })
+
+it.each(["about:blank", "chrome://newtab/"])(
+  "explains a modifier-click that ran it in an empty tab: %s",
+  (url) => {
+    const { open, alert } = run(url)
+    expect(open).not.toHaveBeenCalled()
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining("empty tab"))
+  }
+)
