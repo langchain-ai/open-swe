@@ -2,7 +2,6 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   LaptopRegularIcon,
-  PushPinRegularIcon,
 } from "@langchain/macaw-components/icons"
 import {
   ContextMenu,
@@ -15,10 +14,7 @@ import {
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
-import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
 import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
@@ -29,8 +25,6 @@ import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
-import { HourglassIcon } from "@phosphor-icons/react/dist/ssr/Hourglass"
-import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
@@ -303,7 +297,7 @@ function PullRequestIcon({
         className={meta.className}
         aria-label={meta.label}
       />
-      {live?.checks === "failing" && (
+      {(live?.state ?? state) !== "draft" && live?.checks === "failing" && (
         <span
           className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-error-strong ring-2 ring-surface-level-2"
           aria-label="Checks failing"
@@ -470,18 +464,6 @@ export function SidebarThreadRow({
     deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
-  const onArchiveClick = (event: React.MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    onToggleArchived()
-  }
-
-  const onPinClick = (event: React.MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    onTogglePin()
-  }
-
   const handleNavigate = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (contextMenuOpen) {
       event.preventDefault()
@@ -509,16 +491,8 @@ export function SidebarThreadRow({
         />
       )}
 
-      <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
+      <span className="flex shrink-0 items-center gap-space-2">
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
-        {thread.automationActionPosted && (
-          <SlackLogoIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-success"
-            aria-label="Action posted to Slack"
-          />
-        )}
         {item.reviewPage ? (
           <BookOpenTextIcon
             size={ICON_SIZE}
@@ -539,40 +513,14 @@ export function SidebarThreadRow({
             {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
           </>
         )}
-        {item.status === "running" ? (
+        {item.status === "running" || item.waitingForDelegatedWork ? (
           <RunningIndicator label="Thread running" />
-        ) : item.waitingForDelegatedWork ? (
-          <HourglassIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-secondary"
-            aria-label="Waiting for delegated work"
-          />
         ) : unread ? (
           <span
             className="size-2 rounded-full bg-brand"
             aria-label="Unread thread"
           />
         ) : null}
-      </span>
-
-      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
-        <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
-          label={pinned ? "Unpin thread" : "Pin thread"}
-          size="xs"
-          color="secondary"
-          variant="plain"
-          onClick={onPinClick}
-        />
-        <IconButton
-          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
-          label={archived ? "Unarchive thread" : "Archive thread"}
-          size="xs"
-          color="secondary"
-          variant="plain"
-          onClick={onArchiveClick}
-        />
       </span>
     </>
   )
