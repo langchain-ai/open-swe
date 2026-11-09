@@ -5,18 +5,24 @@ failed, and an admin can redeliver one by hand. A handler claims
 ``(scope, key)`` before acting, and only the first claim wins. A handler that
 fails before its side effect releases the claim, so a later delivery of the
 same event (a provider retry or a manual redelivery) runs.
-A claim lapses at ``expires_at`` and can then be taken again. Each claim also
-sweeps a few lapsed ones, so the table stays about as large as the live claims.
+A claim lapses at ``expires_at`` and can then be taken again. A lapsed row is
+inert: every read checks ``expires_at``. The ``event_claim_purge`` job deletes
+lapsed rows every few minutes, so taking a claim never pays for cleanup and
+the table stays about as large as the live claims.
 Short-lived mutexes use the same claims, so one whose holder never releases it
 lapses on its own.
 """
 
+import logging
 from datetime import timedelta
-from typing import Literal
+from typing import Final, Literal
 
 from sqlalchemy import text
 
 from openswe.database.postgres import transaction
+from openswe.jobs.queue import Job
+
+logger = logging.getLogger(__name__)
 
 _CLAIM = text(
     """
@@ -28,23 +34,28 @@ _CLAIM = text(
     RETURNING 1
     """
 )
-_SWEEP = text(
+_PURGE = text(
     """
     DELETE FROM event_claim WHERE (scope, key) IN (
         SELECT scope, key FROM event_claim
-        WHERE expires_at <= clock_timestamp()
+        -- statement_timestamp() is STABLE, so the expiry index bounds the scan;
+        -- the VOLATILE clock_timestamp() would scan the whole table.
+        WHERE expires_at <= statement_timestamp()
+        ORDER BY expires_at
         LIMIT :limit
         FOR UPDATE SKIP LOCKED
     )
     """
 )
-_SWEEP_LIMIT = 100
+PURGE_JOB: Final = "event_claim_purge"
+PURGE_SCHEDULE: Final = "*/5 * * * *"
+# Small enough that each delete is a short transaction and a short burst of WAL.
+_PURGE_BATCH: Final = 5_000
 
 
 async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
     """Take the claim on ``(scope, key)``; ``False`` when someone already holds it."""
     async with transaction() as conn:
-        await conn.execute(_SWEEP, {"limit": _SWEEP_LIMIT})
         result = await conn.execute(_CLAIM, {"scope": scope, "key": key, "ttl": ttl})
         return result.first() is not None
 
@@ -78,7 +89,6 @@ async def remaining(scope: str, key: str) -> float:
 async def defer(scope: str, key: str, *, ttl: timedelta) -> None:
     """Keep a cooldown claim until at least ``ttl`` from now, never shortening it."""
     async with transaction() as conn:
-        await conn.execute(_SWEEP, {"limit": _SWEEP_LIMIT})
         await conn.execute(
             text(
                 "INSERT INTO event_claim (scope, key, expires_at) "
@@ -127,3 +137,21 @@ async def claim_within_limit(
             return "limited"
         result = await conn.execute(_CLAIM, {"scope": scope, "key": key, "ttl": ttl})
         return "claimed" if result.first() is not None else "taken"
+
+
+async def purge_lapsed(_job: Job) -> None:
+    """The ``event_claim_purge`` job: delete lapsed claims.
+
+    Deletes in batches, each its own transaction, so a backlog never holds one
+    long transaction. ``SKIP LOCKED`` leaves rows a claim is retaking to it, and
+    lets two overlapping purges split the work.
+    """
+    purged = 0
+    while True:
+        async with transaction() as conn:
+            result = await conn.execute(_PURGE, {"limit": _PURGE_BATCH})
+        purged += result.rowcount
+        if result.rowcount < _PURGE_BATCH:
+            break
+    if purged:
+        logger.info("Lapsed event claims purged", extra={"purged": purged})

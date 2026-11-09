@@ -24,6 +24,8 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
+from openswe.event_claims import PURGE_JOB as EVENT_CLAIM_PURGE
+from openswe.event_claims import PURGE_SCHEDULE as EVENT_CLAIM_SCHEDULE
 from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
 from openswe.github.branch_config import refresh_required_checks
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
@@ -221,6 +223,7 @@ async def _tool_sets_purge(_job: Job) -> None:
     logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
+WORKER.register(EVENT_CLAIM_PURGE)(event_claims.purge_lapsed)
 WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
 
 
@@ -265,6 +268,7 @@ async def start_jobs() -> None:
             REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
         lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
+        lambda: queue.schedule(EVENT_CLAIM_PURGE, cron=EVENT_CLAIM_SCHEDULE, key=EVENT_CLAIM_PURGE),
         lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
     ]
     for step in steps:
