@@ -267,6 +267,7 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         user_id=turn.user_id,
         text=turn.text,
         attachments=cast(list[dict[str, Any]], turn.attachments),
+        action_token=turn.action_token,
         bot_user_id=common.SLACK_BOT_USER_ID,
         thread_id=conversation,
         held_thread_id=branch_of,

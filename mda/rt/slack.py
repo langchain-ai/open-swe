@@ -132,6 +132,8 @@ async def start_turn(
     """The run a message starts on its conversation's thread, the reply that says why
     it starts none, or ``None``."""
     raw = event.payload
+    nested = raw.get("assistant_thread")
+    grant_holder = nested if isinstance(nested, dict) else {}
     app_id = thread.source_thread_key.split(":")[2:3]
     bot_user_id, bot_username = await _bot_identity()
     message = SlackMessage(
@@ -150,6 +152,7 @@ async def start_turn(
         text=event.text,
         attachments=_attachments(raw.get("attachments")),
         explicit_mention=event.key == "mention",
+        action_token=_text(raw.get("action_token")) or _text(grant_holder.get("action_token")),
     )
     if not message.team_id or not message.app_id:
         return None

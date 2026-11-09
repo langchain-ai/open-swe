@@ -58,6 +58,8 @@ class SlackMessage(BaseModel):
     attachments: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=100)
     # Whether it mentions Open SWE, as the channel's key says.
     explicit_mention: bool = False
+    # Slack's search grant, sent only with a message that @mentions Robin or is a DM.
+    action_token: str = Field(default="", max_length=512)
 
 
 class SlackMessageFactsRequest(SlackMessage):
