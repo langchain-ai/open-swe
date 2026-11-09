@@ -170,8 +170,13 @@ export interface ClientErrorReport {
 }
 
 export class ApiError extends DashboardRequestError {
-  constructor(status: number, message: string, requestId?: string) {
-    super(status, message, requestId)
+  constructor(
+    status: number,
+    message: string,
+    requestId?: string,
+    retryAfter?: string | null
+  ) {
+    super(status, message, requestId, undefined, retryAfter)
     this.name = "ApiError"
   }
 }
@@ -208,7 +213,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, message, requestId)
+    throw new ApiError(
+      res.status,
+      message,
+      requestId,
+      res.headers.get("Retry-After")
+    )
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

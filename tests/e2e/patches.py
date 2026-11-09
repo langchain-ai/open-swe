@@ -453,7 +453,7 @@ async def _fake_assert_repo_access(full_name: str, token: str) -> str:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-    repo_access._raise_for_github_repo_status(response.status_code)  # noqa: SLF001
+    repo_access.RepoAccessResponse.require(response)
     return normalized
 
 

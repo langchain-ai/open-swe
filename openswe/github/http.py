@@ -1225,12 +1225,7 @@ async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
     except httpx2.HTTPStatusError as exc:
         response = exc.response
         status: ReadStatus = "unavailable"
-        if (
-            response.status_code == 429
-            or 500 <= response.status_code < 600
-            or _Retry.rate_limited(response)
-            or (response.status_code == 403 and "Retry-After" in response.headers)
-        ):
+        if 500 <= response.status_code < 600 or GitHubError(response).rate_limited:
             status = "transient"
         elif response.status_code == 404:
             status = "missing"
@@ -1307,6 +1302,14 @@ class GitHubError(httpx2.HTTPStatusError):
             f"GitHub answered {response.status_code}",
             request=response.request,
             response=response,
+        )
+
+    @property
+    def rate_limited(self) -> bool:
+        return (
+            self.response.status_code == 429
+            or _Retry.rate_limited(self.response)
+            or (self.response.status_code == 403 and "Retry-After" in self.response.headers)
         )
 
     @property

@@ -42,13 +42,20 @@ export function newRequestId(): string {
 
 /** A dashboard API call that failed; `requestId` matches the server's logs. */
 export class DashboardRequestError extends Error {
+  readonly retryAfterMs?: number
+
   constructor(
     public readonly status: number,
     message: string,
     public readonly requestId?: string,
-    options?: ErrorOptions
+    options?: ErrorOptions,
+    retryAfter?: string | null
   ) {
     super(message, options)
+    const seconds =
+      retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN
+    if (Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 2_147_483)
+      this.retryAfterMs = seconds * 1000
   }
 }
 
