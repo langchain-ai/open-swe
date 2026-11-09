@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from langsmith.utils import LangSmithError
 
 from openswe.utils import langsmith as ls_utils
 
@@ -14,6 +15,7 @@ _REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 def _clear_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     ls_utils._PROJECT_ID_CACHE.clear()
     ls_utils._TENANT_ID_CACHE.clear()
+    ls_utils._PROJECT_AGENT_CACHE.clear()
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: None)
 
 
@@ -222,3 +224,51 @@ async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch)
     assert await ls_utils.get_langsmith_trace_url("t9") == (
         "https://smith.example/o/tenant-d/projects/p/pid/t/t9"
     )
+
+
+async def test_trace_url_scopes_to_owning_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api/v1")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key")
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant-d")
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    calls: list[tuple[str, object]] = []
+
+    class _FakeClient:
+        async def _arequest_with_retries(self, method: str, url: str, **kwargs: object):
+            calls.append((url, kwargs["params"]))
+            return SimpleNamespace(json=lambda: {"items": [{"id": "agent-1"}]})
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
+
+    for _ in range(2):
+        assert await ls_utils.get_langsmith_trace_url("t9") == (
+            "https://smith.example/o/tenant-d/a/agent-1/projects/p/pid/t/t9"
+        )
+    assert calls == [
+        ("https://smith.example/api/v1/agents", {"tracer_session_id": "pid", "page_size": 2})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "cached"), [(403, True), (404, True), (429, False), (503, False)]
+)
+async def test_agent_lookup_caches_only_definitive_client_errors(
+    monkeypatch: pytest.MonkeyPatch, status: int, cached: bool
+) -> None:
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api/v1")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key")
+    calls: list[str] = []
+
+    class _FakeClient:
+        async def _arequest_with_retries(self, method: str, url: str, **kwargs: object):
+            calls.append(url)
+            error = LangSmithError("failed")
+            error.__cause__ = Exception()
+            error.__cause__.response = SimpleNamespace(status_code=status)  # type: ignore[attr-defined]
+            raise error
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
+
+    assert await ls_utils._resolve_project_agent_id("pid") is None
+    assert await ls_utils._resolve_project_agent_id("pid") is None
+    assert len(calls) == (1 if cached else 2)

@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 _PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
 _TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
+_PROJECT_AGENT_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 
 
 def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
@@ -192,7 +193,45 @@ async def _compose_langsmith_project_url(project_name: str | None = None) -> str
     project_id = await _resolve_project_id_by_name(project_name or tracing_project())
     if not project_id:
         return None
-    return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
+    agent_id = await _resolve_project_agent_id(project_id)
+    agent_segment = f"/a/{quote(agent_id, safe='')}" if agent_id else ""
+    return f"{langsmith_host_url()}/o/{tenant_id}{agent_segment}/projects/p/{project_id}"
+
+
+def _is_definitive_client_error(exc: BaseException) -> bool:
+    """Whether a failed request got a 4xx that retrying won't change (not 408 or 429)."""
+    status = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
+    return isinstance(status, int) and 400 <= status < 500 and status not in {408, 429}
+
+
+async def _resolve_project_agent_id(project_id: str) -> str | None:
+    """The single agent owning a tracing project, so links skip LangSmith's agent redirect."""
+    cache_key = _project_cache_key(project_id)
+    if cache_key in _PROJECT_AGENT_CACHE:
+        return _PROJECT_AGENT_CACHE[cache_key] or None
+    client = _build_langsmith_client()
+    if client is None:
+        return None
+    base = ENV.LANGSMITH_ENDPOINT.get().rstrip("/").removesuffix("/api/v1").removesuffix("/api")
+    try:
+        async with asyncio.timeout(5):
+            response = await client._arequest_with_retries(  # noqa: SLF001
+                "GET",
+                f"{base}/api/v1/agents",
+                params={"tracer_session_id": project_id, "page_size": 2},
+                stop_after_attempt=1,
+            )
+        items = response.json().get("items") or []
+    except Exception as exc:  # noqa: BLE001
+        if _is_definitive_client_error(exc):
+            _PROJECT_AGENT_CACHE[cache_key] = ""
+        logger.debug(
+            "Could not resolve the agent for LangSmith project %s", project_id, exc_info=True
+        )
+        return None
+    agent_id = str(items[0].get("id") or "") if len(items) == 1 else ""
+    _PROJECT_AGENT_CACHE[cache_key] = agent_id
+    return agent_id or None
 
 
 async def get_langsmith_trace_url(thread_id: str, project_name: str | None = None) -> str | None:
