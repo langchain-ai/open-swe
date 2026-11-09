@@ -233,7 +233,7 @@ it("retains a failed question and retries it with the same command identity", as
     return Response.json(detail)
   })
   mount(<IncidentDetail incidentId="incident-1" />)
-  const input = await screen.findByRole("textbox", { name: "Ask Open SWE" })
+  const input = await screen.findByRole("textbox", { name: "Ask Robin" })
   fireEvent.change(input, {
     target: { value: "  Did database latency change?  " },
   })
@@ -313,7 +313,7 @@ it("renders findings and referenced evidence while hiding unauthorized commands"
   ).toBe("https://app.datadoghq.com/apm/trace/1")
   expect(screen.getByText("Missing deployed revision")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
-  expect(screen.queryByRole("textbox", { name: "Ask Open SWE" })).toBeNull()
+  expect(screen.queryByRole("textbox", { name: "Ask Robin" })).toBeNull()
   expect(
     screen.getByRole("link", { name: /Open trace/ }).getAttribute("href")
   ).toBe("https://smith.langchain.com/o/org/projects/p/proj/t/thread-1")

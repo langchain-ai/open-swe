@@ -148,7 +148,7 @@ class SlackChannel(Base):
     async def save_all(cls, *payloads: JsonObject) -> None:
         """Upsert what Slack just said about these channels."""
         rows = [row for row in (cls.from_payload(item) for item in payloads) if row is not None]
-        if not rows or not postgres.configured():
+        if not rows:
             return
         upsert = insert(cls).values(
             [
@@ -172,8 +172,6 @@ class SlackChannel(Base):
     @classmethod
     async def listed_channels(cls) -> list[Self]:
         """The directory: every listed channel, by name."""
-        if not postgres.configured():
-            return []
         async with postgres.session() as session:
             rows = await session.scalars(select(cls).where(cls.listed).order_by(cls.name, cls.id))
             return list(rows)
@@ -217,11 +215,8 @@ class SlackChannel(Base):
     async def observe(cls, event_type: str, channel_id: str) -> None:
         """Bring one channel's row up to date after a Slack channel event about it."""
         if event_type in UNLIST_EVENTS:
-            if postgres.configured():
-                async with postgres.session() as session:
-                    await session.execute(
-                        update(cls).where(cls.id == channel_id).values(listed=False)
-                    )
+            async with postgres.session() as session:
+                await session.execute(update(cls).where(cls.id == channel_id).values(listed=False))
         elif event_type in REFETCH_EVENTS:
             await cls.load(channel_id, use_cache=False)
 
@@ -273,15 +268,11 @@ class SlackChannel(Base):
 
     @classmethod
     async def _row(cls, channel_id: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.get(cls, channel_id)
 
     @classmethod
     async def _row_named(cls, name: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(select(cls).where(cls.name == name))
 

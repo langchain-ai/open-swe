@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 import jwt
 import pytest
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from pydantic import JsonValue
@@ -17,6 +18,7 @@ from openswe.agent_api import server
 from openswe.agent_api.agent import AgentKind
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_kinds import RunKind
+from openswe.agent_api.run_state import as_messages
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
     RemoteRun,
@@ -28,6 +30,7 @@ from openswe.agent_api.tokens import (
     verify_runtime_token,
     verify_worker_grant,
 )
+from openswe.input_messages import human_input
 from openswe.sandboxes.tool_runtime import ToolSurface
 
 RUN = RemoteRun(
@@ -36,6 +39,16 @@ RUN = RemoteRun(
     configurable={"repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7},
     expires_at=int(time.time()) + 3600,
 )
+
+
+def _said(text: str, message_id: str | None = None) -> HumanMessage:
+    """What a person wrote, as the backend builds it."""
+    [message] = as_messages(
+        [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
+    )
+    assert isinstance(message, HumanMessage)
+    message.id = message_id or message.id
+    return message
 
 
 class _NeverPlanned(AgentKind):
@@ -127,49 +140,146 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
     assert bool(node.error) is fails
 
 
+async def test_each_backend_operation_compiles_its_graph_once_and_runs_its_own_work() -> None:
+    """Calls of one name share its compiled graph, each running its own work and
+    answering with its own result and events, however they interleave or nest."""
+    from langgraph.config import get_stream_writer
+    from langgraph.runtime import Runtime
+
+    from openswe.agent_api import runs
+    from openswe.agent_api.runs import in_graph_context
+
+    runs._graph.cache_clear()
+
+    async def call(n: int) -> tuple[int, list[object]]:
+        events: list[object] = []
+
+        async def work(_runtime: Runtime) -> int:
+            await asyncio.sleep(0)
+            get_stream_writer()({"call": n})
+            if n == 0:
+                # The same name, nested inside one of its own calls.
+                await in_graph_context({"run_name": "files.read"}, lambda _r: asyncio.sleep(0))
+            return n
+
+        answered = await in_graph_context({"run_name": "files.read"}, work, events=events)
+        return answered, events
+
+    answers = await asyncio.gather(*(call(n) for n in range(5)))
+
+    assert answers == [(n, [{"call": n}]) for n in range(5)]
+    assert runs._graph.cache_info().currsize == 1
+
+
+async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reaching the thread's files reads the thread and the run's skill stores; the run's
+    later files calls reach the same files, and a fresh sandbox builds them again."""
+    from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+
+    from openswe.agent_api import run_calls
+    from openswe.agent_api.run_sandbox import RunSandbox
+
+    class Machine(SandboxBackendProtocol):
+        @property
+        def id(self) -> str:
+            return "machine"
+
+        async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+            return ExecuteResponse(output=f"ran {command}", exit_code=0)
+
+    built: list[str | None] = []
+
+    class Kind(RunKind):
+        async def files(self, config: RunnableConfig) -> Machine:
+            built.append(config["configurable"].get("run_id"))
+            return Machine()
+
+    async def reconnected(self: RunSandbox) -> None:
+        return None
+
+    run_calls._files.clear()
+    kind = Kind()
+    run = RUN.model_copy(update={"grant_id": "grant-1"})
+    other = RUN.model_copy(update={"grant_id": "grant-2"})
+
+    for run_id in ("run-1", "run-1", "run-2"):
+        reply = await TokenRun.answer(
+            kind, run, "files.execute", {"command": "ls", "run_id": run_id}
+        )
+        assert reply == {"output": "ran ls", "exit_code": 0, "truncated": False}
+    assert built == ["run-1"]
+    # Another run on the thread reaches its files as itself.
+    await TokenRun.answer(kind, other, "files.execute", {"command": "ls", "run_id": "run-3"})
+    assert built == ["run-1", "run-3"]
+
+    monkeypatch.setattr(RunSandbox, "reconnect", reconnected)
+    await TokenRun.answer(kind, run, "sandbox_replaced", {"run_id": "run-1"})
+    await TokenRun.answer(kind, run, "files.execute", {"command": "ls", "run_id": "run-1"})
+    assert built == ["run-1", "run-3", "run-1"]
+    run_calls._files.clear()
+
+
+def test_a_tools_parameters_are_worked_out_once_while_it_lives() -> None:
+    import gc
+
+    from langchain_core.tools import tool
+
+    from openswe.sandboxes import tool_runtime
+    from openswe.sandboxes.tool_runtime import tool_parameters
+
+    @tool
+    def lookup(query: str, limit: int = 5) -> str:
+        """Look it up."""
+        return query
+
+    parameters = tool_parameters(lookup)
+
+    assert parameters["required"] == ["query"]
+    assert tool_parameters(lookup) is parameters
+    assert id(lookup) in tool_runtime._parameters_of
+    key = id(lookup)
+    del lookup
+    gc.collect()
+    assert key not in tool_runtime._parameters_of
+
+
 async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from langchain_core.messages import HumanMessage, messages_to_dict
+    from langchain_core.messages import messages_to_dict
+    from runtime_api.models import provider_model_kwargs
 
-    from openswe.agent_api import run_sandbox
+    from openswe.agent_api import run_calls, run_sandbox
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
     from openswe.middleware.model_selection import RouteSelection
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-    from openswe.utils.model import provider_model_kwargs
 
-    classify = AsyncMock(return_value=RouteSelection("fast"))
     refresh = AsyncMock(return_value=None)
-    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     monkeypatch.setattr(run_sandbox, "refresh_thread_github_proxy", refresh)
-    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(run_calls, "refresh_thread_github_proxy", refresh)
     parts = _NeverPlanned()
     monkeypatch.setattr(
         parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
     )
     run = RUN.model_copy(update={"assistant_id": "agent"})
-    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
 
-    route = await TokenRun.answer(parts, run, "route_model", {"run_id": "run-1", "humans": asked})
     chosen = await TokenRun.answer(
         parts,
         run,
         "model_choice",
         {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
     )
-    context = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
     refreshed = await TokenRun.answer(parts, run, "refresh_github_proxy", {"run_id": "run-1"})
 
-    assert route == {"route": "fast", "persist": True}
-    classify.assert_awaited_once_with("Fix the login")
     assert isinstance(chosen, dict)
     assert chosen["model_id"] == "anthropic:claude-opus-5-5"
     assert chosen["kwargs"] == provider_model_kwargs(
         "anthropic:claude-opus-5-5", "high", max_tokens=64_000
     )
-    # A thread in no task gets no task context.
-    assert context == {"instructions": None, "message": None}
     assert refreshed == {"expires_at": None}
     # The coding agent narrows its token no further than its thread does.
     refresh.assert_awaited_once_with(
@@ -177,7 +287,30 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         workspace_slug=None,
         github_proxy_repositories=None,
         github_proxy_permissions=None,
+        force_refresh=False,
     )
+    # Deprecated: an MDA deployment from before classifying routes and reading the task's
+    # context from its catalog still asks, and is answered.
+    monkeypatch.setattr(
+        "openswe.middleware.model_selection._select_jev_route",
+        AsyncMock(return_value=RouteSelection("fast")),
+    )
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
+    asked = messages_to_dict([_said("Fix the login", "human-1")])
+    route = await TokenRun.answer(parts, run, "route_model", {"run_id": "run-1", "humans": asked})
+    context = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
+    assert route == {"route": "fast", "persist": True}
+    assert context == {"instructions": None, "message": None}
+
+    # A task worker works in its coordinator's sandbox, so it keeps that one's token fresh,
+    # with the coordinator's own scope.
+    refresh.reset_mock()
+    turn = AgentTurnSettings(
+        title_model_id="anthropic:claude-haiku-5-5", coordinator_thread_id="owner"
+    )
+    worker = run.model_copy(update={"settings": RunSettings(agent=turn)})
+    await TokenRun.answer(parts, worker, "refresh_github_proxy", {"run_id": "run-1"})
+    refresh.assert_awaited_once_with("owner", workspace_slug=None, force_refresh=False)
 
 
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
@@ -187,8 +320,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     what the turn's start records waits for its ``run_started`` report."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from langchain_core.messages import HumanMessage, messages_to_dict
-    from runtime_api.catalog import RoutingRules
+    from langchain_core.messages import messages_to_dict
 
     from openswe import server
     from openswe.agent_api import agent, run_calls, run_sandbox
@@ -205,9 +337,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
     # Binding the sandbox found its workspace image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
-    monkeypatch.setattr(
-        run_calls, "stale_workspace_notice", lambda thread_id, stale: {"workspace": "w"}
-    )
+    monkeypatch.setattr(run_calls, "StaleWorkspaceReporter", MagicMock(report=AsyncMock()))
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
@@ -228,10 +358,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
     parts = _NeverPlanned()
-    turn = AgentTurnSettings(
-        title_model_id="openai:gpt-6-luna",
-        routing=RoutingRules(route_model_ids={"default": "openai:gpt-6.1-sol"}),
-    )
+    turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna")
     run = RUN.model_copy(
         update={
             "assistant_id": "agent",
@@ -240,7 +367,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
             "grant_id": "grant-1",
         }
     )
-    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+    asked = messages_to_dict([_said("Fix the login", "human-1")])
 
     prepared = await TokenRun.answer(
         parts,
@@ -256,8 +383,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()
-    # The transcript turn may open on another replica, so its notices go with the run.
-    assert prepared["notices"] == [{"kind": "workspace_stale", "data": {"workspace": "w"}}]
+    assert prepared["notices"] == []
     queued = MagicMock()
     monkeypatch.setattr(run_calls, "queue_run_notice", queued)
 
@@ -276,7 +402,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
         },
     )
 
-    queued.assert_called_once_with("thread-1", "workspace_stale", {"workspace": "w"})
+    queued.assert_not_called()
     [metadata] = [call.kwargs["metadata"] for call in updated.await_args_list]
     assert metadata["model"] == "openai:gpt-6.1-sol"
     assert metadata["model_route"] == "default"
@@ -327,13 +453,16 @@ async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
     assert not turn.reaches_sandbox
 
 
-async def test_task_context_rechecks_membership_and_cancellation(
+async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_worker_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock
     from uuid import uuid4
 
+    from runtime_api.catalog import TaskContext
+
     from openswe.middleware import task_coordination
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.tasks import store
 
     task = store.Task(title="Repair login", workspace_id=uuid4(), coordinator_thread_id="owner")
@@ -351,29 +480,204 @@ async def test_task_context_rechecks_membership_and_cancellation(
     )
     thread = AsyncMock(return_value={"metadata": {}})
     monkeypatch.setattr(task_coordination, "read_thread", thread)
-    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
     monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
-    parts = AgentKind()
-    run = RUN.model_copy(update={"assistant_id": "agent"})
 
-    absent = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
-    assert isinstance(absent, dict) and absent["message"] is None
+    async def task_context() -> TaskContext:
+        coordination = await TaskCoordinationMiddleware.for_thread(RUN.thread_id)
+        assert coordination is not None
+        return coordination.task_context()
+
+    absent = await task_context()
+    assert absent.message is None
 
     membership.return_value = context
-    joined = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
-    assert isinstance(joined, dict)
-    assert str(task.id) in str(joined["message"])
-    assert task.title in str(joined["message"])
-    assert joined["instructions"] != absent["instructions"]
+    joined = await task_context()
+    assert str(task.id) in str(joined.message)
+    assert task.title in str(joined.message)
+    assert joined.instructions != absent.instructions
 
+    # Planning a cancelled worker's run refuses to start it; its live runs are cancelled
+    # with it (``tasks.service.cancel_worker``).
     delegation.cancelled = True
     with pytest.raises(PermissionError, match="This worker was cancelled"):
-        await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
+        await task_context()
 
     thread.side_effect = PermissionError("Thread access revoked")
     with pytest.raises(PermissionError, match="Thread access revoked"):
-        await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
+        await task_context()
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_batch_of_reports_claims_keeps_and_writes_its_reports_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each report is recorded in order, but the batch's keys are claimed and kept, and
+    what its reports queued written, once for the batch rather than once per report."""
+    from runtime_api.loop import TOOL_STARTED, ToolCallReport
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.database import postgres
+
+    heard: list[str] = []
+
+    class Recorder(AgentMiddleware):
+        async def aresume_run(self, state: object, runtime: object) -> None:
+            heard.append("resumed")
+
+        async def aflush_run(self, runtime: object) -> None:
+            heard.append("written")
+
+        async def atool_started(self, tool_call: dict, message_id: str | None) -> None:
+            heard.append(f"started {tool_call['id']}")
+
+        async def atool_finished(self, result: object) -> None:
+            raise AssertionError("No result was reported")
+
+    class Kind(RunKind):
+        reporters = (Recorder(),)
+
+    transactions = 0
+    transaction = postgres.transaction
+
+    def counted() -> object:
+        nonlocal transactions
+        transactions += 1
+        return transaction()
+
+    monkeypatch.setattr(postgres, "transaction", counted)
+    kind = Kind()
+    batch = Reports(
+        items=[
+            item(
+                TOOL_STARTED,
+                ToolCallReport(run_id="run-1", name="ls", tool_call_id=f"call-{n}"),
+                key=f"run-1:call-{n}",
+                trace={},
+            )
+            for n in range(3)
+        ]
+    ).model_dump(mode="json")
+
+    first = ReportsTaken.model_validate(await TokenRun.answer(kind, RUN, "reports", batch))
+    # Its keys claimed in one transaction and its replies kept in another.
+    assert transactions == 2
+    again = ReportsTaken.model_validate(await TokenRun.answer(kind, RUN, "reports", batch))
+    # Delivered again, it answers from what was kept, read as its keys are claimed.
+    assert transactions == 3
+    assert first == again == ReportsTaken(replies=[{}, {}, {}])
+    assert heard == [
+        "resumed",
+        "started call-0",
+        "resumed",
+        "started call-1",
+        "resumed",
+        "started call-2",
+        "written",
+    ]
+
+
+async def test_an_operation_that_joins_a_task_hands_the_run_its_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.tools import tool
+    from runtime_api.catalog import JOINED_TASK_CONTEXT
+
+    from openswe.agent_api import agent
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+
+    @tool
+    def manage_baby_sit(pr_url: str) -> str:
+        """Watch a pull request."""
+        return f"watching {pr_url}"
+
+    @tool
+    def draft_preference(note: str) -> str:
+        """Say something."""
+        return note
+
+    tools = {tool.name: tool for tool in (manage_baby_sit, draft_preference)}
+    monkeypatch.setattr(agent, "agent_tools_by_name", lambda: tools)
+    monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
+    coordination = MagicMock(context_message=MagicMock(return_value="<task>Watch it</task>"))
+    for_thread = AsyncMock(return_value=coordination)
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", for_thread)
+    kind = AgentKind()
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+
+    async def operate(name: str, arguments: dict[str, JsonValue]) -> JsonValue:
+        call = {"run_id": "run-1", "name": name, "arguments": arguments, "request_id": name}
+        return await TokenRun.answer(kind, run, "operation", {**call, "grant": run.grant(name)})
+
+    watched = await operate("manage_baby_sit", {"pr_url": "https://github.com/a/b/pull/1"})
+    other = await operate("draft_preference", {"note": "hi"})
+
+    # A baby-sit watch can make the thread a task's coordinator after its catalog was planned.
+    assert isinstance(watched, dict)
+    assert watched["state"] == {JOINED_TASK_CONTEXT: "<task>Watch it</task>"}
+    assert isinstance(other, dict) and other["state"] == {}
+    for_thread.assert_awaited_once_with(run.thread_id)
+
+    # A thread in no task, or a read that fails, hands nothing back.
+    for_thread.side_effect = RuntimeError("database down")
+    failed = await operate("manage_baby_sit", {"pr_url": "https://github.com/a/b/pull/1"})
+    assert isinstance(failed, dict) and failed["state"] == {}
+
+
+async def test_a_model_failure_leaves_its_code_for_the_failure_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from openswe.agent_api.reviewer import ReviewerKind
+    from openswe.completion import _failure_reason_code
+    from openswe.threads.store import THREADS
+
+    metadata: dict[str, object] = {}
+    update = AsyncMock(side_effect=lambda _thread_id, patch: metadata.update(patch))
+    monkeypatch.setattr(THREADS, "update", update)
+
+    await TokenRun.answer(
+        ReviewerKind(),
+        RUN,
+        "model_failed",
+        {"run_id": "run-1", "code": "context_too_long", "error_type": "BadRequestError"},
+    )
+
+    assert update.await_args.args[0] == RUN.thread_id
+    # The reply trusts the record only for the exception the run failed with.
+    assert _failure_reason_code({"error": "BadRequestError"}, metadata, "run-1") == (
+        "context_too_long"
+    )
+    assert _failure_reason_code({"error": "ValueError"}, metadata, "run-1") is None
+
+
+@pytest.mark.parametrize("exa_connection", [None, "open-swe-exa"])
+async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of_it(
+    monkeypatch: pytest.MonkeyPatch, exa_connection: str | None
+) -> None:
+    from openswe.agent_api.run_catalog import RunCatalog
+    from openswe.tools import fetch_url, http_request, publish_artifact, web_search
+
+    if exa_connection is None:
+        monkeypatch.delenv("MDA_EXA_CONNECTION", raising=False)
+    else:
+        monkeypatch.setenv("MDA_EXA_CONNECTION", exa_connection)
+    surface = ToolSurface(base_tools=[web_search, fetch_url, http_request, publish_artifact])
+    await surface.prepare()
+    # A bridged client's tool of the same name is the client's to run.
+    client = {"kind": "function", "name": "http_request", "parameters": {"type": "object"}}
+    config: RunnableConfig = {"configurable": {"client_tools": [client]}}
+
+    specs = RunCatalog(RunKind(), RUN, surface, config).tool_set().tools
+
+    # web_search only with its key in the deployment's connection, which the runtime reads.
+    assert {spec.name for spec in specs if spec.runtime_runs} == {
+        "fetch_url",
+        *(() if exa_connection is None else ("web_search",)),
+    }
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -497,13 +801,21 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     regranted = await TokenRun.answer(
         parts, run, "operation", {**call, "grant": another_run.grant("draft_preference")}
     )
+    # A tool the run's catalog offers disabled is granted to no call of it.
+    disabled_run = run.model_copy(
+        update={"settings": RunSettings(draft_prs=False, disabled_tools=["draft_preference"])}
+    )
+    disabled = await TokenRun.answer(
+        parts, disabled_run, "operation", {**call, "grant": run.grant("draft_preference")}
+    )
     verdict = await TokenRun.answer(
         parts, run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
     )
 
     assert isinstance(result, dict) and result["content"] == "drafts: False"
     assert verdict == {"allowed": True, "command": None, "refusal": None}
-    for refused in (ungranted, regranted):
+    assert disabled_run.grant("draft_preference") is None
+    for refused in (ungranted, regranted, disabled):
         assert isinstance(refused, dict) and refused["status"] == "error"
         assert "not one of this run's operations" in str(refused["content"])
 
@@ -956,11 +1268,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert all(RUN.granted(spec.name, spec.grant) for spec in listed.tools)
     # The run's search and code mode reach what its catalog leaves out, by its token.
     found = ToolMatches.model_validate(
-        await TokenRun.answer(
-            parts, started_run, "search_tools", {"query": "mcp search", "limit": 1}
-        )
+        await TokenRun.answer(parts, started_run, "search_tools", {"query": "mcp search"})
     )
-    [match] = found.matches
+    match = found.matches[0]
     assert (match.name, match.code_name) == ("mcp_search", "mcpSearch")
     expected = {
         "connection_name": "lmt",
@@ -984,8 +1294,60 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     # What the graph excludes is never found, so the run cannot call it either.
     assert ResolvedTool.model_validate(unknown).tool is None
 
+    # The catalog names the set its token does, which the run reads to search it itself,
+    # finding what the backend finds, without grants, which stay the backend's to give.
+    from runtime_api.tool_search import KeptTools, ToolIndex
 
-def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
+    assert catalog["tool_set"] == started.settings.tools
+    kept = KeptTools.model_validate(await TokenRun.answer(parts, started_run, "tool_set", {}))
+    assert kept.digest == started.settings.tools
+    assert all(tool.grant is None for tool in kept.tools)
+    index = ToolIndex(kept.tools, kept.excluded)
+    assert [ToolIndex.match(tool) for tool in index.search("mcp search")] == found.matches
+    resolved = index.resolve("mcpSearch")
+    assert resolved is not None and resolved.name == "mcp_search"
+    assert index.resolve("load_integration_tools") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_kept_tool_set_is_read_from_postgres_once_per_digest() -> None:
+    from runtime_api.catalog import ToolSpec
+
+    from openswe.agent_api import tool_sets
+    from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError, purge_tool_sets
+    from openswe.database import postgres
+
+    tool_sets._read.clear()
+    digest = await ToolSet(
+        [ToolSpec(name="lookup", description="Look it up.", parameters={})]
+    ).keep()
+
+    reads = 0
+    session = postgres.session
+
+    def counted() -> object:
+        nonlocal reads
+        reads += 1
+        return session()
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(postgres, "session", counted)
+        first = await ToolSet.kept(digest)
+        again = await ToolSet.kept(digest)
+        assert first is again
+        assert reads == 1
+        # One no run reads any more is gone, and so never found again.
+        with pytest.raises(ToolSetNotKeptError):
+            await ToolSet.kept("0" * 64)
+        with pytest.raises(ToolSetNotKeptError):
+            await ToolSet.kept("0" * 64)
+        assert reads == 3
+    assert [tool.name for tool in first.search("look it up")] == ["lookup"]
+    assert await purge_tool_sets() == 0
+    tool_sets._read.clear()
+
+
+def test_search_tools_ranks_name_matches_above_long_descriptions() -> None:
     from runtime_api.catalog import ToolSpec
 
     from openswe.agent_api.tool_sets import ToolSet
@@ -998,19 +1360,39 @@ def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
             code_name=code_name,
         )
 
+    # An integration's main tool is the one with the longest description.
+    notion_search = (
+        "Search Notion pages and databases, or look up a user by name or email. "
+        + "Keep filters nested, use page size, and prefer the default relevance order. " * 20
+    )
     tools = ToolSet(
         [
             tool("searchDatadogLogs", "Search raw Datadog log entries.", "searchDatadogLogs"),
             tool("get_datadog_metric", "Query metrics from Datadog.", "getDatadogMetric"),
             tool("save_issue", "Create or update a Linear issue.", "saveIssue"),
             tool("slack_reply", "Reply in Slack.", None),
+            tool("mcp_notion_notion-search", notion_search, "mcpNotionNotionSearch"),
+            tool(
+                "mcp_notion_notion-search-sessions",
+                "Search past agent sessions by topic.",
+                "mcpNotionNotionSearchSessions",
+            ),
+            tool(
+                "mcp_notion_notion-search-agents",
+                "Search agents by name or description.",
+                "mcpNotionNotionSearchAgents",
+            ),
         ]
     )
 
-    matches = tools.search("datadog logs", 2)
-
-    assert [spec.name for spec in matches] == ["searchDatadogLogs", "get_datadog_metric"]
-    assert tools.search("kubernetes", 5) == []
+    assert [spec.name for spec in tools.search("datadog logs")][:2] == [
+        "searchDatadogLogs",
+        "get_datadog_metric",
+    ]
+    assert tools.search("notion search")[0].name == "mcp_notion_notion-search"
+    assert tools.search("mcpNotionNotionSearch")[0].name == "mcp_notion_notion-search"
+    assert tools.search("kubernetes") == []
+    assert tools.resolve("saveIssue") == tools.resolve("save_issue") is not None
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
@@ -1380,6 +1762,9 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
         AsyncMock(side_effect=store.WorkerAlreadyLaunchedError(task, first)),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    monkeypatch.setattr(
+        async_workers.TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None)
+    )
     client = MagicMock()
     client.runs.cancel = AsyncMock()
     mda = MagicMock(client=client)
@@ -1397,6 +1782,66 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
 
     assert reply.worker["worker_thread_id"] == "first-worker"
     client.runs.cancel.assert_awaited_once_with("second-worker", "run-2")
+
+
+async def test_a_registered_worker_tells_its_coordinators_run_the_task_it_now_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid7
+
+    from runtime_api.workers import Launched
+
+    from openswe.agent_api import async_workers
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+    from openswe.tasks import store
+    from openswe.threads import runtimes
+
+    coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
+    task = store.Task(title="Fix login", workspace_id=uuid7(), coordinator_thread_id="coordinator")
+    membership = store.TaskMembership(thread_id="coordinator", task_id=task.id, role="coordinator")
+    coordination = TaskCoordinationMiddleware(
+        "coordinator", True, store.TaskContext(task, membership)
+    )
+    for_thread = AsyncMock(return_value=coordination)
+    monkeypatch.setattr(async_workers.TaskCoordinationMiddleware, "for_thread", for_thread)
+    monkeypatch.setattr(
+        async_workers.service,
+        "register_async_worker",
+        AsyncMock(return_value={"worker_thread_id": "worker"}),
+    )
+    monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    client = MagicMock()
+    client.runs.get = AsyncMock(return_value={"run_id": "run-1", "status": "running"})
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: MagicMock(client=client)))
+
+    reply = await async_workers.launched(
+        coordinator,
+        Launched(
+            tool_call_id="call-1",
+            instructions="Fix login",
+            worker_thread_id="worker",
+            worker_run_id="run-1",
+        ),
+    )
+
+    for_thread.assert_awaited_once_with("coordinator")
+    assert reply.task_context == coordination.context_message()
+    assert reply.task_context is not None and str(task.id) in reply.task_context
+
+    # The worker is registered either way: a failed read only leaves the context out.
+    for_thread.side_effect = RuntimeError("database down")
+    again = await async_workers.launched(
+        coordinator,
+        Launched(
+            tool_call_id="call-1",
+            instructions="Fix login",
+            worker_thread_id="worker",
+            worker_run_id="run-1",
+        ),
+    )
+    assert again.worker == {"worker_thread_id": "worker"}
+    assert again.task_context is None
 
 
 async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_settled(

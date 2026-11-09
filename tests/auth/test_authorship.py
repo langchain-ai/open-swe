@@ -13,6 +13,8 @@ from openswe.utils.authorship import (
     resolve_triggering_user_identity,
 )
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_slack_id", ["", "U_CURRENT"])

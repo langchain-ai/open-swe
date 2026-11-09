@@ -1,4 +1,5 @@
-"""Tools: keep a memory for the person a thread works for, and offer it to the curator."""
+"""Tools: keep a memory for the person a thread works for, offer it to the curator, and
+recall the memories a trigger holds back."""
 
 from uuid import UUID
 
@@ -6,7 +7,12 @@ from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
-from openswe.memories.store import MAX_MEMORY_CHARS, MEMORIES, UnknownWorkspaceError
+from openswe.memories.store import (
+    MAX_MEMORY_CHARS,
+    MEMORIES,
+    MemoryTrigger,
+    UnknownWorkspaceError,
+)
 from openswe.run_config import RunConfig
 from openswe.tools.access import Policy, access, resolve_access, unchanged
 from openswe.tools.mcp_exposure import expose_mcp
@@ -83,4 +89,34 @@ async def forget(memory_id: str) -> dict[str, object]:
             else "at once for this person's runs, and the workspace's curator decides what "
             "leaves its prompt"
         ),
+    }
+
+
+@expose_mcp()
+@access(_ANYWHERE)
+async def recall(path: str) -> dict[str, object]:
+    """Implement the `recall` tool."""
+    try:
+        parsed = MemoryTrigger.path_of(path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    login = await resolve_github_login(as_json_object(get_config()))
+    person = await User.for_login("github", login) if login else None
+    if person is None:
+        return {"ok": False, "error": "Could not tell whose memories to recall."}
+    run_access = await resolve_access(RunConfig.from_runtime())
+    curated_in = (
+        RunConfig.from_runtime().workspace_slug
+        if person.typed_preferences.experimental_memory
+        else None
+    )
+    guidance = await MEMORIES.recall_guidance(curated_in, parsed) if curated_in else []
+    memories = await MEMORIES.recall(
+        person.id, parsed, include_private=run_access.private, curated_in=curated_in
+    )
+    return {
+        "ok": True,
+        "path": parsed,
+        "workspace": [entry.model_dump() for entry in guidance],
+        "personal": [memory.line for memory in memories],
     }

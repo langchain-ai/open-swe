@@ -94,6 +94,12 @@ const PROMPTS: &[(&str, usize, &str)] = &[
          without one, deploy fails saying the app stays there",
     ),
     (
+        "pull.rs",
+        1,
+        "--yes applies without confirmation; --dry-run previews without prompting; \
+         otherwise refuses without a terminal and hints to use --yes",
+    ),
+    (
         "secret_input.rs",
         1,
         "--secret-from-env, --secret-from-file, or stdin",

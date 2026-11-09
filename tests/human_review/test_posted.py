@@ -12,6 +12,8 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.human_review.settling import SETTLE_JOB
+from openswe.jobs import queue
 from openswe.slack.pr_links import linked_pull_requests
 from openswe.users import User, UserIdentity, UserPreferences
 from tests.support.slack_api import SlackAPI
@@ -90,15 +92,18 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         reactions = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.add" and params["name"] != "white_check_mark"
+            if method == "reactions.add"
         }
         assert reactions == expected
         removed = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.remove" and params["name"] != "white_check_mark"
+            if method == "reactions.remove"
         }
-        assert removed == ({"warning", "construction", "pencil2"} - expected) | {"x"}
+        assert removed == ({"warning", "construction", "pencil2"} - expected) | {
+            "x",
+            "white_check_mark",
+        }
         assert all(
             params["channel"] == "C1" and params["timestamp"] == "1.0"
             for _, params in slack_api.calls[start:]
@@ -166,7 +171,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     assert stored is not None and stored.state == "merged"
 
 
-async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failures(
+async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_explain_failures(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = User(identities=[UserIdentity(provider="slack", external_id="U1")])
@@ -207,12 +212,12 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         AsyncMock(return_value=UserPreferences(pr_failure_reactions=True)),
     )
     first, second = map(ReviewCard, requests)
-    reactions.add("x")
+    reactions.update({"x", "white_check_mark"})
     await first.mark_approved()
     assert "x" not in reactions
     assert "white_check_mark" not in reactions
     await second.mark_approved()
-    assert "white_check_mark" in reactions
+    assert "white_check_mark" not in reactions
     snapshot = PullRequestSnapshot(
         state="open",
         merged=False,
@@ -226,14 +231,18 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         failing_checks=["unit tests"],
         unresolved_threads=0,
     )
+    wake.side_effect = RuntimeError("thread owner unavailable")
     await first.update_blocked_reactions(snapshot)
     assert {"warning", "construction"} <= reactions
-    assert wake.await_count == 1
+    assert [job.kind for job in await queue.find({})] == [SETTLE_JOB]
+    wake.side_effect = None
+    await first.update_blocked_reactions(snapshot)
+    assert wake.await_count == 2
     args = wake.await_args.args
     assert args[:3] == ("C1", "1.0", "U1")
     assert urls[0] in args[3] and "unit tests" in args[3]
     await first.update_blocked_reactions(snapshot)
-    assert wake.await_count == 1
+    assert wake.await_count == 2
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
     snapshot.check_state = "success"
@@ -248,7 +257,7 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     assert "white_check_mark" not in reactions
     snapshot.check_state = "failure"
     await second.update_blocked_reactions(snapshot)
-    assert wake.await_count == 2
+    assert wake.await_count == 3
     assert urls[1] in wake.await_args.args[3]
     snapshot.draft = True
     await second.update_blocked_reactions(snapshot)
@@ -264,7 +273,6 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
 async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock, skip: str
 ) -> None:
-    monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
     monkeypatch.setattr(
         supplementary.SupplementaryReviews,
         "policies",
@@ -324,7 +332,7 @@ async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     monkeypatch.setattr(posted, "settle", settle)
     await posted.watch_post("C1", "1.0", "U1", " ".join(pr.url for pr in pulls.values()))
     assert [request.pull_request.number for request in requests] == [7, 9]
-    assert approved_after_settle == [False, True]
+    assert approved_after_settle == [False, False]
     await ReviewCard(requests[0]).mark_merged()
     assert "merged" not in reactions
     await ReviewCard(requests[1]).mark_merged()

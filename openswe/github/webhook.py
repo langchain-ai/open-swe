@@ -4,15 +4,15 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass
-from typing import Any, Final
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from typing import Any, Final, Protocol
 
+import httpx
 from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
-from openswe.database import postgres
+from openswe.bridge.worktree_branch import BRANCH_PREFIX
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
@@ -22,10 +22,9 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequestPayload
 from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import settle_pull_request, settle_repository
+from openswe.human_review.settling import SettleTarget
 from openswe.input_messages import (
     EnvelopeData,
-    FieldValue,
     PersonIdentity,
     RunInput,
     SystemIdentity,
@@ -35,13 +34,19 @@ from openswe.input_messages import (
     system_introduction,
 )
 from openswe.prompts import prompt
-from openswe.review.approvals import approval_mode_for, approval_policy_for_review
+from openswe.review.approvals import (
+    ApprovalPolicy,
+    approval_mode_for,
+    approval_policy_for_review,
+)
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
     ReviewerSlackThread,
     reviewer_thread_title,
 )
+from openswe.review.goal_review import GOAL_REVIEW_KEY, GoalReview
 from openswe.review.reconcile import reconcile_linked_findings
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import Repo, RunConfig
@@ -64,63 +69,6 @@ async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()
     """Lowercased logins, among the people in this event, who are known Open SWE users."""
     return await User.known_logins(
         [*logins, *(str(comment.get("author") or "") for comment in comments)]
-    )
-
-
-def build_github_issue_prompt(
-    repo_config: dict[str, str],
-    issue_number: int,
-    issue_id: str,
-    title: str,
-    body: str,
-    comments: list[dict[str, Any]],
-    *,
-    github_login: str,
-    issue_author: str = "",
-    issue_url: str = "",
-    trusted: Collection[str],
-) -> str:
-    """Build the user prompt for a GitHub issue-triggered run."""
-    triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
-    issue_url_line = f"## Issue URL: {issue_url}\n\n" if issue_url else ""
-    comments_text = common.build_github_issue_comments_text(comments, trusted=trusted)
-    sanitized_title = common.sanitize_github_comment_body(title)
-    formatted_body = common.format_github_comment_body_for_prompt(
-        issue_author or github_login, body, trusted=trusted
-    )
-    return prompt(
-        "runs/github-issue",
-        repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
-        triggered_by_line=triggered_by_line,
-        issue_number=issue_number,
-        issue_id=issue_id,
-        issue_url_line=issue_url_line,
-        title=sanitized_title,
-        body=formatted_body,
-        comments=comments_text,
-    )
-
-
-def build_github_issue_followup_prompt(
-    github_login: str, comment_body: str, *, trusted: Collection[str]
-) -> str:
-    """Build the prompt for a follow-up GitHub issue comment."""
-    body = common.format_github_comment_body_for_prompt(github_login, comment_body, trusted=trusted)
-    return f"**{github_login}:**\n{body}"
-
-
-def build_github_issue_update_prompt(
-    github_login: str, title: str, body: str, *, trusted: Collection[str]
-) -> str:
-    """Build the prompt for a follow-up GitHub issue title/body update."""
-    sanitized_title = common.sanitize_github_comment_body(title)
-    formatted_body = common.format_github_comment_body_for_prompt(
-        github_login, body, trusted=trusted
-    )
-    return (
-        f"**{github_login}:** updated the GitHub issue title/body.\n\n"
-        f"Title: {sanitized_title}\n\n"
-        f"Description:\n{formatted_body}"
     )
 
 
@@ -189,70 +137,6 @@ def _github_webhook_run_input(content: str, *, data: EnvelopeData) -> RunInput:
     }
 
 
-def _github_issue_run_input(
-    prompt: str,
-    comments: list[dict[str, Any]],
-    *,
-    issue_author: str,
-    description: str,
-    trigger_login: str,
-    trigger_user_id: object,
-    issue_data: Mapping[str, FieldValue | None],
-    trusted: Collection[str],
-) -> RunInput:
-    actor: SystemIdentity = {
-        "id": "system:github-webhook",
-        "display_name": "GitHub webhook",
-        "platform": "github",
-    }
-    messages = [
-        system_introduction(actor),
-        system_input(
-            prompt,
-            {
-                "sender_id": actor["id"],
-                "surface": "github",
-                "kind": "system",
-                "data": {"issue": issue_data},
-            },
-        ),
-    ]
-    # The run describes the trigger sender itself; only replayed authors nobody
-    # resolves need an introduction here.
-    introduced: set[str] = {_github_person(trigger_login, trigger_user_id)["id"]}
-    source_messages = [
-        {"author": issue_author or trigger_login, "body": description, "type": "description"},
-        *comments,
-    ]
-    for comment in source_messages:
-        author = str(comment.get("author") or "unknown")
-        person = _github_person(
-            author, trigger_user_id if author == trigger_login else comment.get("author_id")
-        )
-        if person["id"] not in introduced:
-            messages.append(person_introduction(person))
-            introduced.add(person["id"])
-        body = common.format_github_comment_body_for_prompt(
-            author, str(comment.get("body", "")), trusted=trusted
-        )
-        messages.append(
-            human_input(
-                body,
-                {
-                    "sender_id": person["id"],
-                    "surface": "github",
-                    "kind": "human",
-                    "data": {
-                        "message_type": str(comment.get("type", "comment")),
-                        "created_at": str(comment.get("created_at", "")),
-                        "comment_id": str(comment.get("comment_id", "")),
-                    },
-                },
-            )
-        )
-    return {"messages": messages}
-
-
 def _pr_data(
     repo_config: dict[str, str], pr_number: int, pr_url: str, base_sha: str, head_sha: str
 ) -> EnvelopeData:
@@ -276,8 +160,12 @@ async def trigger_pr_review_from_ref(
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
     allow_draft: bool = False,
+    goal_review: GoalReview | None = None,
 ) -> dict[str, Any]:
+    """Review a PR on request. A ``goal_review`` reviews a Goal mode agent's draft and
+    sends the findings back to it instead of publishing them."""
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
+    allow_draft = allow_draft or goal_review is not None
     if not common.is_repo_allowed(repo_config):
         return {
             "success": False,
@@ -344,22 +232,56 @@ async def trigger_pr_review_from_ref(
         "base_ref": base_ref,
         "author": (pr_metadata.get("user") or {}).get("login", ""),
     }
-    slack_thread_meta: ReviewerSlackThread | None = None
+    slack_thread_meta: ReviewerSlackThread = {}
     if slack_channel_id and slack_thread_ts:
         slack_thread_meta = {
             "channel_id": slack_channel_id,
             "thread_ts": slack_thread_ts,
         }
+    last_reviewed_sha = ""
+    if goal_review is not None:
+        metadata = await common.get_thread_metadata_safe(thread_id) or {}
+        kept = GoalReview.of(metadata)
+        if not pr_metadata.get("draft") and (kept is None or not kept.handoff):
+            goal_review = None
+        elif kept is not None:
+            goal_review = kept.model_copy(update={"thread_id": goal_review.thread_id})
+            if isinstance(reviewed := metadata.get("last_reviewed_sha"), str):
+                last_reviewed_sha = reviewed
     await common.set_reviewer_thread_metadata(
-        thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
+        thread_id,
+        pr=pr_meta,
+        watch=True,
+        slack_thread=slack_thread_meta,
+        head_sha=head_sha,
+        extra={
+            GOAL_REVIEW_KEY: None if goal_review is None else goal_review.model_dump(mode="json")
+        },
     )
-    await common.post_review_started_comment(
-        thread_id=thread_id,
-        owner=pr_ref.owner,
-        repo=pr_ref.repo,
-        pr_number=pr_ref.number,
-        token=app_token,
-    )
+    if goal_review is None:
+        await common.post_review_started_comment(
+            thread_id=thread_id,
+            owner=pr_ref.owner,
+            repo=pr_ref.repo,
+            pr_number=pr_ref.number,
+            token=app_token,
+        )
+    else:
+        check_run_id = await common.create_review_check_run(
+            owner=pr_ref.owner,
+            repo=pr_ref.repo,
+            head_sha=head_sha,
+            token=app_token,
+            details_url=common.dashboard_thread_url(thread_id),
+        )
+        if check_run_id is not None:
+            await common.track_review_check_run(
+                thread_id,
+                owner=pr_ref.owner,
+                repo=pr_ref.repo,
+                token=app_token,
+                check_run_id=check_run_id,
+            )
 
     review_prompt = build_github_pr_review_prompt(
         repo_config, pr_ref.number, pr_url, base_sha, head_sha
@@ -375,6 +297,8 @@ async def trigger_pr_review_from_ref(
         head_sha=head_sha,
         branch_name=branch_name,
         repo_private=repo_private,
+        re_review=bool(last_reviewed_sha),
+        last_reviewed_sha=last_reviewed_sha,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
     )
@@ -409,7 +333,13 @@ async def trigger_pr_review_from_ref(
     await ReviewShadow.follow(
         RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
     )
-    return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
+    return {
+        "success": True,
+        "queued": False,
+        "thread_id": thread_id,
+        "pr_url": pr_url,
+        "goal_review": goal_review is not None,
+    }
 
 
 async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, source: str) -> None:
@@ -454,9 +384,19 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     if payload.get("action") == "ready_for_review":
         metadata = await common.get_thread_metadata_safe(thread_id)
         if metadata is not None and metadata.get("kind") == common.REVIEWER_THREAD_KIND:
+            goal_review = GoalReview.of(metadata)
+            if goal_review is not None and await goal_review.ready(
+                reviewer_thread_id=thread_id,
+                owner=repo_config.get("owner", ""),
+                repo=repo_config.get("name", ""),
+                pr_number=pr_number,
+                head_sha=head_sha,
+            ):
+                await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
+                return
             existing_last_reviewed_sha = metadata.get("last_reviewed_sha")
             if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
-                if existing_last_reviewed_sha == head_sha:
+                if existing_last_reviewed_sha == head_sha and goal_review is None:
                     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
                     common.logger.info(
                         "Skipping ready_for_review auto-review for %s/%s#%s: "
@@ -486,7 +426,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     ):
         return
 
-    await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+    await common.set_reviewer_thread_metadata(
+        thread_id, pr=pr_meta, watch=True, head_sha=head_sha, extra={"review_base_sha": base_sha}
+    )
 
     check_run_id = await common.create_review_check_run(
         owner=repo_config.get("owner", ""),
@@ -555,7 +497,7 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     from openswe.workspaces.store import WORKSPACES
 
     event = PullRequestEvent.parse(payload)
-    if event is None or event.identity is None or not postgres.configured():
+    if event is None or event.identity is None:
         return
     owner, repo, number = event.identity
     pull = event.pull_request
@@ -622,6 +564,17 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
                 author_login or "<unknown>",
             )
             return
+        head_ref = (pull_request.get("head") or {}).get("ref", "")
+        if (
+            author_login
+            and head_ref.startswith(f"{BRANCH_PREFIX}/")
+            and (await User.preferences_for_login(author_login)).goal_mode
+        ):
+            common.logger.info(
+                "Skipping auto-review of draft PR by %s: Goal mode reviews it on request",
+                author_login,
+            )
+            return
     # Use source="github" so the reviewer resolver can use the GitHub App token;
     # "github_auto" would fall through to the email-based path, which has no
     # user_email to route on for webhook-triggered runs.
@@ -632,7 +585,7 @@ async def settle_human_review_on_close(payload: dict[str, Any]) -> None:
     """Mark a closed PR's open review card merged or closed, whoever closed the PR."""
     event = PullRequestEvent.parse(payload)
     identity = event.identity if event is not None else None
-    if identity is None or not postgres.configured():
+    if identity is None:
         return
     await close_for_pull_request(*identity)
 
@@ -646,19 +599,19 @@ async def withdraw_superseded_approvals(payload: dict[str, Any]) -> None:
     try:
         async with PullRequestClient.as_app(*identity) as pull:
             refused = await pull.withdraw_open_swe_approvals(
-                reason="New commits were pushed after Open SWE approved this pull request.",
+                reason="New commits were pushed after Robin approved this pull request.",
                 keep_commit=event.pull_request.head_sha,
             )
     except Exception:
         # Later background tasks of this delivery must still run.
         common.logger.exception(
-            "Could not withdraw Open SWE approvals of superseded commits",
+            "Could not withdraw Robin approvals of superseded commits",
             extra={"repository": event.repo_full_name, "pr_number": identity[2]},
         )
         return
     if refused:
         common.logger.error(
-            "Open SWE approvals of superseded commits are still standing",
+            "Robin approvals of superseded commits are still standing",
             extra={
                 "repository": event.repo_full_name,
                 "pr_number": identity[2],
@@ -873,7 +826,7 @@ async def _process_github_head_update(
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
         common.logger.info(
             "Push to %s/%s#%s ignored: no reviewer thread for this PR. "
-            "Trigger a first review (Slack `@open-swe review <url>` or request "
+            "Trigger a first review (Slack `@Robin review <url>` or request "
             "open-swe[bot] as a GitHub reviewer) to start watching.",
             repo_config["owner"],
             repo_config["name"],
@@ -888,6 +841,8 @@ async def _process_github_head_update(
 
     if pull_request.state == "closed":
         return
+    if GoalReview.of(metadata) is not None:
+        return
     if pull_request.draft and not await common.draft_review_enabled_for_author(
         pull_request.author, repo_config
     ):
@@ -899,40 +854,54 @@ async def _process_github_head_update(
             "Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref
         )
         return
+    previous_assessment = await PublishedAssessment.latest(context.owner, context.name, pr_number)
+    previous_base_sha = metadata.get("last_reviewed_base_sha")
     if (
         isinstance(last_reviewed_sha, str)
         and last_reviewed_sha
         and await common.is_pr_diff_unchanged_since_last_review(
             repo_config,
             base_ref=base_ref,
+            base_sha=base_sha,
+            last_reviewed_base_sha=previous_base_sha if isinstance(previous_base_sha, str) else "",
             last_reviewed_sha=last_reviewed_sha,
             head_sha=head_sha,
             token=app_token,
         )
         and not (
-            await approval_mode_for(context.owner, context.name) == "approve"
-            and await approval_policy_for_review(context.owner, context.name, token=app_token)
+            previous_assessment is not None
+            and previous_assessment.approved
+            and await approval_mode_for(context.owner, context.name) == "approve"
+            and (
+                await approval_policy_for_review(
+                    context.owner, context.name, pr_number, token=app_token
+                )
+                or ApprovalPolicy()
+            ).configured
         )
     ):
         await PullRequest(
             owner=repo_config["owner"], repo=repo_config["name"], number=pr_number
         ).link_review(reviewer_thread_id=thread_id, head_sha=head_sha)
-        await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
-        if postgres.configured():
-            try:
-                await Walkthrough.carry_forward(
-                    repo_config["owner"],
-                    repo_config["name"],
-                    pr_number,
-                    from_sha=last_reviewed_sha,
-                    to_sha=head_sha,
-                )
-            except Exception:
-                common.logger.warning(
-                    "Could not carry the review walkthrough forward",
-                    exc_info=True,
-                    extra={"pr_number": pr_number, "scout_head_sha": head_sha},
-                )
+        if previous_assessment is not None and previous_assessment.head_sha == last_reviewed_sha:
+            await previous_assessment.model_copy(update={"head_sha": head_sha}).save()
+        await common.set_reviewer_thread_metadata(
+            thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+        )
+        try:
+            await Walkthrough.carry_forward(
+                repo_config["owner"],
+                repo_config["name"],
+                pr_number,
+                from_sha=last_reviewed_sha,
+                to_sha=head_sha,
+            )
+        except Exception:
+            common.logger.warning(
+                "Could not carry the review walkthrough forward",
+                exc_info=True,
+                extra={"pr_number": pr_number, "scout_head_sha": head_sha},
+            )
         # The old head's check disappears once the head moves (GitHub only
         # shows checks on the current head), so even though no re-review runs,
         # surface a settled check on the new head.
@@ -996,7 +965,9 @@ async def _process_github_head_update(
         "base_ref": base_ref,
         "author": pull_request.author,
     }
-    await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
+    await common.set_reviewer_thread_metadata(
+        thread_id, pr=pr_meta, watch=True, head_sha=head_sha, extra={"review_base_sha": base_sha}
+    )
 
     # GitHub only shows check runs on a PR's current head commit, so the check
     # created on the previous head disappears after a follow-up push. Create a
@@ -1181,10 +1152,16 @@ def recent_turns(messages: list[dict[str, JsonValue]], limit: int) -> list[dict[
     return messages[start:]
 
 
-async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[dict[str, JsonValue]]:
-    """The channel conversation a PR thread continues, for the PR thread's first run."""
+async def _channel_history(
+    channel_thread_id: str, pr_thread_id: str, *, new: bool = False
+) -> list[dict[str, JsonValue]]:
+    """The channel conversation a PR thread continues, for the PR thread's first run.
+
+    ``new``: the PR thread was just indexed as MDA's GitHub channel's, which creates
+    it with its first run, so it has no messages to read yet.
+    """
     try:
-        if _state_messages(await THREADS.state(pr_thread_id)):
+        if not new and _state_messages(await THREADS.state(pr_thread_id)):
             return []
         messages = _state_messages(await THREADS.state(channel_thread_id))
     except Exception:  # noqa: BLE001 - the review still runs, without the conversation
@@ -1197,8 +1174,43 @@ async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[di
     return recent_turns(messages, CHANNEL_HISTORY_MESSAGES)
 
 
+#: MDA's GitHub channel, as thread metadata names it (``CHANNEL_METADATA_KEY``).
+GITHUB_CHANNEL: Final = "github"
+
+
+class PrCommentChannel(Protocol):
+    """MDA's GitHub channel, which starts a comment's run on the pull request's own thread."""
+
+    async def adopt(self, thread_id: str, metadata: dict[str, JsonValue]) -> None:
+        """Index the thread as the channel's, before its metadata is written."""
+        ...
+
+    async def start(self, thread_id: str, configurable: dict[str, object], run_input: Any) -> bool:
+        """Sign the run for the channel to start; whether it starts."""
+        ...
+
+    async def once(self) -> bool:
+        """Whether a run the backend starts itself still starts: once per delivery."""
+        ...
+
+
+async def _channel_takes(channel: PrCommentChannel | None, thread_id: str) -> bool:
+    """Whether the channel starts the run on the PR's own thread: it is new, or the channel's.
+
+    One the backend made before the channel started these runs stays the backend's.
+    """
+    if channel is None:
+        return False
+    thread = await index.get(thread_id)
+    return thread is None or channel_of(thread.metadata) == GITHUB_CHANNEL
+
+
 async def process_github_pr_comment(
-    payload: dict[str, Any], event_type: str, *, agent_thread_id: str | None = None
+    payload: dict[str, Any],
+    event_type: str,
+    *,
+    agent_thread_id: str | None = None,
+    channel: PrCommentChannel | None = None,
 ) -> None:
     """Process a GitHub PR comment that tagged @open-swe.
 
@@ -1209,6 +1221,11 @@ async def process_github_pr_comment(
         payload: The parsed GitHub webhook payload.
         event_type: One of 'issue_comment', 'pull_request_review_comment',
                     'pull_request_review'.
+        agent_thread_id: The thread of the agent that opened the pull request,
+            for a comment that doesn't mention Open SWE.
+        channel: MDA's GitHub channel: it starts the run when it goes to the pull
+            request's own thread, new or the channel's; the backend starts any
+            other once per delivery.
     """
     (
         repo_config,
@@ -1242,8 +1259,17 @@ async def process_github_pr_comment(
         )
         return
     thread_id = await index.live_thread_id(derived_thread_id)
+    pr_thread_id = (
+        pr_comment_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
+        if pr_number
+        else None
+    )
+    on_channel = thread_id == pr_thread_id and await _channel_takes(channel, thread_id)
+    new_on_channel = on_channel and await index.get(thread_id) is None
+    if on_channel and channel is not None:
+        await channel.adopt(thread_id, {"branch_name": branch_name})
     # The agent's own thread exists; a PR thread or a successor may not yet.
-    if thread_id != own_thread_id:
+    elif thread_id != own_thread_id:
         common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
         langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
         try:
@@ -1264,7 +1290,7 @@ async def process_github_pr_comment(
 
     # A channel (Linear, GitHub issues) starts the runs on its own threads, so
     # feedback on a PR its conversation opened continues on the PR's own thread.
-    channel_metadata = await common.get_thread_metadata_safe(thread_id)
+    channel_metadata = None if on_channel else await common.get_thread_metadata_safe(thread_id)
     continues_thread: str | None = None
     if channel_metadata is not None and channel_of(channel_metadata):
         if not pr_number:
@@ -1284,15 +1310,17 @@ async def process_github_pr_comment(
         inherited = {
             key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
         }
-        await THREADS.create(
-            thread_id,
-            title=f"PR #{pr_number}",
-            metadata={
-                "branch_name": branch_name,
-                CONTINUES_THREAD_KEY: continues_thread,
-                **inherited,
-            },
-        )
+        metadata: dict[str, JsonValue] = {
+            "branch_name": branch_name,
+            CONTINUES_THREAD_KEY: continues_thread,
+            **inherited,
+        }
+        on_channel = await _channel_takes(channel, thread_id)
+        if on_channel and channel is not None:
+            new_on_channel = await index.get(thread_id) is None
+            await channel.adopt(thread_id, metadata)
+        else:
+            await THREADS.create(thread_id, title=f"PR #{pr_number}", metadata=metadata)
 
     repo = Repo.parse(repo_config)
     if pr_number and repo is not None and repo.owner and repo.name:
@@ -1361,7 +1389,6 @@ async def process_github_pr_comment(
         and payload.get("action") == "submitted"
         and str(event.get("state") or "").lower() == "approved"
         and event_body.startswith(REVIEW_BODY_PREFIX)
-        and postgres.configured()
         and await HumanReviewRequest.is_expedited_approver(
             repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
         )
@@ -1414,7 +1441,7 @@ async def process_github_pr_comment(
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     pr_author = _PrAuthorEvent.author_of(payload)
     author_logins: set[str] = set()
-    if postgres.configured() and repo is not None:
+    if repo is not None:
         try:
             stored = await PullRequest.get(repo.owner, repo.name, pr_number)
             pull_request = (
@@ -1463,7 +1490,12 @@ async def process_github_pr_comment(
             )
         )
     if continues_thread is not None:
-        messages = [*await _channel_history(continues_thread, thread_id), *messages]
+        messages = [
+            *await _channel_history(continues_thread, thread_id, new=new_on_channel),
+            *messages,
+        ]
+    if channel is not None and not on_channel and not await channel.once():
+        return
     dispatched = await common.trigger_or_queue_run(
         thread_id,
         prompt,
@@ -1473,6 +1505,7 @@ async def process_github_pr_comment(
         repo_config=repo_config,
         pr_number=pr_number,
         token_repositories=common.event_thread_token_repositories(repo_config, payload),
+        start=channel.start if on_channel and channel is not None else None,
     )
     if not dispatched:
         return
@@ -1663,16 +1696,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     await common.store_current_reviewer_run_id(thread_id, run)
 
 
-@dataclass(frozen=True)
-class GitHubIssueRun:
-    """An issue run, prepared: its thread's metadata is written, the run is not started."""
-
-    thread_id: str
-    input: RunInput
-    configurable: dict[str, JsonValue]
-
-
-async def _conversation_started(thread_id: str) -> bool:
+async def conversation_started(thread_id: str) -> bool:
     """Whether a run on the issue's thread already took the issue in.
 
     Not whether the thread is indexed: ``adopt`` indexes it before its first run
@@ -1684,20 +1708,29 @@ async def _conversation_started(thread_id: str) -> bool:
     except NotFoundError:
         # Indexed, but no run created it on MDA yet.
         return False
+    except httpx.HTTPStatusError as error:
+        # A channel's thread is read over HTTP, which says so with a 404.
+        if error.response.status_code == httpx.codes.NOT_FOUND:
+            return False
+        raise
     return bool(_state_messages(state))
 
 
 async def prepare_github_issue_run(
     payload: dict[str, Any],
-    event_type: str,
     thread_id: str,
+    *,
+    workspace: str | None,
     adopt: Callable[[str], Awaitable[None]] | None = None,
-) -> GitHubIssueRun | None:
-    """Prepare the run an issue or issue comment that tagged @open-swe starts, or None.
+) -> dict[str, Any] | None:
+    """Index the thread an issue mention starts its run on, and the run's configurable.
 
-    ``thread_id`` is the issue's thread, which MDA's GitHub channel owns. ``adopt``
-    indexes it as the channel's before its metadata is written, so the write
-    doesn't create it.
+    MDA's GitHub channel writes the run's input; this checks the issue and its
+    sender, and writes the thread's metadata. ``thread_id`` is the issue's thread,
+    which the channel owns. ``adopt`` indexes it as the channel's before its
+    metadata is written, so the write doesn't create it. ``workspace`` is the one
+    the thread started in, for a follow-up; ``None`` for the repository's own.
+    ``None`` when the run can't start.
     """
     issue = payload.get("issue", {})
     repo = payload.get("repository", {})
@@ -1705,139 +1738,25 @@ async def prepare_github_issue_run(
         "owner": repo.get("owner", {}).get("login", ""),
         "name": repo.get("name", ""),
     }
-
     issue_id = str(issue.get("id", ""))
     issue_number = issue.get("number")
     github_login = payload.get("sender", {}).get("login", "")
-    github_user_id = payload.get("sender", {}).get("id")
-    issue_url = issue.get("html_url", "") or issue.get("url", "")
-    title = issue.get("title", "No title")
-    description = issue.get("body") or "No description"
-    issue_author = issue.get("user", {}).get("login", "")
-
-    common.logger.info(
-        "Processing GitHub issue: event=%s, issue=%s, repo=%s/%s",
-        event_type,
-        issue_number,
-        repo_config.get("owner"),
-        repo_config.get("name"),
-    )
-
     if not issue_id or not issue_number:
         common.logger.warning("Missing GitHub issue id/number, skipping")
         return None
-
-    email = await User.email_for_login(github_login) or ""
-    if not email:
+    if not await User.email_for_login(github_login):
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return None
-
-    existing_thread = await _conversation_started(thread_id)
-    github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
-    app_token = await common.get_github_app_installation_token()
-    reaction_token = github_token or app_token
-    comment = payload.get("comment", {})
-    comment_id = comment.get("id")
-    if event_type == "issue_comment" and comment_id:
-        if not reaction_token:
-            common.logger.warning(
-                "No GitHub token available to react to issue comment %s", comment_id
-            )
-        else:
-            try:
-                reacted = await common.react_to_github_comment(
-                    repo_config,
-                    comment_id,
-                    event_type="issue_comment",
-                    token=reaction_token,
-                )
-            except GitHubAuthError:
-                github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
-                reaction_token = github_token or app_token
-                reacted = False
-                if reaction_token:
-                    try:
-                        reacted = await common.react_to_github_comment(
-                            repo_config,
-                            comment_id,
-                            event_type="issue_comment",
-                            token=reaction_token,
-                        )
-                    except GitHubAuthError:
-                        common.logger.warning(
-                            "Re-auth still produced 401 reacting to issue comment %s",
-                            comment_id,
-                        )
-                        reacted = False
-            if not reacted:
-                common.logger.warning("Failed to react to GitHub issue comment %s", comment_id)
-
-    comments: list[dict[str, Any]] = []
-    comment_login = str(comment.get("user", {}).get("login") or github_login)
-    trusted = await _trusted_authors(github_login, issue_author, comment_login)
-    if existing_thread:
-        if event_type == "issue_comment":
-            prompt = build_github_issue_followup_prompt(
-                comment_login, comment.get("body", ""), trusted=trusted
-            )
-        else:
-            prompt = build_github_issue_update_prompt(
-                github_login, title, description, trusted=trusted
-            )
-    else:
-        try:
-            comments = await common.fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
-            )
-        except GitHubAuthError:
-            github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
-            comments = await common.fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
-            )
-        if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
-            comments.append(
-                {
-                    "body": comment.get("body", ""),
-                    "author": comment.get("user", {}).get("login", "unknown"),
-                    "created_at": comment.get("created_at", ""),
-                    "comment_id": comment_id,
-                }
-            )
-            comments.sort(key=lambda item: item.get("created_at", ""))
-
-        trusted = await _trusted_authors(github_login, issue_author, comments=comments)
-        prompt = build_github_issue_prompt(
-            repo_config,
-            issue_number,
-            issue_id,
-            title,
-            description,
-            comments,
-            github_login=github_login,
-            issue_author=issue_author,
-            issue_url=issue_url,
-            trusted=trusted,
-        )
-    # A follow-up stays in the workspace its thread started in, even if the
-    # repository has since been preferred by another workspace.
-    workspace = (
-        await common.get_thread_workspace(thread_id) if existing_thread else None
-    ) or await common.workspace_for_repo_config(repo_config)
-    configurable: dict[str, Any] = {
-        "source": "github",
-        "github_login": github_login,
-        "github_user_id": github_user_id,
-        "repo": repo_config,
-        "github_issue": {
-            "id": issue_id,
-            "number": issue_number,
-            "title": title,
-            "url": issue_url,
-        },
-        "workspace": workspace,
-        "environment": workspace,
+    # The thread's App token, cached for the backend's own GitHub calls on it.
+    await common.get_or_resolve_thread_github_token(thread_id, "")
+    workspace = workspace or await common.workspace_for_repo_config(repo_config)
+    title = issue.get("title", "No title")
+    github_issue = {
+        "id": issue_id,
+        "number": issue_number,
+        "title": title,
+        "url": issue.get("html_url", "") or issue.get("url", ""),
     }
-
     token_repositories = common.event_thread_token_repositories(repo_config, payload)
     if adopt is not None:
         await adopt(thread_id)
@@ -1846,8 +1765,8 @@ async def prepare_github_issue_run(
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
-        source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
+        title=title or f"Issue #{issue_number}",
+        source_context=SourceContext.parse({"github_issue": github_issue}),
         workspace=workspace,
         token_repositories=token_repositories,
     )
@@ -1857,41 +1776,15 @@ async def prepare_github_issue_run(
             extra={"agent_thread_id": thread_id},
         )
         return None
-
-    if existing_thread:
-        sender_login = (
-            comment.get("user", {}).get("login", github_login) or github_login
-            if event_type == "issue_comment"
-            else github_login
-        )
-        run_input = _github_human_run_input(
-            sender_login,
-            prompt,
-            user_id=github_user_id,
-            data={
-                "issue": {"id": issue_id, "number": issue_number, "url": issue_url},
-                "event_type": event_type,
-                "comment_id": comment_id or "",
-            },
-        )
-    else:
-        run_input = _github_issue_run_input(
-            prompt,
-            comments,
-            trusted=trusted,
-            issue_author=issue_author,
-            description=description,
-            trigger_login=github_login,
-            trigger_user_id=github_user_id,
-            issue_data={
-                "id": issue_id,
-                "number": issue_number,
-                "url": issue_url,
-                "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
-                "title": title,
-            },
-        )
-    return GitHubIssueRun(thread_id=thread_id, input=run_input, configurable=configurable)
+    return {
+        "source": "github",
+        "github_login": github_login,
+        "github_user_id": payload.get("sender", {}).get("id"),
+        "repo": repo_config,
+        "github_issue": github_issue,
+        "workspace": workspace,
+        "environment": workspace,
+    }
 
 
 class _PullRequestNumber(BaseModel):
@@ -1922,8 +1815,6 @@ class _HumanReviewEvent(BaseModel):
 
 async def settle_human_reviews(payload: dict[str, Any]) -> None:
     """Re-check the open standard review requests of the pull requests an event names."""
-    if not postgres.configured():
-        return
     try:
         event = _HumanReviewEvent.model_validate(payload)
     except ValidationError:
@@ -1931,7 +1822,7 @@ async def settle_human_reviews(payload: dict[str, Any]) -> None:
         return
     owner, repo = event.repository.owner.login, event.repository.name
     for number in event.numbers:
-        await settle_pull_request(owner, repo, number)
+        await SettleTarget.queue(owner, repo, number)
 
 
 class _StatusEvent(BaseModel):
@@ -1941,8 +1832,6 @@ class _StatusEvent(BaseModel):
 
 async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
     """A finished commit status names only a SHA, so re-check the repository's open requests."""
-    if not postgres.configured():
-        return
     try:
         event = _StatusEvent.model_validate(payload)
     except ValidationError:
@@ -1950,4 +1839,4 @@ async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
         return
     if event.state == "pending":
         return
-    await settle_repository(event.repository.owner.login, event.repository.name)
+    await SettleTarget.queue(event.repository.owner.login, event.repository.name)

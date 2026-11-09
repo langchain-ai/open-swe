@@ -19,6 +19,8 @@ from openswe.users import UserPreferences
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 class DummyPrepareMiddleware(BasePrepareRunMiddleware):
     def __init__(self) -> None:
@@ -77,7 +79,7 @@ async def test_sender_is_matched_by_login_and_others_get_their_slack_timezone(
         commit_email=f"123+{sender_login}@users.noreply.github.com",
     )
     bob_user = SimpleNamespace(
-        id="bob",
+        id="00000000-0000-0000-0000-000000000002",
         github_login="bob",
         display_name="bob",
         email="",

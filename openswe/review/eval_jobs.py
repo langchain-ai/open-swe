@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, TypeAdapter
+from runtime_api.models import gateway_api_key, gateway_base_url
 from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
@@ -36,7 +37,6 @@ from openswe.review.eval_report import (
 from openswe.users.records import github_login_of
 from openswe.utils.build_info import backend_build_info
 from openswe.utils.dashboard_links import dashboard_api_base_url
-from openswe.utils.gateway import gateway_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.tracing import tracing_project
 
@@ -387,7 +387,7 @@ async def _launch_sandbox(
     endpoint = ENV.LANGSMITH_ENDPOINT.get().rstrip("/")
     langgraph_url = config["langgraph_url"] or ENV.LANGGRAPH_URL.get()
     gateway = gateway_base_url()
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or api_key
+    gateway_key = gateway_api_key() or api_key
     report_url = dashboard_api_base_url() + REPORT_PATH
     env = {
         "LANGSMITH_API_KEY": KEY_PLACEHOLDER,

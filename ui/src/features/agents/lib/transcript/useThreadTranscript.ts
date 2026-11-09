@@ -18,7 +18,7 @@ import { useReconnectNotice } from "@/features/agents/lib/stream/useReconnectNot
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
-  WorkThreadCache,
+  ThreadSummaryCache,
 } from "@/features/agents/lib/queries"
 import {
   threadHydrated,
@@ -131,7 +131,7 @@ export function useThreadTranscript(
   const runTracker = options.runTracker
   const queryClient = useQueryClient()
   const summaries = useMemo(
-    () => new WorkThreadCache(queryClient, threadId),
+    () => new ThreadSummaryCache(queryClient, threadId),
     [queryClient, threadId]
   )
   const [state, setState] = useState<TranscriptState | null>(() =>

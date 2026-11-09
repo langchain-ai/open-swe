@@ -423,8 +423,6 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
 
 
 async def _review_card(watch: BabySitWatch) -> HumanReviewRequest | None:
-    if not postgres.configured():
-        return None
     try:
         approval = await HumanReviewRequest.active_for(watch.owner, watch.repo, watch.pr_number)
     except Exception:
@@ -465,7 +463,7 @@ async def _finish_ready(watch: BabySitWatch) -> str:
             return await _finish_watch(
                 watch,
                 f"*`/baby-sit` stopped:* {watch.pr_url} finished CI without a failure, but "
-                f"Open SWE could not resume its agent after {MAX_EVALUATION_ERRORS} attempts. "
+                f"Robin could not resume its agent after {MAX_EVALUATION_ERRORS} attempts. "
                 "Check the agent service and restart the CI watch; nothing was merged.",
             )
         return "error"

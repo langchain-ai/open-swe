@@ -42,7 +42,7 @@ describe("withAttachments", () => {
     expect(submission.replies).toEqual([
       reply,
       {
-        source: "conversation",
+        source: "pull_request",
         before: "",
         selection: "Off by one",
         after: "",

@@ -17,7 +17,7 @@ from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
 from openswe import event_claims
-from openswe.database import configured, transaction
+from openswe.database import transaction
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.slack.payloads import SlackEventEnvelope
 from openswe.slack.pr_links import event_pull_requests
@@ -291,8 +291,6 @@ class EventLog:
         Never raises. False means the row was not stored, so a caller that must
         not drop the delivery can ask the sender to retry.
         """
-        if not configured():
-            return False
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 
@@ -340,8 +338,6 @@ class EventLog:
         """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
-        if not configured():
-            return False
         try:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
@@ -397,8 +393,6 @@ class EventLog:
         again. A delivery that was not stored gives its claim back, so its next
         try records it. Never raises; False means the row was not stored.
         """
-        if not configured():
-            return False
         scope = f"{_TABLE}:{source}"
         claimed = False
         try:

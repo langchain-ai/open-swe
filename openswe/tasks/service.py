@@ -36,6 +36,7 @@ from openswe.threads.status import refresh_thread_status
 from openswe.threads.summary import assert_thread_postable, assert_thread_readable
 from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
 from openswe.tools.threads import resolve_thread_actor
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import (
@@ -95,7 +96,7 @@ class Actor:
         user = await user_for_login(self.login)
         if user is None:
             raise PermissionError(
-                "Task operations require the thread owner to have an Open SWE account"
+                "Task operations require the thread owner to have a Robin account"
             )
         owner = await metadata.owner()
         is_owner = owner.id == user.id
@@ -167,7 +168,7 @@ async def authorized_context(
         # Participants steer only from the coordinator; a worker thread stays owner-only.
         await authorized_metadata(actor)
     workspace = metadata.workspace or metadata.environment
-    if workspace and workspace != context.task.workspace.slug:
+    if workspace and workspace != context.task.workspace.slug and context.task.delegated:
         raise PermissionError("The thread no longer belongs to the task's workspace")
     if coordinator and (
         context.membership.role != "coordinator"
@@ -217,7 +218,6 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         "workspace": metadata.workspace,
         "admin_thread": metadata.admin_thread,
         "repo_explicitly_none": metadata.repo_explicitly_none,
-        "experience": "coding",
     }
     if metadata.owner_type != "system":
         owner = await metadata.owner()
@@ -244,7 +244,6 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
             config |= {
                 "user_id": str(owner.id),
                 "auth_provider": "langsmith",
-                "experience": metadata.experience,
             }
         else:
             config["github_login"] = login
@@ -410,7 +409,6 @@ def _worker_metadata(
             "repo_owner",
             "repo_name",
             "repo_explicitly_none",
-            "experience",
             "base_branch",
             "branch_prefix",
             "sandbox_id",
@@ -521,7 +519,9 @@ class Delegation:
         workspace_value = metadata.workspace or metadata.environment
         workspace = await resolve_workspace(
             thread_workspace=(
-                context.task.workspace.slug if context is not None else workspace_value
+                context.task.workspace.slug
+                if context is not None and context.task.delegated
+                else workspace_value
             ),
             login=actor.login,
         )
@@ -534,7 +534,7 @@ class Delegation:
         self, worker_thread_id: str, instructions: str, request_id: str
     ) -> tuple[store.Task, store.TaskDelegation]:
         title = self.metadata.title
-        return await store.Task.reserve_worker(
+        reserved = await store.Task.reserve_worker(
             self.actor.thread_id,
             worker_thread_id,
             title=title.strip() if title and title.strip() else "Delegated work",
@@ -544,6 +544,8 @@ class Delegation:
             effort=self.effort,
             launch_request_id=request_id,
         )
+        await Topic.TASK_WORKERS.invalidate(key=self.actor.thread_id)
+        return reserved
 
     async def launched_by(self, request_id: str) -> tuple[store.Task, store.TaskDelegation] | None:
         """The async worker this coordinator's tool call ``request_id`` already launched."""
@@ -759,6 +761,8 @@ async def cancel_worker(worker_thread_id: str, *, silently: bool = False) -> Non
         await TaskMessage.withdraw(coordinator_thread_id, sender_thread_id=worker_thread_id)
     await interrupt_transcript_turns(worker_thread_id, run_ids)
     await cancel_thread_wakeups(worker_thread_id)
+    if coordinator_thread_id is not None:
+        await Topic.TASK_WORKERS.invalidate(key=coordinator_thread_id)
 
 
 async def control_worker(

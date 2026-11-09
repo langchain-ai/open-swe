@@ -11,7 +11,7 @@
 
 export type PerfAttributeValue = string | number | boolean | null
 export type PerfAttributes = Record<string, PerfAttributeValue>
-export type PerfSpanName = "thread_load" | "agent_run"
+export type PerfSpanName = "thread_load" | "thread_list_load" | "agent_run"
 export type PerfSpanStatus = "open" | "ended" | "abandoned"
 
 export interface PerfStep {

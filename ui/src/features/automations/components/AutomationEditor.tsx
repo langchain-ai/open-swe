@@ -590,7 +590,7 @@ export function AutomationEditor({
                     />
                   </div>
                   {hint(
-                    "Top-level messages only. Open SWE must be in the channel; messages reach the run as untrusted context."
+                    "Top-level messages only. Robin must be in the channel; messages reach the run as untrusted context."
                   )}
                 </TriggerCard>
               )
@@ -677,7 +677,7 @@ export function AutomationEditor({
             value={prompt}
             onValueChange={setPrompt}
             disabled={!canManage}
-            placeholder="What should Open SWE do each time this runs?"
+            placeholder="What should Robin do each time this runs?"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-placeholder"
           />

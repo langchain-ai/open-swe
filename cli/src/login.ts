@@ -10,7 +10,7 @@ function page(heading: string, detail: string): string {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Open SWE</title>
+<title>Robin</title>
 <style>
   :root { color-scheme: light dark }
   body {
@@ -38,7 +38,7 @@ const SIGNED_IN_PAGE = page(
 )
 const FAILED_PAGE = page(
   "Sign-in failed",
-  "Open SWE did not receive a sign-in code. Try `oswe login` again."
+  "Robin did not receive a sign-in code. Try `robin login` again."
 )
 
 function openBrowser(url: string): void {
@@ -52,7 +52,7 @@ function openBrowser(url: string): void {
     Bun.spawn(command, { stdout: "ignore", stderr: "ignore" }).unref()
   } catch (cause) {
     process.stderr.write(
-      `oswe: could not open a browser (${errorMessage(cause)}). Open the URL above manually.\n`
+      `robin: could not open a browser (${errorMessage(cause)}). Open the URL above manually.\n`
     )
   }
 }

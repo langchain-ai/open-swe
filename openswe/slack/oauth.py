@@ -16,7 +16,7 @@ import httpx2
 from fastapi import HTTPException
 
 from openswe.config import ENV
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import PublicOrigin
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def slack_oauth_configured() -> bool:
 
 def slack_base_url() -> str:
     """Public origin Slack must reach, which a tunnel can point away from the API."""
-    return (ENV.SLACK_PUBLIC_BASE_URL.get() or dashboard_api_base_url()).rstrip("/")
+    return (ENV.SLACK_PUBLIC_BASE_URL.get() or PublicOrigin.dashboard_api_base_url()).rstrip("/")
 
 
 @dataclass(frozen=True)

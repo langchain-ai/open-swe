@@ -14,6 +14,8 @@ from openswe.dashboard.profiles import (
     get_valid_access_token,
 )
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 def test_expires_at_from_github_response() -> None:
     data = {"expires_in": 3600}

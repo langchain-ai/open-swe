@@ -12,6 +12,8 @@ from openswe.skill_store.store import (
 from openswe.tools.organization_skills import save_organization_skill
 from openswe.users import User
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 async def test_skill_validation_and_persistence(
     registry_db: None, monkeypatch: pytest.MonkeyPatch

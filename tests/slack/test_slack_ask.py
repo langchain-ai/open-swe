@@ -2,11 +2,13 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from runtime_api.slack import SlackNotice
 
 from openswe.slack import ask as slack_ask
 from openswe.slack import routes as slack_routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.request import SlackRequest
 from openswe.slack.tools import reply as slack_reply
 from openswe.tasks import schemas as task_schemas
 from openswe.tasks import service as task_service
@@ -123,6 +125,12 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     assert await slack_reply.slack_reply("the worker's answer", "final") == {"success": True}
     if reply_thread_ts:
         assert post.await_args.args == ("C1", reply_thread_ts, "the worker's answer")
+        # The conversation's own agent reads the answer from Slack after the question.
+        assert SlackNotice.marks(post.await_args.kwargs)
+        assert (
+            post.await_args.kwargs["blocks"][-1]["block_id"]
+            == SlackNotice(kind="btw", key="123.789").block_id
+        )
         remove_reaction.assert_awaited_once_with("C1", "123.789", "hourglass_flowing_sand")
         replace.assert_not_awaited()
     else:
@@ -178,6 +186,49 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
     assert post.await_args.kwargs["agent_thread_id"] == "thread-1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "blocks", "posted"),
+    [
+        ("the answer", None, True),
+        ("the answer", [], True),
+        ("the answer", [{"type": "section", "text": {"type": "mrkdwn", "text": "hi"}}], True),
+        ("x" * 200_000, None, False),
+    ],
+)
+async def test_a_btw_answer_is_posted_as_a_notice_or_not_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    blocks: list[dict[str, Any]] | None,
+    posted: bool,
+) -> None:
+    configurable = {
+        "thread_id": "thread-1",
+        "source": "slack",
+        "slack_ask": True,
+        "slack_by_the_way_thread_ts": "123.456",
+        "slack_by_the_way_message_ts": "123.789",
+        "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+    }
+    monkeypatch.setattr(slack_reply, "get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(slack_reply.event_claims, "claim", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_reply, "settle_slack_thread_status", AsyncMock())
+    monkeypatch.setattr(slack_reply, "remove_slack_reaction", AsyncMock())
+    post = AsyncMock(return_value="123.999")
+    monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
+
+    result = await slack_reply.slack_reply(message, "final", blocks=blocks)
+
+    assert result["success"] is posted
+    if posted:
+        # Slack drops a markdown block's block_id, so the notice rides on a context block.
+        notice = post.await_args.kwargs["blocks"][-1]
+        assert notice["type"] == "context"
+        assert notice["block_id"] == SlackNotice(kind="btw", key="123.789").block_id
+    else:
+        post.assert_not_awaited()
+
+
 def _ask_config(response_url: str) -> dict[str, Any]:
     return {
         "configurable": {
@@ -205,3 +256,98 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
     assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
     assert post.await_args.args == ("C1", "U1", "the answer")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("linked_asker")
+async def test_a_by_the_way_question_for_mda_is_prepared_not_dispatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reaction = AsyncMock()
+    monkeypatch.setattr(slack_ask, "add_slack_reaction", reaction)
+    monkeypatch.setattr(
+        slack_ask.common,
+        "get_slack_repo_config",
+        AsyncMock(return_value=slack_ask.common.SlackRepoResolution()),
+    )
+    upsert = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_ask.common, "upsert_agent_thread_metadata", upsert)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(slack_ask, "fetch_slack_thread_messages", AsyncMock(return_value=[]))
+    remembered = SlackRequest(
+        channel_id="C1",
+        thread_ts="123.456",
+        original_message_ts="123.789",
+        user_id="U1",
+        team_id="T1",
+        thread_id="side-1",
+        by_the_way="why?",
+    )
+
+    run = await slack_ask.prepare_ask_channel_run(slack_ask.by_the_way_request(remembered))
+
+    assert run is not None
+    dispatch.assert_not_awaited()
+    # MDA's Slack channel shows the run as working; the backend adds no reaction of its own.
+    reaction.assert_not_awaited()
+    assert upsert.await_args.args[0] == "side-1"
+    assert upsert.await_args.kwargs["unlisted"] is True
+    assert run.configurable["slack_by_the_way_thread_ts"] == "123.456"
+    assert run.configurable["slack_by_the_way_message_ts"] == "123.789"
+    assert run.input["messages"]
+
+
+@pytest.mark.asyncio
+async def test_a_by_the_way_question_for_mda_without_a_question_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refuse = AsyncMock()
+    monkeypatch.setattr(slack_ask, "_refuse", refuse)
+    request = slack_ask.SlackAskRequest(
+        channel_id="C1",
+        user_id="U1",
+        question="",
+        thread_id="side-1",
+        command=slack_ask.BY_THE_WAY_COMMAND,
+        reply_thread_ts="123.456",
+        message_ts="123.789",
+    )
+
+    assert await slack_ask.prepare_ask_channel_run(request) is None
+    refuse.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("held_thread_id", "read"),
+    [("", "question-thread"), ("conversation-thread", "conversation-thread")],
+    ids=["its-own-thread", "a-branch"],
+)
+async def test_a_question_quotes_only_what_its_thread_never_got(
+    monkeypatch: pytest.MonkeyPatch, held_thread_id: str, read: str
+) -> None:
+    raw = [
+        {"ts": "1.0", "user": "U2", "text": "the build is red"},
+        {"ts": "2.0", "user": "U3", "text": "only said in Slack"},
+    ]
+    monkeypatch.setattr(slack_ask, "fetch_slack_thread_messages", AsyncMock(return_value=raw))
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
+    held = AsyncMock(return_value={"1.0"})
+    monkeypatch.setattr(slack_ask.forks, "held_timestamps", held)
+    request = slack_ask.SlackAskRequest(
+        channel_id="C1",
+        user_id="U1",
+        question="why?",
+        thread_id="question-thread",
+        reply_thread_ts="1.0",
+        message_ts="3.0",
+        held_thread_id=held_thread_id,
+    )
+
+    context = await slack_ask._request_context(request)
+
+    # A branch's new thread starts with what its conversation's thread holds.
+    held.assert_awaited_once_with(read)
+    assert "only said in Slack" in context
+    assert "the build is red" not in context

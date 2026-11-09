@@ -28,6 +28,7 @@ class PostHogProject(BaseModel):
 class TelemetryConfig(BaseModel):
     environment: str
     posthog: PostHogProject | None
+    segment_write_key: str | None
 
 
 @router.get("/analytics/config")
@@ -36,6 +37,7 @@ async def api_telemetry_config() -> TelemetryConfig:
     return TelemetryConfig(
         environment=ENV.DD_ENV.get(),
         posthog=PostHogProject(key=key, host=ENV.POSTHOG_HOST.get()) if key else None,
+        segment_write_key=ENV.SEGMENT_BROWSER_WRITE_KEY.get().strip() or None,
     )
 
 
@@ -51,11 +53,7 @@ async def api_agent_usage_leaderboard(
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
 
-    from openswe.database import configured
-
     try:
-        if not configured():
-            raise HTTPException(503, "Usage analytics is unavailable on this deployment.")
         return await usage_leaderboard(
             period=period,
             limit=limit,
@@ -90,11 +88,8 @@ async def api_pr_merge_rate_by_model(
     from sqlalchemy.exc import SQLAlchemyError
 
     from openswe.analytics.queries import pr_merge_rate_by_model
-    from openswe.database import configured
 
     try:
-        if not configured():
-            raise HTTPException(503, "PR analytics is unavailable on this deployment.")
         return await pr_merge_rate_by_model(
             period=period,
             maturity_days=maturity_days,

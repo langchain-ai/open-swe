@@ -1,5 +1,5 @@
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
@@ -12,7 +12,10 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwis
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 
+import { Link } from "@tanstack/react-router"
+
 import { DropdownMenuItem } from "@/components/MenuItem"
+import { parsePullRequestReference } from "@/features/reviews/search"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
 import type { PanelFile } from "@/features/agents/components/DiffFilesView"
@@ -145,38 +148,43 @@ export function ChangesPanel({
   branchScopeAvailable,
 }: ChangesPanelProps) {
   const emptyLabel = changesEmptyLabel({ status, isLoading, error, scope })
-  const actions = useMemo(
-    () => (
-      <>
-        <IconButton
-          icon={ArrowClockwiseIcon}
-          label="Refresh changes"
-          size="sm"
+  const reference = parsePullRequestReference(pr?.url ?? "")
+  const actions = (
+    <>
+      <IconButton
+        icon={ArrowClockwiseIcon}
+        label="Refresh changes"
+        size="sm"
+        color="secondary"
+        variant="plain"
+        onClick={onRefresh}
+        disabled={isFetching}
+        loading={isFetching}
+      />
+      {extraActions}
+      {pr && (
+        <Button
+          as={
+            reference ? (
+              <Link
+                to="/agents/reviews/$owner/$repo/$number"
+                params={{ ...reference, number: String(reference.number) }}
+              />
+            ) : (
+              <a href={pr.url} target="_blank" rel="noreferrer" />
+            )
+          }
+          aria-label="View PR"
+          title="View PR"
           color="secondary"
-          variant="plain"
-          onClick={onRefresh}
-          disabled={isFetching}
-          loading={isFetching}
-        />
-        {extraActions}
-        {pr && (
-          <Button
-            as={<a href={pr.url} target="_blank" rel="noreferrer" />}
-            aria-label="View PR"
-            title="View PR"
-            color="secondary"
-            variant="outlined"
-            leftDecorator={GitPullRequestIcon}
-            className="@max-[680px]:w-6 @max-[680px]:px-0"
-          >
-            <span className="whitespace-nowrap @max-[680px]:hidden">
-              View PR
-            </span>
-          </Button>
-        )}
-      </>
-    ),
-    [extraActions, isFetching, onRefresh, pr]
+          variant="outlined"
+          leftDecorator={GitPullRequestIcon}
+          className="@max-[680px]:w-6 @max-[680px]:px-0"
+        >
+          <span className="whitespace-nowrap @max-[680px]:hidden">View PR</span>
+        </Button>
+      )}
+    </>
   )
 
   return (

@@ -222,17 +222,21 @@ async def test_generated_title_updates_only_manual_breakout_roots(
         "openswe.thread_title.dashboard_thread_url",
         lambda thread_id: f"https://openswe.langchain.dev/agents/{thread_id}",
     )
+    recorder: dict[str, Any] = {}
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
-        conversation="fix it",
-        model=cast(BaseChatModel, _Model()),
+        conversation="fix it\n\n@Robin /breakout replace baby-sit with PR goals",
+        model=cast(BaseChatModel, _Model(recorder)),
         client=SimpleNamespace(threads=threads),
     )
 
+    title_input = recorder["messages"][1].content
     if suffix is None:
+        assert "Request to title:" not in title_input
         update.assert_not_awaited()
     else:
+        assert "Request to title:\nfix it\n\nEarlier messages" in title_input
         update.assert_awaited_once_with(
             "C1",
             "200.0",

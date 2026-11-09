@@ -6,6 +6,7 @@ import {
   groupRepoGroupsByWorkspace,
   groupSidebarThreadsByDay,
   sortSidebarThreads,
+  sidebarRefreshInterval,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -26,6 +27,23 @@ function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
 }
 
 describe("sidebar thread adapters", () => {
+  it("refreshes finished workers while approval is outstanding", () => {
+    const worker = cloudThread({
+      status: "finished",
+      pendingWorkflowApproval: true,
+    })
+    expect(
+      sidebarRefreshInterval([cloudThread({ taskWorkers: [worker] })])
+    ).toBe(30_000)
+    expect(
+      sidebarRefreshInterval([
+        cloudThread({
+          taskWorkers: [{ ...worker, pendingWorkflowApproval: false }],
+        }),
+      ])
+    ).toBe(false)
+  })
+
   it("uses short repository names and namespaced identities", () => {
     expect(cloudSidebarThread(cloudThread())).toMatchObject({
       key: "cloud:same-id",
@@ -74,7 +92,7 @@ describe("sortSidebarThreads", () => {
 })
 
 describe("groupSidebarThreadsByDay", () => {
-  it("buckets by last-updated day and orders each day by creation", () => {
+  it("buckets by local creation day, even when an older thread is active today", () => {
     const now = new Date(2026, 5, 10, 15)
     const at = (day: number, hour: number) =>
       new Date(2026, 5, day, hour).getTime()
@@ -86,24 +104,30 @@ describe("groupSidebarThreadsByDay", () => {
         thread("busy", at(1, 9), at(10, 14)),
         thread("fresh", at(10, 8), at(10, 9)),
         thread("old", at(3, 9), at(3, 10)),
+        thread("older", at(2, 9), at(4, 10)),
         thread("yesterday", at(9, 9), at(9, 10)),
       ],
       now
     )
 
+    const label = (day: number) =>
+      new Date(2026, 5, day).toLocaleDateString([], {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })
     expect(
-      groups.map((group) => [group.label, group.threads.map((item) => item.id)])
+      groups.map((group) => [
+        group.key,
+        group.label,
+        group.threads.map((item) => item.id),
+      ])
     ).toEqual([
-      ["Today", ["fresh", "busy"]],
-      ["Yesterday", ["yesterday"]],
-      [
-        new Date(2026, 5, 3).toLocaleDateString([], {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        }),
-        ["old"],
-      ],
+      ["today", "Today", ["fresh"]],
+      ["yesterday", "Yesterday", ["yesterday"]],
+      ["2026-06-03", label(3), ["old"]],
+      ["2026-06-02", label(2), ["older"]],
+      ["2026-06-01", label(1), ["busy"]],
     ])
   })
 })

@@ -1028,8 +1028,7 @@ async def test_native_observation_survives_restart_and_old_events(
     queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from openswe.jobs import queue as jobs
-    from openswe.webhooks import common
-    from tests.conftest import post_signed_github_webhook
+    from tests.github_channel import deliver_github_event
     from tests.merge_queue.test_queue_controller import native_response
 
     original = queue_controller.queue
@@ -1084,7 +1083,6 @@ async def test_native_observation_survives_restart_and_old_events(
     assert restored is not None and restored.native_snapshot == observed.native_snapshot
     # A delayed event is a wakeup only. The next read sees AC, not its old ABC payload.
     response = native_response((1, 3))
-    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "native-observer-test")
     event = {
         "action": "checks_requested",
         "repository": {
@@ -1096,10 +1094,8 @@ async def test_native_observation_survives_restart_and_old_events(
         "merge_group": {"head_sha": old_abc, "base_ref": "refs/heads/main"},
     }
     for _ in range(2):
-        result = await post_signed_github_webhook(
-            "merge_group", event, secret="native-observer-test"
-        )
-        assert result.json()["status"] == "accepted"
+        delivered = await deliver_github_event(monkeypatch, "merge_group", event)
+        assert delivered.work == ("wake_merge_queue",)
     job = await jobs.get(f"merge-queue-native-wakeup:{original.id}")
     assert job is not None and runtime.RUNTIME is not None
     await runtime.RUNTIME.reconcile(QueueJob.model_validate(job.payload))

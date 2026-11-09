@@ -12,7 +12,9 @@ from openswe.review import run_failure
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
-from tests.conftest import MemoryEventClaims
+from tests.conftest import MemoryEventClaims, serve_runs_from
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +46,34 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
-async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+async def test_concierge_receipt_is_cleared_when_its_run_ends(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    client = _FakeClient({})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    remove = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "remove_slack_reaction", remove)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": status,
+            "metadata": {
+                "slack_channel_id": "D1",
+                "slack_concierge_message_ts": "123.45",
+            },
+        }
+    )
+
+    remove.assert_awaited_once_with("D1", "123.45", "hourglass_flowing_sand")
+
+
+@pytest.mark.parametrize("is_fallback", [False, True])
+async def test_failed_run_offers_a_requester_scoped_retry(
+    monkeypatch: pytest.MonkeyPatch, is_fallback: bool
+) -> None:
     import json
 
     from openswe.slack.retry import SlackRetry
@@ -52,17 +81,23 @@ async def test_failed_run_offers_a_requester_scoped_retry(monkeypatch: pytest.Mo
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
-    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    error_link = completion.LangSmithErrorLink("https://smith.example/trace", is_fallback)
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=error_link))
     metadata = _slack_metadata()
     metadata["source_context"]["slack_thread"]["triggering_user_id"] = "U1"
     await completion._post_failure_reply("t1", metadata, "error", invocation_id="run-1")
     assert reply.await_args is not None
+    text = reply.await_args.args[2]
+    assert ("Couldn't link to the specific error trace" in text) is is_fallback
+    assert f"<{error_link.url}|LangSmith>" in text
     blocks = reply.await_args.kwargs["blocks"]
+    assert blocks[0]["text"]["text"] == text
     notice = reply.await_args.kwargs["notice"]
     assert blocks[0]["block_id"] == notice.block_id
     assert notice.repeats({"blocks": blocks})
-    token = json.loads(blocks[1]["elements"][0]["value"])["response"]
-    assert SlackRetry.parse(token) == SlackRetry(
+    retry = SlackRetry.from_value(json.loads(blocks[1]["elements"][0]["value"]))
+    assert retry is not None
+    assert retry.model_copy(update={"expires_at": 0}) == SlackRetry(
         channel_id="C1", thread_ts="123.45", user_id="U1", nonce="run-1"
     )
 
@@ -246,7 +281,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     }
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_linear_notification", notify)
+    monkeypatch.setattr(completion, "_post_failure_reply", notify)
     task_messages, wakes = AsyncMock(), AsyncMock()
     monkeypatch.setattr(completion.TaskMessage, "deliver_to", task_messages)
     monkeypatch.setattr(completion.EventSubscription, "deliver_to", wakes)
@@ -261,7 +296,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     task_messages.assert_awaited_once_with("t1")
     wakes.assert_awaited_once_with("t1", "enqueue")
 
-    # A run the backend started on the same thread still gets its notice.
+    # A run the backend started on the same thread still goes to its failure reply.
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-2", "status": "error"}
     )
@@ -387,7 +422,7 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
 
     error_url = "https://smith.example/o/tenant/projects/p/project/r/failed-span"
-    trace = AsyncMock(return_value=error_url)
+    trace = AsyncMock(return_value=completion.LangSmithErrorLink(error_url, is_fallback=False))
     monkeypatch.setattr(completion, "get_langsmith_error_url", trace)
 
     result = await completion.handle_run_completion(
@@ -457,6 +492,7 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     metadata = {**_slack_metadata(), "running_background_tasks": ["cmd-1"]}
     client = _FakeActiveRunClient(metadata, active=False)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(completion, "post_slack_thread_reply", AsyncMock(return_value=True))
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)

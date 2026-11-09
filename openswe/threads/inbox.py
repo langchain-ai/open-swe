@@ -25,7 +25,6 @@ from pydantic import JsonValue
 from runtime_api.catalog import InboxSpec
 
 from openswe.dashboard.options import model_supports_images
-from openswe.database import postgres
 from openswe.input_messages import (
     PersonIdentity,
     RunMessage,
@@ -210,7 +209,7 @@ class ThreadInbox:
         return taken
 
     async def _task_messages(self, spec: InboxSpec) -> list[TaskMessage]:
-        if not spec.events or not postgres.configured():
+        if not spec.events:
             return []
         try:
             return await TaskMessage.owed(self.thread_id)
@@ -223,7 +222,7 @@ class ThreadInbox:
             return []
 
     async def _event_matches(self, spec: InboxSpec) -> list[EventMatch]:
-        if not spec.events or not postgres.configured():
+        if not spec.events:
             return []
         try:
             return await EventMatch.owed(self.thread_id)
@@ -246,7 +245,7 @@ class ThreadInbox:
     async def receive(self, queued: Collection[int] = (), events: Collection[UUID] = ()) -> None:
         """A run holds ``queued`` follow-ups and ``events``: none is owed again."""
         await QueuedMessage.remove(self.thread_id, queued)
-        if events and postgres.configured():
+        if events:
             await TaskMessage.received(self.thread_id, events)
             await EventMatch.received(self.thread_id, events)
 

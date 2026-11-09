@@ -49,6 +49,14 @@ body.version-mismatch {
        compositor updates discrete frames instead of every vsync. */
     --animate-status-pulse: status-pulse 2s infinite;
     --animate-attention-flash: attention-flash 1.4s ease-out;
+    /* Grows a grid row in from nothing, so the entries above slide up. */
+    --animate-work-tail-enter: work-tail-enter 320ms ease-out;
+    @keyframes work-tail-enter {
+        from {
+            grid-template-rows: 0fr;
+            opacity: 0;
+        }
+    }
     @keyframes attention-flash {
         0% {
             background-color: var(--bg-brand-subtle);
@@ -92,17 +100,16 @@ body.version-mismatch {
     --color-user-message: var(--bg-user-message);
 }
 
-/* Macaw's dark canvas (neutral-25) is near-black and harsh behind long
-   transcripts. Lift it just above the sidebar so the rail reads as recessed,
-   and raise elevated surfaces with it so the composer still sits on top.
-   User bubbles sit a step above the composer so they read as raised too. */
+/* Structure comes from tone steps (page, then rail, then composer) rather than
+   divider lines, so the composer and user bubbles sit a step above the rail
+   and borders sit a step lower than Macaw's defaults. */
 html.dark,
 .dark[data-theme-scope] {
-    --bg-surface-level-1: color-mix(in oklch, var(--neutral-50) 55%, var(--neutral-100));
-    --bg-surface-level-1-hover: var(--neutral-100);
-    --bg-elevated: var(--neutral-100);
-    --bg-elevated-hover: color-mix(in oklch, var(--neutral-100), var(--neutral-200));
-    --bg-user-message: color-mix(in oklch, var(--neutral-100), var(--neutral-200));
+    --bg-elevated: var(--neutral-200);
+    --bg-elevated-hover: var(--neutral-300);
+    --bg-user-message: var(--neutral-200);
+    --border-default: var(--neutral-300);
+    --border-subtle: var(--neutral-200);
 }
 
 :root {
@@ -110,9 +117,11 @@ html.dark,
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: var(--radius-md);
-    /* Height of the right panel's tab bar; the empty-state launcher offsets by
-       it so its cards center against the whole panel. */
-    --workspace-topbar-height: 2.25rem;
+    /* Height of the right panel's tab bar. It matches the thread header (h-11)
+       so their lines meet and the panel toggle keeps its spot whether the
+       panel is open or collapsed; the empty-state launcher offsets by it so
+       its cards center against the whole panel. */
+    --workspace-topbar-height: 2.75rem;
 }
 
 @layer utilities {

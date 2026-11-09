@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import sys
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired
@@ -134,7 +135,7 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
         memory_limit: Bytes the QuickJS heap may use. Shared across all
             contexts under the same Runtime. Default 64 MiB.
         timeout: Per-call timeout in seconds. Applied to every
-            `eval` on every context. Default 5.
+            `eval` on every context. `None` disables the deadline. Default 5.
 
             !!! warning
 
@@ -144,6 +145,13 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
                 is not counted against it. A slow or blocking host call can
                 therefore stall an `eval` for longer than `timeout` seconds, so
                 do not rely on it to bound total wall-clock duration.
+
+            !!! warning
+
+                Avoid `timeout=None` unless absolutely needed: a runaway `eval`
+                then runs forever, and asyncio cancellation cannot stop it.
+                Only use it with an external limit that can, such as a
+                process kill or workflow timeout.
         max_ptc_calls: Maximum number of `tools.*` bridge calls allowed
             during one `eval` execution. Exceeding this budget throws
             from the host-function bridge before invoking the tool.
@@ -255,7 +263,7 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
         self,
         *,
         memory_limit: int = _DEFAULT_MEMORY_LIMIT,
-        timeout: float = _DEFAULT_TIMEOUT,
+        timeout: float | None = _DEFAULT_TIMEOUT,
         max_ptc_calls: int | None = _DEFAULT_MAX_PTC_CALLS,
         tool_name: str = _DEFAULT_TOOL_NAME,
         max_result_chars: int = _DEFAULT_MAX_RESULT_CHARS,
@@ -270,6 +278,9 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
     ) -> None:
         """Initialize REPL middleware state and build the exposed eval tool."""
         super().__init__()
+        if timeout is not None and not timeout > 0:
+            msg = "`timeout` must be > 0 or None"
+            raise ValueError(msg)
         if max_ptc_calls is not None and max_ptc_calls < 1:
             msg = "`max_ptc_calls` must be >= 1 or None"
             raise ValueError(msg)
@@ -713,6 +724,12 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
 
     def __del__(self) -> None:
         """Best-effort Runtime cleanup on GC; never raises at shutdown."""
+        # During interpreter finalization the daemon worker threads can no
+        # longer take the GIL, so closing a slot (which waits on its worker)
+        # would block forever and the process would never exit. The OS
+        # reclaims the interpreters' memory at exit anyway.
+        if sys.is_finalizing():
+            return
         # Wrapped in `contextlib.suppress` because __del__ must not raise
         # during interpreter shutdown, when dependencies may already be
         # half-unloaded.

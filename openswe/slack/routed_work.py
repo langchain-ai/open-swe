@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Mapping, Sequence
 
-from openswe.database import postgres
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.store import TaskMembership, sidebar_memberships
@@ -14,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 DESTINATIONS_KEY = "routed_work_destinations"
 ORIGINS_KEY = "routed_work_origins"
+ANSWERED_RUN_KEY = "routed_work_answered_run"
 
 
 class RoutedWork:
@@ -47,6 +47,15 @@ class RoutedWork:
         await RoutedWork(destination).merge(ORIGINS_KEY, add=[self.thread_id])
         await self.merge(DESTINATIONS_KEY, add=[destination])
 
+    async def answered(self, run_id: str) -> None:
+        try:
+            await THREADS.update(self.thread_id, metadata={ANSWERED_RUN_KEY: run_id})
+        except Exception:
+            logger.exception(
+                "Could not record routed work answer",
+                extra={"thread_id": self.thread_id, "run_id": run_id},
+            )
+
     async def active(self) -> bool:
         thread = await THREADS.get(self.thread_id)
         if thread is None:
@@ -54,11 +63,12 @@ class RoutedWork:
         run = await RUNTIMES.runs_on(thread.runtime).latest_run(self.thread_id)
         if run is not None and run.active:
             return True
-        if thread.metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+        answered = run is not None and thread.metadata.get(ANSWERED_RUN_KEY) == run.run_id
+        if thread.metadata.get(RUNNING_BACKGROUND_TASKS_KEY) and not answered:
             return True
         if await TaskMessage.pending_threads([self.thread_id]):
             return True
-        return postgres.configured() and bool(await QueuedMessage.for_thread(self.thread_id))
+        return bool(await QueuedMessage.for_thread(self.thread_id))
 
     async def delegated_active(
         self,

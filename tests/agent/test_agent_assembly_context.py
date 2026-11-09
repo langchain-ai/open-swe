@@ -20,6 +20,9 @@ from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurfa
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads.inbox import ThreadInbox
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
@@ -69,7 +72,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
-    from runtime_api.skills import RunSkills
+    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillsRequest
 
     from openswe.agent_api.agent import AgentKind
     from openswe.agent_api.run_calls import TokenRun
@@ -98,6 +101,13 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert "Do it." in personal.content
     # The runtime answers reads of skills itself; the files API serves none of them.
     assert not set(surface.skill_sources) & set(surface.backend_paths)
+    # A runtime from before serving the bundled skills itself still has them listed.
+    assert any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
+
+    # A runtime that serves them gets PostgreSQL's skills alone.
+    served = SkillsRequest(served=[BUNDLED_SKILLS]).model_dump()
+    own = RunSkills.model_validate(await TokenRun.answer(AgentKind(), run, "skills", served))
+    assert own.files and not any(f.path.startswith(BUNDLED_SKILLS) for f in own.files)
 
 
 @pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])
@@ -165,7 +175,10 @@ async def test_existing_task_keeps_controls_without_delegation(
     )
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
-        coordinator_thread_id="coordinator", title="Existing task", workspace_id=workspace.id
+        coordinator_thread_id="coordinator",
+        title="Existing task",
+        workspace_id=workspace.id,
+        delegated=True,
     )
     task.workspace = workspace
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
@@ -298,7 +311,6 @@ async def _agent_catalog(
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await agent_catalog(config, surface)
@@ -343,6 +355,35 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
     )
 
     assert configurable["draft_prs"] is False
+
+
+@pytest.mark.parametrize("channel, thread_ts", [("C1", "1.0"), ("D1", "1.0"), ("D1", "0")])
+@pytest.mark.parametrize("explicit_goal", [False, True])
+async def test_dm_runs_only_use_goal_mode_when_a_goal_is_already_active(
+    channel: str, thread_ts: str, explicit_goal: bool
+) -> None:
+    from openswe.threads.goal import Goal, ThreadGoals
+    from openswe.users.preferences import UserPreferences
+
+    config = _base_config()
+    config["configurable"].update(
+        source="slack",
+        slack_thread={"channel_id": channel, "thread_ts": thread_ts},
+    )
+    with (
+        patch("openswe.server.THREADS.get", AsyncMock(return_value=None)),
+        patch.object(
+            ThreadGoals, "current", AsyncMock(return_value=Goal() if explicit_goal else None)
+        ),
+        patch(
+            "openswe.server.User.preferences_for_login",
+            AsyncMock(return_value=UserPreferences(goal_mode=True)),
+        ),
+    ):
+        agent = await _agent_catalog(config)
+
+    turn = cast(AgentTurnSettings, agent["turn"])
+    assert turn.goal_mode is (explicit_goal or channel == "C1")
 
 
 @pytest.mark.asyncio

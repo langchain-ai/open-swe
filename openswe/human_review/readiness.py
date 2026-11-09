@@ -17,7 +17,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.people import Outcome, linked_participant
 from openswe.prompts import prompt
-from openswe.slack.blocks import actions, block_payload, button, section
+from openswe.slack.blocks import block_payload, section
 from openswe.slack.client import (
     GitHubPrRef,
     fetch_slack_message_by_ts,
@@ -31,6 +31,7 @@ from openswe.slack.responses import WebhookResponse, accepted, ignored
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.store import THREADS
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.webhooks import common
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 BUTTON_TYPE = "human_review_ready"
 DELIVERY_SCOPE = "human_review_readiness_dm"
+LINK_DELIVERY_SCOPE = "human_review_readiness_link_dm"
 CARD_TTL = timedelta(days=1)
 
 
@@ -56,9 +58,9 @@ class ReadinessCard(BaseModel):
     def delivery_key(self) -> str:
         return f"{self.pr_url.lower()}:{self.head_sha}:{self.slack_user_id}"
 
-    async def release_delivery(self) -> None:
+    async def release_delivery(self, scope: str = DELIVERY_SCOPE) -> None:
         try:
-            await event_claims.release(DELIVERY_SCOPE, self.delivery_key)
+            await event_claims.release(scope, self.delivery_key)
         except Exception:
             logger.warning("Could not release readiness delivery claim", exc_info=True)
 
@@ -69,9 +71,7 @@ class ReadinessCard(BaseModel):
 
     async def mark_ready(self, slack_user_id: str) -> None:
         if datetime.now(UTC) >= self.expires_at:
-            raise ValueError(
-                "This readiness card expired. Ask Open SWE for a new Mark ready button."
-            )
+            raise ValueError("This readiness card expired. Ask Robin for a new Mark ready button.")
         actor = linked_participant(await User.for_person({"id": f"slack:{slack_user_id}"}))
         if (
             isinstance(actor, Outcome)
@@ -92,7 +92,7 @@ class ReadinessCard(BaseModel):
             if details.head_sha != self.head_sha:
                 raise ValueError(
                     "New commits changed this pull request. Review the changes carefully and "
-                    "ask Open SWE for a new Mark ready button."
+                    "ask Robin for a new Mark ready button."
                 )
             await act_on_pull_request(pull, MarkReadyAction(action="mark-ready"))
 
@@ -128,7 +128,7 @@ class ReadinessCard(BaseModel):
 
 
 async def offer_readiness(pr: GitHubPrRef, pull: PullRequestClient, origin: Origin) -> str:
-    """Send the author a readiness control, without creating a review request."""
+    """Send the author to the diff, without creating a review request."""
     details = PullRequestPayload.model_validate(await pull.pull())
     if not details.draft or details.state != "open" or details.merged:
         return "Refresh the pull request before retrying."
@@ -146,26 +146,19 @@ async def offer_readiness(pr: GitHubPrRef, pull: PullRequestClient, origin: Orig
         origin_channel=origin.slack_channel_id,
         origin_thread=origin.slack_thread_ts,
     )
-    text = f"Review {pr.url} carefully yourself before clicking Mark ready."
+    review_url = dashboard_review_url(pr.owner, pr.repo, pr.number) or pr.url
+    text = f"Review the diff before marking this draft ready: {review_url}"
     blocks = block_payload(
         [
-            section(f"*Draft pull request*\n<{pr.url}|{pr.repo}#{pr.number}>"),
-            section(text),
-            actions(
-                button(
-                    "Mark ready",
-                    action_id="open_swe_option_select_human_review_ready",
-                    value=card.value(),
-                    style="primary",
-                )
-            ),
+            section(f"*Draft pull request*\n{pr.repo}#{pr.number}"),
+            section(f"Review the diff before marking this draft ready. <{review_url}|Open review>"),
         ]
     )
-    if not await event_claims.claim(DELIVERY_SCOPE, card.delivery_key, ttl=CARD_TTL):
+    if not await event_claims.claim(LINK_DELIVERY_SCOPE, card.delivery_key, ttl=CARD_TTL):
         return (
-            f"An author-only Mark ready button for this revision was already sent or is being "
+            f"A review-page link for this revision was already sent or is being "
             f"delivered to <@{author.slack_user_id}> in Slack DM. No new card or review request "
-            "was created. Only the conversation that sent the card resumes automatically. "
+            "was created. "
             "In this conversation, ask for review again after the author has reviewed the "
             "changes carefully and marked the pull request ready."
         )
@@ -179,18 +172,19 @@ async def offer_readiness(pr: GitHubPrRef, pull: PullRequestClient, origin: Orig
             else None,
         )
     except Exception:
-        await card.release_delivery()
+        await card.release_delivery(LINK_DELIVERY_SCOPE)
         raise
     if location is None:
-        await card.release_delivery()
+        await card.release_delivery(LINK_DELIVERY_SCOPE)
         return (
-            "Slack could not deliver the author-only Mark ready button; try again or ask "
+            "Slack could not deliver the review-page link; try again or ask "
             "the author to use Ready for review on GitHub."
         )
     return (
-        f"Sent <@{author.slack_user_id}> an author-only Mark ready button in Slack DM. "
-        "No review has been requested. Ask the author to review the changes carefully and "
-        "click that button; do not send a generic response-option button instead."
+        f"Sent <@{author.slack_user_id}> a review-page link in Slack DM: {review_url}. "
+        "No review has been requested. Ask the author to inspect the diff and mark it ready "
+        "on the review page, then ask for human review again. Do not offer a Mark ready "
+        "button in Slack."
     )
 
 
@@ -259,7 +253,7 @@ async def _process(interaction: SlackInteraction, value: SlackButtonValue) -> No
             except Exception:
                 logger.warning("Could not restore readiness card", exc_info=True)
         if marked:
-            error = "Marked ready, but Open SWE could not resume the request. Ask it to request review again."
+            error = "Marked ready, but Robin could not resume the request. Ask it to request review again."
         elif isinstance(exc, GitHubSignInRequired):
             error = f"Sign in to GitHub before marking ready. {github_token_hint()}"
         elif isinstance(exc, HTTPException):

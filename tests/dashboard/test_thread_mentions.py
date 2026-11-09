@@ -34,6 +34,9 @@ async def test_mentions_are_deduplicated_and_do_not_disclose_private_content(
     await alice.link("slack", "U123SELF")
     bob = await User.sign_in("github", "2", login="bob")
     await bob.link("slack", "U123BOB")
+    await bob.note_desktop_use()
+    dm = AsyncMock()
+    monkeypatch.setattr(mentions, "post_dm", dm)
     metadata = {"source": "dashboard", "visibility": "private"}
     if review:
         metadata.update(source="review_chat", repo_owner="acme", repo_name="demo", pr_number=1)
@@ -44,17 +47,12 @@ async def test_mentions_are_deduplicated_and_do_not_disclose_private_content(
     )
     await notification.notify()
     await notification.notify()
-    pending = await AppNotification.pending(bob.id)
-    assert len(pending) == 1
-    assert "secret" not in pending[0].body
-    assert ("/agents/reviews/acme/demo/1" if review else f"/agents/{thread_id}") in pending[0].url
-    assert await AppNotification.pending(alice.id) == []
-    assert not await AppNotification.acknowledge(alice.id, pending[0].id)
-    assert await AppNotification.acknowledge(bob.id, pending[0].id)
-    dm = AsyncMock()
-    monkeypatch.setattr(service, "post_dm", dm)
-    await AppNotification.deliver_fallback(bob.id, f"mention:{thread_id}:message-1")
-    dm.assert_not_awaited()
+    dm.assert_awaited_once()
+    assert dm.await_args is not None
+    recipient, text = dm.await_args.args
+    assert recipient == "U123BOB"
+    assert "secret" not in text
+    assert ("/agents/reviews/acme/demo/1" if review else f"/agents/{thread_id}") in text
 
 
 async def test_mentions_cap_and_rate_limit_sender(monkeypatch, registry_db) -> None:
@@ -64,7 +62,7 @@ async def test_mentions_cap_and_rate_limit_sender(monkeypatch, registry_db) -> N
     thread_id = str(uuid7())
     await index.create(thread_id, runtime="mda", metadata={"source": "dashboard"})
     send = AsyncMock()
-    monkeypatch.setattr(AppNotification, "send_to_slack", send)
+    monkeypatch.setattr(mentions, "post_dm", send)
     tokens = " ".join(f"<@U123{i:03}>" for i in range(100))
     for number in range(5):
         await mentions.ThreadMentions(thread_id, "alice", str(number), tokens).notify()
@@ -79,7 +77,7 @@ async def test_one_failed_recipient_does_not_stop_other_mentions(monkeypatch, re
     thread_id = str(uuid7())
     await index.create(thread_id, runtime="mda", metadata={"source": "dashboard"})
     send = AsyncMock(side_effect=[RuntimeError("offline"), None])
-    monkeypatch.setattr(AppNotification, "send_to_slack", send)
+    monkeypatch.setattr(mentions, "post_dm", send)
     await mentions.ThreadMentions(thread_id, "alice", "m1", "<@U123BAD> <@U123GOOD>").notify()
     assert send.await_count == 2
 

@@ -7,6 +7,7 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
 import {
+  reviewChecksOptions,
   reviewDetailQuery,
   reviewDiffOptions,
   reviewKeys,
@@ -39,6 +40,12 @@ export const reviewQueries = {
       queryKey: reviewKeys.diff(pr),
       queryFn: () => api.getReviewDiff(pr.owner, pr.repo, pr.number),
       ...reviewDiffOptions,
+    }),
+  checks: (pr: PullRequestRef) =>
+    queryOptions({
+      queryKey: reviewKeys.checks(pr),
+      queryFn: () => api.getReviewChecks(pr.owner, pr.repo, pr.number),
+      ...reviewChecksOptions(pr),
     }),
   conversation: (pr: PullRequestRef) =>
     queryOptions({
@@ -117,6 +124,7 @@ export function warmReviewPage(queryClient: QueryClient, pr: PullRequestRef) {
   void queryClient.prefetchQuery(reviewQueries.detail(pr))
   void queryClient.prefetchQuery(reviewQueries.diff(pr))
   void queryClient.prefetchQuery(reviewQueries.conversation(pr))
+  void queryClient.prefetchQuery(reviewQueries.checks(pr))
   getOrCreateWorkerPoolSingleton({
     poolOptions: DIFF_WORKER_POOL_OPTIONS,
     highlighterOptions: DIFF_WORKER_HIGHLIGHTER_OPTIONS,

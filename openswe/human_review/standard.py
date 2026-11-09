@@ -12,6 +12,7 @@ approved reaction, and once its pull request has sat green and unapproved for
 the workspace auto-assignment timeout the agent picks a reviewer, the same way.
 """
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
+from openswe.human_review.pick_modals import SNOOZE_DURATIONS
 from openswe.human_review.picking import (
     Area,
     Coverage,
@@ -64,8 +66,8 @@ from openswe.human_review.requests import (
     AUTO_ASSIGN_ASKED,
     HumanReviewParticipant,
     HumanReviewRequest,
-    RequestKind,
 )
+from openswe.human_review.settling import SETTLED_KINDS
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -80,7 +82,6 @@ from openswe.slack.cards import origin_footer
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
-    get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
 )
@@ -102,18 +103,9 @@ AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 DeadlineStep = Literal["unclaimed", "pick_expiry", "auto_merge"]
-SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
-SNOOZE_DURATIONS = {
-    "30 minutes": timedelta(minutes=30),
-    "1 hour": timedelta(hours=1),
-    "2 hours": timedelta(hours=2),
-    "4 hours": timedelta(hours=4),
-    "1 day": timedelta(days=1),
-    "2 days": timedelta(days=2),
-}
 _REMAINING_OWNERS_ASKED = "remaining_owners_asked"
 
 
@@ -243,7 +235,7 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if author_allowed is None:
         return None
     if not author_allowed:
-        blockers.append("its author is not an Open SWE user or in reviewAllowedAuthors")
+        blockers.append("its author is not a Robin user or in reviewAllowedAuthors")
     return blockers
 
 
@@ -290,7 +282,7 @@ async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: Sl
 
 
 async def _permalink(request: HumanReviewRequest) -> str:
-    return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
+    return await request.card_url()
 
 
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
@@ -428,7 +420,7 @@ async def request_review(
                 supplementary_review_area=supplementary_review_area,
             )
     except GitHubAppUnavailable:
-        result = _failure("Open SWE cannot reach this repository's GitHub App installation.")
+        result = _failure("Robin cannot reach this repository's GitHub App installation.")
     await EventLog.append(
         "human_review",
         {
@@ -510,7 +502,7 @@ async def _request_review(
                     exc_info=True,
                 )
                 readiness_note = (
-                    "Could not confirm delivery of the author-only Mark ready button. "
+                    "Could not confirm delivery of the review-page link. "
                     "Ask the author to use Ready for review on GitHub."
                 )
         return _failure(
@@ -567,7 +559,7 @@ async def _request_review(
         scheduled = await _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
     if not scheduled:
         await _discard(request.id)
-        return _failure("Open SWE could not schedule the review request's deadlines. Try again.")
+        return _failure("Robin could not schedule the review request's deadlines. Try again.")
     try:
         message_ts = await ReviewCard(request).post_standard()
     except SlackRequestError as exc:
@@ -581,7 +573,6 @@ async def _request_review(
         raise
     request.slack_message_ts = message_ts
     request = await request.save()
-    await ReviewCard(request).link_on_github()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
     refusal = ""
@@ -715,7 +706,7 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
         await ReviewPicks(added).drop(
             others,
             f"{mention(reviewer.user)} is reviewing {label} *{escape(pr.title)}*, so you no "
-            "longer need to. Open SWE removed you as a reviewer.",
+            "longer need to. Robin removed you as a reviewer.",
         )
     merge_note = (
         "It merges once every reviewer approves on GitHub."
@@ -732,7 +723,7 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
 async def snooze(request: HumanReviewRequest, user: User | None, length: str) -> Outcome:
     """Hold ``user``'s pending pick for ``length``, one of ``SNOOZE_DURATIONS``, then remind them."""
     if user is None:
-        return Outcome("Link your Open SWE account before snoozing a review.")
+        return Outcome("Link your Robin account before snoozing a review.")
     duration = SNOOZE_DURATIONS[length]
     until = datetime.now(UTC) + duration
     async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -756,7 +747,7 @@ async def snooze(request: HumanReviewRequest, user: User | None, length: str) ->
 
 async def decline(request: HumanReviewRequest, user: User | None, reason: str) -> Outcome:
     if user is None:
-        return Outcome("Link your Open SWE account before declining a review.")
+        return Outcome("Link your Robin account before declining a review.")
     if request.state != "open":
         return Outcome("This review request is no longer open.")
     dropped = await ReviewPicks(request).drop({user.id}, None, expired=True)
@@ -769,7 +760,7 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
     )
     trigger = PickTrigger("declined", tuple(p.github_login for p in dropped), reason)
     await start_auto_assign(request, asked=True, trigger=trigger)
-    return Outcome("Review declined; Open SWE will find another reviewer.")
+    return Outcome("Review declined; Robin will find another reviewer.")
 
 
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
@@ -799,8 +790,7 @@ async def assign(
     owns, and unasked only once someone approved. ``replace`` is a person naming the reviewer:
     Open SWE's pending picks for the same code are withdrawn first.
     """
-    approvers = await _github_approvers(request)
-    coverage = await Coverage.load(request)
+    approvers, coverage = await asyncio.gather(_github_approvers(request), Coverage.load(request))
     if approvers and (coverage is None or not coverage.uncovered(approvers)):
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
@@ -809,7 +799,7 @@ async def assign(
         )
     user = await User.for_login("github", github_login)
     if user is None:
-        return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+        return _failure(f"@{github_login} is not a Robin user; pick someone who is.")
     if not replace:
         if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
             return _failure(
@@ -843,7 +833,7 @@ async def assign(
     ):
         await ReviewPicks(request).drop(
             others,
-            f"Open SWE asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
+            f"Robin asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
             "so you no longer need to.",
         )
         request = await HumanReviewRequest.get(request.id) or request
@@ -886,15 +876,13 @@ async def assign(
             extra={"request_id": str(added.id), "github_login": github_login},
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
-    deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
+    deadline = f" Accept within {minutes} minutes, or Robin will ask someone else."
     accept = actions(accept_button(added), decline_button(added), snooze_button(added))
     permalink = await _permalink(added)
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
-        dm_text = (
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
-        )
+        dm_text = f"Robin picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         if not replace and (base := dashboard_base_url()):
             dm_text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
         origin = added.dm_origin
@@ -966,8 +954,9 @@ class ReviewStatus(BaseModel):
                 )
             )
         requester = request.requested_by
-        approvers = await _github_approvers(request)
-        coverage = await Coverage.load(request)
+        approvers, coverage = await asyncio.gather(
+            _github_approvers(request), Coverage.load(request)
+        )
         assigned = [p.github_login for p in request.reviewers + request.picks]
         return cls(
             requested_by=requester.login_for("github") if requester else "",
@@ -1027,7 +1016,7 @@ async def _settle_posted(
     snapshot: PullRequestSnapshot,
     states: dict[str, str],
 ) -> None:
-    """React once the pull request's owners approve; until then, time how long it has sat green."""
+    """Record owner approvals; until then, time how long the pull request has sat green."""
     approvers = {login for login, state in states.items() if state == "APPROVED"}
     approved = bool(approvers)
     if approved:
@@ -1138,10 +1127,9 @@ async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
                 return "auto-merge paused — could not verify PR thread activity"
             if thread.status == "busy":
                 return "auto-merge paused — a PR thread has an active run"
-            client = RUNTIMES.runs_on(thread.runtime).client
-            for run_status in ("pending", "running"):
-                if await client.runs.list(thread_id, status=run_status, limit=1):
-                    return "auto-merge paused — a PR thread has an active run"
+            # Not the SDK's write client: an MDA channel's own threads are readable only.
+            if await RUNTIMES.runs_on(thread.runtime).has_active_run(thread_id):
+                return "auto-merge paused — a PR thread has an active run"
     except Exception:
         logger.warning(
             "Could not check PR thread activity before auto-merge",
@@ -1527,7 +1515,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         )
         sent = await send_dm(
             participant.user.slack_user_id,
-            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.label}> "
+            f"Reminder: Robin picked you to review <{pr.url}|{pr.label}> "
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
@@ -1615,7 +1603,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     await ReviewPicks(request).drop(
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{minutes} minutes, so Open SWE released you from it.",
+        f"{minutes} minutes, so Robin released you from it.",
         expired=True,
     )
     current = await HumanReviewRequest.get(request.id)
@@ -1675,7 +1663,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     await ReviewPicks(request).drop(
         {pick.user_id for pick in request.picks},
         f"You no longer need to review <{pr.url}|{pr.label}> "
-        f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
+        f"*{escape(pr.title)}*: nobody asked Robin to find a reviewer for it.",
     )
     return "not_asked"
 

@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
@@ -28,6 +28,7 @@ from openswe.dashboard.oauth import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.users.preferences import KitchenChannelPreference
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
@@ -48,6 +49,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "experimental_monitor",
         "experimental_assistant_ui",
         "recent_thread_context_enabled",
+        "github_review_request_comments",
     }
 )
 
@@ -80,7 +82,7 @@ PROFILES = ProfileRecords("profile")
 GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(KitchenChannelPreference):
     default_repo: str | None = None
     workspace_default_repos: dict[str, str] = Field(default_factory=dict)
     base_branch: str | None = None
@@ -91,10 +93,15 @@ class ProfileUpdate(BaseModel):
     pr_failure_reactions: bool | None = None
     goal_mode: bool | None = None
     experimental_memory: bool | None = None
+    experimental_conditional_approval: bool | None = None
     experimental_classify: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    # A live run shows its latest thoughts and tool calls in the dashboard fold and in Slack.
+    experimental_live_activity: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     slack_onboarding_dismissed: bool = False
@@ -166,6 +173,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
+        ),
+        "experimental_live_activity": (
+            update.experimental_live_activity
+            if update.experimental_live_activity is not None
+            else existing.get("experimental_live_activity")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -380,7 +392,6 @@ async def get_my_profile(
     return {
         **normalize_profile_for_response(profile or {}),
         **preferences.model_dump(),
-        "agent_workspace_tasks_supported": True,
     }
 
 
@@ -403,27 +414,33 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     login = session["sub"]
-    preferences = await User.update_preferences(
-        login,
-        UserPreferencesPatch(
-            concierge_mode=update.concierge_mode,
-            pr_failure_reactions=update.pr_failure_reactions,
-            goal_mode=update.goal_mode,
-            experimental_memory=update.experimental_memory,
-            experimental_classify=update.experimental_classify,
-        ),
-    )
+    try:
+        preferences = await User.update_preferences(
+            login,
+            UserPreferencesPatch(
+                personal_kitchen_channel_id=update.personal_kitchen_channel_id,
+                concierge_mode=update.concierge_mode,
+                pr_failure_reactions=update.pr_failure_reactions,
+                goal_mode=update.goal_mode,
+                experimental_memory=update.experimental_memory,
+                experimental_conditional_approval=update.experimental_conditional_approval,
+                experimental_classify=update.experimental_classify,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if preferences is None and (
-        update.concierge_mode
+        update.personal_kitchen_channel_id is not None
+        or update.concierge_mode
         or update.pr_failure_reactions
         or update.goal_mode
         or update.experimental_memory
+        or update.experimental_conditional_approval
         or update.experimental_classify
     ):
-        raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
+        raise HTTPException(status_code=409, detail="No Robin user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
         **(preferences or UserPreferences()).model_dump(),
-        "agent_workspace_tasks_supported": True,
     }

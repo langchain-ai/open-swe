@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from githubkit.auth import TokenAuthStrategy
 from pydantic import BaseModel, PositiveInt
 
-from openswe.database import postgres
 from openswe.github.app import (
     PermissionMap,
     get_github_app_installation_token_with_expiry,
@@ -20,6 +19,11 @@ from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 logger = logging.getLogger(__name__)
 
 RECHECK_MISSING_AFTER = timedelta(minutes=10)
+# A sandbox keeps its token until the run's loop replaces it, 10 minutes before the
+# expiry of the token the loop last put there. A token put there by anything else,
+# such as a backend tool reconnecting to the sandbox, must outlive that schedule, so
+# it is at most 10 minutes into its 1-hour life.
+SANDBOX_TOKEN_MIN_LIFETIME = timedelta(minutes=50)
 
 # Clone, fetch, read the pull request, and check CI. Nothing here can write.
 READ_ONLY_REVIEW_PERMISSIONS: PermissionMap = {
@@ -45,7 +49,10 @@ class SandboxGitHubAccess:
 
 
 async def repository_token(
-    repositories: Sequence[str], *, permissions: PermissionMap | None = None
+    repositories: Sequence[str],
+    *,
+    permissions: PermissionMap | None = None,
+    force_refresh: bool = False,
 ) -> SandboxGitHubAccess:
     """Mint access only to full repository names available to the installation.
 
@@ -65,7 +72,11 @@ async def repository_token(
         if not stored_ids:
             return SandboxGitHubAccess()
         token, expires_at = await get_github_app_installation_token_with_expiry(
-            repository_ids=stored_ids, permissions=permissions, log_errors=False
+            repository_ids=stored_ids,
+            permissions=permissions,
+            log_errors=False,
+            min_lifetime=SANDBOX_TOKEN_MIN_LIFETIME,
+            force_refresh=force_refresh,
         )
         if token:
             return SandboxGitHubAccess(token, expires_at)
@@ -74,7 +85,10 @@ async def repository_token(
     if not repository_ids:
         return SandboxGitHubAccess()
     token, expires_at = await get_github_app_installation_token_with_expiry(
-        repository_ids=repository_ids, permissions=permissions
+        repository_ids=repository_ids,
+        permissions=permissions,
+        min_lifetime=SANDBOX_TOKEN_MIN_LIFETIME,
+        force_refresh=force_refresh,
     )
     if not token:
         raise RuntimeError("Workspace GitHub repository token is unavailable")
@@ -83,8 +97,6 @@ async def repository_token(
 
 async def _stored_repositories(allowed: set[str]) -> dict[str, Repository] | None:
     """The ``repository`` rows for ``allowed``, or ``None`` when they cannot be read."""
-    if not postgres.configured():
-        return None
     try:
         return await Repository.by_keys(allowed)
     except Exception:
@@ -145,9 +157,15 @@ async def _record_github_ids(github_ids: Mapping[str, int | None]) -> None:
         logger.warning("Could not store repository ids", exc_info=True)
 
 
-async def installation_token(*, permissions: PermissionMap | None = None) -> SandboxGitHubAccess:
+async def installation_token(
+    *, permissions: PermissionMap | None = None, force_refresh: bool = False
+) -> SandboxGitHubAccess:
     """A token for every repository the GitHub App installation can reach."""
-    token, expires_at = await get_github_app_installation_token_with_expiry(permissions=permissions)
+    token, expires_at = await get_github_app_installation_token_with_expiry(
+        permissions=permissions,
+        min_lifetime=SANDBOX_TOKEN_MIN_LIFETIME,
+        force_refresh=force_refresh,
+    )
     if not token:
         raise RuntimeError("GitHub installation token is unavailable")
     return SandboxGitHubAccess(token, expires_at)
@@ -158,6 +176,7 @@ async def workspace_token(
     *,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
+    force_refresh: bool = False,
 ) -> SandboxGitHubAccess:
     """The token a workspace's sandbox gets: the whole installation unless narrowed.
 
@@ -170,5 +189,7 @@ async def workspace_token(
     if slug != DEFAULT_WORKSPACE_SLUG and not await WORKSPACES.slug_exists(slug):
         raise ValueError(f"Workspace {slug!r} does not exist")
     if repositories is not None:
-        return await repository_token(sorted(repositories), permissions=permissions)
-    return await installation_token(permissions=permissions)
+        return await repository_token(
+            sorted(repositories), permissions=permissions, force_refresh=force_refresh
+        )
+    return await installation_token(permissions=permissions, force_refresh=force_refresh)

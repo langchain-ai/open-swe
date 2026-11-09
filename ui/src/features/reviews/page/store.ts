@@ -6,6 +6,7 @@ import type { SelectedLineRange } from "@pierre/diffs"
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import type { ComposerAttachment } from "@/features/agents/components/composer/ComposerAttachments"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import { rangeBounds } from "@/features/reviews/lib/lineRange"
 import {
@@ -99,6 +100,8 @@ interface VisitState {
   chatDraft: { key: number; text: string } | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
+  /** Replies to passages of the page, waiting for the chat composer to take them. */
+  chatReplies: ReadonlyArray<PassageReply>
   /** Events not yet taken by the part of the page they're for. */
   events: ReadonlySet<PageEvent>
   entryOrder: ReadonlyArray<DiffEntry>
@@ -152,6 +155,10 @@ interface ReviewPageActions {
   askInChat: (text: string) => void
   sendInChat: (text: string) => void
   clearChatQuestion: () => void
+  /** Hands a reply to a passage of the page to the chat composer. */
+  replyInChat: (reply: PassageReply) => void
+  /** Takes the oldest waiting reply off the queue; whether `reply` was it. */
+  takeChatReply: (reply: PassageReply) => boolean
   /** Adds cards to the next chat message and opens the chat. */
   attachToChat: (attachments: ReadonlyArray<ComposerAttachment>) => void
   removeChatAttachment: (index: number) => void
@@ -312,6 +319,7 @@ function freshVisit(): VisitState {
     jump: null,
     chatDraft: undefined,
     chatQuestion: undefined,
+    chatReplies: [],
     events: new Set(),
     entryOrder: [],
     fileFilter: "",
@@ -528,6 +536,16 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       get().focusChat()
     },
     clearChatQuestion: () => set({ chatQuestion: undefined }),
+    replyInChat: (reply) => {
+      set({ chatReplies: [...get().chatReplies, reply] })
+      get().focusChat()
+    },
+    takeChatReply: (reply) => {
+      const [oldest, ...rest] = get().chatReplies
+      if (oldest !== reply) return false
+      set({ chatReplies: rest })
+      return true
+    },
     attachToChat: (attachments) => {
       const known = new Set(get().chatAttachments.map(attachmentKey))
       set({

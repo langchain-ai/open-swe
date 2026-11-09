@@ -7,13 +7,15 @@ import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import type { ThreadVisibility } from "@/lib/api"
-import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 
 const OPTIONS: Record<
   ThreadVisibility,
@@ -27,23 +29,23 @@ const ORDER: ThreadVisibility[] = ["private", "public"]
 export function ThreadVisibilityMenu({
   value,
   onChange,
+  onCopyLink,
   disabledValues = [],
   busy = false,
 }: {
   value: ThreadVisibility
   onChange: (next: ThreadVisibility) => void
+  onCopyLink?: () => void
   disabledValues?: ThreadVisibility[]
   busy?: boolean
 }) {
-  const agentWorkspace = useAgentWorkspace()
   const current = OPTIONS[value]
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           color="secondary"
-          variant={agentWorkspace ? "plain" : "outlined"}
-          size={agentWorkspace ? "sm" : undefined}
+          variant="outlined"
           aria-label="Thread visibility"
           aria-busy={busy}
           disabled={busy}
@@ -77,6 +79,15 @@ export function ThreadVisibilityMenu({
             </MenuCheckItem>
           )
         })}
+        {onCopyLink && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onCopyLink}>
+              <CopyIcon size={14} className="text-icon-secondary" />
+              Copy thread link
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

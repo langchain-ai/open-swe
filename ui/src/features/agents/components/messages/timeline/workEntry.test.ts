@@ -197,7 +197,13 @@ describe("liveActivityLabel", () => {
   it("names the thought by its latest finished heading", () => {
     const reasoning = (text: string): Chunk => ({ kind: "reasoning", text })
 
-    expect(liveActivityLabel([reasoning("**Evaluating tok")])).toBe("Thinking…")
+    expect(liveActivityLabel([reasoning("")])).toBe("Thinking…")
+    expect(liveActivityLabel([reasoning("Evaluating token budget")])).toBe(
+      "Evaluating token budget…"
+    )
+    expect(liveActivityLabel([reasoning("**Evaluating tok")])).toBe(
+      "Evaluating tok…"
+    )
     expect(
       liveActivityLabel([
         reasoning(

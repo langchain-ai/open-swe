@@ -100,10 +100,22 @@ class Job(BaseModel):
         async with transaction() as conn:
             # A job queued again while this ran holds no claim of this run's, and stays.
             if self.cron is None:
-                await conn.execute(
-                    text("DELETE FROM job WHERE id = :id AND claim_token = :token"),
-                    {"id": self.id, "token": self.claim_token},
-                )
+                # Made due again while it ran (``coalesce``): run once more instead.
+                rerun = (
+                    await conn.execute(
+                        text(
+                            "UPDATE job SET attempts = 0, locked_until = NULL, claim_token = NULL, "
+                            f"{_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token "
+                            "AND due_at > :due_at RETURNING 1"
+                        ),
+                        {"id": self.id, "token": self.claim_token, "due_at": self.due_at},
+                    )
+                ).first()
+                if rerun is None:
+                    await conn.execute(
+                        text("DELETE FROM job WHERE id = :id AND claim_token = :token"),
+                        {"id": self.id, "token": self.claim_token},
+                    )
                 return
             await conn.execute(
                 text(
@@ -220,6 +232,58 @@ async def schedule(
             .one()
         )
     return Job.from_row(row)
+
+
+async def coalesce(
+    kind: str,
+    payload: Mapping[str, JsonValue],
+    *,
+    key: str,
+    due_at: datetime | None = None,
+) -> None:
+    """Queue keyed work that any number of triggers can share.
+
+    A trigger can bring the job forward but never puts it off, so a slow trigger
+    (a retry minutes out) never holds back a prompt one. A job still waiting under
+    ``key`` covers this trigger and runs no later than it asks. One a worker is running
+    may have read its inputs before the trigger, so it becomes due again while keeping
+    its claim: no other worker starts it meanwhile, and ``Job.finish`` releases it to
+    run once more.
+    """
+    due = due_at or datetime.now(UTC)
+    while True:
+        job = await schedule(kind, payload, due_at=due, key=key, replace=False)
+        async with transaction() as conn:
+            if job.claim_token is None:
+                await conn.execute(
+                    text(
+                        f"UPDATE job SET due_at = :due_at, {_SYSTEM_WRITE} "
+                        "WHERE id = :id AND claim_token IS NULL AND due_at > :due_at"
+                    ),
+                    {"id": job.id, "due_at": due},
+                )
+                return
+            # A due time still ahead is a rerun already asked for; one behind is the run's own.
+            rerun = (
+                await conn.execute(
+                    text(
+                        "UPDATE job SET due_at = CASE WHEN due_at > clock_timestamp() "
+                        "THEN least(due_at, greatest(:due_at, clock_timestamp())) "
+                        "ELSE greatest(:due_at, clock_timestamp()) END, "
+                        f"payload = CAST(:payload AS jsonb), {_SYSTEM_WRITE} "
+                        "WHERE id = :id AND claim_token = :token RETURNING 1"
+                    ),
+                    {
+                        "id": job.id,
+                        "token": job.claim_token,
+                        "due_at": due,
+                        "payload": json.dumps(dict(payload)),
+                    },
+                )
+            ).first()
+        if rerun is not None:
+            return
+        # The run finished or changed hands since: queue against what is there now.
 
 
 async def find(metadata: Mapping[str, JsonValue], *, limit: int = 100) -> list[Job]:

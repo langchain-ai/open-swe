@@ -3,18 +3,20 @@ Listen for inbound events in this thread's workspace and have each matching one 
 Event visibility is enforced per item: public by default, private only in its user’s private thread, and admin-only only in an admin thread for its workspace.
 
 Events come from GitHub (repositories bound to the workspace) and Slack (channels bound to the workspace).
-Slack events from public and private channels Open SWE has joined are published to the event log and subscriptions.
-Inviting Open SWE to a private channel consents to making its events readable within the workspace.
-DMs, group DMs, channels Open SWE has not joined, and unknown membership are excluded.
+Slack events from public and private channels Robin has joined are published to the event log and subscriptions.
+Inviting Robin to a private channel consents to making its events readable within the workspace.
+DMs, group DMs, channels Robin has not joined, and unknown membership are excluded.
 Use `list_event_types` to see which sources and event types actually arrive, and `list_event_types(source=..., event_type=...)` to see a payload's shape before writing `payload_match`.
-Events Open SWE itself caused never match, except GitHub CI results and explicitly named admin-only sources.
+Events Robin itself caused never match, except GitHub CI results and explicitly named admin-only sources.
 
 Every matching event is delivered exactly once, oldest first, as a message from the event listener.
 None is lost when the thread is busy or when a run is interrupted: if a run is stopped before an event reached it, the next run on this thread receives that event before anything newer.
 A subscription ends after its first match when `one_shot` is set, after it delivers a subscribed pull request's `pull_request.closed` event, when it expires, or when you cancel it.
 
 Prefer narrow filters: each matching event costs a model turn.
-For CI, `event_types=["check_suite.completed"]` gives one event per finished suite instead of one per check, and adding `payload_match={"check_suite": {"conclusion": "failure"}}` only the failed ones.
+For CI, listen for individual check results so failures can be investigated before the rest of the suite finishes.
+Choose event types from the actual feed rather than assuming a particular event arrives.
+Every subscription requires a bounded timeout that wakes this thread even if events also arrive, so a missing webhook cannot strand the work.
 
 Args:
 - action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions, each with `trigger_count` (events matched) and `last_triggered_at`; `cancel` removes the one named by `subscription_id`.
@@ -43,6 +45,10 @@ Args:
   Use it only when the event makes the current work pointless, for example the pull request you are fixing was closed.
 - one_shot: End the subscription after the first event it matches.
 - instructions: What to do when an event arrives; repeated with every event from this subscription.
+- timeout_seconds: Required bounded callback deadline, 60 to 3600 seconds; use about 300 seconds for CI.
+  At the deadline, the thread receives a durable wake-up regardless of event delivery, including after a one-shot matched.
+  This callback is independent of subscription lifetime and remains scheduled if the subscription is cancelled.
+  The response returns `timeout_at`; inspect external state directly when it fires.
 - expires_in_hours: How long to listen, 1 to 336 hours.
   Defaults to 168 (7 days).
 - subscription_id: The subscription to cancel.

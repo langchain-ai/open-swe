@@ -513,7 +513,10 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     from openswe.middleware import task_coordination
 
     task = store.Task(
-        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
+        title="Repair login",
+        workspace_id=uuid4(),
+        coordinator_thread_id=_COORDINATOR,
+        delegated=True,
     )
     context = store.TaskContext(
         task,
@@ -521,7 +524,6 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     )
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
-    monkeypatch.setattr(postgres, "configured", lambda: False)
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
 
@@ -574,7 +576,6 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         task,
         store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
     )
-    monkeypatch.setattr(postgres, "configured", lambda: False)
     state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
     initial = await middleware.abefore_model(state, Runtime())

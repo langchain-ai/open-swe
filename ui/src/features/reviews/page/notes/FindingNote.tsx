@@ -15,6 +15,7 @@ import {
   findingGroupColor,
   findingGroupLabel,
   findingGroupTextColor,
+  findingLocation,
 } from "@/features/reviews/page/findings"
 import { InlineCode } from "@/features/reviews/page/inlineCode"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
@@ -109,7 +110,10 @@ export function FindingNote({
           />
         </Button>
         {open && (
-          <div className="border-t border-subtle px-space-3 pt-space-2 pb-space-2">
+          <div
+            data-reply-part={`Robin finding at ${findingLocation(finding)}: ${finding.title}`}
+            className="border-t border-subtle px-space-3 pt-space-2 pb-space-2"
+          >
             <div className="text-xs leading-[1.6]">
               <Markdown content={findingMarkdown(finding)} />
             </div>
@@ -128,7 +132,7 @@ export function FindingNote({
                   attachToChat([findingAttachment(finding, "ask")])
                 }
               >
-                Ask Open SWE
+                Ask Robin
               </Button>
               {!settled && (
                 <Button

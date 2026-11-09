@@ -10,13 +10,14 @@ from datetime import datetime
 from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field
+from runtime_api.provenance import Provenance
 from sqlalchemy import BigInteger, Identity, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.input_messages import RunMessage, message_sender_id
+from openswe.input_messages import RunMessage
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject
 
@@ -118,7 +119,9 @@ class QueuedMessage(Base):
         message = self.run_message
         return (
             message is not None
-            and message_sender_id(message["content"], kind="system") == "system:slack-note"
+            and (provenance := Provenance.of(message)) is not None
+            and provenance.kind == "system"
+            and provenance.sender == "system:slack-note"
         )
 
     async def preview(self) -> QueuedPreview:

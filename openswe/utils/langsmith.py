@@ -49,6 +49,12 @@ class LangSmithThreadCost:
 
 
 @dataclass(frozen=True)
+class LangSmithErrorLink:
+    url: str
+    is_fallback: bool
+
+
+@dataclass(frozen=True)
 class LangSmithLocator:
     kind: Literal["thread", "run"]
     id: str
@@ -198,17 +204,18 @@ async def get_langsmith_trace_url(thread_id: str, project_name: str | None = Non
 
 async def get_langsmith_error_url(
     thread_id: str, invocation_id: str | None, terminal_error: str | None = None
-) -> str | None:
+) -> LangSmithErrorLink | None:
     """Follow the terminal error's unique parent chain, otherwise link to its root."""
     thread_url = await get_langsmith_trace_url(thread_id)
+    fallback = LangSmithErrorLink(thread_url, is_fallback=True) if thread_url else None
     client = _build_langsmith_client()
     if not thread_url or not invocation_id or client is None:
-        return thread_url
+        return fallback
     try:
         async with asyncio.timeout(5):
             project_id = await _resolve_project_id_by_name(tracing_project())
             if not project_id:
-                return thread_url
+                return fallback
             lookup_start = await _project_lookup_start(project_id)
             for field in ("invocation_id", "prepare_run_id"):
                 runs = client.runs.query(
@@ -228,7 +235,7 @@ async def get_langsmith_error_url(
                     run for run in failed_runs if run.dotted_order and "." not in run.dotted_order
                 ]
                 if len(roots) != 1:
-                    return thread_url
+                    return fallback
                 root = failed_run = roots[0]
                 if terminal_error and root.error and terminal_error in root.error:
                     signature = root.error.splitlines()[0]
@@ -244,14 +251,16 @@ async def get_langsmith_error_url(
                             failed_run = root
                             break
                         failed_run = children[0]
-                return f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}"
+                return LangSmithErrorLink(
+                    f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}", is_fallback=False
+                )
     except Exception:
         logger.warning(
             "Could not resolve the failing LangSmith span",
             extra={"thread_id": thread_id, "invocation_id": invocation_id},
             exc_info=True,
         )
-    return thread_url
+    return fallback
 
 
 def _langsmith_web_origins() -> set[str]:

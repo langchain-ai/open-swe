@@ -6,16 +6,12 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const ORGANIZE_MODES = ["workspace", "repo", "list"] as const
-const CHAT_SORTS = ["created", "updated"] as const
-const PINNED_SORTS = ["updated", "manual"] as const
+const ORGANIZE_MODES = ["date", "repo", "workspace", "none"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
-export type ChatSort = (typeof CHAT_SORTS)[number]
-export type PinnedSort = (typeof PINNED_SORTS)[number]
+export type ChatSort = "created" | "updated"
 
 export interface SidebarPrefs {
-  compact: boolean
   filters: SidebarFilters
   /** Repositories pinned into the sidebar's Pinned section. Client-side only. */
   pinnedRepoKeys: Array<string>
@@ -28,22 +24,23 @@ export interface SidebarPrefs {
   /** Nav links moved into the "More" menu. */
   hiddenNavItems: Array<string>
   organize: OrganizeMode
-  sortChats: ChatSort
-  sortPinned: PinnedSort
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
-  compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
   pinnedRepoKeys: [],
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
   expandedSubagentKeys: [],
-  hiddenNavItems: ["/agents/bots", "/incidents"],
-  organize: "workspace",
-  sortChats: "created",
-  sortPinned: "manual",
+  hiddenNavItems: [
+    "/agents/skills",
+    "/agents/automations",
+    "/agents/bots",
+    "/agents/reviews",
+    "/incidents",
+  ],
+  organize: "none",
 }
 
 function asStringArray(value: unknown): Array<string> {
@@ -77,7 +74,14 @@ function sanitizeFilters(value: unknown): SidebarFilters {
       typeof raw.includeResolved === "boolean"
         ? raw.includeResolved
         : DEFAULT_SIDEBAR_FILTERS.includeResolved,
-    ownedOnly: raw.ownedOnly === true,
+    ownedOnly:
+      typeof raw.ownedOnly === "boolean"
+        ? raw.ownedOnly
+        : DEFAULT_SIDEBAR_FILTERS.ownedOnly,
+    includeSlack:
+      typeof raw.includeSlack === "boolean"
+        ? raw.includeSlack
+        : DEFAULT_SIDEBAR_FILTERS.includeSlack,
     includeClaudeCode:
       typeof raw.includeClaudeCode === "boolean"
         ? raw.includeClaudeCode
@@ -88,8 +92,14 @@ function sanitizeFilters(value: unknown): SidebarFilters {
 /**
  * Stored keys predate repositories replacing "projects" in the sidebar: pins
  * and folds were saved under `project:` keys and a `"project"` organize mode.
- * Read them once under their new names so nobody loses their layout.
+ * Read them once under their new names so nobody loses their layout. The
+ * `"list"` mode grouped by day, which is what `"date"` does now.
  */
+const LEGACY_ORGANIZE_MODES: Record<string, OrganizeMode> = {
+  project: "repo",
+  list: "date",
+}
+
 function migrateRepoKey(key: string): string {
   if (key === "project:no-project") return "repo:no-repo"
   return key.startsWith("project:")
@@ -109,10 +119,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
   return {
-    compact:
-      typeof raw.compact === "boolean"
-        ? raw.compact
-        : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
     pinnedRepoKeys: repoKeys(raw, "pinnedRepoKeys", "pinnedProjectKeys"),
     collapsedRepoKeys: repoKeys(
@@ -134,19 +140,11 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
       ? asStringArray(raw.hiddenNavItems)
       : DEFAULT_SIDEBAR_PREFS.hiddenNavItems,
     organize: asEnum(
-      raw.organize === "project" ? "repo" : raw.organize,
+      (typeof raw.organize === "string" &&
+        LEGACY_ORGANIZE_MODES[raw.organize]) ||
+        raw.organize,
       ORGANIZE_MODES,
       DEFAULT_SIDEBAR_PREFS.organize
-    ),
-    sortChats: asEnum(
-      raw.sortChats,
-      CHAT_SORTS,
-      DEFAULT_SIDEBAR_PREFS.sortChats
-    ),
-    sortPinned: asEnum(
-      raw.sortPinned,
-      PINNED_SORTS,
-      DEFAULT_SIDEBAR_PREFS.sortPinned
     ),
   }
 }
@@ -221,10 +219,6 @@ export function useSidebarPrefs() {
     () => DEFAULT_SIDEBAR_PREFS
   )
 
-  const setCompact = useCallback(
-    (compact: boolean) => setPrefs((prev) => ({ ...prev, compact })),
-    []
-  )
   const setFilters = useCallback(
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
@@ -281,17 +275,13 @@ export function useSidebarPrefs() {
     []
   )
   const setView = useCallback(
-    (
-      patch: Partial<
-        Pick<SidebarPrefs, "organize" | "sortChats" | "sortPinned">
-      >
-    ) => setPrefs((prev) => ({ ...prev, ...patch })),
+    (patch: Partial<Pick<SidebarPrefs, "organize">>) =>
+      setPrefs((prev) => ({ ...prev, ...patch })),
     []
   )
 
   return {
     prefs,
-    setCompact,
     setFilters,
     toggleRepoPin,
     toggleRepoCollapsed,

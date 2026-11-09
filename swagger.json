@@ -464,6 +464,46 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppModel": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppVersionModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "listed": {
+            "title": "Listed",
+            "type": "boolean"
+          },
+          "mine": {
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mine",
+          "listed",
+          "latest"
+        ],
+        "title": "AppModel",
+        "type": "object"
+      },
       "AppNotification": {
         "properties": {
           "body": {
@@ -525,6 +565,51 @@
           "id"
         ],
         "title": "AppUser",
+        "type": "object"
+      },
+      "AppVersionModel": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "preview": {
+            "title": "Preview",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "manifest",
+          "origin",
+          "preview",
+          "created_at"
+        ],
+        "title": "AppVersionModel",
         "type": "object"
       },
       "ApprovalsFileStatus": {
@@ -962,6 +1047,14 @@
             "title": "Commands",
             "type": "array"
           },
+          "listeners": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EventListener"
+            },
+            "title": "Listeners",
+            "type": "array"
+          },
           "monitors": {
             "default": [],
             "items": {
@@ -987,7 +1080,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "object"
               },
@@ -1030,6 +1123,27 @@
           "options"
         ],
         "title": "BlockSuggestionResponse",
+        "type": "object"
+      },
+      "BranchBody": {
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "sha"
+        ],
+        "title": "BranchBody",
         "type": "object"
       },
       "BridgeClaimBody": {
@@ -1151,7 +1265,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -1204,6 +1318,19 @@
         "title": "BrowserTab",
         "type": "object"
       },
+      "BundleResponse": {
+        "properties": {
+          "html": {
+            "title": "Html",
+            "type": "string"
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "title": "BundleResponse",
+        "type": "object"
+      },
       "ChallengeResponse": {
         "properties": {
           "challenge": {
@@ -1215,6 +1342,186 @@
           "challenge"
         ],
         "title": "ChallengeResponse",
+        "type": "object"
+      },
+      "ChatBody": {
+        "properties": {
+          "name": {
+            "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ChatBody",
+        "type": "object"
+      },
+      "ChatCallModel": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "tool": {
+            "description": "The tool's own name, as the plugin offered it.",
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "tool",
+          "arguments"
+        ],
+        "title": "ChatCallModel",
+        "type": "object"
+      },
+      "ChatOpened": {
+        "properties": {
+          "chat_id": {
+            "format": "uuid",
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id",
+          "thread_id"
+        ],
+        "title": "ChatOpened",
+        "type": "object"
+      },
+      "ChatOutputBody": {
+        "properties": {
+          "call_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "output": {
+            "maxLength": 200000,
+            "title": "Output",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "output"
+        ],
+        "title": "ChatOutputBody",
+        "type": "object"
+      },
+      "ChatOutputsBody": {
+        "properties": {
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/ChatOutputBody"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Outputs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outputs"
+        ],
+        "title": "ChatOutputsBody",
+        "type": "object"
+      },
+      "ChatResumed": {
+        "properties": {
+          "paused": {
+            "description": "The agent stopped to wait for the person: the plugin's results resumed it too often.",
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id",
+          "paused"
+        ],
+        "title": "ChatResumed",
+        "type": "object"
+      },
+      "ChatToolBody": {
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,47}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/JsonObject-Input",
+            "description": "A JSON Schema for the tool's arguments object."
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "parameters"
+        ],
+        "title": "ChatToolBody",
+        "type": "object"
+      },
+      "ChatToolsBody": {
+        "properties": {
+          "instructions": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ChatToolBody"
+            },
+            "maxItems": 32,
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "ChatToolsBody",
         "type": "object"
       },
       "CheckpointFile": {
@@ -1331,7 +1638,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Params",
             "type": "object"
@@ -1500,6 +1807,56 @@
           "body"
         ],
         "title": "CommentBody",
+        "type": "object"
+      },
+      "CommitBody": {
+        "properties": {
+          "branch": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Branch",
+            "type": "string"
+          },
+          "deletions": {
+            "items": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Deletions",
+            "type": "array"
+          },
+          "expected_head": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Expected Head",
+            "type": "string"
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 100,
+            "propertyNames": {
+              "maxLength": 1000,
+              "minLength": 1
+            },
+            "title": "Files",
+            "type": "object"
+          },
+          "message": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch",
+          "expected_head",
+          "message"
+        ],
+        "title": "CommitBody",
         "type": "object"
       },
       "ConnectedService": {
@@ -1940,6 +2297,53 @@
         ],
         "type": "string"
       },
+      "CursorModel": {
+        "description": "A key, or with ``order_by`` the field's value and optionally the key that breaks ties.",
+        "properties": {
+          "inclusive": {
+            "default": true,
+            "title": "Inclusive",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CursorModel",
+        "type": "object"
+      },
       "CustomToolCallItem": {
         "properties": {
           "call_id": {
@@ -2019,6 +2423,13 @@
       },
       "DesktopEnvironments": {
         "properties": {
+          "dashboard_origins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dashboard Origins",
+            "type": "array"
+          },
           "environments": {
             "items": {
               "$ref": "#/components/schemas/DesktopEnvironment"
@@ -2028,7 +2439,8 @@
           }
         },
         "required": [
-          "environments"
+          "environments",
+          "dashboard_origins"
         ],
         "title": "DesktopEnvironments",
         "type": "object"
@@ -2049,6 +2461,140 @@
           "verifier"
         ],
         "title": "DesktopHandoffExchange",
+        "type": "object"
+      },
+      "DocumentModel": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "key",
+          "document",
+          "updated_at"
+        ],
+        "title": "DocumentModel",
+        "type": "object"
+      },
+      "DocumentQueryBody": {
+        "properties": {
+          "direction": {
+            "default": "asc",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CursorModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "default": 200,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_-]{1,64}(\\.[A-Za-z0-9_-]{1,64}){0,7}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A dotted field path; omitted orders by key.",
+            "title": "Order By"
+          },
+          "prefix": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefix"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CursorModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "where": {
+            "$ref": "#/components/schemas/JsonObject-Input"
+          }
+        },
+        "title": "DocumentQueryBody",
+        "type": "object"
+      },
+      "DocumentWrite": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/JsonObject-Input"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          }
+        },
+        "required": [
+          "document"
+        ],
+        "title": "DocumentWrite",
         "type": "object"
       },
       "DuplicateIncidentResponse": {
@@ -2083,74 +2629,21 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
-      "EndpointAnswer": {
-        "additionalProperties": false,
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.\n\nExperimental: this may change in a minor release.",
+      "EndpointRequest_SlackEndpointEvent_": {
+        "description": "What a channel POSTs its endpoint: the event, and the thread it belongs to.\n\nTypedDicts, so a receiver validates a request with pydantic, by the channel's\nevent keys, such as ``TypeAdapter(LinearEndpointRequest)``: the key picks the\npayload's type. TypeScript's ``LinearEndpointRequest<K>`` also narrows to one\nkey; in Python, a union alias can't take the key, so a receiver of one key\nnames it as ``EndpointRequest[EndpointEvent[Literal[key], Payload]]``, with the\npayload types the package exports, or narrows on ``request[\"event\"][\"key\"]``.\n\nExperimental: this may change in a minor release.",
         "properties": {
-          "context": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Context",
-            "type": "object"
+          "event": {
+            "$ref": "#/components/schemas/SlackEndpointEvent"
           },
-          "input": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-                },
-                "type": "object"
-              }
-            ],
-            "title": "Input"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Metadata",
-            "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
           }
         },
         "required": [
-          "input"
+          "event",
+          "thread"
         ],
-        "title": "EndpointAnswer",
-        "type": "object"
-      },
-      "EndpointEvent_str_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.\n\nExperimental: this may change in a minor release.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
+        "title": "EndpointRequest",
         "type": "object"
       },
       "EndpointThread": {
@@ -2193,13 +2686,96 @@
         "title": "EntryView",
         "type": "object"
       },
+      "EventListener": {
+        "description": "An event subscription that wakes the thread when a matching event arrives.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Types",
+            "type": "array"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "number"
+          },
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          },
+          "last_triggered_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Triggered At"
+          },
+          "one_shot": {
+            "title": "One Shot",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "subscription_id": {
+            "title": "Subscription Id",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "trigger_count": {
+            "title": "Trigger Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "subscription_id",
+          "target",
+          "sources",
+          "event_types",
+          "instructions",
+          "one_shot",
+          "trigger_count",
+          "last_triggered_at",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "EventListener",
+        "type": "object"
+      },
       "ExcludedHunk": {
         "additionalProperties": false,
-        "description": "A hunk left off the card.",
+        "description": "A hunk left off the card; an empty ``header`` stands for a whole file without a text diff.",
         "properties": {
           "additions": {
             "title": "Additions",
             "type": "integer"
+          },
+          "approval_condition": {
+            "title": "Approval Condition",
+            "type": "boolean"
           },
           "deletions": {
             "title": "Deletions",
@@ -2239,7 +2815,7 @@
         "type": "object"
       },
       "Exclusion": {
-        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "description": "Changes the agent judged to qualify under the target repository's auto-approve rules.",
         "properties": {
           "guideline": {
             "title": "Guideline",
@@ -2272,7 +2848,7 @@
       },
       "ExpeditedExclusions": {
         "additionalProperties": false,
-        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "description": "What an expedited card left off as qualifying under the target repo's auto-approve rules.",
         "properties": {
           "approvals_md_sha256": {
             "title": "Approvals Md Sha256",
@@ -2370,6 +2946,24 @@
           "modified"
         ],
         "type": "string"
+      },
+      "FileResponse": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "text"
+        ],
+        "title": "FileResponse",
+        "type": "object"
       },
       "FixIntent": {
         "properties": {
@@ -2507,23 +3101,6 @@
         "title": "GatewayStatus",
         "type": "object"
       },
-      "GitHubChannelCall": {
-        "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "GitHubChannelCall",
-        "type": "object"
-      },
       "GitHubEndpointActor": {
         "description": "A ``GitHubActor`` as an endpoint is sent it.",
         "properties": {
@@ -2599,6 +3176,118 @@
         "title": "GitHubTrigger",
         "type": "object"
       },
+      "Goal": {
+        "description": "What the thread's task keeps of its goal.",
+        "properties": {
+          "ask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserWaitReason"
+              },
+              {
+                "$ref": "#/components/schemas/PauseReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "default": "working",
+            "enum": [
+              "working",
+              "waiting",
+              "waiting_on_user",
+              "paused",
+              "complete"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at_ms": {
+            "default": 0,
+            "title": "Updated At Ms",
+            "type": "integer"
+          },
+          "waits": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GoalWait"
+            },
+            "title": "Waits",
+            "type": "array"
+          }
+        },
+        "title": "Goal",
+        "type": "object"
+      },
+      "GoalWait": {
+        "description": "One thing that wakes the thread again.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "kind": {
+            "enum": [
+              "wakeup",
+              "command",
+              "monitor",
+              "event",
+              "review"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "GoalWait",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2629,6 +3318,53 @@
           "message"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HistoryEntry": {
+        "properties": {
+          "author_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Login"
+          },
+          "author_name": {
+            "title": "Author Name",
+            "type": "string"
+          },
+          "authored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authored At"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "message",
+          "author_name",
+          "author_login",
+          "authored_at"
+        ],
+        "title": "HistoryEntry",
         "type": "object"
       },
       "HumanReviewAvailability": {
@@ -2895,6 +3631,28 @@
         "title": "InputTokensDetails",
         "type": "object"
       },
+      "InstallBody": {
+        "properties": {
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/PluginPermission"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "version": {
+            "format": "uuid",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "permissions"
+        ],
+        "title": "InstallBody",
+        "type": "object"
+      },
       "ItemStatus": {
         "enum": [
           "in_progress",
@@ -2903,7 +3661,11 @@
         ],
         "type": "string"
       },
-      "JsonValue-Input": {},
+      "JsonObject-Input": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "JsonValue-Output": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -2976,37 +3738,6 @@
           "body"
         ],
         "title": "LineComment",
-        "type": "object"
-      },
-      "LinearChannelCall": {
-        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "LinearChannelCall",
-        "type": "object"
-      },
-      "LinearDecline": {
-        "description": "An answer that starts nothing and has MDA's Linear channel tell the session why.",
-        "properties": {
-          "decline": {
-            "title": "Decline",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decline"
-        ],
-        "title": "LinearDecline",
         "type": "object"
       },
       "LinearEndpointActor": {
@@ -3107,6 +3838,19 @@
           "events"
         ],
         "title": "LinearTrigger",
+        "type": "object"
+      },
+      "ListedBody": {
+        "properties": {
+          "listed": {
+            "title": "Listed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "listed"
+        ],
+        "title": "ListedBody",
         "type": "object"
       },
       "MCPConnectionPublic": {
@@ -3534,6 +4278,29 @@
         ],
         "type": "string"
       },
+      "MemberSet": {
+        "properties": {
+          "person": {
+            "minLength": 1,
+            "title": "Person",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "person"
+        ],
+        "title": "MemberSet",
+        "type": "object"
+      },
       "MergeAction": {
         "properties": {
           "action": {
@@ -3554,6 +4321,11 @@
             ],
             "title": "Merge Method",
             "type": "string"
+          },
+          "resolve_conversations": {
+            "default": false,
+            "title": "Resolve Conversations",
+            "type": "boolean"
           },
           "sha": {
             "pattern": "^[0-9a-fA-F]{40,64}$",
@@ -3684,7 +4456,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "array"
               },
@@ -3913,7 +4685,7 @@
           },
           "settings": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Settings",
             "type": "object"
@@ -4157,8 +4929,11 @@
               {
                 "enum": [
                   "assigned",
+                  "requested",
                   "tentative",
-                  "mentioned"
+                  "mentioned",
+                  "draft",
+                  "speculative"
                 ],
                 "type": "string"
               },
@@ -4167,6 +4942,17 @@
               }
             ],
             "title": "Assignment"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
           },
           "autoMerge": {
             "default": false,
@@ -4184,6 +4970,17 @@
             ],
             "title": "Ci",
             "type": "string"
+          },
+          "conversationResolutionRequired": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationresolutionrequired"
           },
           "createdAt": {
             "anyOf": [
@@ -4289,6 +5086,17 @@
           "repo": {
             "title": "Repo",
             "type": "string"
+          },
+          "requiredChecksPassing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requiredcheckspassing"
           },
           "reviewDecision": {
             "anyOf": [
@@ -4467,7 +5275,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Annotations",
             "type": "array"
@@ -4498,6 +5306,62 @@
         "title": "OutputTokensDetails",
         "type": "object"
       },
+      "PageCommand": {
+        "description": "A command waiting for the page, under the page's own name for its tool.",
+        "properties": {
+          "arguments": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "tool",
+          "arguments"
+        ],
+        "title": "PageCommand",
+        "type": "object"
+      },
+      "PageCommandOutcome": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "PageCommandOutcome",
+        "type": "object"
+      },
+      "PageQueueView": {
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/PageCommand"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "commands"
+        ],
+        "title": "PageQueueView",
+        "type": "object"
+      },
       "PauseChange": {
         "additionalProperties": false,
         "properties": {
@@ -4511,6 +5375,16 @@
         ],
         "title": "PauseChange",
         "type": "object"
+      },
+      "PauseReason": {
+        "enum": [
+          "stopped",
+          "requested",
+          "no_progress",
+          "failing_commands",
+          "error"
+        ],
+        "type": "string"
       },
       "PendingReview": {
         "description": "The viewer's unsubmitted GitHub review on a PR, with its line comments.",
@@ -4704,6 +5578,53 @@
         "title": "PendingReviewDiscarded",
         "type": "object"
       },
+      "Person": {
+        "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "name",
+          "avatar_url"
+        ],
+        "title": "Person",
+        "type": "object"
+      },
+      "PinnedThreadOrderBody": {
+        "properties": {
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "PinnedThreadOrderBody",
+        "type": "object"
+      },
       "PlanUpdate": {
         "properties": {
           "dismissed": {
@@ -4735,6 +5656,123 @@
           }
         },
         "title": "PlanUpdate",
+        "type": "object"
+      },
+      "PluginManifest": {
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 280,
+            "title": "Description",
+            "type": "string"
+          },
+          "displayName": {
+            "maxLength": 48,
+            "minLength": 1,
+            "title": "Displayname",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$",
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PluginPermission"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "sidebar": {
+            "$ref": "#/components/schemas/SidebarEntry"
+          },
+          "version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "displayName",
+          "version",
+          "sidebar"
+        ],
+        "title": "PluginManifest",
+        "type": "object"
+      },
+      "PluginPermission": {
+        "description": "What a plugin may ask the web UI to do for the person using it.",
+        "enum": [
+          "storage",
+          "github:read",
+          "github:write",
+          "agent",
+          "realtime"
+        ],
+        "title": "PluginPermission",
+        "type": "string"
+      },
+      "PluginSummary": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "installed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed At"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "mine": {
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plugin_id": {
+            "format": "uuid",
+            "title": "Plugin Id",
+            "type": "string"
+          },
+          "repositories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repositories",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/components/schemas/AppVersionModel"
+          }
+        },
+        "required": [
+          "id",
+          "plugin_id",
+          "name",
+          "manifest",
+          "version",
+          "mine",
+          "repositories",
+          "installed_at"
+        ],
+        "title": "PluginSummary",
         "type": "object"
       },
       "PostHogProject": {
@@ -4839,6 +5877,36 @@
           "deletions"
         ],
         "title": "PreviewFile",
+        "type": "object"
+      },
+      "PreviewModel": {
+        "properties": {
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppVersionModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "running",
+          "waiting"
+        ],
+        "title": "PreviewModel",
         "type": "object"
       },
       "PreviewReply": {
@@ -5052,6 +6120,29 @@
             ],
             "title": "Experimental Classify"
           },
+          "experimental_conditional_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Conditional Approval"
+          },
+          "experimental_live_activity": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Live Activity"
+          },
           "experimental_memory": {
             "anyOf": [
               {
@@ -5073,6 +6164,17 @@
               }
             ],
             "title": "Goal Mode"
+          },
+          "personal_kitchen_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personal Kitchen Channel Id"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -5112,6 +6214,189 @@
         "title": "ProfileUpdate",
         "type": "object"
       },
+      "Project": {
+        "description": "A project as one of its members sees it.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "workspace",
+          "repo_full_name",
+          "role",
+          "members",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Project",
+        "type": "object"
+      },
+      "ProjectChanges": {
+        "description": "What an owner may change; an omitted field stays as it is.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "title": "ProjectChanges",
+        "type": "object"
+      },
+      "ProjectCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
+      "ProjectMember": {
+        "properties": {
+          "avatar_url": {
+            "title": "Avatar Url",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "name",
+          "login",
+          "avatar_url",
+          "role"
+        ],
+        "title": "ProjectMember",
+        "type": "object"
+      },
       "PullRequestActionResult": {
         "properties": {
           "action": {
@@ -5134,6 +6419,46 @@
           "done"
         ],
         "title": "PullRequestActionResult",
+        "type": "object"
+      },
+      "PullRequestBody": {
+        "properties": {
+          "base": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Base",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "maxLength": 60000,
+            "title": "Body",
+            "type": "string"
+          },
+          "draft": {
+            "default": false,
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "head": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Head",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head",
+          "base",
+          "title"
+        ],
+        "title": "PullRequestBody",
         "type": "object"
       },
       "PullRequestChecksRef": {
@@ -5168,6 +6493,20 @@
           }
         },
         "title": "PullRequestChecksRequest",
+        "type": "object"
+      },
+      "PullRequestDescriptionUpdate": {
+        "properties": {
+          "body": {
+            "maxLength": 65536,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "PullRequestDescriptionUpdate",
         "type": "object"
       },
       "PullRequestFixContext": {
@@ -5344,6 +6683,49 @@
           "selected"
         ],
         "title": "PullRequestLabels",
+        "type": "object"
+      },
+      "PullRequestModel": {
+        "properties": {
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "head": {
+            "title": "Head",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "url",
+          "state",
+          "draft",
+          "head",
+          "base"
+        ],
+        "title": "PullRequestModel",
         "type": "object"
       },
       "PullRequestPreview": {
@@ -5811,6 +7193,26 @@
         "title": "ReasoningParam",
         "type": "object"
       },
+      "RefResponse": {
+        "properties": {
+          "sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha"
+          }
+        },
+        "required": [
+          "sha"
+        ],
+        "title": "RefResponse",
+        "type": "object"
+      },
       "RefreshStep": {
         "description": "One stage of a refresh \u2014 booting the builder, a script, the capture.\n\nRecorded as it happens so a poll mid-rebuild can say how far it got. A\nrebuild is minutes to an hour, and a single terminal status at the end is\nnot enough to tell slow from wedged.",
         "properties": {
@@ -5873,6 +7275,24 @@
         "title": "RefreshStep",
         "type": "object"
       },
+      "RepositoriesBody": {
+        "properties": {
+          "repositories": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repositories"
+        ],
+        "title": "RepositoriesBody",
+        "type": "object"
+      },
       "RepositoryConfiguration": {
         "description": "Settings to change on one repository. Anything left out keeps its value.",
         "properties": {
@@ -5889,6 +7309,29 @@
           }
         },
         "title": "RepositoryConfiguration",
+        "type": "object"
+      },
+      "RepositoryInfo": {
+        "properties": {
+          "default_branch": {
+            "title": "Default Branch",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "private": {
+            "title": "Private",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "full_name",
+          "default_branch",
+          "private"
+        ],
+        "title": "RepositoryInfo",
         "type": "object"
       },
       "RepositoryMergeMethods": {
@@ -6021,7 +7464,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -6046,7 +7489,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -6318,7 +7761,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Tools",
             "type": "array"
@@ -6394,6 +7837,49 @@
           "thread_id"
         ],
         "title": "ReviewChat",
+        "type": "object"
+      },
+      "ReviewCheck": {
+        "description": "A check run on the pull request's head, as the review page lists it.",
+        "properties": {
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "conclusion",
+          "url"
+        ],
+        "title": "ReviewCheck",
         "type": "object"
       },
       "ReviewCounts": {
@@ -7201,6 +8687,108 @@
         "title": "RolloutAccepted",
         "type": "object"
       },
+      "RoomCompactBody": {
+        "properties": {
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "snapshot": {
+            "description": "Base64 of a state covering every update through `through`",
+            "title": "Snapshot",
+            "type": "string"
+          },
+          "through": {
+            "minimum": 0.0,
+            "title": "Through",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot",
+          "through"
+        ],
+        "title": "RoomCompactBody",
+        "type": "object"
+      },
+      "RoomPresenceBody": {
+        "properties": {
+          "client": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client",
+            "type": "string"
+          },
+          "presence": {
+            "description": "Base64 presence state",
+            "maxLength": 4000,
+            "title": "Presence",
+            "type": "string"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          }
+        },
+        "required": [
+          "client",
+          "presence"
+        ],
+        "title": "RoomPresenceBody",
+        "type": "object"
+      },
+      "RoomSeq": {
+        "properties": {
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq"
+        ],
+        "title": "RoomSeq",
+        "type": "object"
+      },
+      "RoomUpdateBody": {
+        "properties": {
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "update": {
+            "description": "Base64 of the update's bytes",
+            "title": "Update",
+            "type": "string"
+          }
+        },
+        "required": [
+          "update"
+        ],
+        "title": "RoomUpdateBody",
+        "type": "object"
+      },
       "ScheduleCreateBody": {
         "properties": {
           "admin_thread": {
@@ -7494,6 +9082,85 @@
         "title": "SessionCreateBody",
         "type": "object"
       },
+      "SidebarEntry": {
+        "properties": {
+          "icon": {
+            "default": "puzzle-piece",
+            "enum": [
+              "puzzle-piece",
+              "notebook",
+              "file-text",
+              "book-open",
+              "kanban",
+              "chart-bar",
+              "chat-circle",
+              "calendar",
+              "lightbulb"
+            ],
+            "title": "Icon",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "SidebarEntry",
+        "type": "object"
+      },
+      "SidebarThreadOrderBody": {
+        "properties": {
+          "ownerless": {
+            "default": false,
+            "title": "Ownerless",
+            "type": "boolean"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "SidebarThreadOrderBody",
+        "type": "object"
+      },
       "SkillCreate": {
         "properties": {
           "description": {
@@ -7574,27 +9241,6 @@
           "name"
         ],
         "title": "SlackBotOption",
-        "type": "object"
-      },
-      "SlackChannelCall": {
-        "description": "What MDA's Slack channel POSTs: the event (MDA's ``SlackEndpointEvent``) and its thread.\n\nThe event stays a plain object here: its fields are read one by one below.",
-        "properties": {
-          "event": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Event",
-            "type": "object"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "SlackChannelCall",
         "type": "object"
       },
       "SlackChannelDirectory": {
@@ -7690,6 +9336,104 @@
           "teamId"
         ],
         "title": "SlackEndpointActor",
+        "type": "object"
+      },
+      "SlackEndpointEvent": {
+        "description": "The event a Slack channel sends its endpoint: its key, delivery ID and\nSlack's own event as ``payload``, with the fields of ``SlackEndpointFields``.",
+        "properties": {
+          "actionId": {
+            "title": "Actionid",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/SlackEndpointActor"
+          },
+          "channelId": {
+            "title": "Channelid",
+            "type": "string"
+          },
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SlackEndpointFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "messageTs": {
+            "title": "Messagets",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+          },
+          "reaction": {
+            "title": "Reaction",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          },
+          "teamId": {
+            "title": "Teamid",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "threadTs": {
+            "title": "Threadts",
+            "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "SlackEndpointEvent",
+        "type": "object"
+      },
+      "SlackEndpointFile": {
+        "description": "A ``SlackFile`` as an endpoint is sent it.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mimetype": {
+            "title": "Mimetype",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SlackEndpointFile",
         "type": "object"
       },
       "SlackTrigger": {
@@ -7922,11 +9666,23 @@
                 "type": "null"
               }
             ]
+          },
+          "segment_write_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment Write Key"
           }
         },
         "required": [
           "environment",
-          "posthog"
+          "posthog",
+          "segment_write_key"
         ],
         "title": "TelemetryConfig",
         "type": "object"
@@ -8121,6 +9877,19 @@
         "title": "ThreadMoveRequest",
         "type": "object"
       },
+      "ThreadReadState": {
+        "properties": {
+          "viewed": {
+            "title": "Viewed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "viewed"
+        ],
+        "title": "ThreadReadState",
+        "type": "object"
+      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -8160,20 +9929,6 @@
         "title": "ThreadResolveBody",
         "type": "object"
       },
-      "ThreadViewedBody": {
-        "properties": {
-          "run_id": {
-            "minLength": 1,
-            "title": "Run Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id"
-        ],
-        "title": "ThreadViewedBody",
-        "type": "object"
-      },
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
@@ -8181,7 +9936,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 },
                 "type": "array"
               },
@@ -8333,6 +10088,67 @@
           "older_cursor"
         ],
         "title": "TranscriptTurnPage",
+        "type": "object"
+      },
+      "TreeEntryModel": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "type": {
+            "enum": [
+              "blob",
+              "tree",
+              "commit"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "type",
+          "size"
+        ],
+        "title": "TreeEntryModel",
+        "type": "object"
+      },
+      "TreeResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TreeEntryModel"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sha",
+          "truncated",
+          "entries"
+        ],
+        "title": "TreeResponse",
         "type": "object"
       },
       "TurnView": {
@@ -8524,6 +10340,13 @@
         "title": "UserPreferencesUpdate",
         "type": "object"
       },
+      "UserWaitReason": {
+        "enum": [
+          "blocked",
+          "ready"
+        ],
+        "type": "string"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -8654,43 +10477,6 @@
         "title": "WebhookResponse",
         "type": "object"
       },
-      "WorkRunView": {
-        "properties": {
-          "runId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Runid"
-          },
-          "viewed": {
-            "title": "Viewed",
-            "type": "boolean"
-          },
-          "viewedAt": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Viewedat"
-          }
-        },
-        "required": [
-          "runId",
-          "viewed",
-          "viewedAt"
-        ],
-        "title": "WorkRunView",
-        "type": "object"
-      },
       "WorkerActivity": {
         "properties": {
           "active": {
@@ -8766,6 +10552,13 @@
       },
       "Workspace": {
         "properties": {
+          "ask_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ask Channel Ids",
+            "type": "array"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -8779,7 +10572,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Output"
             },
             "title": "Create Params",
             "type": "object"
@@ -9078,6 +10871,13 @@
       },
       "WorkspaceCreate": {
         "properties": {
+          "ask_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ask Channel Ids",
+            "type": "array"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -9091,7 +10891,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -9714,6 +11514,20 @@
       "WorkspaceUpdate": {
         "description": "Partial update: only the fields present are written.",
         "properties": {
+          "ask_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask Channel Ids"
+          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -9729,7 +11543,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -9933,7 +11747,7 @@
       },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          "$ref": "#/components/schemas/JsonValue-Output"
         },
         "type": "object"
       },
@@ -9952,7 +11766,7 @@
     }
   },
   "info": {
-    "title": "FastAPI",
+    "title": "Robin",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
@@ -11187,63 +13001,6 @@
         ]
       }
     },
-    "/dashboard/api/auth/langsmith/callback": {
-      "get": {
-        "operationId": "auth_langsmith_callback_dashboard_api_auth_langsmith_callback_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Auth Langsmith Callback",
-        "tags": [
-          "dashboard",
-          "auth"
-        ]
-      }
-    },
     "/dashboard/api/auth/langsmith/login": {
       "get": {
         "operationId": "auth_langsmith_login_dashboard_api_auth_langsmith_login_get",
@@ -11338,6 +13095,7 @@
     },
     "/dashboard/api/auth/login": {
       "get": {
+        "description": "Everyone signs in with LangSmith; locally without it, as the `gh` CLI's user.",
         "operationId": "auth_login_dashboard_api_auth_login_get",
         "parameters": [
           {
@@ -11354,50 +13112,6 @@
                 }
               ],
               "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Desktop",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
             }
           }
         ],
@@ -11998,6 +13712,144 @@
         ]
       }
     },
+    "/dashboard/api/github/desktop/exchange": {
+      "post": {
+        "description": "Finish a desktop GitHub link with the app's own session.",
+        "operationId": "github_link_desktop_exchange_dashboard_api_github_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Github Link Desktop Exchange Dashboard Api Github Desktop Exchange Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/github/login": {
+      "get": {
+        "description": "Start linking a GitHub account to the signed-in LangSmith person.",
+        "operationId": "github_link_login_dashboard_api_github_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Github Link Login",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
     "/dashboard/api/incidents/documents/history": {
       "get": {
         "operationId": "search_history_dashboard_api_incidents_documents_history_get",
@@ -12462,7 +14314,8 @@
     },
     "/dashboard/api/langsmith/callback": {
       "get": {
-        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "description": "Finish LangSmith sign-in on the callback the LangSmith OAuth client registers.",
+        "operationId": "auth_langsmith_callback_dashboard_api_langsmith_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -12488,38 +14341,6 @@
               ],
               "title": "Code"
             }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
           }
         ],
         "responses": {
@@ -12542,149 +14363,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Langsmith Callback",
+        "summary": "Auth Langsmith Callback",
         "tags": [
           "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop LangSmith connection with the app's own session.",
-        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
-    "/dashboard/api/langsmith/login": {
-      "get": {
-        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Langsmith Login",
-        "tags": [
-          "dashboard",
-          "langsmith"
+          "auth"
         ]
       }
     },
@@ -13523,62 +15205,6 @@
         ]
       }
     },
-    "/dashboard/api/my-credentials/langsmith": {
-      "delete": {
-        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Langsmith",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Langsmith Status",
-        "tags": [
-          "dashboard",
-          "langsmith"
-        ]
-      }
-    },
     "/dashboard/api/my-managed-tools": {
       "get": {
         "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
@@ -14401,6 +16027,118 @@
         ]
       }
     },
+    "/dashboard/api/page-sessions/{page_session}/commands": {
+      "get": {
+        "description": "The commands this tab's page has yet to carry out, in order.",
+        "operationId": "api_page_commands_dashboard_api_page_sessions__page_session__commands_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_session",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageQueueView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Page Commands",
+        "tags": [
+          "dashboard",
+          "page-commands"
+        ]
+      }
+    },
+    "/dashboard/api/page-sessions/{page_session}/commands/{position}/result": {
+      "post": {
+        "description": "Record what the page's next command returned once the page has carried it out.",
+        "operationId": "api_record_page_command_dashboard_api_page_sessions__page_session__commands__position__result_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "title": "Position",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_session",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Session",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageCommandOutcome"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Record Page Command",
+        "tags": [
+          "dashboard",
+          "page-commands"
+        ]
+      }
+    },
     "/dashboard/api/plan/{thread_id}": {
       "get": {
         "operationId": "get_plan_dashboard_api_plan__thread_id__get",
@@ -14723,6 +16461,2547 @@
         ]
       }
     },
+    "/dashboard/api/plugins": {
+      "get": {
+        "operationId": "api_list_plugins_dashboard_api_plugins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PluginSummary"
+                  },
+                  "title": "Response Api List Plugins Dashboard Api Plugins Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Plugins",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Add a version of an app to the viewer's web UI.",
+        "operationId": "api_install_plugin_dashboard_api_plugins_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Install Plugin",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/apps": {
+      "get": {
+        "description": "The apps the viewer may add: their own, and the ones others listed.",
+        "operationId": "api_list_apps_dashboard_api_plugins_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppModel"
+                  },
+                  "title": "Response Api List Apps Dashboard Api Plugins Apps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Apps",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Release a version of one of the viewer's apps from its bundle, the request's HTML body.\n\n``repository``, ``ref`` and ``commit`` say where it was built, only to show.",
+        "operationId": "api_publish_app_dashboard_api_plugins_apps_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ref"
+            }
+          },
+          {
+            "in": "query",
+            "name": "commit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commit"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppVersionModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Publish App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/apps/{app_id}": {
+      "patch": {
+        "description": "List the app for anyone to add, or keep it to the viewer, who publishes it.",
+        "operationId": "api_list_app_dashboard_api_plugins_apps__app_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/previews/{thread_id}": {
+      "get": {
+        "description": "The app the viewer's agent builds in ``thread_id``, as it runs beside the thread.",
+        "operationId": "api_app_preview_dashboard_api_plugins_previews__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api App Preview",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Run the thread's newest build, with the permissions it asks for approved.",
+        "operationId": "api_approve_app_preview_dashboard_api_plugins_previews__thread_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Approve App Preview",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/previews/{thread_id}/release": {
+      "post": {
+        "description": "Keep the build running beside the thread: release it, in the viewer's sidebar.",
+        "operationId": "api_release_app_preview_dashboard_api_plugins_previews__thread_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Release App Preview",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}": {
+      "delete": {
+        "operationId": "api_uninstall_plugin_dashboard_api_plugins__installation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Uninstall Plugin",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/bundle": {
+      "get": {
+        "operationId": "api_plugin_bundle_dashboard_api_plugins__installation_id__bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BundleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Bundle",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats": {
+      "post": {
+        "description": "The person's chat under ``name`` beside the plugin, made the first time it is opened.",
+        "operationId": "api_open_plugin_chat_dashboard_api_plugins__installation_id__chats_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatOpened"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Plugin Chat",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/calls": {
+      "get": {
+        "description": "Calls the chat's agent made to the plugin's tools that wait for the plugin's frame.",
+        "operationId": "api_plugin_chat_calls_dashboard_api_plugins__installation_id__chats__chat_id__calls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChatCallModel"
+                  },
+                  "title": "Response Api Plugin Chat Calls Dashboard Api Plugins  Installation Id  Chats  Chat Id  Calls Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Chat Calls",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/calls/claim": {
+      "post": {
+        "description": "Take the waiting calls to run them in this dock's frame, so no other open dock runs them too.",
+        "operationId": "api_claim_plugin_chat_calls_dashboard_api_plugins__installation_id__chats__chat_id__calls_claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChatCallModel"
+                  },
+                  "title": "Response Api Claim Plugin Chat Calls Dashboard Api Plugins  Installation Id  Chats  Chat Id  Calls Claim Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Claim Plugin Chat Calls",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/outputs": {
+      "post": {
+        "description": "Resume the chat with what the plugin's frame returned for its calls.",
+        "operationId": "api_answer_plugin_chat_calls_dashboard_api_plugins__installation_id__chats__chat_id__outputs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatOutputsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResumed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Answer Plugin Chat Calls",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/tools": {
+      "put": {
+        "description": "The tools the plugin's frame runs for this chat's next runs, replacing those before.",
+        "operationId": "api_offer_plugin_chat_tools_dashboard_api_plugins__installation_id__chats__chat_id__tools_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatToolsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Offer Plugin Chat Tools",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/documents/{collection}/query": {
+      "post": {
+        "operationId": "api_query_plugin_documents_dashboard_api_plugins__installation_id__documents__collection__query_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentQueryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentModel"
+                  },
+                  "title": "Response Api Query Plugin Documents Dashboard Api Plugins  Installation Id  Documents  Collection  Query Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Query Plugin Documents",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/documents/{collection}/{key}": {
+      "delete": {
+        "operationId": "api_delete_plugin_document_dashboard_api_plugins__installation_id__documents__collection___key__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Plugin Document",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "get": {
+        "operationId": "api_get_plugin_document_dashboard_api_plugins__installation_id__documents__collection___key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Plugin Document",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "put": {
+        "description": "Stores the document; with ``if_absent``, only when the key is free, returning what is stored.",
+        "operationId": "api_put_plugin_document_dashboard_api_plugins__installation_id__documents__collection___key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "if_absent",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "If Absent",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Plugin Document",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}": {
+      "get": {
+        "operationId": "api_plugin_repository_dashboard_api_plugins__installation_id__github__owner___repo__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Repository",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/branches": {
+      "post": {
+        "operationId": "api_plugin_create_branch_dashboard_api_plugins__installation_id__github__owner___repo__branches_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BranchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Create Branch",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/branches/{name}": {
+      "delete": {
+        "description": "Delete a branch, such as a draft's; never the repository's default branch.",
+        "operationId": "api_plugin_delete_branch_dashboard_api_plugins__installation_id__github__owner___repo__branches__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Delete Branch",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/commits": {
+      "post": {
+        "operationId": "api_plugin_commit_dashboard_api_plugins__installation_id__github__owner___repo__commits_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Commit",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/file": {
+      "get": {
+        "operationId": "api_plugin_file_dashboard_api_plugins__installation_id__github__owner___repo__file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin File",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/history": {
+      "get": {
+        "operationId": "api_plugin_history_dashboard_api_plugins__installation_id__github__owner___repo__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryEntry"
+                  },
+                  "title": "Response Api Plugin History Dashboard Api Plugins  Installation Id  Github  Owner   Repo  History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin History",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/image": {
+      "get": {
+        "description": "An image in the repository, as bytes the plugin's frame can show; its own policy loads none.",
+        "operationId": "api_plugin_image_dashboard_api_plugins__installation_id__github__owner___repo__image_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/avif": {},
+              "image/gif": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/svg+xml": {},
+              "image/webp": {},
+              "image/x-icon": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Image",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/pulls": {
+      "get": {
+        "operationId": "api_plugin_pull_for_branch_dashboard_api_plugins__installation_id__github__owner___repo__pulls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "head",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Head",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PullRequestModel"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Plugin Pull For Branch Dashboard Api Plugins  Installation Id  Github  Owner   Repo  Pulls Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Pull For Branch",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "post": {
+        "operationId": "api_plugin_open_pull_dashboard_api_plugins__installation_id__github__owner___repo__pulls_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Open Pull",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/ref": {
+      "get": {
+        "operationId": "api_plugin_ref_dashboard_api_plugins__installation_id__github__owner___repo__ref_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Ref",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/tree": {
+      "get": {
+        "operationId": "api_plugin_tree_dashboard_api_plugins__installation_id__github__owner___repo__tree_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sha",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{40}$",
+              "title": "Sha",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Tree",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/people": {
+      "get": {
+        "description": "Names and pictures for GitHub logins: Open SWE's record of each, else the login alone.",
+        "operationId": "api_plugin_people_dashboard_api_plugins__installation_id__people_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "login",
+            "required": true,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "title": "Login",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Person"
+                  },
+                  "title": "Response Api Plugin People Dashboard Api Plugins  Installation Id  People Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin People",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/repositories": {
+      "post": {
+        "description": "Share repositories with the app, for the viewer only: what they picked when it asked.",
+        "operationId": "api_share_plugin_repositories_dashboard_api_plugins__installation_id__repositories_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoriesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Share Plugin Repositories",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/repositories/{owner}/{repo}": {
+      "delete": {
+        "operationId": "api_unshare_plugin_repository_dashboard_api_plugins__installation_id__repositories__owner___repo__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Unshare Plugin Repository",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/rooms/stream": {
+      "get": {
+        "operationId": "api_plugin_rooms_stream_dashboard_api_plugins__installation_id__rooms_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "JSON list of {room, repository, after}",
+            "in": "query",
+            "name": "rooms",
+            "required": true,
+            "schema": {
+              "description": "JSON list of {room, repository, after}",
+              "title": "Rooms",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Rooms Stream",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/rooms/{room}/compact": {
+      "post": {
+        "operationId": "api_plugin_room_compact_dashboard_api_plugins__installation_id__rooms__room__compact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "room",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Room",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomCompactBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomSeq"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Room Compact",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/rooms/{room}/presence": {
+      "post": {
+        "operationId": "api_plugin_room_presence_dashboard_api_plugins__installation_id__rooms__room__presence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "room",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Room",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomPresenceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Room Presence",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/rooms/{room}/updates": {
+      "post": {
+        "operationId": "api_plugin_room_update_dashboard_api_plugins__installation_id__rooms__room__updates_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "room",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Room",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomSeq"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Room Update",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/upgrade": {
+      "post": {
+        "description": "Move the install to another version of its app.",
+        "operationId": "api_upgrade_plugin_dashboard_api_plugins__installation_id__upgrade_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Upgrade Plugin",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
     "/dashboard/api/profile": {
       "get": {
         "operationId": "get_my_profile_dashboard_api_profile_get",
@@ -14825,6 +19104,407 @@
         "tags": [
           "dashboard",
           "profiles"
+        ]
+      }
+    },
+    "/dashboard/api/projects": {
+      "get": {
+        "operationId": "api_list_projects_dashboard_api_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "$ref": "#/components/schemas/Project"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Api List Projects Dashboard Api Projects Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Projects",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_project_dashboard_api_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/threads/{thread_id}": {
+      "delete": {
+        "operationId": "api_unfile_thread_dashboard_api_projects_threads__thread_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Unfile Thread",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}": {
+      "delete": {
+        "operationId": "api_delete_project_dashboard_api_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "api_update_project_dashboard_api_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Project",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/members": {
+      "put": {
+        "operationId": "api_set_project_member_dashboard_api_projects__project_id__members_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Project Member",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "api_remove_project_member_dashboard_api_projects__project_id__members__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Project Member",
+        "tags": [
+          "dashboard",
+          "projects"
+        ]
+      }
+    },
+    "/dashboard/api/projects/{project_id}/threads/{thread_id}": {
+      "put": {
+        "operationId": "api_file_thread_dashboard_api_projects__project_id__threads__thread_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api File Thread",
+        "tags": [
+          "dashboard",
+          "projects"
         ]
       }
     },
@@ -15014,7 +19694,7 @@
     },
     "/dashboard/api/repos": {
       "get": {
-        "description": "List repos where Open SWE is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
+        "description": "List repos where Robin is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
         "operationId": "list_repos_dashboard_api_repos_get",
         "parameters": [
           {
@@ -16724,6 +21404,76 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/checks": {
+      "get": {
+        "operationId": "api_get_review_checks_dashboard_api_reviews__owner___repo___pr_number__checks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewCheck"
+                  },
+                  "title": "Response Api Get Review Checks Dashboard Api Reviews  Owner   Repo   Pr Number  Checks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review Checks",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments": {
       "post": {
         "operationId": "api_post_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
@@ -16936,6 +21686,75 @@
           }
         ],
         "summary": "Api Post Review Conversation Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/description": {
+      "patch": {
+        "operationId": "api_update_pull_request_description_dashboard_api_reviews__owner___repo___pr_number__description_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestDescriptionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Pull Request Description",
         "tags": [
           "dashboard",
           "review"
@@ -19822,26 +24641,6 @@
               "title": "Limit",
               "type": "integer"
             }
-          },
-          {
-            "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
-            }
           }
         ],
         "responses": {
@@ -19921,6 +24720,57 @@
           }
         ],
         "summary": "Api Create Session",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/order": {
+      "put": {
+        "operationId": "api_reorder_sidebar_threads_dashboard_api_threads_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SidebarThreadOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Reorder Sidebar Threads Dashboard Api Threads Order Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reorder Sidebar Threads",
         "tags": [
           "dashboard",
           "threads"
@@ -20147,26 +24997,6 @@
           },
           {
             "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
-            }
-          },
-          {
-            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -20187,6 +25017,23 @@
               "default": false,
               "title": "Hierarchy",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
             }
           }
         ],
@@ -20229,28 +25076,6 @@
     "/dashboard/api/threads/pinned": {
       "get": {
         "operationId": "api_list_pinned_threads_dashboard_api_threads_pinned_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -20262,6 +25087,47 @@
                   },
                   "title": "Response Api List Pinned Threads Dashboard Api Threads Pinned Get",
                   "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Pinned Threads",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/pinned/order": {
+      "put": {
+        "operationId": "api_reorder_pinned_threads_dashboard_api_threads_pinned_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinnedThreadOrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Reorder Pinned Threads Dashboard Api Threads Pinned Order Put",
+                  "type": "object"
                 }
               }
             },
@@ -20283,7 +25149,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api List Pinned Threads",
+        "summary": "Api Reorder Pinned Threads",
         "tags": [
           "dashboard",
           "threads"
@@ -20402,26 +25268,6 @@
                 }
               ],
               "title": "Exclude Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "experience",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "coding",
-                    "agent_workspace"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Experience"
             }
           }
         ],
@@ -20581,16 +25427,6 @@
             "schema": {
               "title": "Thread Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "mark_viewed",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Mark Viewed",
-              "type": "boolean"
             }
           }
         ],
@@ -21189,6 +26025,64 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/goal": {
+      "get": {
+        "description": "The thread's goal, for someone allowed to read the thread; None without Goal mode.",
+        "operationId": "api_get_thread_goal_dashboard_api_threads__thread_id__goal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Goal"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Get Thread Goal Dashboard Api Threads  Thread Id  Goal Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Goal",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/history": {
       "post": {
         "operationId": "api_thread_history_dashboard_api_threads__thread_id__history_post",
@@ -21602,6 +26496,64 @@
           }
         ],
         "summary": "Api Get Thread Queued Messages",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/read-state": {
+      "put": {
+        "operationId": "api_set_thread_read_state_dashboard_api_threads__thread_id__read_state_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadReadState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadReadState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Set Thread Read State",
         "tags": [
           "dashboard",
           "threads"
@@ -22419,64 +27371,6 @@
         "tags": [
           "dashboard",
           "transcript"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/viewed": {
-      "post": {
-        "operationId": "api_mark_thread_viewed_dashboard_api_threads__thread_id__viewed_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadViewedBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkRunView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Mark Thread Viewed",
-        "tags": [
-          "dashboard",
-          "threads"
         ]
       }
     },
@@ -23685,53 +28579,6 @@
         ]
       }
     },
-    "/github/channel/events": {
-      "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
-        "operationId": "github_channel_event_github_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GitHubChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Github Channel Event Github Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Github Channel Event"
-      }
-    },
     "/health": {
       "get": {
         "operationId": "health_check_health_get",
@@ -23754,37 +28601,27 @@
         "summary": "Health Check"
       }
     },
-    "/linear/channel/events": {
+    "/mda/channel-api/{endpoint}": {
       "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares, or declines with what the\nchannel tells the session, such as that it names no repository. While the\nsession's thread waits on an interrupt nothing is prepared. Issue events run\nLinear automations.",
-        "operationId": "linear_channel_event_linear_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinearChannelCall"
-              }
+        "description": "What ``endpoint`` answers the channel's call with.",
+        "operationId": "channel_api_mda_channel_api__endpoint__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint",
+            "required": true,
+            "schema": {
+              "title": "Endpoint",
+              "type": "string"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LinearDecline"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Linear Channel Event Linear Channel Events Post"
+                  "$ref": "#/components/schemas/JsonValue-Output"
                 }
               }
             },
@@ -23801,12 +28638,35 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Linear Channel Event"
+        "summary": "Channel Api"
+      }
+    },
+    "/mda/github/deliveries": {
+      "post": {
+        "description": "Take a delivery MDA forwarded; the backend's work runs after the answer.",
+        "operationId": "github_delivery_mda_github_deliveries_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Github Delivery Mda Github Deliveries Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Github Delivery"
       }
     },
     "/mda/resolve-user": {
       "post": {
-        "description": "The Open SWE user a channel's verified sender is, or ``None`` for MDA's default.",
+        "description": "The Robin user a channel's verified sender is, or ``None`` for MDA's default.",
         "operationId": "resolve_user_mda_resolve_user_post",
         "requestBody": {
           "content": {
@@ -23851,26 +28711,15 @@
         "summary": "Resolve User"
       }
     },
-    "/slack/channel/events": {
+    "/mda/slack/channel-events": {
       "post": {
-        "description": "The run a forwarded Slack message starts on the channel's thread, or ``None``.\n\n``None`` when the message wasn't one the backend handed over (the backend\ngates every message before it forwards one), when gating posted the reply\nitself, such as the prompt to connect an account, or when building the run\nfailed, which the Slack thread hears about. MDA retrying a call it got no\nanswer to, under the same ``webhook_id``, gets the run built again.",
-        "operationId": "slack_channel_event_slack_channel_events_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "webhook-id",
-            "required": true,
-            "schema": {
-              "title": "Webhook-Id",
-              "type": "string"
-            }
-          }
-        ],
+        "description": "Record a Slack channel's own change; ``None`` starts no run.",
+        "operationId": "slack_channel_event_mda_slack_channel_events_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SlackChannelCall"
+                "$ref": "#/components/schemas/EndpointRequest_SlackEndpointEvent_"
               }
             }
           },
@@ -23880,17 +28729,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Slack Channel Event Slack Channel Events Post"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -23909,27 +28748,41 @@
         "summary": "Slack Channel Event"
       }
     },
-    "/webhooks/github": {
+    "/mda/slack/reactions": {
       "post": {
-        "description": "Handle GitHub webhooks for issue and PR events that tag @open-swe.",
-        "operationId": "github_webhook_webhooks_github_post",
+        "description": "Act on a reaction as ``/webhooks/slack`` does; ``None`` starts no run of MDA's.",
+        "operationId": "slack_reaction_mda_slack_reactions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointRequest_SlackEndpointEvent_"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Github Webhook Webhooks Github Post",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
-        "summary": "Github Webhook"
+        "summary": "Slack Reaction"
       }
     },
     "/webhooks/rollout": {
@@ -24039,7 +28892,7 @@
     },
     "/webhooks/slack/commands": {
       "post": {
-        "description": "Answer a single `/oswe` question, ephemerally and without a Slack thread.",
+        "description": "Answer `/robin` and legacy `/oswe` questions without a Slack thread.",
         "operationId": "slack_command_webhooks_slack_commands_post",
         "responses": {
           "200": {

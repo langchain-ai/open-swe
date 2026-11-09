@@ -77,7 +77,13 @@ async def ensure_workflow_push_pending(
             "approval_url": approval_url,
         }
         if existing and existing.get("status") == WORKFLOW_APPROVAL_PENDING:
-            record = {**existing, **review_fields}
+            record = {
+                **existing,
+                **review_fields,
+                "first_requested_at": existing.get("first_requested_at")
+                or existing.get("requested_at"),
+                "requested_at": now_iso(),
+            }
             approvals[fingerprint] = record
             await _save_approvals(thread_id, approvals)
             return record, False
@@ -122,6 +128,7 @@ def workflow_push_approval_response(record: Mapping[str, Any]) -> dict[str, Any]
     return {
         "fingerprint": str(record.get("fingerprint") or ""),
         "status": str(record.get("status") or WORKFLOW_APPROVAL_PENDING),
+        "coordinatorStatus": record.get("coordinator_status"),
         "repo": str(record.get("repo") or ""),
         "branch": str(record.get("branch") or ""),
         "baseSha": str(record.get("base_sha") or ""),

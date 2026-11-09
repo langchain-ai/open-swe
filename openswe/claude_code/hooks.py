@@ -272,8 +272,6 @@ def mirror_thread_id(owner_id: UUID, session_id: str) -> str:
 
 async def mirror_of(owner_id: UUID, session_id: str) -> str | None:
     """The thread mirroring this person's session, or ``None`` when it was never mirrored."""
-    if not postgres.configured():
-        return None
     thread_id = mirror_thread_id(owner_id, session_id)
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
@@ -339,9 +337,7 @@ class SessionMirror:
     async def _create(self, event: _Hook) -> None:
         login = self.owner.github_login
         if not await is_authorized_github_login(login):
-            raise PermissionError(
-                "your GitHub account is not authorized for this Open SWE instance"
-            )
+            raise PermissionError("your GitHub account is not authorized for this Robin instance")
         title = event.title if isinstance(event, PromptSubmitted) else _UNTITLED
         created_ms = now_ms()
         metadata: dict[str, object] = {

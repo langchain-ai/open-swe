@@ -137,6 +137,27 @@ async def test_a_run_that_ends_after_its_job_was_replaced_and_reclaimed_leaves_i
     assert job.payload == {"v": "new"}
 
 
+async def test_coalesced_work_shares_a_waiting_run_and_follows_a_running_one() -> None:
+    later = datetime.now(UTC) + timedelta(hours=1)
+    await queue.coalesce("probe", {"v": 1}, key="probe:d", due_at=later)
+    await queue.coalesce("probe", {"v": 2}, key="probe:d", due_at=_PAST)
+    await queue.coalesce("probe", {"v": 3}, key="probe:d", due_at=later)
+    [waiting] = await queue.find({})
+    assert (waiting.payload, waiting.due_at) == ({"v": 1}, _PAST)
+
+    [running] = await queue.claim_due(1)
+    await queue.coalesce("probe", {"v": 4}, key="probe:d", due_at=later)
+    await queue.coalesce("probe", {"v": 5}, key="probe:d", due_at=_PAST)
+    assert await queue.claim_due(1) == []
+    assert await running.hold() == Hold.HELD
+    await running.finish()
+
+    [after] = await queue.claim_due(1)
+    assert after.payload == {"v": 5}
+    await after.finish()
+    assert await queue.find({}) == []
+
+
 async def test_jobs_are_found_and_cancelled_by_metadata() -> None:
     await queue.schedule("probe", metadata={"thread_id": "t1", "kind": "wake"}, due_at=_PAST)
     await queue.schedule("probe", metadata={"thread_id": "t2", "kind": "wake"}, due_at=_PAST)

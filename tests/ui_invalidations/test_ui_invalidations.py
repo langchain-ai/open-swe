@@ -2,16 +2,62 @@ import asyncio
 import json
 from contextlib import aclosing
 from types import SimpleNamespace
+from uuid import uuid7
 
 import pytest
 from sqlalchemy import text
 
 from openswe.database import postgres
 from openswe.database.notifications import LISTENER
+from openswe.plugins.records import DocumentScope
 from openswe.ui_invalidations import Topic, outbox
-from openswe.ui_invalidations.hub import HUB
+from openswe.ui_invalidations.hub import HUB, Stream
 from openswe.ui_invalidations.routes import _stream
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+
+
+def test_a_plugins_document_topics_can_always_be_subscribed_to() -> None:
+    # The longest names GitHub allows, and the "_" a repository and a collection may hold:
+    # one malformed topic fails the whole subscription.
+    plugin = uuid7()
+    for scope in (
+        DocumentScope(repository=f"{'o' * 39}/{'r_' * 50}"),
+        DocumentScope(user_id=uuid7()),
+    ):
+        key = scope.topic_key(plugin, f"my_{'c' * 61}")
+        assert Topic.well_formed(Topic.PLUGIN_DOCUMENTS.keyed(key))
+
+
+async def test_a_burst_of_check_changes_reaches_a_reader_as_its_first_and_last(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Topic.PULL_REQUEST_CHECKS, "min_interval_seconds", 0.3)
+    checks = Topic.PULL_REQUEST_CHECKS.keyed("acme/app/7")
+    review = Topic.PULL_REQUESTS.keyed("acme/app/7")
+    stream = Stream(frozenset({checks, review}))
+
+    stream.mark([checks])
+    assert await stream.drain(1) == {checks}
+
+    stream.mark([checks])
+    stream.mark([checks, review])
+    assert await stream.drain(1) == {review}
+    assert await stream.drain(0.05) == set()
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    assert await stream.drain(1) == {checks}
+    assert loop.time() - started > 0.1
+
+    # A reconnect replays the change the previous stream just sent; the reader
+    # still gets it, but no sooner than the interval after its data.
+    reconnected = Stream(frozenset({checks}))
+    reconnected.hold_fresh({checks: 0})
+    reconnected.mark([checks])
+    assert reconnected.take() == set()
+    started = loop.time()
+    assert await reconnected.drain(1) == {checks}
+    assert loop.time() - started > 0.2
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:

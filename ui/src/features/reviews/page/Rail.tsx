@@ -15,6 +15,7 @@ import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
@@ -124,7 +125,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
       ? "Why are the checks failing, and what would fix them?"
       : null,
     bugs > 0
-      ? "Which of Open SWE's findings matter most, and are any false alarms?"
+      ? "Which of Robin's findings matter most, and are any false alarms?"
       : null,
     open > 0
       ? "Summarize the unresolved review comments and what each one asks for."
@@ -172,6 +173,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   const clearAttachments = useReviewPage((state) => state.clearChatAttachments)
   const question = useReviewPage((state) => state.chatQuestion)
   const clearQuestion = useReviewPage((state) => state.clearChatQuestion)
+  const reply = useReviewPage((state) => state.chatReplies[0])
+  const takeReply = useReviewPage((state) => state.takeChatReply)
   const actions = useMemo(
     () => ({
       owner: pr.owner,
@@ -184,7 +187,6 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
           line: range.endLine,
           side: range.side,
         }),
-      emptyState: <ChatStarters pr={pr} />,
       attachments: {
         items: attachments,
         remove: removeAttachment,
@@ -192,6 +194,8 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       },
       question,
       clearQuestion,
+      reply,
+      takeReply,
     }),
     [
       pr,
@@ -201,8 +205,11 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       clearAttachments,
       question,
       clearQuestion,
+      reply,
+      takeReply,
     ]
   )
+  const embedded = { emptyState: <ChatStarters pr={pr} /> }
   if (meta.isPending)
     return (
       <div className="flex h-full flex-col justify-end gap-space-3 p-space-4">
@@ -219,13 +226,15 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
     )
   return (
     <ReviewChatActionsContext.Provider value={actions}>
-      <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
-        <AgentThreadPage
-          threadId={meta.data.thread_id}
-          composerDraft={chatDraft}
-          ownsTitle={false}
-        />
-      </div>
+      <EmbeddedThreadContext.Provider value={embedded}>
+        <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
+          <AgentThreadPage
+            threadId={meta.data.thread_id}
+            composerDraft={chatDraft}
+            ownsTitle={false}
+          />
+        </div>
+      </EmbeddedThreadContext.Provider>
     </ReviewChatActionsContext.Provider>
   )
 }

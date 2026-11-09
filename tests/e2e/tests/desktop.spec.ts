@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -136,20 +138,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     const task = tasks.find((thread) => thread.id === taskThreadId);
     expect(task?.managedTaskFolder).toBe(true);
     expect(task?.cwd).toContain(taskThreadId);
-    const work = page.getByRole("button", { name: "Home", exact: true });
-    const coding = page.getByRole("button", { name: "Code", exact: true });
-    await expect(work).toHaveAttribute("aria-pressed", "true");
-    await expect(page).toHaveTitle(/Open SWE/);
-    const workBounds = await work.boundingBox();
-    const codingBounds = await coding.boundingBox();
-    expect(workBounds).not.toBeNull();
-    expect(codingBounds).not.toBeNull();
-    expect(workBounds!.x).toBeLessThan(codingBounds!.x);
-    expect(Math.abs(workBounds!.width - codingBounds!.width)).toBeLessThan(1);
-    await coding.click();
-    await expect(coding).toHaveAttribute("aria-pressed", "true");
-    await page.reload();
-    await expect(coding).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveTitle(/Robin/);
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),
@@ -162,6 +151,12 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
+    // New threads start without a project (the agent gets a task folder), so
+    // choose the registered one.
+    await composer
+      .getByRole("button", { name: "Choose project", exact: true })
+      .click();
+    await page.getByRole("option").filter({ hasText: "demo" }).click();
     await expect(
       composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
@@ -243,6 +238,85 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await electronApp.close().catch(() => {});
     if (!process.env.E2E_KEEP_TMP)
       rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("Desktop keeps cloud browser authentication redirects inside the viewer", async () => {
+  const stateRoot = mkdtempSync(join(tmpdir(), "desktop-browser-"));
+  const archive = join(stateRoot, "ui.json.gz");
+  writeFileSync(
+    archive,
+    gzipSync(
+      JSON.stringify({
+        files: [
+          {
+            path: "/_shell.html",
+            body: Buffer.from(
+              "<html><body>Browser fixture</body></html>",
+            ).toString("base64"),
+          },
+        ],
+      }),
+    ),
+  );
+  const server = createServer((request, response) => {
+    if (request.url === "/auth") {
+      response.writeHead(302, {
+        "set-cookie":
+          "viewer=session; HttpOnly; Path=/act; SameSite=None; Secure; Partitioned",
+        location: "/act",
+      });
+      response.end();
+      return;
+    }
+    const authenticated = request.headers.cookie === "viewer=session";
+    response.writeHead(authenticated ? 200 : 403, {
+      "content-type": "text/html",
+    });
+    response.end(
+      authenticated ? "Viewer connected" : "Window link is not valid",
+    );
+  });
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  const address = server.address();
+  if (!address || typeof address === "string")
+    throw new Error("No viewer address");
+  const viewerOrigin = `http://127.0.0.1:${address.port}`;
+  const electronApp = await electron.launch({
+    executablePath: electronPath,
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      desktopRoot,
+      "--backend-url=https://desktop.test",
+    ],
+    env: {
+      ...process.env,
+      HOME: stateRoot,
+      XDG_CONFIG_HOME: stateRoot,
+      APPDATA: stateRoot,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: archive,
+    },
+  });
+  try {
+    const page = await electronApp.firstWindow();
+    await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
+    await page.evaluate((origin) => {
+      const frame = document.createElement("iframe");
+      frame.title = "Browser window";
+      frame.src = `${origin}/auth`;
+      document.body.append(frame);
+    }, viewerOrigin);
+    await expect(
+      page
+        .frameLocator('iframe[title="Browser window"]')
+        .getByText("Viewer connected", { exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await electronApp.close();
+    await new Promise<void>((closed, reject) =>
+      server.close((error) => (error ? reject(error) : closed())),
+    );
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
 

@@ -1,13 +1,16 @@
 import asyncio
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
+from sqlalchemy import text
 
-from openswe.database import postgres
+from openswe.database import postgres, transaction
 from openswe.monitors import budget, delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
 from openswe.monitors.sandbox import MonitorEnd, MonitorEvent, PendingMonitor, SandboxMonitors
@@ -208,11 +211,28 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
     assert "the command failed" in owed[1].content
 
 
-async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_running(
+@pytest.mark.usefixtures("registry_db")
+async def test_dashboard_lists_event_listeners_without_waking_an_idle_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.threads import background_work
+    from openswe.webhooks.event_subscriptions import EventSubscription
 
+    workspace_id = uuid4()
+    async with transaction() as conn:
+        await conn.execute(
+            text("INSERT INTO workspace (id, slug, name) VALUES (:id, 'acme', 'Acme')"),
+            {"id": workspace_id},
+        )
+    await EventSubscription(
+        thread_id="thread-1",
+        workspace_id=workspace_id,
+        multitask_strategy="enqueue",
+        run_config={"thread_id": "thread-1"},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        event_types=["check_suite.completed"],
+        instructions="Recheck CI.",
+    ).create()
     metadata = {"sandbox_id": "sandbox-a", "running_background_tasks": [], "running_monitors": []}
     monkeypatch.setattr(
         background_work, "_readable_thread_metadata", AsyncMock(return_value=metadata)
@@ -224,6 +244,10 @@ async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_runnin
     work = await background_work.get_dashboard_thread_background_work("thread-1", "alice")
 
     assert (work.commands, work.monitors) == ([], [])
+    assert [
+        (listener.target, listener.event_types, listener.instructions)
+        for listener in work.listeners
+    ] == [("workspace", ["check_suite.completed"], "Recheck CI.")]
 
 
 async def test_dashboard_shows_no_output_of_another_threads_command(
@@ -275,6 +299,7 @@ class FakeThreads:
 def _human(text: str) -> dict[str, object]:
     return {
         "id": text,
+        "type": "human",
         "content": f'<input-message sender="u" surface="web" kind="human">{text}</input-message>',
     }
 

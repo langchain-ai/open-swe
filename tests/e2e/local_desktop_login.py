@@ -84,7 +84,7 @@ async def fake_github_authorize(redirect_uri: str, state: str, client_id: str = 
     return HTMLResponse(
         f"""<!doctype html><meta charset=utf-8><title>Fake GitHub</title>
         <body style="font:16px system-ui;max-width:30rem;margin:4rem auto;text-align:center">
-        <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
+        <h1 style="font-size:1.1rem">Authorize Robin</h1>
         <p style="opacity:.7">Signing in as <b>{escape(LOGIN)}</b> — a local fake, not GitHub.</p>
         <p><a href="{target}"
               style="display:inline-block;padding:.6rem 1rem;border:1px solid;border-radius:.4rem">

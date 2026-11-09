@@ -5,7 +5,10 @@ import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
 import type { ReviewPageRef } from "@/features/agents/lib/types"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { pullRequestTopic } from "@/features/reviews/lib/cache"
+import {
+  pullRequestChecksTopic,
+  pullRequestTopic,
+} from "@/features/reviews/lib/cache"
 
 export type PullRequestRef = ReviewPageRef
 
@@ -15,6 +18,8 @@ export const reviewKeys = {
     ["review", owner, repo, number] as const,
   diff: ({ owner, repo, number }: PullRequestRef) =>
     ["reviewDiff", owner, repo, number] as const,
+  checks: ({ owner, repo, number }: PullRequestRef) =>
+    ["review-checks", owner, repo, number] as const,
   conversation: ({ owner, repo, number }: PullRequestRef) =>
     ["review-conversation", owner, repo, number] as const,
 }
@@ -40,6 +45,20 @@ export function sharedReviewOptions(pr: PullRequestRef) {
   return {
     ...reviewReadOptions,
     meta: { invalidatedBy: [pullRequestTopic(statusRef(pr))] },
+  } as const
+}
+
+// CI changes check runs far more often than anything else on the PR, so they
+// have a topic of their own that the detail and conversation don't hear.
+export function reviewChecksOptions(pr: PullRequestRef) {
+  return {
+    ...reviewReadOptions,
+    meta: {
+      invalidatedBy: [
+        pullRequestTopic(statusRef(pr)),
+        pullRequestChecksTopic(statusRef(pr)),
+      ],
+    },
   } as const
 }
 

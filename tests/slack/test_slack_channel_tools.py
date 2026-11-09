@@ -8,6 +8,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 async def test_list_channels_keeps_cursor_on_empty_page(slack_api: SlackAPI) -> None:
     slack_api.respond({"ok": True, "channels": [], "response_metadata": {"next_cursor": "more"}})
@@ -254,3 +256,78 @@ async def test_post_channel_message_refuses_missing_origin_link(
         "error": "origin_link_unavailable" if thread_id else "origin_thread_required",
     }
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
+
+
+def _search_run(monkeypatch: pytest.MonkeyPatch, *, shared: bool, token: str) -> None:
+    channel = {"id": "C123", "is_ext_shared": shared, "is_pending_ext_shared": False}
+    monkeypatch.setattr(
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig.parse(
+            {
+                "slack_thread": {
+                    "channel_id": "C123",
+                    "thread_ts": "1.0",
+                    "channel_context": channel,
+                },
+                "source": "slack",
+                "slack_action_token": token,
+            }
+        ),
+    )
+
+
+@pytest.mark.parametrize(("shared", "token"), [(True, "grant"), (False, "")])
+async def test_slack_search_refuses_shared_channels_and_runs_without_a_grant(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, shared: bool, token: str
+) -> None:
+    _search_run(monkeypatch, shared=shared, token=token)
+    result = await tools.slack_search("launch plan")
+    assert result["success"] is False
+    assert slack_api.calls == []
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_slack_search_searches_public_channels_with_the_runs_grant(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _search_run(monkeypatch, shared=False, token="grant")
+    hit = {
+        "channel_id": "C9",
+        "message_ts": "2.0",
+        "author_user_id": "U1",
+        "content": "We ship Friday",
+        "permalink": "https://x.slack.com/archives/C9/p20",
+    }
+    slack_api.respond(
+        {"ok": True, "results": {"messages": [hit]}, "response_metadata": {"next_cursor": "n"}}
+    )
+    result = await tools.slack_search("launch plan", limit=50)
+    assert result["success"] is True
+    assert result["next_cursor"] == "n"
+    assert result["messages"] == [
+        {
+            "channel_name": "",
+            "author_name": "",
+            "is_author_bot": False,
+            **hit,
+        }
+    ]
+    method, payload = slack_api.calls[0]
+    assert method == "assistant.search.context"
+    assert payload["action_token"] == "grant"
+    assert payload["channel_types"] == ["public_channel"]
+    assert payload["include_bots"] is False
+    assert payload["limit"] == 20
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_slack_search_stops_once_the_grants_searches_are_spent(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _search_run(monkeypatch, shared=False, token="grant")
+    for _ in range(6):
+        assert (await tools.slack_search("launch plan"))["success"] is True
+    refused = await tools.slack_search("launch plan")
+    assert refused["success"] is False
+    assert len(slack_api.calls) == 6

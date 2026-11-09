@@ -27,7 +27,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
     <Card id="about" className="divide-y divide-default overflow-hidden p-0">
       {version ? (
         <SettingsRow
-          label="Open SWE Desktop"
+          label="Robin Desktop"
           control={
             <span className="text-xs text-secondary">Version {version}</span>
           }

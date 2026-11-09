@@ -143,12 +143,12 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           color="secondary"
           variant="plain"
           size="xs"
-          aria-label={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
+          aria-label={`${plural(findings.length, "open finding")} from Robin; go to the worst`}
           type="button"
           onClick={() => showFinding(worst.id, findingTarget(worst))}
           className="h-auto shrink-0 gap-space-1 border-0 px-space-1 hover:bg-surface-level-1-hover"
           style={{ color: findingGroupColor[worst.group] }}
-          title={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
+          title={`${plural(findings.length, "open finding")} from Robin; go to the worst`}
         >
           <AgentMark className="size-3" />
           {findings.length}
@@ -188,7 +188,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
             }),
           ])
         }
-        aria-label={`Ask Open SWE about ${path}`}
+        aria-label={`Ask Robin about ${path}`}
         className={onHover}
       >
         <AgentMark className="size-3" />

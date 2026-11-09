@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from managed_deepagents._channel import Channel
+from managed_deepagents._channels.auto_post import channel_auto_post, reply_of
 from managed_deepagents._channels.reactions import (
     DEFAULT_REACTION_EMOJI,
     ReactionChoice,
@@ -21,12 +22,14 @@ from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor
+    from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http.endpoint import EventEndpoint
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
+    from managed_deepagents._channels.reply import HandlerResult
     from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
-    from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.run_input import RunChannel
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
         SlackChannelThread,
@@ -43,6 +46,7 @@ if TYPE_CHECKING:
     )
     from managed_deepagents._channels.trigger.types import (
         TriggerChannelMessageEvent,
+        TriggerChannelProviderEvent,
         TriggerChannelUserPromptResponseEvent,
     )
     from managed_deepagents._channels.types import ChannelReply, JsonValue
@@ -70,7 +74,35 @@ _TRIGGER_ON_ALL_MESSAGES_DEPRECATION = (
     "channels.slack(trigger_on_all_messages=...) is deprecated; use trigger_mode instead "
     '(trigger_on_all_messages=True is trigger_mode="all").'
 )
+_ALLOW_BOT_TRIGGERS_DEPRECATION = (
+    "channels.slack(allow_bot_triggers=...) is deprecated and will be removed in 0.12; "
+    "use ignore_bots instead (allow_bot_triggers=True is ignore_bots=False), "
+    "as channels.linear takes it."
+)
+_APP_FIELDS_DEPRECATION = (
+    "channels.slack(name=..., description=..., icon=..., background_color=...) is deprecated "
+    "and will be removed in 0.12; "
+    "set them in app instead, as channels.github and channels.linear take theirs "
+    '(channels.slack(app={"name": ...})).'
+)
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class SlackAppOptions(TypedDict, total=False):
+    """The Slack app ``mda deploy`` sets up: how it looks."""
+
+    name: str
+    """Your agent's name, used in mentions like ``@support-agent``: up to 35
+    letters, numbers, spaces, underscores, dashes and periods."""
+    description: str
+    """A short description of what your agent does: up to 139 characters."""
+    icon: str
+    """A 512x512 PNG of at most 1 MB, as a path relative to ``channels/``."""
+    background_color: str
+    """The Slack app background as a ``#RRGGBB`` hex color."""
+
+
+_APP_KEYS = frozenset(SlackAppOptions.__annotations__)
 
 
 class TriggerSlackAppConfig(TypedDict, total=False):
@@ -98,7 +130,7 @@ class TriggerSlackChannel(Channel):
         status: SlackStatusChoice | None = None,
         on_event: Mapping[str, SlackEventCallback] | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
-        reply: ChannelReply = "auto",
+        auto_post: bool = True,
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
         resolve_user: ChannelResolveUser | None = None,
     ) -> None:
@@ -110,7 +142,8 @@ class TriggerSlackChannel(Channel):
         self.status = status
         self.on_event = on_event
         self.multitask_strategy = multitask_strategy
-        self.reply = reply
+        self.auto_post = auto_post
+        self.reply: ChannelReply = reply_of(auto_post)
         self.on_finish = on_finish
         self._decided: DecidedSlackEvents | None = None
 
@@ -151,6 +184,14 @@ class TriggerSlackChannel(Channel):
             return await _decide_event(
                 on_event or {}, event, thread, name, actor, remember=remember
             )
+
+        async def decide_provider_event(
+            event: TriggerChannelProviderEvent,
+            thread: TriggerChannelThread,
+            actor: ChannelActor | None,
+        ) -> TriggerMessageRoute | None:
+            assert on_event is not None  # noqa: S101 - only passed with handlers
+            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
 
         on_finish = None
         if self.on_finish is not None:
@@ -194,6 +235,7 @@ class TriggerSlackChannel(Channel):
             # type; with no handler for the event, it starts the default run.
             decide_message=decide_message,
             decide_interaction=decide_interaction,
+            decide_provider_event=decide_provider_event if self.forwarded_events else None,
             multitask_strategy=self.multitask_strategy,
             on_finish=on_finish,
             resolve_user=context.get("resolve_user"),
@@ -209,6 +251,23 @@ class TriggerSlackChannel(Channel):
             self._decided = DecidedSlackEvents()
         return self._decided
 
+    @property
+    def forwarded_events(self) -> tuple[str, ...]:
+        """The Slack events besides messages the channel's handlers ask Trigger
+        Server to forward."""
+        from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
+            SLACK_FORWARDED_EVENTS,
+        )
+
+        return tuple(
+            sorted(
+                event
+                for key, events in SLACK_FORWARDED_EVENTS.items()
+                if (self.on_event or {}).get(key) is not None
+                for event in events
+            )
+        )
+
     def requirements(self, name: str) -> ChannelManifest:
         # Older CLIs require triggerOnAllMessages and reject unknown fields, so
         # "all" is sent as that flag and triggerMode only for mention/thread.
@@ -221,6 +280,9 @@ class TriggerSlackChannel(Channel):
         }
         if self.trigger_mode in ("mention", "thread"):
             provider_config["triggerMode"] = self.trigger_mode
+        # Only with a handler that needs it, so other channels deploy with any CLI.
+        if forwarded := self.forwarded_events:
+            provider_config["forwardedEvents"] = cast("JsonValue", list(forwarded))
         return {
             "name": name,
             "provider": "slack",
@@ -259,19 +321,22 @@ async def _is_plain_message(event: TriggerChannelMessageEvent) -> bool:
 
 async def _decide_event(
     handlers: Mapping[str, SlackEventCallback],
-    delivery: TriggerChannelMessageEvent | TriggerChannelUserPromptResponseEvent,
+    delivery: TriggerChannelMessageEvent
+    | TriggerChannelUserPromptResponseEvent
+    | TriggerChannelProviderEvent,
     thread: TriggerChannelThread,
     channel_name: str,
     actor: ChannelActor | None = None,
     *,
     remember: Callable[[str, SlackEvent], None] | None = None,
 ) -> TriggerMessageRoute | None:
-    """What a message or interaction starts, as its key's handler decides.
+    """What a message, interaction, edit, deletion or reaction starts, as its key's
+    handler decides.
 
-    ``None``, so what it starts without one. An endpoint is asked after
-    Trigger Server has its answer.
+    ``None``, so what it starts without one. Every handler is asked after
+    Trigger Server has its answer, since it may take longer than Trigger Server
+    waits.
     """
-    from managed_deepagents._channels.http.endpoint import is_endpoint_handler  # noqa: PLC0415
     from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
         read_slack_event,
         slack_thread,
@@ -292,40 +357,70 @@ async def _decide_event(
         return await _run_handler(
             event,
             lambda: handler(cast("SlackMessageEvent", event), slack_thread(thread, channel_name)),
+            _run_channel(channel_name, delivery, thread),
         )
 
-    if is_endpoint_handler(handler):
-        return TriggerMessageBackground(decide)
-    return await decide()
+    return TriggerMessageBackground(decide)
+
+
+def _run_channel(
+    channel_name: str,
+    delivery: TriggerChannelMessageEvent
+    | TriggerChannelUserPromptResponseEvent
+    | TriggerChannelProviderEvent,
+    thread: TriggerChannelThread,
+) -> RunChannel:
+    """The channel a delivery's runs start from: its conversation's thread and target."""
+    from managed_deepagents._channels.run_input import RunChannel  # noqa: PLC0415
+    from managed_deepagents._channels.target import channel_target  # noqa: PLC0415
+
+    origin = channel_target(
+        cast(
+            "ChannelBinding",
+            {
+                "provider": "slack",
+                "transport": "trigger_server",
+                "target": {"address": delivery["address"]},
+            },
+        )
+    )
+    return RunChannel(
+        name=channel_name,
+        provider="slack",
+        conversation_thread_id=thread["id"],
+        origin=origin,
+    )
 
 
 async def _run_handler(
     event: SlackEvent,
-    call: Callable[[], ChannelRunResult | Awaitable[ChannelRunResult | None] | None],
+    call: Callable[[], HandlerResult | Awaitable[HandlerResult | None] | None],
+    channel: RunChannel,
 ) -> TriggerMessageDecision:
     """Run a handler and normalize what it returned into run input.
 
-    A Slack message's blocks and attachments are added to the handler's
-    messages, as to a message's own.
+    A handler may return a list of runs: at most one on the Slack thread's own
+    conversation, the others on threads it chooses. A Slack message's blocks
+    and attachments are added to each run's messages, as to a message's own.
     """
     from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
     from managed_deepagents._channels.run_input import (  # noqa: PLC0415
         InvalidRunInput,
-        normalize_run_input,
+        normalize_run_inputs,
     )
-    from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
-        with_slack_rich_content,
-    )
+    from managed_deepagents._channels.slack.events import SlackMessageEvent  # noqa: PLC0415
     from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415
         TriggerMessageDecision,
     )
     from managed_deepagents._log import logger  # noqa: PLC0415
 
     outcome = await run_event_handler("Slack", event.key, event.delivery_id, call)
+    if outcome.reply is not None:
+        return TriggerMessageDecision("reply", message=outcome.reply.message)
     if outcome.type != "input":
         return TriggerMessageDecision(outcome.type)
     try:
-        run_input = normalize_run_input(outcome.input)
+        runs = normalize_run_inputs(outcome.input, channel)
     except InvalidRunInput as error:
         # MDA's own reason, bounded, unlike a raised exception's message.
         logger.error("slack handler returned invalid run input: %s", error.reason)
@@ -335,16 +430,30 @@ async def _run_handler(
             "slack handler returned invalid run input (%s)", logger.safe_error_label(error)
         )
         return TriggerMessageDecision("failed")
-    if run_input is None:
+    if not runs:
         return TriggerMessageDecision("skipped")
-    if event.key != "interaction" and run_input["messages"]:
-        run_input["messages"] = cast(
-            "list[dict[str, JsonValue]]",
-            with_slack_rich_content(
-                cast("list[dict[str, object]]", run_input["messages"]), event.payload
-            ),
-        )
-    return TriggerMessageDecision("input", run_input)
+    if isinstance(event, SlackMessageEvent):
+        for run in runs:
+            if run["messages"]:
+                run["messages"] = _with_rich_content(run["messages"], event)
+    return TriggerMessageDecision(
+        "input",
+        next((run for run in runs if "thread" not in run), None),
+        tuple(run for run in runs if "thread" in run),
+    )
+
+
+def _with_rich_content(
+    messages: list[dict[str, JsonValue]], event: SlackEvent
+) -> list[dict[str, JsonValue]]:
+    from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
+        with_slack_rich_content,
+    )
+
+    return cast(
+        "list[dict[str, JsonValue]]",
+        with_slack_rich_content(cast("list[dict[str, object]]", messages), event.payload),
+    )
 
 
 class _TriggerSlackArgs(BaseModel):
@@ -419,30 +528,73 @@ class _TriggerSlackArgs(BaseModel):
         return self
 
 
+def _allow_bot_triggers(ignore_bots: object, allow_bot_triggers: object) -> object:
+    """Trigger Server's ``allowBotTriggers``, from ``ignore_bots`` or the deprecated
+    ``allow_bot_triggers``; both set and contradictory is an error."""
+    if ignore_bots is not None and not isinstance(ignore_bots, bool):
+        raise ValueError("channels.slack(...) ignore_bots must be true or false")
+    if allow_bot_triggers is not None:
+        warnings.warn(_ALLOW_BOT_TRIGGERS_DEPRECATION, FutureWarning, stacklevel=3)
+        if ignore_bots is not None and allow_bot_triggers == ignore_bots:
+            raise ValueError(
+                "channels.slack(...) allow_bot_triggers conflicts with ignore_bots; "
+                "set only ignore_bots"
+            )
+    if ignore_bots is not None:
+        return not ignore_bots
+    return False if allow_bot_triggers is None else allow_bot_triggers
+
+
+def _app_look(
+    app: SlackAppOptions | None, top_level: Mapping[str, object]
+) -> tuple[Mapping[str, object], bool]:
+    """The app's look, from ``app`` or the deprecated top-level fields, and
+    whether those were used. Both at once is an error."""
+    deprecated = any(value is not None for value in top_level.values())
+    if app is None:
+        return top_level, deprecated
+    if deprecated:
+        raise ValueError(
+            "channels.slack(...) app conflicts with name, description, icon or "
+            "background_color; set them only in app"
+        )
+    if not isinstance(app, Mapping) or not set(app) <= _APP_KEYS:
+        raise ValueError(
+            "channels.slack(...) app takes only name, description, icon and background_color"
+        )
+    return {key: app.get(key) for key in top_level}, False
+
+
 def slack_channel(
     *,
+    app: SlackAppOptions | None = None,
     name: str | None = None,
     description: str | None = None,
     icon: str | None = None,
     background_color: str | None = None,
     trigger_mode: SlackTriggerMode | None = None,
     trigger_on_all_messages: bool | None = None,
-    allow_bot_triggers: bool = False,
+    ignore_bots: bool | None = None,
+    allow_bot_triggers: bool | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     status: SlackStatusChoice | None = None,
     on_event: SlackHandlers | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
-    reply: ChannelReply = "auto",
+    auto_post: bool | None = None,
+    reply: ChannelReply | None = None,
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
 
     Args:
-        name: Your agent's name, used in mentions like ``@support-agent``.
-        description: A short description of what your agent does.
-        icon: Optional path to a custom Slack app icon under ``channels/``.
-        background_color: Optional Slack app background as a ``#RRGGBB`` hex color.
+        app: The Slack app ``mda deploy`` sets up, as ``channels.github`` and
+            ``channels.linear`` take theirs: its ``name``, ``description``,
+            ``icon`` and ``background_color``.
+        name: Deprecated; use ``app["name"]``.
+        description: Deprecated; use ``app["description"]``.
+        icon: Deprecated; use ``app["icon"]``.
+        background_color: Deprecated; use ``app["background_color"]``.
         trigger_mode: Which channel messages start a run; see
             ``SlackTriggerMode``. New Slack apps use ``"mention"``; set
             ``"thread"`` to keep replying in a thread after one mention. When
@@ -452,9 +604,12 @@ def slack_channel(
         trigger_on_all_messages: Deprecated; use ``trigger_mode`` instead.
             ``True`` is ``trigger_mode="all"``. When both are set they must
             agree.
-        allow_bot_triggers: Let messages from other bots start runs. In every
-            trigger mode, a bot must still @-mention your agent explicitly in
-            the message.
+        ignore_bots: Ignore messages from other bots, so automations don't
+            trigger each other. ``True`` by default, as on ``channels.linear``.
+            With ``False``, a bot must still @-mention your agent explicitly,
+            in every trigger mode. Your agent's own messages are always ignored.
+        allow_bot_triggers: Deprecated and removed in 0.12; use
+            ``ignore_bots``. ``True`` is ``ignore_bots=False``.
         reactions: Emoji to react with when a message starts a run; ``eyes`` by
             default, and ``True`` keeps it. Pass ``False`` for none, another
             Slack emoji short name, or a callable that picks one per message.
@@ -478,9 +633,13 @@ def slack_channel(
             ``"directMessage"``, and ``"message"`` (any other channel message,
             which only ``trigger_mode`` ``"thread"`` or ``"all"`` delivers). A
             handler gets the ``SlackMessageEvent`` and its ``SlackChannelThread``, and
-            returns a prompt (string, message, or state), optionally with run
-            options as ``(input, {"context", "metadata", "webhook"})``, or
-            ``None`` to start no run: then the agent doesn't react or reply. A
+            returns a prompt (string, message, or state), a list of runs
+            ``[{"input": ..., **options}]`` with options such as ``context``,
+            ``metadata``, ``webhook``, ``thread``, ``auto_post`` or
+            ``multitask_strategy``, ``reply(message)``, or ``None`` to start no
+            run: then the agent doesn't react or reply. ``"edit"``, ``"delete"``,
+            ``"reaction"``, ``"shortcut"`` and ``"channel"`` take what happened to
+            a message or a channel, and start only the run they return. A
             message kind without a handler starts a run with the message, as
             without ``on_event``. The message's blocks, attachments and files
             still reach the run. ``"interaction"`` decides what a click on a
@@ -497,12 +656,13 @@ def slack_channel(
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
             Experimental: this may change in a minor release.
-        reply: Whether the channel posts the run's final answer in the thread:
-            ``"auto"`` (the default) or ``"none"``, to leave replying to the
-            agent, through ``runtime.channel.post`` or its own tools. The
-            status, reactions and ``on_finish`` stay as they are. ``"none"``
+        auto_post: Whether the channel posts the run's final answer in the
+            thread: ``True`` (the default), or ``False`` to leave replying to
+            the agent, through ``runtime.channel.post`` or its own tools. The
+            status, reactions and ``on_finish`` stay as they are. ``False``
             needs an ``mda`` CLI that deploys it.
             Experimental: this may change in a minor release.
+        reply: Deprecated: ``auto_post``. ``"none"`` is ``auto_post=False``.
         resolve_user: Map the Slack user to one of your users, with a function
             or an endpoint MDA asks; overrides the identity's ``resolve_user``.
             Experimental: this may change in a minor release.
@@ -524,34 +684,40 @@ def slack_channel(
     Example::
 
         channels.slack(
-            name="Support Bot",
+            app={"name": "Support Bot"},
             on_event={
-                "mention": lambda e, _: (e.text, {"metadata": {"slack_channel": e.channel_id}}),
+                "mention": lambda e, _: [
+                    {"input": e.text, "metadata": {"slack_channel": e.channel_id}}
+                ],
                 "message": lambda e, _: None,
             },
         )
     """
     if on_finish is not None and not callable(on_finish):
         raise TypeError("channels.slack(...) on_finish must be callable")
-    from managed_deepagents._channels.types import CHANNEL_REPLIES  # noqa: PLC0415
     from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES  # noqa: PLC0415
 
     if multitask_strategy not in MULTITASK_STRATEGIES:
         raise ValueError(
             "channels.slack(...) multitask_strategy must be enqueue, interrupt, rollback or reject"
         )
-    if reply not in CHANNEL_REPLIES:
-        raise ValueError("channels.slack(...) reply must be auto or none")
+    posts = channel_auto_post(auto_post, reply, label="channels.slack(...)", error=ValueError)
+    look, deprecated = _app_look(
+        app,
+        {
+            "name": name,
+            "description": description,
+            "icon": icon,
+            "background_color": background_color,
+        },
+    )
     try:
         parsed = _TriggerSlackArgs.model_validate(
             {
-                "name": name,
-                "description": description,
-                "icon": icon,
-                "background_color": background_color,
+                **look,
                 "trigger_mode": trigger_mode,
                 "trigger_on_all_messages": trigger_on_all_messages,
-                "allow_bot_triggers": allow_bot_triggers,
+                "allow_bot_triggers": _allow_bot_triggers(ignore_bots, allow_bot_triggers),
                 "reactions": reactions,
                 "status": status,
             }
@@ -560,6 +726,8 @@ def slack_channel(
         raise ValueError(f"channels.slack(...) received invalid configuration:\n{error}") from error
     if trigger_on_all_messages is not None:
         warnings.warn(_TRIGGER_ON_ALL_MESSAGES_DEPRECATION, FutureWarning, stacklevel=2)
+    if deprecated:
+        warnings.warn(_APP_FIELDS_DEPRECATION, FutureWarning, stacklevel=2)
     _warn_unreachable_handlers(parsed.trigger_mode, on_event)
     app: TriggerSlackAppConfig = {}
     if parsed.name is not None:
@@ -578,7 +746,7 @@ def slack_channel(
         status=cast("SlackStatusChoice | None", parsed.status),
         on_event=_resolve_handlers(on_event),
         multitask_strategy=multitask_strategy,
-        reply=reply,
+        auto_post=posts,
         on_finish=on_finish,
         resolve_user=checked_resolve_user("channels.slack", resolve_user),
     )

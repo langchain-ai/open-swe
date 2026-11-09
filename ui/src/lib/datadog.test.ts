@@ -164,6 +164,24 @@ describe("initializeDatadogRum", () => {
     )
   })
 
+  it("uses local storage for sessions on the desktop custom origin", async () => {
+    vi.stubGlobal("window", {
+      openSweDesktop: {},
+      location: { protocol: "open-swe:" },
+    })
+    const { rum, load } = rumLoader()
+    await initializeDatadogRum(
+      {
+        VITE_DATADOG_APPLICATION_ID: "app-id",
+        VITE_DATADOG_CLIENT_TOKEN: "client-token",
+      },
+      load
+    )
+    expect(rum.init).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionPersistence: "local-storage" })
+    )
+  })
+
   it("enables replay by default", async () => {
     const { rum, load } = rumLoader()
 

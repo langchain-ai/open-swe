@@ -49,7 +49,6 @@ class ThreadMetadata(BaseModel):
     repo_owner: str | None = None
     repo_name: str | None = None
     repo: dict[str, JsonValue] | None = None
-    experience: Literal["coding", "agent_workspace"] = "coding"
     repo_explicitly_none: bool = False
     model_selection: Literal["auto", "explicit"] | None = None
     model: str | None = None
@@ -79,7 +78,7 @@ class ThreadMetadata(BaseModel):
         else:
             user = await user_for_login(self.owner_login or "")
         if user is None:
-            raise PermissionError("The thread owner needs an Open SWE account")
+            raise PermissionError("The thread owner needs a Robin account")
         return user
 
 

@@ -26,12 +26,26 @@ export function pullRequestTopic(pr: PullRequestRef) {
   )
 }
 
+/** Invalidated as the pull request's checks run, at most every 15s; `repo` is `owner/name`. */
+export function pullRequestChecksTopic(pr: PullRequestRef) {
+  return invalidationTopic(
+    "pull-request-checks",
+    `${pr.repo}/${pr.number}`.toLowerCase()
+  )
+}
+
 /** A pull request's live state on GitHub, shared by every page that shows it. */
 export function pullRequestStatusQuery(login: string, pr: PullRequestRef) {
   return {
     queryKey: [PULL_REQUEST_STATUS, login, pr.repo, pr.number],
     queryFn: () => api.pullRequestStatus(pr.repo, pr.number),
-    meta: { invalidatedBy: [pullRequestTopic(pr)] },
+    meta: {
+      invalidatedBy: [
+        pullRequestTopic(pr),
+        pullRequestChecksTopic(pr),
+        invalidationTopic("required-checks", pr.repo.toLowerCase()),
+      ],
+    },
   } as const
 }
 

@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 import { toast } from "sonner"
@@ -143,10 +144,7 @@ export function slackChannelMatches(
 ): boolean {
   const needle = query.trim().replace(/^#/, "").toLowerCase()
   if (!needle) return true
-  return (
-    channel.name.toLowerCase().includes(needle) ||
-    channel.id.toLowerCase().includes(needle)
-  )
+  return new FuzzySearch(needle).matches(channel.name, channel.id)
 }
 
 /** A cached channel name, with a readable fallback while names are unavailable. */

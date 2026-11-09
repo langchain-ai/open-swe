@@ -9,6 +9,7 @@ from openswe.slack import move as slack_move
 from openswe.slack import webhook
 from openswe.slack.request import SlackRequest
 from openswe.slack.tools import move_thread
+from tests.conftest import serve_threads_from
 
 
 @pytest.mark.asyncio
@@ -184,16 +185,9 @@ async def test_private_slack_move_cannot_publish_to_channel(monkeypatch):
             }
         },
     )
-    monkeypatch.setattr(
-        move_thread,
-        "langgraph_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(
-                    return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}
-                )
-            )
-        ),
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}),
     )
     post = AsyncMock()
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", post)

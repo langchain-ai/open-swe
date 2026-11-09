@@ -34,6 +34,7 @@ pub(crate) mod logs;
 pub(crate) mod naming;
 pub(crate) mod path_util;
 pub(crate) mod project;
+pub(crate) mod pull;
 pub(crate) mod python_extract;
 pub(crate) mod secret_input;
 pub(crate) mod state;

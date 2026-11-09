@@ -98,16 +98,18 @@ function AssessmentCard({
               ? "Approved"
               : assessment.decision === "would_approve"
                 ? "Would approve"
-                : "Needs human review"}
+                : assessment.decision === "would_approve_conditionally"
+                  ? "Needs approval of one change"
+                  : "Needs human review"}
           </span>
           <span
             className="text-xs text-secondary"
             title={
               assessment.approved
-                ? "Open SWE approved this pull request on GitHub."
+                ? "Robin approved this pull request on GitHub."
                 : assessment.dry_run
-                  ? "Auto-approval is in dry run for this repository: Open SWE scores the risk but never approves on GitHub."
-                  : "Open SWE only advises here; it doesn't approve on GitHub."
+                  ? "Auto-approval is in dry run for this repository: Robin scores the risk but never approves on GitHub."
+                  : "Robin only advises here; it doesn't approve on GitHub."
             }
           >
             {assessment.approved
@@ -142,9 +144,24 @@ function AssessmentCard({
           </div>
         )}
       </div>
+      {assessment.approval_condition && (
+        <p className="mt-space-2">
+          <span className="font-medium">Needs a person to approve:</span>{" "}
+          {assessment.approval_condition}
+        </p>
+      )}
+      {assessment.auto_approved && (
+        <p className="mt-space-1 text-secondary">
+          <span className="font-medium">Covered by auto-approve:</span>{" "}
+          {assessment.auto_approved}
+        </p>
+      )}
       <details className="mt-space-2 text-xs text-secondary">
         <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-space-2 text-sm whitespace-pre-wrap text-primary">
+        <p
+          data-reply-part="Robin's risk assessment"
+          className="mt-space-2 text-sm whitespace-pre-wrap text-primary"
+        >
           {assessment.explanation}
         </p>
         <p className="mt-space-2">
@@ -213,7 +230,7 @@ function AssessmentCard({
               placeholder="What was right, or what did we miss?"
             />
             <p className="text-xs text-secondary">
-              Saved in Open SWE. Your comment is not posted to GitHub.
+              Saved in Robin. Your comment is not posted to GitHub.
             </p>
             <div className="flex gap-space-2">
               <Button type="submit" size="xs" disabled={!value?.rating}>

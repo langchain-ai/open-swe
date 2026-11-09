@@ -120,7 +120,7 @@ test.describe("thread pull requests", () => {
 
     await card
       .getByRole("link", {
-        name: "Review fakeorg/demo pull request #1 in Open SWE",
+        name: "Review fakeorg/demo pull request #1 in Robin",
       })
       .click();
     await expect(page).toHaveURL(/\/agents\/reviews\/fakeorg\/demo\/1$/);

@@ -92,8 +92,8 @@ export function findingAttachment(
     quote: finding.title,
     comment:
       intent === "ask"
-        ? `About Open SWE's finding "${finding.title}" at ${findingRef(finding)}.`
-        : `Fix Open SWE's finding "${finding.title}" at ${findingRef(finding)} on this branch.`,
+        ? `About Robin's finding "${finding.title}" at ${findingRef(finding)}.`
+        : `Fix Robin's finding "${finding.title}" at ${findingRef(finding)} on this branch.`,
   })
 }
 

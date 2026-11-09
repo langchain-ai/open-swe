@@ -2,8 +2,8 @@ const path = require("node:path");
 
 const APP_ORIGIN = "open-swe://app";
 const APP_URL = `${APP_ORIGIN}/`;
-const APP_NAME = "Open SWE";
-const DEVELOPMENT_APP_NAME = "Open SWE Development";
+const APP_NAME = "Robin";
+const DEVELOPMENT_APP_NAME = "Robin Development";
 const APP_USER_MODEL_ID = "com.langchain.openswe";
 const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev";
 const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development";
@@ -16,7 +16,7 @@ const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
 const DESKTOP_ENVIRONMENTS_PATH = "/dashboard/api/desktop/environments";
-const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
+const CONNECT_PROVIDERS = new Set(["slack", "github"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -202,14 +202,17 @@ function localCallbackUrl(navigationUrl, backendUrl) {
   }
 }
 
-function desktopDeepLinkUrl(value, backendUrl) {
+/** Localizes a trusted dashboard origin; the downloaded UI decides page ownership. */
+function desktopDeepLinkUrl(value, backendUrl, dashboardOrigins = []) {
   try {
     const target = new URL(value);
     const backend = new URL(backendUrl);
     if (
-      target.protocol !== "https:" ||
-      target.origin !== backend.origin ||
-      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
+      !["http:", "https:"].includes(target.protocol) ||
+      target.username ||
+      target.password ||
+      (target.origin !== backend.origin &&
+        !dashboardOrigins.includes(target.origin))
     )
       return null;
     return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;

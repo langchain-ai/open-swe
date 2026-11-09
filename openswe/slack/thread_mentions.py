@@ -43,7 +43,7 @@ class SlackThreadMention(Base):
         """Remember each person a posted message mentions, other than its poster, as of their latest mention per thread."""
         message = envelope.posted_message()
         event = envelope.event
-        if not postgres.configured() or message is None or event is None:
+        if message is None or event is None:
             return
         poster = message.user if isinstance(message.user, str) else ""
         mentioned = set(_MENTION.findall(message.text or "")) - {poster}
@@ -107,8 +107,6 @@ class SlackThreadMention(Base):
         cls, user_id: UUID, *, within: timedelta, limit: int
     ) -> list[str]:
         """PR URLs linked in threads that mention this person, most recently mentioned first."""
-        if not postgres.configured():
-            return []
         link = SlackPullRequestLink
         mentioned_at = func.max(cls.updated_at)
         async with postgres.session() as session:

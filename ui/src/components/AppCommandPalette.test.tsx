@@ -3,8 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { experienceStore } from "@/lib/experience"
-import { AppCommandPalette } from "./AppCommandPalette"
+import { AppCommandPalette, buildPaletteResults } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
@@ -14,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   cloudThread: {
     id: "cloud-1",
     title: "Cloud result",
-    experience: "agent_workspace",
+    updatedAt: Date.now(),
   } as AgentThread,
 }))
 
@@ -75,6 +74,26 @@ describe("AppCommandPalette", () => {
     })
   })
 
+  it("narrows results to the selected tab", () => {
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }))
+    expect(screen.queryByRole("option", { name: /Open settings/ })).toBeNull()
+    expect(screen.getByRole("option", { name: /Cloud result/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Commands" }))
+    expect(screen.queryByRole("option", { name: /Cloud result/ })).toBeNull()
+    expect(screen.getByRole("option", { name: /Open settings/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }))
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "> settings" },
+    })
+    expect(screen.getByRole("option", { name: /Open settings/ })).toBeTruthy()
+  })
+
   it("loads additional cloud thread pages", () => {
     render(
       <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
@@ -96,10 +115,9 @@ describe("AppCommandPalette", () => {
       },
     })
     expect(
-      await screen.findByRole("option", { name: "Cloud result" })
+      await screen.findByRole("option", { name: /Cloud result/ })
     ).toBeTruthy()
 
-    experienceStore.write("alice", "coding")
     fireEvent.change(input, {
       target: {
         value:
@@ -124,4 +142,10 @@ describe("AppCommandPalette", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+})
+
+it("finds typoed app commands", () => {
+  expect(
+    buildPaletteResults(commands, [], "> settngs").map((result) => result.id)
+  ).toContain("command:settings")
 })

@@ -14,7 +14,7 @@ import {
 } from "@/features/agents/utils/passageReply"
 
 /**
- * Something the person pointed Open SWE at, riding ahead of their next message:
+ * Something the person pointed Robin at, riding ahead of their next message:
  * a passage they replied to (including one quoted from the page), an image they
  * marked up, or code lines.
  */
@@ -24,7 +24,6 @@ export type ComposerAttachment =
       reply: PassageReply
       /** What the card calls itself; a plain reply is "Reply". */
       label?: string
-      location?: string
     }
   | { kind: "image"; image: ImageChunk; comment: string }
   | { kind: "code"; excerpt: CodeExcerpt }
@@ -44,9 +43,9 @@ export function quoteFromPage({
   return {
     kind: "reply",
     label,
-    location,
     reply: {
-      source: "conversation",
+      source: "pull_request",
+      part: location,
       before: "",
       selection: normalizeSelection(quote || location || label),
       after: "",
@@ -106,11 +105,11 @@ interface CardContent {
 function cardContent(attachment: ComposerAttachment): CardContent {
   switch (attachment.kind) {
     case "reply": {
-      const { reply, label, location } = attachment
+      const { reply, label } = attachment
+      const location = reply.file ? `${reply.file}:${reply.lines}` : reply.part
       return {
         label: label ?? "Reply",
-        location:
-          location ?? (reply.file ? `${reply.file}:${reply.lines}` : undefined),
+        location,
         quote: reply.selection === location ? undefined : reply.selection,
         comment: label ? undefined : reply.comment,
       }

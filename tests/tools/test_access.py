@@ -9,6 +9,9 @@ from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
 from tests.support.slack_api import SlackAPI
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
 

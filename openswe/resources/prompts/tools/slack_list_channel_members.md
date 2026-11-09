@@ -1,4 +1,4 @@
-List one page of Slack channel members, including their Slack IDs, display names, and linked GitHub logins when known to Open SWE.
+List one page of Slack channel members, including their Slack IDs, display names, and linked GitHub logins when known to Robin.
 Unknown GitHub logins are null; never infer them from names.
 Names fall back to Slack IDs if profile lookup fails.
 Also returns `status_text`, `status_emoji`, and `status_expiration` from Slack profiles.

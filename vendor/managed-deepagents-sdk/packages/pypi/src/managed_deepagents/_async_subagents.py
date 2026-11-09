@@ -13,7 +13,7 @@ GENERAL_PURPOSE = "general-purpose"
 _AGENT_SKILLS = "/skills/"
 
 # Spec keys that override the lead's value; unset ones inherit it, like a sync subagent.
-_INHERITED_KEYS = ("model", "tools", "permissions", "interrupt_on")
+_INHERITED_KEYS = ("model", "tools", "permissions", "interrupt_on", "mcp")
 # Spec keys the lead never passes down, like a sync subagent.
 _OWN_KEYS = ("middleware", "response_format")
 

@@ -76,11 +76,12 @@ from rt.git_evidence import TurnGit, turn_git
 from rt.kinds import KINDS
 from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
-from rt.model_calls import model_call_guards
+from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
-from rt.tools import operation_tool
+from rt.tools import STATE_KEY, operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
+    JOINED_TASK_CONTEXT,
     Catalog,
     FilesSpec,
     InboxSpec,
@@ -89,17 +90,22 @@ from runtime_api.catalog import (
     RunModels,
     SandboxCreate,
     SandboxSpec,
+    TaskContext,
     ToolSpec,
+    WorkStateRules,
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     PREPARE,
+    Done,
+    GitHubProxyRefreshed,
     Inbox,
     InboxItems,
     InboxRead,
     InboxReceipt,
     ModelCall,
+    ModelFailed,
     PhaseResult,
     Prepare,
     Prepared,
@@ -1271,7 +1277,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         )
     await turn_trace(backend.run).ended()
     saved = await graph.aget_state(config)
-    assert saved.values["open_swe_state"] == {"kept": True}
+    # A turn starts with no task joined since its catalog was planned.
+    assert saved.values["open_swe_state"] == {"kept": True, JOINED_TASK_CONTEXT: None}
     assert "ls_git_repo" not in parent.metadata
     created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
     assert any(run["run_type"] == "llm" for run in created.values())
@@ -1538,6 +1545,136 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+@pytest.mark.parametrize(
+    ("command", "goal_mode", "refused"),
+    [
+        ("for i in $(seq 60); do gh pr checks 1 && break; sleep 30; done", True, True),
+        ("sleep 240; gh pr view 1", True, True),
+        ("sleep 240; make test", False, False),
+        ("npm run dev & sleep 3 && curl localhost:3000", True, False),
+        ("for i in 1 2 3; do curl -f localhost:3000 && break; sleep 2; done", True, False),
+        ('git commit -m "wait: sleep 30 before retry"', True, False),
+        ("bash -c 'until gh pr checks 1; do sleep 30; done'", True, True),
+        ("sleep 5 && kubectl wait --for=condition=Ready pod/web --timeout=120s", True, False),
+        ("for((i=0;i<3;i++)); do sleep 5; done", True, True),
+    ],
+)
+async def test_a_goal_mode_execute_that_waits_by_sleeping_is_refused(
+    monkeypatch: pytest.MonkeyPatch, command: str, goal_mode: bool, refused: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    work_state = WorkStateRules(tool="goal_set_state", sleep_refusal="use monitor")
+    backend = _run_backend(
+        catalog=Catalog(
+            loop=LoopRules(work_state=work_state if goal_mode else None), sandbox=_IN_SANDBOX
+        )
+    )
+    post = AsyncMock()
+    monkeypatch.setattr(backend, "post", post)
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={"name": "execute", "args": {"command": command}, "id": "call-1"},
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    screened = await files._screened(request)
+
+    if refused:
+        assert isinstance(screened, ToolMessage) and screened.content == "use monitor"
+    else:
+        assert screened is request
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("command", "output", "refreshed"),
+    [
+        (
+            "git push origin HEAD",
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            True,
+        ),
+        ("gh pr view", "HTTP 401: Bad credentials (https://api.github.com/graphql)", True),
+        ("git push", "Everything up-to-date", False),
+        ("grep -rn 'Bad credentials' .", "file:1:HTTP 401: Bad credentials", False),
+        ("git grep 'Bad credentials'", "file:1:HTTP 401: Bad credentials", False),
+        (
+            "pytest -v mda/tests/test_backend_calls.py",
+            "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+            False,
+        ),
+        ("tail app.log", "HTTP 401: Bad credentials (https://api.github.com/graphql)", False),
+        ("curl https://example.com", '{"message":"Bad credentials"}', False),
+        ("curl https://api.github.com/user", '{"message":"Bad credentials"}', True),
+    ],
+)
+async def test_a_command_github_refused_gets_the_sandbox_a_fresh_token(
+    monkeypatch: pytest.MonkeyPatch, command: str, output: str, refreshed: bool
+) -> None:
+    """The sandbox's token is replaced and the model told to retry; the command runs once."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(
+        catalog=Catalog(loop=LoopRules(refresh_github_proxy=True), sandbox=_IN_SANDBOX)
+    )
+    calls: list[str] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        calls.append(name)
+        if name == "check_shell":
+            return ShellVerdict(allowed=True)
+        if name == "refresh_github_proxy":
+            assert body["force_refresh"] is True
+        return GitHubProxyRefreshed(expires_at=datetime.now(UTC) + timedelta(hours=1))
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": command},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    in_sandbox = AsyncMock(return_value=ToolMessage(content=output, tool_call_id="call-1"))
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    result = await files.awrap_tool_call(request, in_sandbox)
+    await backend.outbox.drain()
+
+    in_sandbox.assert_awaited_once()
+    assert calls.count("refresh_github_proxy") == int(refreshed)
+    assert isinstance(result, ToolMessage)
+    assert result.text.startswith(output)
+    assert ("fresh GitHub token" in result.text) is refreshed
+
+
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
 async def test_execute_searches_through_the_shell_where_grep_and_glob_are_excluded(
     monkeypatch: pytest.MonkeyPatch, excluded: list[str]
@@ -1719,6 +1856,43 @@ async def test_a_run_without_an_mda_sandbox_offloads_a_large_result_to_its_own_f
     assert (tmp_path / "large_tool_results" / "c1").read_text() == "x" * 100_000
 
 
+@pytest.mark.parametrize("bundled", [True, False])
+async def test_the_skills_open_swe_ships_are_served_from_this_deployment(
+    monkeypatch: pytest.MonkeyPatch, bundled: bool
+) -> None:
+    from deepagents.middleware.skills import SkillsState
+    from rt.skills import RunSkillsMiddleware, SkillFiles
+    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillFile
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    sources = ["/organization-skills/", *([BUNDLED_SKILLS] if bundled else [])]
+    backend = _run_backend(catalog=Catalog(skill_sources=sources))
+    asked: list[dict[str, JsonValue]] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        asked.append(body)
+        deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
+        return RunSkills(
+            files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]
+        )
+
+    _answering(monkeypatch, backend, answer)
+    skill_files = SkillFiles(backend, lambda: "run-1")
+    empty = cast(SkillsState, {"messages": []})
+
+    listed = await RunSkillsMiddleware(backend, skill_files).abefore_agent(empty, MagicMock(), {})
+
+    # The backend leaves out what this deployment serves, and lists only PostgreSQL's skills.
+    assert [body["served"] for body in asked] == [[BUNDLED_SKILLS]]
+    assert listed is not None
+    names = {skill["name"] for skill in listed["skills_metadata"]}
+    shipped = {"baby-sit", "html-artifacts", "linear-tickets", "web-apps", "workspaces"}
+    assert names == ({"deploy"} | shipped if bundled else {"deploy"})
+    if bundled:
+        read = await skill_files.aread(f"{BUNDLED_SKILLS}baby-sit/SKILL.md")
+        assert read.error is None
+
+
 async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1805,18 +1979,28 @@ class _ToolCallingModel(GenericFakeChatModel):
         return self
 
 
-COORDINATOR_CATALOG = Catalog(skill_sources=["/skills/coordinator/"])
+_ROLE = '<dynamic-context kind="run" id="task-role">You coordinate.</dynamic-context>'
+COORDINATOR_CATALOG = Catalog(
+    skill_sources=["/skills/coordinator/"],
+    loop=LoopRules(task_context=TaskContext(instructions=_ROLE)),
+)
 
 
 async def _launch_worker(
-    monkeypatch: pytest.MonkeyPatch, client: MagicMock, *, also: Sequence[ToolCall] = ()
-) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]]]:
-    """Run a coordinator that launches a worker through deepagents' ``start_async_task``."""
+    monkeypatch: pytest.MonkeyPatch,
+    client: MagicMock,
+    *,
+    also: Sequence[ToolCall] = (),
+    task_context: str | None = None,
+    backend: OpenSweBackend | None = None,
+) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]], Mapping[str, object]]:
+    """Run a coordinator that launches a worker through deepagents' ``start_async_task``;
+    registering it answers with ``task_context``."""
     from deepagents.middleware import async_subagents
     from rt.middleware import AsyncWorkerLaunchMiddleware
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    backend = _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
+    backend = backend or _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
     calls: list[tuple[str, dict[str, object]]] = []
 
     async def post(
@@ -1831,7 +2015,10 @@ async def _launch_worker(
         calls.append((name, dict(body)))
         if name == "launch_worker":
             return {"grant": "worker-grant", "assignment": "Your assignment: Fix login"}
-        return {"worker": {"worker_thread_id": body["worker_thread_id"], "task_id": "task-1"}}
+        return {
+            "worker": {"worker_thread_id": body["worker_thread_id"], "task_id": "task-1"},
+            "task_context": task_context,
+        }
 
     monkeypatch.setattr(backend, "post", post)
     launches = async_subagents.AsyncSubAgentMiddleware(
@@ -1856,7 +2043,22 @@ async def _launch_worker(
     model = _ToolCallingModel(
         messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
     )
-    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+
+    held: dict[str, object] = {}
+
+    class HeldState(AgentMiddleware[RunState]):
+        """Keeps the run's held state as the model call after the launch sees it."""
+
+        state_schema = RunState
+
+        async def abefore_model(self, state: RunState, runtime: object) -> None:
+            held.update(state.get(STATE_KEY, {}))
+
+    # Middleware types are invariant in the state they extend; a graph merges them all.
+    middleware = cast(
+        list[AgentMiddleware], [HeldState(), AsyncWorkerLaunchMiddleware(backend), launches]
+    )
+    graph = create_agent(model, middleware=middleware)
     values = await graph.ainvoke(
         {"messages": [("user", "fix login in the background")]},
         {
@@ -1868,7 +2070,8 @@ async def _launch_worker(
     )
     # Open SWE's task messages report the worker; deepagents does not poll it too.
     assert not values.get("async_tasks")
-    return [m for m in values["messages"] if isinstance(m, ToolMessage)], calls
+    messages = [m for m in values["messages"] if isinstance(m, ToolMessage)]
+    return messages, calls, held
 
 
 async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_token(
@@ -1878,7 +2081,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
     client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
 
-    results, calls = await _launch_worker(
+    results, calls, _ = await _launch_worker(
         monkeypatch,
         client,
         also=[
@@ -1930,6 +2133,23 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     client.runs.create.assert_awaited_once()
 
 
+async def test_a_coordinators_first_worker_tells_its_run_the_task_it_joined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
+    client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend("coordinator-token", catalog=COORDINATOR_CATALOG)
+    joined = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
+
+    _, _, held = await _launch_worker(monkeypatch, client, task_context=joined, backend=backend)
+
+    # The run's later model calls tell the model the task, from its checkpoint: a run
+    # resumed elsewhere still knows it.
+    assert held == {JOINED_TASK_CONTEXT: joined}
+
+
 def _mda_error(status: int) -> APIStatusError:
     error = {429: RateLimitError, 403: PermissionDeniedError}.get(status, InternalServerError)
     response = httpx.Response(status, request=httpx.Request("POST", "http://api/threads/runs"))
@@ -1955,7 +2175,7 @@ async def test_a_worker_launch_mda_failed_to_start_is_made_again_while_it_may_pa
     )
     client.runs.create = AsyncMock(side_effect=[*failures, {"run_id": "worker-run"}])
 
-    [result], calls = await _launch_worker(monkeypatch, client)
+    [result], calls, _ = await _launch_worker(monkeypatch, client)
 
     attempts = [body for hook, body in calls if hook == "launch_worker"]
     # Every attempt is the same launch, so one launch still registers one worker.
@@ -2035,11 +2255,11 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
         (400, "No tool call found for function call output call_1", False),
         (400, "unexpected `tool_use_id` found in `tool_result` blocks", False),
         (400, "tool_use ids were found without `tool_result` blocks", False),
-        (400, "context window exceeded", True),
+        (400, "context window exceeded", False),
         (500, "No tool output found for function call", True),
     ],
 )
-async def test_mda_does_not_retry_tool_pairing_errors(
+async def test_mda_retries_only_transient_errors_on_the_fallback(
     monkeypatch: pytest.MonkeyPatch, status: int, message: str, retries: bool
 ) -> None:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -2100,6 +2320,108 @@ async def test_a_model_call_paused_for_a_connection_is_not_retried_on_the_fallba
             ModelRequest(model=model, messages=[], state=state), handler
         )
     assert caught.value is paused
+
+
+def _planned_with_fallback() -> RunState:
+    return {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=ModelSpec(model_id="primary", kwargs={}),
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+
+
+def _reporting_backend(
+    monkeypatch: pytest.MonkeyPatch, reported: list[tuple[str, dict[str, JsonValue]]]
+) -> OpenSweBackend:
+    backend = _run_backend("token", invocation_id="run")
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        reported.append((name, body))
+        return Done()
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    return backend
+
+
+async def test_a_model_call_that_fails_the_run_reports_why_before_it_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    body: dict[str, object] = {"error": {"code": "context_length_exceeded"}}
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    error = openai.BadRequestError(
+        "too long", response=httpx2.Response(400, request=request, json=body), body=body
+    )
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+    middleware = BackendRunMiddleware(_reporting_backend(monkeypatch, reported))
+
+    with pytest.raises(openai.BadRequestError) as caught:
+        await middleware.awrap_model_call(
+            ModelRequest(model=model, messages=[], state=_planned_with_fallback()),
+            AsyncMock(side_effect=error),
+        )
+
+    assert caught.value is error
+    # Taken by the backend before the run fails, so the completion webhook finds it.
+    assert reported == [
+        (
+            "model_failed",
+            ModelFailed(
+                run_id="run-1", code="context_too_long", error_type="BadRequestError"
+            ).model_dump(mode="json"),
+        )
+    ]
+
+
+async def test_a_model_call_paused_for_a_connection_reports_no_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+    middleware = BackendRunMiddleware(_reporting_backend(monkeypatch, reported))
+
+    with pytest.raises(GraphInterrupt):
+        await middleware.awrap_model_call(
+            ModelRequest(model=model, messages=[], state=_planned_with_fallback()),
+            AsyncMock(side_effect=GraphInterrupt()),
+        )
+    assert reported == []
+
+
+async def test_a_lasting_provider_outage_ends_the_run_with_a_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.model_calls.BACKOFF_SCHEDULE", (0.0, 0.0))
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+    middleware = BackendRunMiddleware(_reporting_backend(monkeypatch, reported))
+    handler = AsyncMock(side_effect=TimeoutError("overloaded"))
+
+    response = await middleware.awrap_model_call(
+        ModelRequest(model=model, messages=[], state=_planned_with_fallback()), handler
+    )
+
+    assert isinstance(response, ModelResponse)
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert handler.await_count == 3
+    assert reported == []
 
 
 @pytest.mark.parametrize("managed", [False, True])
@@ -2209,3 +2531,42 @@ def test_the_backend_hears_where_summarization_cut_the_conversation() -> None:
     }
 
     assert held_state(state) == {"reply_surface": "slack", "visible_from": 4}
+
+
+async def test_the_goal_tool_waits_for_the_edits_reported_before_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    backend = _run_backend(
+        catalog=Catalog(loop=LoopRules(work_state=WorkStateRules(tool="goal_set_state")))
+    )
+    order: list[str] = []
+
+    async def drained() -> None:
+        order.append("drained")
+
+    async def answer(name: str, _body: dict[str, JsonValue]) -> BaseModel:
+        order.append(name)
+        return OperationResult(content="done")
+
+    monkeypatch.setattr(backend.outbox, "drain", drained)
+    _answering(monkeypatch, backend, answer)
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    for name in ("web_search", "goal_set_state"):
+        served = operation_tool(
+            ToolSpec(name=name, description=name, parameters={"type": "object"}), backend
+        )
+        assert served.coroutine is not None
+        await served.coroutine(runtime=runtime)
+
+    # Only the goal tool waits, and it waits before its own operation goes out.
+    assert order.count("drained") == 1
+    assert order.index("drained") == len(order) - 2

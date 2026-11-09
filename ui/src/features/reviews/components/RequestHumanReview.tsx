@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
+import { pullRequestTopic } from "../lib/cache"
 import { pullRequestKey } from "../lib/status"
 import { PullRequestActionButton } from "./PullRequestActionButton"
 
@@ -19,11 +20,16 @@ import { PullRequestActionButton } from "./PullRequestActionButton"
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const queryClient = useQueryClient()
   const queryKey = ["human-review-availability", pr.repo, pr.number]
+  const needsReview =
+    pr.draft === false &&
+    (pr.reviewDecision !== "approved" || pr.reviewRequired)
   const availability = useQuery({
     queryKey,
+    enabled: needsReview,
     queryFn: () =>
       api.humanReviewAvailability({ repo: pr.repo, number: pr.number }),
-    staleTime: 60_000,
+    meta: { invalidatedBy: [pullRequestTopic(pr)] },
+    refetchOnWindowFocus: true,
   })
   const [channel, setChannel] = useState<string | null>(null)
   const active = availability.data?.active ?? false
@@ -65,14 +71,14 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (pr.draft !== false) return null
+  if (!needsReview) return null
   const channelHint =
     active || channel
       ? null
       : availability.isPending
         ? "Checking the default Slack review channel…"
         : availability.isError
-          ? "Could not check the default Slack review channel. Choose a review channel manually or retry the review status."
+          ? "Could not check the default Slack review channel. Choose a review channel manually."
           : needsChannel
             ? "No default Slack review channel is configured. Choose a review channel manually to enable this button."
             : null
@@ -89,25 +95,26 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       onClick={(event) => event.stopPropagation()}
       title={channelHint ?? undefined}
     >
-      {(needsChannel || (availability.isError && !active)) &&
-        !requestReview.isSuccess && (
-          <SlackChannelCombobox
-            value={channel}
-            onValueChange={setChannel}
-            placeholder="Choose a review channel"
-            aria-label="Review channel"
-            eligible={(option) => option.is_member}
-            disabled={requestReview.isPending}
-          />
-        )}
+      {(needsChannel || (availability.isError && !active)) && (
+        <SlackChannelCombobox
+          value={channel}
+          onValueChange={setChannel}
+          placeholder="Choose a review channel"
+          aria-label="Review channel"
+          eligible={(option) => option.is_member}
+          disabled={requestReview.isPending}
+        />
+      )}
       <PullRequestActionButton
         label={label}
         loading={requestReview.isPending}
-        disabled={Boolean(channelHint)}
+        disabled={Boolean(channelHint) || (active && !permalink)}
         onClick={() => {
           if (requestReview.isPending) return
-          if (active && permalink) {
-            window.open(permalink, "_blank", "noopener,noreferrer")
+          if (active) {
+            if (permalink) {
+              window.open(permalink, "_blank", "noopener,noreferrer")
+            }
           } else if (channelHint) {
             toast.error(channelHint)
           } else {
@@ -115,14 +122,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           }
         }}
       />
-      {availability.isError && (
-        <PullRequestActionButton
-          label="Retry review status"
-          loading={availability.isFetching}
-          disabled={availability.isFetching}
-          onClick={() => void availability.refetch()}
-        />
-      )}
       {channelHint && (
         <Popover>
           <PopoverTrigger asChild>

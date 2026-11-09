@@ -1,10 +1,11 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::blocking::Client as HttpClient;
 use reqwest::{redirect, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{humanize_error_body, Client, REQUEST_TIMEOUT, TENANT_HEADER};
+use crate::error::{api_category, categorized, ErrorCategory};
 
 /// A channel setup request that may succeed when made again: it never reached
 /// Trigger Server, or Trigger Server or Slack was busy (a 5xx or 429).
@@ -170,6 +171,11 @@ pub(crate) struct SlackChannelOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) trigger_mode: Option<SlackTriggerMode>,
     pub(crate) allow_bot_triggers: bool,
+    /// The Slack events besides messages the channel's handlers take, which
+    /// Trigger Server forwards. Always sent, so removing the handlers stops
+    /// them; Trigger Servers that predate it ignore it.
+    #[serde(default)]
+    pub(crate) forwarded_events: Vec<String>,
 }
 
 /// Which channel messages start a run; DMs always do.
@@ -275,16 +281,25 @@ impl Client {
         if let Some(mode) = options.trigger_mode {
             query.push(("trigger_mode", mode.as_str()));
         }
+        // Each forwarded event adds its event subscription and scopes to the
+        // app, one query parameter apiece.
+        query.extend(
+            options
+                .forwarded_events
+                .iter()
+                .map(|event| ("forwarded_events", event.as_str())),
+        );
         let response = self.trigger_get(
             &["v1", "triggers", "slack-custom-app", "manifest"],
             &query,
             "Slack manifest",
         )?;
-        if !response.status().is_success() {
-            bail!(
-                "Slack manifest request failed (HTTP {}).",
-                response.status().as_u16()
-            );
+        let status = response.status();
+        if !status.is_success() {
+            return Err(categorized(
+                api_category(status),
+                format!("Slack manifest request failed (HTTP {}).", status.as_u16()),
+            ));
         }
         response
             .json::<Value>()
@@ -302,10 +317,15 @@ impl Client {
         match response.status() {
             StatusCode::NOT_FOUND => return Ok(None),
             StatusCode::SERVICE_UNAVAILABLE => return Ok(Some(SlackManager::Unavailable)),
-            status if !status.is_success() => bail!(
-                "Slack app management lookup failed (HTTP {}).",
-                status.as_u16()
-            ),
+            status if !status.is_success() => {
+                return Err(categorized(
+                    api_category(status),
+                    format!(
+                        "Slack app management lookup failed (HTTP {}).",
+                        status.as_u16()
+                    ),
+                ))
+            }
             _ => {}
         }
         let body: SlackManagerResponse = response
@@ -330,11 +350,12 @@ impl Client {
             &[("deployment_id", deployment_id)],
             "Channel listing",
         )?;
-        if !response.status().is_success() {
-            bail!(
-                "Channel listing failed (HTTP {}).",
-                response.status().as_u16()
-            );
+        let status = response.status();
+        if !status.is_success() {
+            return Err(categorized(
+                api_category(status),
+                format!("Channel listing failed (HTTP {}).", status.as_u16()),
+            ));
         }
         let list: TriggerChannelList = response
             .json()
@@ -378,6 +399,7 @@ impl Client {
             }
             let code = status.as_u16();
             let transient = status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS;
+            let category = api_category(status);
             if payload.slack.customer_app.is_some() {
                 // The body is untrusted and may echo the app's credentials, so
                 // none of it is shown.
@@ -388,25 +410,33 @@ impl Client {
                     .into());
                 }
                 if status == StatusCode::CONFLICT {
-                    bail!(
-                        "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel."
-                    );
+                    // The user's app, not a platform failure.
+                    return Err(categorized(
+                        ErrorCategory::UserInput,
+                        "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel.",
+                    ));
                 }
                 if matches!(
                     status,
                     StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
                 ) {
-                    bail!(
-                        "Channel setup failed (HTTP {code}). Check the Slack app's bot token and signing secret."
-                    );
+                    return Err(categorized(
+                        ErrorCategory::UserInput,
+                        format!(
+                            "Channel setup failed (HTTP {code}). Check the Slack app's bot token and signing secret."
+                        ),
+                    ));
                 }
-                bail!("Channel setup failed (HTTP {code}).");
+                return Err(categorized(
+                    category,
+                    format!("Channel setup failed (HTTP {code})."),
+                ));
             }
             let message = setup_failure_message(status, &text, api_key.as_str());
             if transient {
                 return Err(TransientSetupError(message).into());
             }
-            bail!("{message}");
+            return Err(categorized(category, message));
         }
         let text = response
             .text()
@@ -478,6 +508,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
+    use crate::error::category_of;
     use crate::langsmith::{ApiKey, Client, REQUEST_TIMEOUT};
 
     fn client(tenant_id: Option<String>, platform_api_url: &Url) -> Client {
@@ -883,6 +914,56 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_setup_is_categorized_by_its_status() {
+        let failure = |status: &str, customer: bool| {
+            let (origin, _) = serve_once(status, &[], "{}");
+            let mut payload = request();
+            if customer {
+                payload.slack.customer_app = Some(SlackCustomerApp {
+                    bot_token: "test-bot-token".to_string(),
+                    signing_secret: "signing-private".to_string(),
+                    move_from_deployment: None,
+                });
+            }
+            client(None, &origin)
+                .setup_trigger_channel(&payload)
+                .unwrap_err()
+        };
+        let cases = [
+            ("401 Unauthorized", false, ErrorCategory::Authentication),
+            ("403 Forbidden", false, ErrorCategory::Permission),
+            ("409 Conflict", false, ErrorCategory::Remote),
+            ("422 Unprocessable Entity", true, ErrorCategory::UserInput),
+            ("409 Conflict", true, ErrorCategory::UserInput),
+            ("401 Unauthorized", true, ErrorCategory::Authentication),
+        ];
+
+        for (status, customer, expected) in cases {
+            assert_eq!(
+                category_of(&failure(status, customer)),
+                expected,
+                "{status}"
+            );
+        }
+        // Left to the caller, which may still ask again.
+        let busy = failure("503 Service Unavailable", false);
+        assert!(is_transient_setup_error(&busy));
+        assert_eq!(category_of(&busy), ErrorCategory::Unclassified);
+    }
+
+    #[test]
+    fn a_failed_channel_listing_is_categorized_by_its_status() {
+        let (origin, _) = serve_once("401 Unauthorized", &[], "{}");
+
+        let error = client(None, &origin)
+            .trigger_channels("deployment-id")
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "Channel listing failed (HTTP 401).");
+        assert_eq!(category_of(&error), ErrorCategory::Authentication);
+    }
+
+    #[test]
     fn setup_channel_error_includes_the_trigger_server_detail() {
         let rendered = setup_error(
             "502 Bad Gateway",
@@ -1167,6 +1248,7 @@ mod tests {
         let (origin, receiver) = serve_once("200 OK", &[], &manifest.to_string());
         let mut options = request().slack.options;
         options.trigger_mode = Some(SlackTriggerMode::Thread);
+        options.forwarded_events = vec!["message_changed".into(), "reaction_added".into()];
 
         let fetched = client(None, &origin)
             .slack_app_manifest(&request().slack.app, &options)
@@ -1179,5 +1261,6 @@ mod tests {
         assert!(path.contains("name=Managed+Deep+Agent"));
         assert!(path.contains("trigger_on_all_messages=false"));
         assert!(path.contains("trigger_mode=thread"));
+        assert!(path.contains("forwarded_events=message_changed&forwarded_events=reaction_added"));
     }
 }

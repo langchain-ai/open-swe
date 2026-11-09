@@ -16,6 +16,9 @@ from openswe.tools import access as tool_access
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.workspaces.store import WORKSPACES, Workspace
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 real_resolve_access = tool_access.resolve_access
 
 

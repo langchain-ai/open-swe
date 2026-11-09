@@ -1,27 +1,33 @@
 [project]
 name = "open-swe-runtime"
 version = "0.0.0"
-description = "Open SWE's coding agent and pull request reviewer as one Managed Deep Agent; the Open SWE backend serves their tools."
+description = "Robin's coding agent and pull request reviewer as one Managed Deep Agent; the Robin backend serves their tools."
 requires-python = ">=3.14"
 dependencies = [
-    "managed-deepagents>=0.10.0",
-    "deepagents==0.7.32",
-    # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
-    "langchain-core>=1.7.3,<2",
-    "langchain[mcp]>=1.4.7",
-    "langchain-anthropic>=1.7.9",
+    "managed-deepagents>=0.10.1",
+    "deepagents==0.7.34",
+    "langchain[mcp]>=1.4.9",
+    "langchain-anthropic>=1.7.10",
     # Fireworks models the dashboard offers, such as Kimi.
-    "langchain-fireworks>=1.7.1,<2.0.0",
-    "langchain-openai>=1.7.3,<2.0.0",
-    "langchain-quickjs>=0.3.11,<0.4.0",
+    "langchain-fireworks>=1.7.2,<2.0.0",
+    # Gemini models the dashboard offers; it arrived only through deepagents before.
+    "langchain-google-genai>=4.4.3",
+    "langchain-openai>=1.7.4,<2.0.0",
+    "langchain-quickjs>=0.3.12,<0.4.0",
     "langsmith>=0.14.17",
     "httpx2>=2.12.0",
+    # Renders the prompts in prompts/, as the backend renders its own.
+    "jinja2>=3.1.6",
     # The vendored SDK's browser installs its extension from this package, so this
     # matches managed_deepagents.browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
     # The browser's tools; matches the pin `mda` injects into browser builds.
     "stagehand-middleware==0.1.0",
     "mcp>=2.2.0",
+    # web_search and fetch_url, which MDA runs itself; their results match the
+    # backend's only at the versions it runs.
+    "exa-py==2.22.2",
+    "markdownify==1.2.3",
     "pydantic>=2.11",
     "open-swe-runtime-api",
 ]
@@ -37,7 +43,7 @@ test = [
 # Editable, so that CLI is read from the source tree.
 [tool.uv.sources]
 managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
-# The code mode, vendored too, so Open SWE can change it before upstream does.
+# The code mode, vendored too, so Robin can change it before upstream does.
 langchain-quickjs = { path = "../vendor/langchain-quickjs", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }

@@ -8,7 +8,9 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard import oauth
+from openswe.github import app as github_app
 from openswe.github import org_membership
+from openswe.github.http import GitHubAppUnavailable
 from openswe.users import authorization
 
 
@@ -102,12 +104,12 @@ async def test_gate_retries_membership_lookup_within_deadline(
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
     monkeypatch.setattr(
-        org_membership, "get_github_app_installation_id_for_org", AsyncMock(return_value=1)
+        github_app, "get_github_app_installation_id_for_org", AsyncMock(return_value=1)
     )
     monkeypatch.setattr(
-        org_membership, "get_github_app_installation_token", AsyncMock(return_value="token")
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="token")
     )
-    monkeypatch.setattr(org_membership, "_MEMBERSHIP_REQUEST_TIMEOUT", 0.1)
+    monkeypatch.setattr(org_membership.Org, "MEMBERSHIP_TIMEOUT", 0.1)
     monkeypatch.setattr(
         httpx2.AsyncClient,
         "request",
@@ -139,3 +141,27 @@ async def test_gate_rejects_user_outside_both_allowlists(monkeypatch) -> None:
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "your GitHub account is not authorized"
+
+
+@pytest.mark.asyncio
+async def test_membership_survives_a_reinstalled_org_installation(monkeypatch) -> None:
+    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
+    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setattr(
+        github_app.AppInstallations, "_ask_github_for_org", AsyncMock(side_effect=[1, 2])
+    )
+
+    async def mint(*, installation_id: int, **kwargs: object) -> str:
+        if installation_id == 1:
+            raise GitHubAppUnavailable("installation removed", gone=True)
+        return "token"
+
+    monkeypatch.setattr(github_app, "get_github_app_installation_token", mint)
+    monkeypatch.setattr(
+        httpx2.AsyncClient,
+        "request",
+        AsyncMock(return_value=httpx2.Response(200, json={"state": "active"})),
+    )
+
+    assert await github_app.INSTALLATIONS.for_org("primary") == 1
+    assert await org_membership.is_user_active_org_member("insider", "primary")

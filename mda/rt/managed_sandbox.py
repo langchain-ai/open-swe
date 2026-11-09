@@ -260,23 +260,22 @@ def _selected(runtime: object) -> SandboxDefinition | None:
     run, spec = planned
     github = spec.github_proxy
     proxy_config = None if github is None else _PROXIES.get(run).config(github)
-    return definition(spec.create, spec.thread_id, spec.sandbox_id, proxy_config)
+    return definition(spec.create, spec.sandbox_id, proxy_config)
 
 
 def definition(
     create: SandboxCreate,
-    thread_id: str | None,
     sandbox_id: str | None = None,
     proxy_config: dict[str, object] | None = None,
 ) -> SandboxDefinition:
-    """The sandbox MDA keeps for ``thread_id`` (the run's own by default), created from ``create``.
+    """The sandbox MDA keeps for the run's thread, created from ``create``.
 
-    MDA writes ``proxy_config`` on it before each command; without one the backend
-    writes its proxy config.
+    A task worker's run is an async subagent of its coordinator's, so MDA gives it the
+    coordinator's sandbox. MDA writes ``proxy_config`` on it before each command; without
+    one the backend writes its proxy config.
     """
     return define_sandbox(
         _openswe_per_thread=True,
-        _openswe_thread_id=thread_id,
         _openswe_sandbox_id=sandbox_id,
         _openswe_no_manage_proxy=proxy_config is None,
         _openswe_create_fields=dict(create.extra_fields),
@@ -474,7 +473,7 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         try:
             # Created with the proxy config the backend chose for it, never the one MDA
             # last wrote: a cloud identity rule applies only at create.
-            replacement = await replace_sandbox(files, definition(create, spec.thread_id))
+            replacement = await replace_sandbox(files, definition(create))
             await call(self._backend, SANDBOX_REPLACED, RunRequest(run_id=run_id()))
         except Exception as exc:
             logger.warning("Could not replace the thread's sandbox", exc_info=True)

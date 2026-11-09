@@ -29,14 +29,14 @@ import {
   type RunOutcome,
 } from "./stream.ts"
 
-const USAGE = `oswe — run a cloud Open SWE agent against this directory
+const USAGE = `robin — run a cloud Robin agent against this directory
 
 Usage:
-  oswe login [--backend <url>]      Sign in; --backend also repoints the desktop app
-  oswe logout                       Forget the session for the current backend
-  oswe auth status                  Show which credential is in use and check it
-  oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe --help | --version
+  robin login [--backend <url>]      Sign in; --backend also repoints the desktop app
+  robin logout                       Forget the session for the current backend
+  robin auth status                  Show which credential is in use and check it
+  robin run [options] [prompt...]    Start an agent bridged to this directory
+  robin --help | --version
 
 Run options:
   --thread <id>    Continue an existing thread
@@ -64,7 +64,7 @@ function note(text: string): void {
 }
 
 function fail(text: string): void {
-  process.stderr.write(`oswe: ${text}\n`)
+  process.stderr.write(`robin: ${text}\n`)
 }
 
 function printResult(result: CliResult): void {
@@ -134,7 +134,7 @@ async function authStatusCommand(): Promise<number> {
   const config = await readConfig()
   if (config === null) {
     out(`Backend: ${normalizeBackend(await readBackend())}`)
-    fail("not signed in — run `oswe login`, or set OPEN_SWE_API_KEY")
+    fail("not signed in — run `robin login`, or set OPEN_SWE_API_KEY")
     return 1
   }
   const { credential } = config
@@ -181,7 +181,7 @@ async function runCommand(options: RunOptions): Promise<number> {
   }
   const config = await readConfig()
   if (config === null) {
-    fail("not signed in — run `oswe login`, or set OPEN_SWE_API_KEY")
+    fail("not signed in — run `robin login`, or set OPEN_SWE_API_KEY")
     return 1
   }
   const { credential } = config
@@ -203,11 +203,13 @@ async function runCommand(options: RunOptions): Promise<number> {
   if (options.thread !== undefined) {
     const bound = (await readBridgeMemory())[options.thread]
     if (bound === undefined) {
-      fail(`thread ${options.thread} was not started by oswe on this machine`)
+      fail(`thread ${options.thread} was not started by robin on this machine`)
       return 1
     }
     if (bound.root !== root) {
-      fail(`thread ${options.thread} serves ${bound.root}; run oswe from there`)
+      fail(
+        `thread ${options.thread} serves ${bound.root}; run robin from there`
+      )
       return 1
     }
     bridgeId = bound.bridgeId
@@ -221,7 +223,7 @@ async function runCommand(options: RunOptions): Promise<number> {
       label: basename(root),
       bridgeId,
       credentialRejected: credential.rejected,
-      log: (message) => process.stderr.write(`oswe: ${message}\n`),
+      log: (message) => process.stderr.write(`robin: ${message}\n`),
     })
   } catch (cause) {
     if (!(cause instanceof ApiError)) throw cause
@@ -229,7 +231,7 @@ async function runCommand(options: RunOptions): Promise<number> {
     else if (cause.status === 404)
       fail(`the bridge thread ${options.thread} was bound to no longer exists`)
     else if (cause.status === 409)
-      fail(`another oswe process is serving thread ${options.thread}`)
+      fail(`another robin process is serving thread ${options.thread}`)
     else throw cause
     return 1
   }
@@ -252,7 +254,7 @@ async function runCommand(options: RunOptions): Promise<number> {
   })
 
   let exitCode = 0
-  // 128 + SIGINT, as shells report an interrupted command, so `oswe run … &&` stops.
+  // 128 + SIGINT, as shells report an interrupted command, so `robin run … &&` stops.
   const INTERRUPTED = 130
   let closing = false
   let interrupts = 0
@@ -399,7 +401,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "auth":
       if (positionals[1] === "status" && positionals.length === 2)
         return await authStatusCommand()
-      fail("usage: oswe auth status")
+      fail("usage: robin auth status")
       return 2
     case "run":
       return await runCommand({

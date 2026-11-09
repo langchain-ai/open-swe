@@ -15,8 +15,7 @@ its capture lands:
   converges and later creations skip the work.
 
 A run whose sandbox boots from a stale snapshot never waits on the update: it
-starts on the image as captured and warns its requester that checkouts may be
-behind.
+starts on the image as captured and reports stale images to operators.
 
 The outcome — status, kind, timestamps, a capped log — lands on the workspace
 record for the dashboard. A failed refresh of either kind leaves the previous

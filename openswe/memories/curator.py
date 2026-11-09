@@ -70,7 +70,7 @@ class WorkspaceCurator:
             thread_id,
             _ASSISTANT_ID,
             input=build_run_input(
-                prompt("curator/wake", workspace=self.slug),
+                prompt("curator/wake"),
                 {"sender_id": _SENDER_ID, "surface": "automation", "kind": "system"},
                 systems=[
                     {"id": _SENDER_ID, "display_name": "Memory curator", "platform": "open-swe"}

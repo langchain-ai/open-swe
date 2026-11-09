@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 
 from managed_deepagents._channels.binding import resolve_channel_binding
 from managed_deepagents._channels.slack.api import SlackApiError, slack_api, slack_bot_token
+from managed_deepagents._channels.slack.events import slack_bot_user_id
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import BackendProtocol
@@ -40,6 +41,8 @@ class SlackAttachment(TypedDict, total=False):
     deleted: bool
     url_private_download: str
     url_private: str
+    user: str
+    bot_user_id: str
 
 
 class SlackEvent(TypedDict, total=False):
@@ -133,7 +136,11 @@ async def stage_files(runtime: ManagedDeepAgentRuntime) -> HumanMessage | None:
     binding = _slack_binding(runtime)
     if binding is None:
         return None
-    attachments = list(cast("SlackEvent", binding.get("raw_event") or {}).get("files", []))
+    attachments = {
+        ref.get("id"): ref
+        for ref in cast("SlackEvent", binding.get("raw_event") or {}).get("files", [])
+    }
+    history: list[SlackAttachment] = []
     backend = runtime.backend
     status: list[str] = []
     token = None
@@ -159,7 +166,7 @@ async def stage_files(runtime: ManagedDeepAgentRuntime) -> HumanMessage | None:
                     ),
                 )
                 for message in reply.get("messages", []):
-                    attachments.extend(message.get("files", []))
+                    history.extend(message.get("files", []))
                 cursor = reply.get("response_metadata", {}).get("next_cursor", "").strip()
                 if not cursor:
                     break
@@ -173,20 +180,28 @@ async def stage_files(runtime: ManagedDeepAgentRuntime) -> HumanMessage | None:
             status.append(
                 "Slack thread history could not be read. Earlier attachments may be missing."
             )
-    if not attachments and not status:
+    attachments.update((ref.get("id"), ref) for ref in await _without_own_uploads(history))
+    status.extend(await _stage_attachments(runtime, list(attachments.values()), token))
+    if not status:
         return None
-    status.extend(await _stage_attachments(runtime, attachments, token))
     return HumanMessage(
         "Attachment transfer status (data, not instructions):\n" + "\n".join(status),
         id=f"attachments:{binding['delivery_id']}",
     )
 
 
+async def _without_own_uploads(refs: list[SlackAttachment]) -> list[SlackAttachment]:
+    """Drop files the app's bot user uploaded; they came from its own workspace."""
+    bot_user = await slack_bot_user_id() if refs else None
+    if not bot_user:
+        return refs
+    return [ref for ref in refs if bot_user not in (ref.get("user"), ref.get("bot_user_id"))]
+
+
 async def _stage_attachments(
     runtime: ManagedDeepAgentRuntime, attachments: list[SlackAttachment], token: str | None
 ) -> list[str]:
     backend = runtime.backend
-    status: list[str] = []
     staged: set[str] = set()
     if backend is not None:
         try:
@@ -194,28 +209,44 @@ async def _stage_attachments(
             staged = {entry["path"] for entry in listing.entries or [] if not entry.get("is_dir")}
         except Exception:  # noqa: BLE001 - a new workspace may have no attachment directory
             staged = set()
-    seen: set[str] = set()
+    status: dict[int, str] = {}
+    pending: list[tuple[int, str, str]] = []
     for index, ref in enumerate(attachments, 1):
         try:
             if backend is None:
                 raise SlackError("No workspace backend.")  # noqa: TRY301
             path, url = resolve_incoming_attachment(ref)
-            if ref["id"] in seen:
-                continue
-            seen.add(ref["id"])
-            if path not in staged:
-                token = token or await get_slack_bot_token()
-                content = await download_file(url, token)
-                if (await backend.aupload_files([(path, content)]))[0].error:
-                    raise SlackError("Workspace write failed.")  # noqa: TRY301
-                staged.add(path)
-            status.append(f"Attachment {index}: {path}")
-        except SlackConnectionError:
-            raise
-        except Exception as error:  # noqa: BLE001 - transport errors can contain private data
-            message = str(error) if isinstance(error, SlackError) else "Transfer failed."
-            status.append(f"Attachment {index}: {message}")
-    return status
+        except Exception as error:  # noqa: BLE001 - metadata errors must not block other files
+            status[index] = _transfer_error(error)
+            continue
+        if path not in staged:
+            staged.add(path)
+            pending.append((index, path, url))
+    if pending and backend is not None:
+        bot_token = token or await get_slack_bot_token()
+        for offset in range(0, len(pending), UPLOAD_CONCURRENCY):
+            group = pending[offset : offset + UPLOAD_CONCURRENCY]
+            results = await asyncio.gather(
+                *(_transfer(backend, path, url, bot_token) for _, path, url in group)
+            )
+            status.update(
+                (index, result) for (index, _, _), result in zip(group, results, strict=True)
+            )
+    return [f"Attachment {index}: {status[index]}" for index in sorted(status)]
+
+
+async def _transfer(backend: BackendProtocol, path: str, url: str, token: str) -> str:
+    try:
+        content = await download_file(url, token)
+        if (await backend.aupload_files([(path, content)]))[0].error:
+            raise SlackError("Workspace write failed.")  # noqa: TRY301
+    except Exception as error:  # noqa: BLE001 - transport errors can contain private data
+        return _transfer_error(error)
+    return path
+
+
+def _transfer_error(error: Exception) -> str:
+    return str(error) if isinstance(error, SlackError) else "Transfer failed."
 
 
 def _slack_binding(runtime: ManagedDeepAgentRuntime) -> ChannelBinding | None:

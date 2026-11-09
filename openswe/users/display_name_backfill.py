@@ -30,10 +30,6 @@ async def persist_display_name(slack_user_id: str, name: str) -> None:
     name = name.strip()
     if not name or name == "unknown" or not slack_user_id:
         return
-    if postgres.uri() is None:
-        # The Store carries no users in this deployment, so there is nothing to
-        # backfill; the Slack request continues without it.
-        return
     async with postgres.session() as session:
         changed = await session.scalars(
             update(User)

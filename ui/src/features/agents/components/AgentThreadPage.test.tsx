@@ -29,7 +29,7 @@ const threadQuery = {
 
 afterEach(() => {
   cleanup()
-  document.title = "Open SWE"
+  document.title = "Robin"
 })
 
 describe("AgentThreadPage", () => {
@@ -55,17 +55,17 @@ describe("AgentThreadPage", () => {
 
     const view = render(<AgentThreadPage threadId="thread-1" />)
 
-    expect(document.title).toBe("Fix web title · Open SWE")
+    expect(document.title).toBe("Fix web title · Robin")
     view.unmount()
-    expect(document.title).toBe("Agents · Open SWE")
+    expect(document.title).toBe("Agents · Robin")
   })
 
   it("does not update the title for an inactive cached thread", () => {
     vi.mocked(useAgentThread).mockReturnValue(threadQuery as never)
-    document.title = "Current thread · Open SWE"
+    document.title = "Current thread · Robin"
 
     render(<AgentThreadPage threadId="thread-1" active={false} />)
 
-    expect(document.title).toBe("Current thread · Open SWE")
+    expect(document.title).toBe("Current thread · Robin")
   })
 })

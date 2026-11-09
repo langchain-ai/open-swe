@@ -17,7 +17,7 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
-from openswe.github.http import GitHubError, RepoClient
+from openswe.github.http import GitHubError, RepoClient, UnsafeRepoPath
 from openswe.github.pull_request_status import PullRequestClient
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ async def _read_text(
     async with semaphore:
         try:
             content = await repo.raw_file(path, ref)
-        except httpx2.HTTPError:
+        except httpx2.HTTPError, UnsafeRepoPath:
             logger.warning(
                 "diff file read failed",
                 extra={"repo_full_name": repo.full_name, "path": path, "ref": ref},

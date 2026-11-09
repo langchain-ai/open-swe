@@ -7,9 +7,9 @@ import {
   useRef,
   useState,
 } from "react"
-import type { ReactNode } from "react"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import type { ComposerAttachment } from "@/features/agents/components/composer/ComposerAttachments"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   chatDiffAction,
   isChatDiffActionTool,
@@ -29,8 +29,6 @@ interface ReviewChatActionsValue {
   repo: string
   number: number
   showInDiff: (range: DiffRange) => void
-  /** What an empty chat shows: ways in, specific to this pull request. */
-  emptyState?: ReactNode
   /** What the reviewer attached to their next message from the page: code lines, findings, comments. */
   attachments?: {
     items: ReadonlyArray<ComposerAttachment>
@@ -40,6 +38,9 @@ interface ReviewChatActionsValue {
   /** A question to send as soon as the chat can. */
   question?: string
   clearQuestion?: () => void
+  /** The next reply to a passage of the page, for the composer to take. */
+  reply?: PassageReply
+  takeReply?: (reply: PassageReply) => boolean
 }
 
 export const ReviewChatActionsContext =

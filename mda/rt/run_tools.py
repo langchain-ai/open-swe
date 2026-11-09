@@ -10,6 +10,7 @@ model, and the run's limit on model calls, are the run's too.
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import partial
 from typing import Final
@@ -17,24 +18,33 @@ from typing import Final
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import (
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
+from langchain_quickjs._ptc import (  # noqa: PLC2701 - lists code mode tools in a message
+    filter_tools_for_ptc,
+    is_valid_ptc_tool_name,
+    render_ptc_prompt,
+)
 from langchain_quickjs.middleware import PersistenceMode, REPLState
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from managed_deepagents.run_resources import on_run_exit
 from runtime_api.catalog import Catalog, SubagentSpec, ToolSpec
-from runtime_api.endpoint import call
 from runtime_api.loop import ModelCall
-from runtime_api.tool_search import RESOLVE, ToolLookup
+from runtime_api.provenance import Provenance
 
-from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
+from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run, harness_message
 from rt.file_tools import FileToolsMiddleware
+from rt.loop import latest_with_id, visible_messages
 from rt.mcp import McpTools
 from rt.models import build_model
-from rt.search_tools import search_tools_tool
+from rt.search_tools import resolve_tool, search_tools_tool
+from rt.slack_move import MOVE_TOOL, SlackMoveMiddleware
 from rt.tools import backend_tool, operation_tool, run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -42,6 +52,8 @@ logger = logging.getLogger(__name__)
 
 _TASK_TOOL: Final = "task"
 _EVAL_TOOL: Final = "eval"
+# Starts the id of the message listing the tools code mode calls.
+_CODE_TOOLS: Final = "code-tools:"
 
 ToolHandler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 ModelHandler = Callable[[ModelRequest], Awaitable[ModelResponse]]
@@ -75,6 +87,9 @@ class RunTools:
         self._mcp: McpTools | None = None if catalog.mcp_servers else McpTools()
         self._connecting = asyncio.Lock()
         self.excluded = frozenset(catalog.excluded)
+        # Offered to every model call, so the list stays the same from run to run, but
+        # refused when called: this run may not use them.
+        self.disabled = frozenset(catalog.disabled)
         self._offer(McpTools())
         self.subagents = {subagent.name: subagent for subagent in catalog.subagents}
         models = catalog.models
@@ -100,15 +115,30 @@ class RunTools:
         self.by_name = {tool.name: tool for tool in (*tools, *searched)}
         # Every schema offered costs each call its context, and OpenAI answers some
         # requests carrying hundreds with nothing; the tools the model seldom needs are
-        # called from code.
-        code_only = frozenset(catalog.code_only)
+        # called from code. A run with code mode calls its MCP servers' tools from code
+        # too, so the tools offered to the model are the same whoever's servers they are.
+        code_only = frozenset(catalog.code_only) | (
+            {tool.name for tool in mcp.tools if is_valid_ptc_tool_name(tool.name)}
+            if catalog.code_only
+            else frozenset()
+        )
         self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
-        in_code = [tool for tool in tools if tool.name in code_only]
+        in_code = [tool for tool in tools if tool.name in code_only - self.disabled]
+        # A move from code goes through MDA too, as the model's own call of it does.
+        moves = SlackMoveMiddleware(self._backend)
         self.from_code = [
-            *in_code,
-            *(t for t in tools if t.name in catalog.also_from_code and t not in in_code),
-            *self._files.code_tools(catalog.also_from_code),
-        ]
+            moves.code_tool(tool) if tool.name == MOVE_TOOL else tool
+            for tool in [
+                *in_code,
+                *(
+                    t
+                    for t in tools
+                    if t.name in catalog.also_from_code
+                    and t.name not in self.disabled
+                    and t not in in_code
+                ),
+            ]
+        ] + self._files.code_tools(catalog.also_from_code)
         self.hidden = self.excluded | code_only
 
     async def connect(self) -> None:
@@ -193,8 +223,7 @@ class BackendTools:
         if not run.catalog.search_tools:
             return None
         if name not in run.backend_tools:
-            lookup = ToolLookup(run_id=run_id(), name=name)
-            run.backend_tools[name] = (await call(self._backend, RESOLVE, lookup)).tool
+            run.backend_tools[name] = await resolve_tool(self._backend, name)
         return run.backend_tools[name]
 
 
@@ -271,9 +300,16 @@ class RunToolsMiddleware(AgentMiddleware):
     async def awrap_tool_call(
         self, request: ToolCallRequest, handler: ToolHandler
     ) -> ToolMessage | Command:
+        name = request.tool_call["name"]
+        tools = await self._toolsets.ready()
+        if name in tools.disabled:
+            return ToolMessage(
+                content=f"Error: `{name}` is not available in this run.",
+                tool_call_id=request.tool_call["id"],
+                name=name,
+                status="error",
+            )
         if request.tool is None:
-            tools = await self._toolsets.ready()
-            name = request.tool_call["name"]
             tool = tools.by_name.get(name)
             if tool is None and tools.catalog.mcp_servers:
                 # A resumed run's call of an MCP server's tool, before any model call.
@@ -318,7 +354,10 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     """Code mode over the run's tools: the graph's own it names, and those the run offers from code.
 
     ``active`` says whether a run has code mode at all; one without it is offered no
-    ``eval`` and pays nothing for the interpreter.
+    ``eval`` and pays nothing for the interpreter. With ``listed_in_messages`` the tools
+    code mode calls are listed in a message added whenever they change, not in the system
+    prompt: they differ from person to person and from run to run, and a changed system
+    prompt misses the provider's cache for everything after it.
     """
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
@@ -332,10 +371,12 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         subagents: bool = True,
         mode: PersistenceMode | None = None,
         backend_tools: BackendTools | None = None,
+        listed_in_messages: bool = False,
     ) -> None:
         self._toolsets = toolsets
         self._named = list(named)
         self._active = active
+        self._listed_in_messages = listed_in_messages
         self._slots: dict[str, asyncio.Lock] = {}
         super().__init__(
             ptc=[],
@@ -389,11 +430,47 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         restored = await super().abefore_agent(prepared, runtime)
         return {**update, **(restored or {})} or None
 
+    async def abefore_model(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        if not self._listed_in_messages or not await self._runs_code():
+            return None
+        listing = self._listing()
+        if not listing or listing == latest_with_id(visible_messages(state), _CODE_TOOLS):
+            return None
+        message = harness_message(
+            listing,
+            message_id=f"{_CODE_TOOLS}{uuid.uuid4()}",
+            source="code_tools",
+            provenance=Provenance(kind="context", sender="run:code-tools"),
+        )
+        return {"messages": [message]}
+
+    def _listing(self) -> str:
+        """The tools code mode calls, as the message that lists them."""
+        exposed = filter_tools_for_ptc([], self._ptc, self_tool_name=self._tool_name)
+        reference = render_ptc_prompt(exposed, tool_name=self._tool_name).strip()
+        if not reference:
+            return ""
+        body = reference.replace("]]>", "]]]]><![CDATA[>")
+        return (
+            f'<dynamic-context kind="run" id="code-tools"><![CDATA[\n{body}\n]]></dynamic-context>'
+        )
+
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         if not await self._runs_code():
             tools = [tool for tool in request.tools if getattr(tool, "name", None) != _EVAL_TOOL]
             return await handler(request.override(tools=tools))
-        return await super().awrap_model_call(request, handler)
+        if not self._listed_in_messages:
+            return await super().awrap_model_call(request, handler)
+        prompt = self._prepare_for_call(request)
+        listed = self._ptc_prompt_by_slot.get(self._slot_id(request.state))
+        if listed is not None:
+            prompt = prompt.removesuffix(listed[1]).replace(
+                "documented in the API reference below.",
+                'listed in the latest `<dynamic-context kind="run" id="code-tools">` message.',
+            )
+        return await handler(
+            request.override(system_message=self._extend(request.system_message, prompt))
+        )
 
     @staticmethod
     def _cancelled(error: BaseException) -> bool:

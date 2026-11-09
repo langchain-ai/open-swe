@@ -26,7 +26,18 @@ def _lock_for(key: str) -> asyncio.Lock:
     return lock
 
 
-async def cached[T](key: str, ttl_seconds: float, loader: Callable[[], Awaitable[T]]) -> T:
+async def cached[T](
+    key: str,
+    ttl_seconds: float,
+    loader: Callable[[], Awaitable[T]],
+    *,
+    serve_stale: bool = True,
+) -> T:
+    """``loader``'s value, kept for ``ttl_seconds``.
+
+    A loader that fails falls back to the expired value unless ``serve_stale`` is
+    false, as for an access check, where an old yes must never outlive a failure.
+    """
     now = _now()
     entry = _CACHE.get(key)
     if entry is not None:
@@ -43,7 +54,7 @@ async def cached[T](key: str, ttl_seconds: float, loader: Callable[[], Awaitable
                 return cast(T, value)
 
         stale = entry[0] if entry is not None else None
-        has_stale = entry is not None
+        has_stale = entry is not None and serve_stale
         try:
             value = await loader()
         except Exception:
