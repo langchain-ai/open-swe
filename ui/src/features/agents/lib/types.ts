@@ -467,6 +467,7 @@ export interface WorkflowDiffStats {
 }
 
 export interface WorkflowPushApproval {
+  coordinatorStatus?: "approved" | "rejected" | null
   fingerprint: string
   status: WorkflowApprovalStatus
   repo: string
@@ -610,6 +611,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  pendingWorkflowApproval?: boolean
   waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>

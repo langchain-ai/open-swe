@@ -289,10 +289,10 @@ export function sidebarItemContains(
 export function sidebarRefreshInterval(
   threads: ReadonlyArray<AgentThread> = []
 ): number | false {
-  return threads.some((thread) =>
-    threadFamily(thread).some((member) => member.status === "running")
-  )
-    ? 2000
+  const members = threads.flatMap(threadFamily)
+  if (members.some((member) => member.status === "running")) return 2000
+  return members.some((member) => member.pendingWorkflowApproval)
+    ? 30_000
     : false
 }
 

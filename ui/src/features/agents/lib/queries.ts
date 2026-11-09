@@ -992,7 +992,9 @@ export function useAgentThread(threadId: string, active = true) {
       current.state.data?.status === "running" ||
       current.state.data?.waitingForDelegatedWork
         ? 3000
-        : false,
+        : current.state.data?.pendingWorkflowApproval
+          ? 30_000
+          : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
@@ -1235,12 +1237,13 @@ export function useWorkflowApprovals(
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
     refetchInterval: (current) =>
-      pollWhileActive ||
-      current.state.data?.approvals.some(
-        (approval) => approval.status === "pending"
-      )
+      pollWhileActive
         ? 3000
-        : false,
+        : current.state.data?.approvals.some(
+              (approval) => approval.status === "pending"
+            )
+          ? 30_000
+          : false,
     retry: false,
   })
   const previous = useRef({ threadId, pollWhileActive })

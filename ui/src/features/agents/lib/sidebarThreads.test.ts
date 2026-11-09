@@ -6,6 +6,7 @@ import {
   groupRepoGroupsByWorkspace,
   groupSidebarThreadsByDay,
   sortSidebarThreads,
+  sidebarRefreshInterval,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -26,6 +27,23 @@ function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
 }
 
 describe("sidebar thread adapters", () => {
+  it("refreshes finished workers while approval is outstanding", () => {
+    const worker = cloudThread({
+      status: "finished",
+      pendingWorkflowApproval: true,
+    })
+    expect(
+      sidebarRefreshInterval([cloudThread({ taskWorkers: [worker] })])
+    ).toBe(30_000)
+    expect(
+      sidebarRefreshInterval([
+        cloudThread({
+          taskWorkers: [{ ...worker, pendingWorkflowApproval: false }],
+        }),
+      ])
+    ).toBe(false)
+  })
+
   it("uses short repository names and namespaced identities", () => {
     expect(cloudSidebarThread(cloudThread())).toMatchObject({
       key: "cloud:same-id",

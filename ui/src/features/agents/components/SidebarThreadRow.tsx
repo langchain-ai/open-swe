@@ -931,8 +931,9 @@ function SidebarTaskWorkerRow({
     `cloud:${worker.id}`
   )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
-  const status =
-    worker.status === "finished"
+  const status = worker.pendingWorkflowApproval
+    ? "Awaiting approval"
+    : worker.status === "finished"
       ? "Completed"
       : worker.status === "error"
         ? "Failed"

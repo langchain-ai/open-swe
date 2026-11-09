@@ -26,6 +26,7 @@ from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.read_state import THREAD_READ_STATES
+from openswe.threads.workflow_review import WorkflowReview
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -508,6 +509,7 @@ async def _thread_summary(
     read_states: Mapping[str, JsonObject] | None = None,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
+    workflow_review = WorkflowReview(WorkflowReview.parse(metadata))
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
     if not isinstance(created_at, (int, float)):
@@ -603,6 +605,7 @@ async def _thread_summary(
             and _metadata_string(metadata, "automation_action_posted_at") is not None
         ),
         "status": status,
+        "pendingWorkflowApproval": workflow_review.pending,
         "latestRunId": _thread_run_id(metadata, latest_run_id),
         "viewed": read_metadata.get("viewed") is not False
         and _is_thread_viewed(read_metadata, _thread_run_id(metadata, latest_run_id)),
