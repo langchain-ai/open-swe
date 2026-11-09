@@ -5,17 +5,15 @@ description = "Robin's coding agent and pull request reviewer as one Managed Dee
 requires-python = ">=3.14"
 dependencies = [
     "managed-deepagents>=0.10.1",
-    "deepagents==0.7.32",
-    # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
-    "langchain-core>=1.7.6,<2",
+    "deepagents==0.7.34",
     "langchain[mcp]>=1.4.9",
     "langchain-anthropic>=1.7.10",
     # Fireworks models the dashboard offers, such as Kimi.
     "langchain-fireworks>=1.7.2,<2.0.0",
     # Gemini models the dashboard offers; it arrived only through deepagents before.
-    "langchain-google-genai>=4.4.2",
+    "langchain-google-genai>=4.4.3",
     "langchain-openai>=1.7.4,<2.0.0",
-    "langchain-quickjs>=0.3.11,<0.4.0",
+    "langchain-quickjs>=0.3.12,<0.4.0",
     "langsmith>=0.14.17",
     "httpx2>=2.12.0",
     # Renders the prompts in prompts/, as the backend renders its own.

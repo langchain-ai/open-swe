@@ -9,7 +9,7 @@ resolution-markers = [
 [manifest]
 constraints = [
     { name = "langgraph-api", specifier = "==0.19.0.dev3" },
-    { name = "langgraph-runtime-inmem", specifier = "==0.39.0.dev3" },
+    { name = "langgraph-runtime-inmem", specifier = "==0.39.0.dev5" },
 ]
 
 [[package]]
@@ -701,7 +701,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.32"
+version = "0.7.34"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -712,9 +712,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/89/5da9546d5e57a4f815d2cc919bd49ed2a62b25816ebd49ce6dca1919bdd8/deepagents-0.7.32.tar.gz", hash = "sha256:f4154281b04a499015e48c24edf11f59f833fbabd3d87e0898832e8db954aac4", size = 343996, upload-time = "2026-10-23T21:30:24.677Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/1f/1390da696616fa66288a048864a71556c1b7f8a3d3434b09c7aa8af78065/deepagents-0.7.34.tar.gz", hash = "sha256:fc8dc81d006cdd72092caeff30d0a8015da3fc9174a5ed0634b53f1b1a7b8b3a", size = 346231, upload-time = "2026-11-05T21:15:23.867Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/db/ca785ad20bf1c1255856575d9c31f201abd02bb4fd3a76a8b586d938d7e2/deepagents-0.7.32-py3-none-any.whl", hash = "sha256:366bd66c786a66c8d639e40f99614d9e5d37236adf4c5b158f0b2cb27956e28b", size = 374569, upload-time = "2026-10-23T21:30:23.235Z" },
+    { url = "https://files.pythonhosted.org/packages/81/5a/ec80b41b06ee4f7a9a7902f7ecf5ea4e774a8cdd7340a01481584ab71342/deepagents-0.7.34-py3-none-any.whl", hash = "sha256:0bd32b8937d1cffcc6c743e4fcd1f7022dbc3f1d1c3ac15ce3ca0af03e7f81ff", size = 376652, upload-time = "2026-11-05T21:15:22.151Z" },
 ]
 
 [[package]]
@@ -1687,7 +1687,7 @@ wheels = [
 
 [[package]]
 name = "langchain-quickjs"
-version = "0.3.11"
+version = "0.3.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bsdiff4" },
@@ -1697,9 +1697,9 @@ dependencies = [
     { name = "langgraph" },
     { name = "quickjs-rs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/42/21/c0a54049e9916cd181b404b6004bf4072084122c845721b2007596a2a2f0/langchain_quickjs-0.3.11.tar.gz", hash = "sha256:65bd6a7ee2833e60449a5de43cd52c56ba554cead5c00db8b868deb567796ca3", size = 244526, upload-time = "2026-10-27T17:02:12.884Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/a1/2632830366c768327419c7a9c607c4836d144d9ef32afb131ac9ad40d720/langchain_quickjs-0.3.12.tar.gz", hash = "sha256:78a3fa0c1f7a1548fa21639addd44c5db15a43a8c7614baefeb793f82950e57f", size = 248006, upload-time = "2026-11-07T05:00:02.436Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ba/e8/654efea648b34192640a9d33e8967caa6c1e1a5d5d3024e4f0de7087c552/langchain_quickjs-0.3.11-py3-none-any.whl", hash = "sha256:9f523074fdb10bc7b5cbb1e896cc4c06c78fadc3b2afcdca8396d02f9a1708cf", size = 49638, upload-time = "2026-10-27T17:02:11.309Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/cf/78dd9cb6b3d89d1f1acac92658815b8d212b1e581971c54a15ccff5a84c5/langchain_quickjs-0.3.12-py3-none-any.whl", hash = "sha256:95725ab5ecbc138dd194905dcc64752e717d02b11b10dd8ceffa43613ba205bf", size = 50262, upload-time = "2026-11-07T05:00:01.209Z" },
 ]
 
 [[package]]
@@ -1830,7 +1830,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-runtime-inmem"
-version = "0.39.0.dev3"
+version = "0.39.0.dev5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blockbuster" },
@@ -1841,14 +1841,14 @@ dependencies = [
     { name = "starlette" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/39/6c/ffa133e25aa30354e149ca15132506c96895559a0d754ec3dbe6a02a018c/langgraph_runtime_inmem-0.39.0.dev3.tar.gz", hash = "sha256:34adf5de22a69382fb0266c76d8ef14e454002d6b91468eaf26f2e65c4f2c6d7", size = 145539, upload-time = "2026-11-02T18:10:02.157Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/0b/2cbc6bdda30823664dd034c9dce50916df6178835c8c9aacc67554a29077/langgraph_runtime_inmem-0.39.0.dev5.tar.gz", hash = "sha256:60db2e7fd5d705de6e02574059d5ac0b56aadb001a744d9ce06c5f10829e60c8", size = 145725, upload-time = "2026-11-05T20:20:21.412Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/05/1e92da92ac294d65dea194013e12655e428eedcecea4dda3c5d84c5c4238/langgraph_runtime_inmem-0.39.0.dev3-py3-none-any.whl", hash = "sha256:0c701927739ca286d11d44b5b7362c9a528b4a5ddc85c9ab5dd485350f7a2dee", size = 65453, upload-time = "2026-11-02T18:10:00.528Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/87/815e5835f4e012be779518ee64d4f57f463a6b2f51daf20e04d2a634e53d/langgraph_runtime_inmem-0.39.0.dev5-py3-none-any.whl", hash = "sha256:7024a22dd62d0bec76d948ba5fac4f577f0a4347d8e324cf314bf4ca6d3ad4b4", size = 65643, upload-time = "2026-11-05T20:20:20.096Z" },
 ]
 
 [[package]]
 name = "langgraph-sdk"
-version = "0.4.13"
+version = "0.4.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1857,9 +1857,9 @@ dependencies = [
     { name = "orjson" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/30/ec5e936828dc1d0cdbd7b20fd3094feb79381fcc8470867cf69b82f3652a/langgraph_sdk-0.4.13.tar.gz", hash = "sha256:66586aab29426cfeab4f003f4215ec1cbcb88e08f437ec7c5d3f852b03826e6e", size = 370662, upload-time = "2026-11-05T02:15:54.291Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/4d/d26d0393fa9a305199ebc4fbc2550b9b5b4fd33603bd8bd149ad6b84616f/langgraph_sdk-0.4.14.tar.gz", hash = "sha256:13eb1fee92504d87c1f0f43c8e213e7ba0a46bd23a07e3198e413d48efac5833", size = 371481, upload-time = "2026-11-06T03:03:23.191Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/1d/8a8fc610fd5cc58a74f148c830d06c7e36770c59de018f9c7a9dd5b3f1e9/langgraph_sdk-0.4.13-py3-none-any.whl", hash = "sha256:c1c7e586653989c37cc0eb4d016b3154d69386d5fc31208224477f560657455f", size = 170894, upload-time = "2026-11-05T02:15:53.104Z" },
+    { url = "https://files.pythonhosted.org/packages/14/f1/3db4776fb3673dbae57b0ad2e9f14d9a2c44bde8932df7df0f7671572ed3/langgraph_sdk-0.4.14-py3-none-any.whl", hash = "sha256:d47a6755890ae537aa80613a3138680ac77f5d256a2d3953af95a96328e6964d", size = 171310, upload-time = "2026-11-06T03:03:21.723Z" },
 ]
 
 [[package]]
@@ -2238,7 +2238,6 @@ dependencies = [
     { name = "jinja2" },
     { name = "langchain", extra = ["mcp"] },
     { name = "langchain-anthropic" },
-    { name = "langchain-core" },
     { name = "langchain-fireworks" },
     { name = "langchain-google-genai" },
     { name = "langchain-openai" },
@@ -2280,7 +2279,7 @@ requires-dist = [
     { name = "asyncpg", specifier = "==0.32.0" },
     { name = "croniter", specifier = ">=6.0.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "deepagents", specifier = "==0.7.32" },
+    { name = "deepagents", specifier = "==0.7.34" },
     { name = "exa-py", specifier = ">=2.18.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fireworks-ai", specifier = ">=1.2.9" },
@@ -2290,15 +2289,14 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.9" },
     { name = "langchain-anthropic", specifier = ">=1.7.10" },
-    { name = "langchain-core", specifier = ">=1.7.6,<2" },
     { name = "langchain-fireworks", specifier = ">=1.7.2" },
     { name = "langchain-google-genai", specifier = ">=4.4.3" },
     { name = "langchain-openai", specifier = ">=1.7.4,<2.0.0" },
-    { name = "langchain-quickjs", specifier = "==0.3.11" },
+    { name = "langchain-quickjs", specifier = "==0.3.12" },
     { name = "langchain-typesafe", specifier = "==0.0.1" },
     { name = "langgraph", specifier = ">=1.2.20" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.40,<0.4.41" },
-    { name = "langgraph-sdk", specifier = ">=0.4.13" },
+    { name = "langgraph-sdk", specifier = ">=0.4.14" },
     { name = "langsmith", specifier = ">=0.14.17" },
     { name = "managed-deepagents", editable = "vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
@@ -2993,14 +2991,14 @@ wheels = [
 
 [[package]]
 name = "quickjs-rs"
-version = "0.2.5"
+version = "0.2.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "wasmtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/dc/177301106aede96a709d5577127aaa090364d4abb8b4c4cfb87b12ae2c30/quickjs_rs-0.2.5.tar.gz", hash = "sha256:3ceb30fba27013108fac92f0a716d6a16980131ce5b13f9912848df1f1f2cf09", size = 830147, upload-time = "2026-07-24T20:29:26.377Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/d8/5a2a8180f9688a8e9b7d3f00d31c21d257bc69f3254f3cd6b4a35379f734/quickjs_rs-0.2.6.tar.gz", hash = "sha256:fd1de1fb4c2a6828408e09f7109d468f66cc998668120b31a1ce5392134fadd0", size = 831928, upload-time = "2026-10-20T23:42:09.593Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/1d/e4406d13ce9b9443dbfa59e2a2d5b3e11278ebe322b54de38ae18faf5436/quickjs_rs-0.2.5-py3-none-any.whl", hash = "sha256:e82240af1f1dd1b2e12bcf169a22a8e0e451e356f0688f2fc3bba886d9b2bb20", size = 801138, upload-time = "2026-07-24T20:29:24.194Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/df/127d9fe8b3d822dd3ee5838fd598155876e6018872d7105406388b8678f3/quickjs_rs-0.2.6-py3-none-any.whl", hash = "sha256:3591faae7eef58f41e01f50071795679f2b53042e40a64f3784546a6bde35339", size = 802659, upload-time = "2026-10-20T23:42:07.754Z" },
 ]
 
 [[package]]
