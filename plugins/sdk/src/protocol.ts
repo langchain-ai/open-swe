@@ -147,14 +147,48 @@ export interface Commit {
   authoredAt: string | null
 }
 
+/** A pull request as GitHub has it now. */
 export interface PullRequest {
   number: number
   title: string
   url: string
   state: string
+  merged: boolean
   draft: boolean
+  /** The head branch. */
   head: string
   base: string
+  headSha: string
+  baseSha: string
+  author: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  /** Logins GitHub still asks to review; a review answers the request. */
+  requestedReviewers: string[]
+  /** `org/slug` of the teams GitHub still asks to review. */
+  requestedTeams: string[]
+}
+
+/** The person's part in the pull requests a search finds; `review-requested` includes their teams'. */
+export type PullRequestRole = "review-requested" | "author"
+
+/** An open pull request as GitHub's search lists it; read it in full with `github(repository).pull()`. */
+export interface PullRequestSummary {
+  /** `owner/repo`, lowercase. */
+  repository: string
+  number: number
+  title: string
+  url: string
+  draft: boolean
+  author: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface PullRequestSearch {
+  pulls: PullRequestSummary[]
+  /** Whether GitHub left some out: past its first page of results, or a search that timed out. */
+  incomplete: boolean
 }
 
 export interface RoomScope extends DocumentScope {
@@ -207,6 +241,23 @@ export interface CommitRequest {
 export interface CommitWire extends Omit<CommitRequest, "files"> {
   files: { path: string; content: string }[]
 }
+
+/** A file kept beside a document; see `Collection.attach`. */
+export interface StoredAttachment {
+  name: string
+  contentType: AttachmentType
+  size: number
+  updatedAt: string | null
+}
+
+/** What a document's attachment may be: an image or a video. */
+export type AttachmentType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/webp"
+  | "image/gif"
+  | "video/webm"
+  | "video/mp4"
 
 /** A stored document as it crosses the wire: its JSON text, so every key survives. */
 export interface StoredJson {
@@ -328,6 +379,13 @@ export type RoomEvent =
   | { type: "presence"; client: string; presence: Uint8Array }
   | { type: "error"; status: number; message: string }
 
+/** An image to put in the dock's composer beside the draft, base64-encoded. */
+export interface DraftImage {
+  name: string
+  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+  base64: string
+}
+
 /** Something the plugin ends by disposing it. */
 export interface Subscription extends RpcTarget {}
 
@@ -360,6 +418,11 @@ export interface HostApi extends RpcTarget {
   /** One repository the person shared, acting with their own GitHub access. */
   github(repository: string): Promise<GitHubRepositoryApi>
   /**
+   * Open pull requests in every repository the person shared and can still
+   * read, by the person's part in them, newest activity first.
+   */
+  searchPulls(role: PullRequestRole): Promise<PullRequestSearch>
+  /**
    * Offers the agent in the dock tools, as JSON text of
    * `{ tools: [{ name, description, parameters }], instructions }`, in place
    * of any offered before; disposing the subscription withdraws them. `run`
@@ -378,8 +441,11 @@ export interface HostApi extends RpcTarget {
    * shows `label` (at most 120 characters) beside it.
    */
   shareContext(json: string, label: string | null): Promise<void>
-  /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
-  openChat(draft: string | null): Promise<void>
+  /**
+   * Opens the dock on the chosen chat, with `draft` and `images` in its
+   * composer for the person to check and send; at most 5 images of 10 MB each.
+   */
+  openChat(draft: string | null, images: DraftImage[]): Promise<void>
   /**
    * Joins a live room, scoped like documents; dispose the room to leave it.
    * A frame is in at most 20 rooms at once.
@@ -401,7 +467,20 @@ export interface CollectionApi extends RpcTarget {
   /** Stores `json` only if `key` is free; returns what is stored, which is someone else's if they got there first. */
   create(key: string, json: string): Promise<StoredJson>
   delete(key: string): Promise<void>
-  /** Calls `onChange` whenever anyone writes a document here. */
+  /**
+   * Keeps `bytes` as `name` beside the document under `key`, replacing any
+   * file of that name; fails with status 404 when there is no such document.
+   */
+  attach(
+    key: string,
+    name: string,
+    bytes: Uint8Array,
+    contentType: AttachmentType
+  ): Promise<StoredAttachment>
+  /** A file kept beside the document under `key`; `null` when there is none. */
+  attachment(key: string, name: string): Promise<Blob | null>
+  detach(key: string, name: string): Promise<void>
+  /** Calls `onChange` whenever anyone writes a document or attachment here. */
   watch(onChange: () => void): Promise<Subscription>
 }
 
@@ -419,6 +498,8 @@ export interface GitHubRepositoryApi extends RpcTarget {
   deleteBranch(name: string): Promise<void>
   /** Fails when `branch` moved past `expectedHead`, so no push is overwritten. */
   commit(request: CommitWire): Promise<string>
+  /** The pull request numbered `number` as GitHub has it now; `null` when there is none. */
+  pull(number: number): Promise<PullRequest | null>
   findPull(head: string): Promise<PullRequest | null>
   openPull(draft: PullRequestDraft): Promise<PullRequest>
 }

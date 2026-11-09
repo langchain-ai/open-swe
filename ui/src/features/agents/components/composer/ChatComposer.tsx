@@ -78,10 +78,10 @@ import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
-const MAX_IMAGE_COUNT = 5
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+export const MAX_IMAGE_COUNT = 5
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
-const SUPPORTED_IMAGE_TYPES = new Set([
+export const SUPPORTED_IMAGE_TYPES: ReadonlySet<string> = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",
@@ -131,6 +131,12 @@ export interface RestoredDraft {
   replacesSuggestion?: boolean
 }
 
+/** The last suggested prompt put in a composer, which the next suggestion replaces while it is untouched. */
+interface Suggestion {
+  text: string
+  images: ReadonlyArray<ImageChunk>
+}
+
 class ComposerDrafts {
   private drafts = new Map<
     string,
@@ -140,6 +146,7 @@ class ComposerDrafts {
       replies: Array<PendingReply>
     }
   >()
+  private suggestions = new Map<string, Suggestion>()
 
   read(key?: string) {
     return key ? this.drafts.get(key) : undefined
@@ -153,12 +160,26 @@ class ComposerDrafts {
   ) {
     if (!key) return
     this.drafts.delete(key)
-    if (!text && !images.length && !replies.length) return
+    if (!text && !images.length && !replies.length) {
+      this.suggestions.delete(key)
+      return
+    }
     this.drafts.set(key, { text, images, replies })
     if (this.drafts.size > 50) {
       const oldest = this.drafts.keys().next().value
-      if (oldest) this.drafts.delete(oldest)
+      if (oldest) {
+        this.drafts.delete(oldest)
+        this.suggestions.delete(oldest)
+      }
     }
+  }
+
+  suggestion(key?: string) {
+    return key ? this.suggestions.get(key) : undefined
+  }
+
+  suggest(key: string | undefined, suggestion: Suggestion) {
+    if (key) this.suggestions.set(key, suggestion)
   }
 }
 
@@ -566,23 +587,44 @@ export const ChatComposer = memo(function ChatComposer({
   }, [])
 
   const restoredKeyRef = useRef<number | null>(null)
-  const lastSuggestionRef = useRef<string | null>(null)
+  // Kept with the draft, so a suggestion still replaces the last one after a remount.
+  const lastSuggestionRef = useRef<Suggestion | null>(
+    composerDrafts.suggestion(draftKey) ?? null
+  )
   useEffect(() => {
     if (!restoreDraft || restoredKeyRef.current === restoreDraft.key) return
     restoredKeyRef.current = restoreDraft.key
     const current = editorRef.current?.readSnapshot()?.value ?? value
+    const previous = lastSuggestionRef.current
     const untouched =
       restoreDraft.replacesSuggestion &&
-      current.trim() === (lastSuggestionRef.current ?? "").trim()
-    if (restoreDraft.replacesSuggestion)
-      lastSuggestionRef.current = restoreDraft.text
+      current.trim() === (previous?.text ?? "").trim()
+    if (restoreDraft.replacesSuggestion) {
+      lastSuggestionRef.current = {
+        text: restoreDraft.text,
+        images: restoreDraft.images,
+      }
+      composerDrafts.suggest(draftKey, lastSuggestionRef.current)
+    }
     const next = [restoreDraft.text, untouched ? "" : current]
       .filter((part) => part.trim().length > 0)
       .join("\n\n")
     applyPrompt(next, next.length)
-    if (restoreDraft.images.length > 0) {
+    // A replaced suggestion takes its images with it.
+    const replaced = untouched ? (previous?.images ?? []) : []
+    if (restoreDraft.images.length > 0 || replaced.length > 0) {
       // oxlint-disable-next-line react/set-state-in-effect
-      setPendingImages((prev) => [...restoreDraft.images, ...prev])
+      setPendingImages((prev) => {
+        const images = [
+          ...restoreDraft.images,
+          ...prev.filter((image) => !replaced.includes(image)),
+        ]
+        // Only a suggestion is held to the limit; the person's own images
+        // coming back (a cancelled queued message) are never dropped.
+        return restoreDraft.replacesSuggestion
+          ? images.slice(0, MAX_IMAGE_COUNT)
+          : images
+      })
     }
     const restoredReplies = restoreDraft.replies ?? []
     if (restoredReplies.length > 0) {
@@ -595,7 +637,7 @@ export const ChatComposer = memo(function ChatComposer({
       ])
     }
     editorRef.current?.focusAtEnd()
-  }, [applyPrompt, restoreDraft, value])
+  }, [applyPrompt, draftKey, restoreDraft, value])
 
   const handleSubmit = useCallback(
     async (options?: SubmitOptions) => {

@@ -658,6 +658,42 @@
         "title": "AssessmentFeedback",
         "type": "object"
       },
+      "AttachmentModel": {
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "content_type",
+          "size",
+          "updated_at"
+        ],
+        "title": "AttachmentModel",
+        "type": "object"
+      },
       "AttemptView": {
         "properties": {
           "created_at": {
@@ -1731,6 +1767,22 @@
           "action"
         ],
         "title": "CloseAction",
+        "type": "object"
+      },
+      "CollectionRules": {
+        "description": "Who may change one of the app's storage collections; anyone who may read it reads it.",
+        "properties": {
+          "write": {
+            "default": "people",
+            "enum": [
+              "people",
+              "app"
+            ],
+            "title": "Write",
+            "type": "string"
+          }
+        },
+        "title": "CollectionRules",
         "type": "object"
       },
       "CommentBatchIntent": {
@@ -5676,6 +5728,16 @@
       },
       "PluginManifest": {
         "properties": {
+          "collections": {
+            "maxProperties": 64,
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]{0,63}$": {
+                "$ref": "#/components/schemas/CollectionRules"
+              }
+            },
+            "title": "Collections",
+            "type": "object"
+          },
           "description": {
             "default": "",
             "maxLength": 280,
@@ -6703,9 +6765,35 @@
       },
       "PullRequestModel": {
         "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
           "base": {
             "title": "Base",
             "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "draft": {
             "title": "Draft",
@@ -6715,9 +6803,31 @@
             "title": "Head",
             "type": "string"
           },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "merged": {
+            "title": "Merged",
+            "type": "boolean"
+          },
           "number": {
             "title": "Number",
             "type": "integer"
+          },
+          "requested_reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Reviewers",
+            "type": "array"
+          },
+          "requested_teams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Teams",
+            "type": "array"
           },
           "state": {
             "title": "State",
@@ -6726,6 +6836,17 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "url": {
             "title": "Url",
@@ -6737,9 +6858,17 @@
           "title",
           "url",
           "state",
+          "merged",
           "draft",
           "head",
-          "base"
+          "base",
+          "head_sha",
+          "base_sha",
+          "author",
+          "created_at",
+          "updated_at",
+          "requested_reviewers",
+          "requested_teams"
         ],
         "title": "PullRequestModel",
         "type": "object"
@@ -6934,6 +7063,27 @@
         "title": "PullRequestReviewer",
         "type": "object"
       },
+      "PullRequestSearch": {
+        "properties": {
+          "incomplete": {
+            "title": "Incomplete",
+            "type": "boolean"
+          },
+          "pulls": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestSummary"
+            },
+            "title": "Pulls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pulls",
+          "incomplete"
+        ],
+        "title": "PullRequestSearch",
+        "type": "object"
+      },
       "PullRequestSearchResult": {
         "properties": {
           "number": {
@@ -7030,6 +7180,76 @@
           "state"
         ],
         "title": "PullRequestState",
+        "type": "object"
+      },
+      "PullRequestSummary": {
+        "description": "A pull request as GitHub's search lists it, before reading it in full.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "number",
+          "title",
+          "url",
+          "draft",
+          "author",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PullRequestSummary",
         "type": "object"
       },
       "PullRequestThreadRun": {
@@ -16925,6 +17145,283 @@
         ]
       }
     },
+    "/dashboard/api/plugins/{installation_id}/attachments/{collection}/{name}": {
+      "delete": {
+        "operationId": "api_delete_plugin_attachment_dashboard_api_plugins__installation_id__attachments__collection___name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Plugin Attachment",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "get": {
+        "description": "An attachment's bytes, which the dashboard hands the plugin's frame as a Blob.",
+        "operationId": "api_get_plugin_attachment_dashboard_api_plugins__installation_id__attachments__collection___name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/gif": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "video/mp4": {},
+              "video/webm": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Plugin Attachment",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "put": {
+        "description": "Keeps the request's body as ``name`` beside the document under ``key``.\n\nThe body is an image or a video, sent as its own content type.",
+        "operationId": "api_put_plugin_attachment_dashboard_api_plugins__installation_id__attachments__collection___name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Plugin Attachment",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
     "/dashboard/api/plugins/{installation_id}/bundle": {
       "get": {
         "operationId": "api_plugin_bundle_dashboard_api_plugins__installation_id__bundle_get",
@@ -17611,6 +18108,69 @@
           }
         ],
         "summary": "Api Put Plugin Document",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/pulls": {
+      "get": {
+        "description": "Open pull requests in the repositories the person shared and can read, by their role.",
+        "operationId": "api_plugin_search_pulls_dashboard_api_plugins__installation_id__github_pulls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "enum": [
+                "review-requested",
+                "author"
+              ],
+              "title": "Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestSearch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Search Pulls",
         "tags": [
           "dashboard",
           "plugins"
@@ -18344,6 +18904,84 @@
           }
         ],
         "summary": "Api Plugin Open Pull",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/pulls/{number}": {
+      "get": {
+        "operationId": "api_plugin_pull_dashboard_api_plugins__installation_id__github__owner___repo__pulls__number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Pull",
         "tags": [
           "dashboard",
           "plugins"

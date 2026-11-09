@@ -247,6 +247,95 @@ describe("ChatComposer drafts", () => {
     renderComposer(false, { draftKey: "draft-user:new:home" })
     expect(screen.getByRole("textbox").textContent).toBe("")
   })
+
+  it("replaces an untouched suggestion and its images, even after a remount", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const shot = (fileName: string) => ({
+      kind: "image" as const,
+      base64: "aGVsbG8=",
+      mimeType: "image/png",
+      fileName,
+    })
+    const draftKey = "draft-user:thread:suggested"
+    renderComposer(false, {
+      draftKey,
+      restoreDraft: {
+        key: 1,
+        text: "About the header",
+        images: [shot("before.png"), shot("after.png")],
+        replacesSuggestion: true,
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toBe("About the header")
+    )
+    cleanup()
+    const next = [1, 2, 3, 4].map((n) => shot(`footer-${n}.png`))
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      draftKey,
+      onSubmit,
+      restoreDraft: {
+        key: 1,
+        text: "About the footer",
+        images: next,
+        replacesSuggestion: true,
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toBe("About the footer")
+    )
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        { text: "About the footer", images: next, replies: [] },
+        expect.anything()
+      )
+    )
+  })
+
+  it("keeps every unsent image when a cancelled queued message comes back", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const shot = (fileName: string) => ({
+      kind: "image" as const,
+      base64: "aGVsbG8=",
+      mimeType: "image/png",
+      fileName,
+    })
+    const draftKey = "draft-user:thread:queued"
+    const unsent = [1, 2, 3].map((n) => shot(`unsent-${n}.png`))
+    renderComposer(false, {
+      draftKey,
+      restoreDraft: { key: 1, text: "Unsent", images: unsent },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toBe("Unsent")
+    )
+    cleanup()
+    const queued = [1, 2, 3].map((n) => shot(`queued-${n}.png`))
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      draftKey,
+      onSubmit,
+      restoreDraft: { key: 2, text: "Queued", images: queued },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toContain("Queued")
+    )
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ images: [...queued, ...unsent] }),
+        expect.anything()
+      )
+    )
+  })
 })
 
 describe("ChatComposer options", () => {

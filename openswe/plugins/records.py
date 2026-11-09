@@ -6,13 +6,16 @@ import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar, Final
 from uuid import UUID, uuid7
 
 from pydantic import ValidationError
 from sqlalchemy import (
     ColumnElement,
     ForeignKey,
+    LargeBinary,
     Numeric,
+    Select,
     SQLColumnExpression,
     String,
     Text,
@@ -29,7 +32,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, aggregate_order_by, array, insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, undefer
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
@@ -38,6 +41,7 @@ from openswe.plugins.manifest import PluginManifest, PluginPermission, read_bund
 from openswe.run_config import PluginChatConfig
 from openswe.ui_invalidations import Topic
 from openswe.utils.json_types import JsonObject
+from openswe.utils.object_store import ObjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +157,30 @@ class PluginDocumentRow(Base):
     repository: Mapped[str | None]
     user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     document: Mapped[JsonObject] = mapped_column(JSONB)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
+class PluginDocumentAttachmentRow(Base):
+    """A file an app keeps beside one of its documents, deleted with it."""
+
+    __tablename__ = "plugin_document_attachment"
+
+    document: Mapped[UUID] = mapped_column(ForeignKey("plugin_document.id", ondelete="CASCADE"))
+    name: Mapped[str]
+    content_type: Mapped[str]
+    size: Mapped[int]
+    content: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True, default=None)
+    """The file itself, when it is small enough to keep in PostgreSQL."""
+    object_key: Mapped[str | None] = mapped_column(default=None)
+    """Where object storage keeps it otherwise."""
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -426,6 +454,18 @@ class PluginApps:
                 )
                 apps.append(App(app.id, app.owner, app.name, app.listed, version))
             return apps
+
+    @staticmethod
+    async def newest_release(app_id: UUID) -> AppVersion | None:
+        """The app's newest release, which anyone adding it now gets; ``None`` before the first."""
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(PluginVersionRow)
+                .where(PluginVersionRow.plugin == app_id, PluginVersionRow.preview_of.is_(None))
+                .order_by(PluginVersionRow.number.desc())
+                .limit(1)
+            )
+        return None if row is None else AppVersion.of(row)
 
     @staticmethod
     async def newest_preview(thread_id: str, owner: UUID) -> AppVersion | None:
@@ -767,6 +807,17 @@ class PluginDocument:
     updated_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class Attachment:
+    """A file kept beside a document; ``content`` is read only when asked for."""
+
+    name: str
+    content_type: str
+    size: int
+    updated_at: datetime | None
+    content: bytes | None = None
+
+
 JsonScalar = str | int | float | bool | None
 
 
@@ -866,6 +917,88 @@ class ConflictingDocumentWrites(RuntimeError):
 
     def __init__(self, key: str) -> None:
         super().__init__(f"{key} kept changing while it was being created; try again")
+
+
+INLINE_ATTACHMENT_BYTES = 256 * 1024
+"""The largest attachment kept in PostgreSQL; larger ones go to object storage."""
+
+ATTACHMENT_SWEEP_JOB: Final = "plugin_attachment_sweep"
+ATTACHMENT_SWEEP_SCHEDULE: Final = "23 * * * *"
+
+
+class AttachmentStorageUnavailable(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__(
+            f"files over {INLINE_ATTACHMENT_BYTES // 1024} KiB need object storage, "
+            "which this Robin instance has not set up"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentObjects:
+    """The attachments too large for PostgreSQL, as objects in object storage."""
+
+    store: ObjectStore
+
+    PREFIX: ClassVar[str] = "plugin-attachments/"
+    # An object younger than this may belong to an upload whose row is not written yet.
+    GRACE: ClassVar[timedelta] = timedelta(days=1)
+    BATCH: ClassVar[int] = 500
+
+    @classmethod
+    def of(cls) -> AttachmentObjects:
+        store = ObjectStore.configured()
+        if store is None:
+            raise AttachmentStorageUnavailable()
+        return cls(store)
+
+    async def put(self, content: bytes, content_type: str) -> str:
+        """Stores ``content`` under a new key, which it returns."""
+        object_key = f"{self.PREFIX}{uuid7()}"
+        await self.store.put(object_key, content, content_type)
+        return object_key
+
+    async def read(self, object_key: str) -> bytes | None:
+        return await self.store.get(object_key)
+
+    async def sweep(self) -> int:
+        """Deletes the objects no attachment names any longer; returns how many."""
+        cutoff = datetime.now(UTC) - self.GRACE
+        swept = 0
+        batch: list[str] = []
+        async for stored in self.store.list(self.PREFIX):
+            if stored.last_modified < cutoff:
+                batch.append(stored.key)
+            if len(batch) >= self.BATCH:
+                swept += await self._delete_unnamed(batch)
+                batch = []
+        if batch:
+            swept += await self._delete_unnamed(batch)
+        return swept
+
+    async def _delete_unnamed(self, object_keys: list[str]) -> int:
+        async with postgres.session() as session:
+            named = set(
+                await session.scalars(
+                    select(PluginDocumentAttachmentRow.object_key).where(
+                        PluginDocumentAttachmentRow.object_key.in_(object_keys)
+                    )
+                )
+            )
+        unnamed = [object_key for object_key in object_keys if object_key not in named]
+        for object_key in unnamed:
+            await self.store.delete(object_key)
+        return len(unnamed)
+
+    @staticmethod
+    async def sweep_configured() -> None:
+        """The sweep job: nothing to do where object storage is not set up."""
+        store = ObjectStore.configured()
+        if store is not None:
+            logger.info(
+                "Plugin attachment objects swept",
+                extra={"swept": await AttachmentObjects(store).sweep()},
+            )
 
 
 class PluginDocuments:
@@ -1002,6 +1135,122 @@ class PluginDocuments:
                 delete(PluginDocumentRow)
                 .where(*self._where(collection, scope), PluginDocumentRow.key == key)
                 .returning(PluginDocumentRow.id)
+            )
+            if deleted is not None:
+                await Topic.PLUGIN_DOCUMENTS.invalidate(
+                    session, key=scope.topic_key(self.plugin, collection)
+                )
+            return deleted is not None
+
+    def _document_id(self, collection: str, scope: DocumentScope, key: str) -> Select[UUID]:
+        return select(PluginDocumentRow.id).where(
+            *self._where(collection, scope), PluginDocumentRow.key == key
+        )
+
+    async def attach(
+        self,
+        collection: str,
+        scope: DocumentScope,
+        key: str,
+        name: str,
+        content_type: str,
+        content: bytes,
+        *,
+        by: UUID,
+    ) -> Attachment | None:
+        """Keeps ``content`` as ``name`` beside the document, replacing any file of that name.
+
+        ``None`` when there is no document under ``key`` to attach it to. A file the row
+        replaces, or one stored for a document deleted meanwhile, is left for the sweep.
+        """
+        objects = None if len(content) <= INLINE_ATTACHMENT_BYTES else AttachmentObjects.of()
+        async with postgres.session() as session:
+            if await session.scalar(self._document_id(collection, scope, key)) is None:
+                return None
+        # Uploaded outside any transaction, so no row lock waits on object storage.
+        object_key = await objects.put(content, content_type) if objects else None
+        inline = None if object_key else content
+        async with postgres.session() as session:
+            document = await session.scalar(
+                self._document_id(collection, scope, key).with_for_update(key_share=True)
+            )
+            if document is None:
+                return None
+            row = (
+                await session.execute(
+                    insert(PluginDocumentAttachmentRow)
+                    .values(
+                        id=uuid7(),
+                        document=document,
+                        name=name,
+                        content_type=content_type,
+                        size=len(content),
+                        content=inline,
+                        object_key=object_key,
+                        created_by=by,
+                        updated_by=by,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=[
+                            PluginDocumentAttachmentRow.document,
+                            PluginDocumentAttachmentRow.name,
+                        ],
+                        set_={
+                            "content_type": content_type,
+                            "size": len(content),
+                            "content": inline,
+                            "object_key": object_key,
+                            "updated_at": func.clock_timestamp(),
+                            "updated_by": by,
+                        },
+                    )
+                    .returning(
+                        PluginDocumentAttachmentRow.name,
+                        PluginDocumentAttachmentRow.content_type,
+                        PluginDocumentAttachmentRow.updated_at,
+                    )
+                )
+            ).one()
+            await Topic.PLUGIN_DOCUMENTS.invalidate(
+                session, key=scope.topic_key(self.plugin, collection)
+            )
+        return Attachment(row.name, row.content_type, len(content), row.updated_at)
+
+    async def attachment(
+        self, collection: str, scope: DocumentScope, key: str, name: str
+    ) -> Attachment | None:
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(PluginDocumentAttachmentRow)
+                .where(
+                    PluginDocumentAttachmentRow.document
+                    == self._document_id(collection, scope, key).scalar_subquery(),
+                    PluginDocumentAttachmentRow.name == name,
+                )
+                .options(undefer(PluginDocumentAttachmentRow.content))
+            )
+        if row is None:
+            return None
+        content = row.content
+        if row.object_key is not None:
+            content = await AttachmentObjects.of().read(row.object_key)
+        if content is None:
+            logger.warning(
+                "A plugin attachment's object is missing", extra={"object_key": row.object_key}
+            )
+            return None
+        return Attachment(row.name, row.content_type, row.size, row.updated_at, content=content)
+
+    async def detach(self, collection: str, scope: DocumentScope, key: str, name: str) -> bool:
+        async with postgres.session() as session:
+            deleted = await session.scalar(
+                delete(PluginDocumentAttachmentRow)
+                .where(
+                    PluginDocumentAttachmentRow.document
+                    == self._document_id(collection, scope, key).scalar_subquery(),
+                    PluginDocumentAttachmentRow.name == name,
+                )
+                .returning(PluginDocumentAttachmentRow.id)
             )
             if deleted is not None:
                 await Topic.PLUGIN_DOCUMENTS.invalidate(

@@ -49,6 +49,11 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
 from openswe.notifications.service import AppNotification
+from openswe.plugins.records import (
+    ATTACHMENT_SWEEP_JOB,
+    ATTACHMENT_SWEEP_SCHEDULE,
+    AttachmentObjects,
+)
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -244,6 +249,11 @@ WORKER.register(EVENT_CLAIM_PURGE)(event_claims.purge_lapsed)
 WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
 
 
+@WORKER.register(ATTACHMENT_SWEEP_JOB)
+async def _plugin_attachment_sweep(_job: Job) -> None:
+    await AttachmentObjects.sweep_configured()
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     if job.lapsed_lease is not None:
@@ -289,6 +299,9 @@ async def start_jobs() -> None:
         lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
         lambda: queue.schedule(
             GITHUB_QUOTA_SAMPLE, cron=GITHUB_QUOTA_SCHEDULE, key=GITHUB_QUOTA_SAMPLE
+        ),
+        lambda: queue.schedule(
+            ATTACHMENT_SWEEP_JOB, cron=ATTACHMENT_SWEEP_SCHEDULE, key=ATTACHMENT_SWEEP_JOB
         ),
     ]
     for step in steps:

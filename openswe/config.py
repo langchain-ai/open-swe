@@ -527,6 +527,30 @@ ENV.var(
     aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
 )
 
+# --- Object storage ----------------------------------------------------------------------------
+ENV.var(
+    "OBJECT_STORE_URL",
+    "Endpoint of the object storage that keeps large files, such as app attachments: "
+    "https://storage.googleapis.com for GCS (its XML API, with an HMAC key), or an S3, R2 or "
+    "MinIO endpoint. Unset, only files small enough to keep in PostgreSQL are accepted.",
+)
+ENV.var("OBJECT_STORE_BUCKET", "Bucket the object storage keeps those files in.")
+ENV.var(
+    "OBJECT_STORE_REGION",
+    "Region requests to the object storage are signed for: the bucket's region on S3; GCS takes "
+    "auto, the default.",
+    default="auto",
+)
+ENV.var(
+    "OBJECT_STORE_ACCESS_KEY_ID",
+    "Access key for the object storage; on GCS, the access ID of a service account's HMAC key.",
+)
+ENV.var(
+    "OBJECT_STORE_SECRET_ACCESS_KEY",
+    "Secret of OBJECT_STORE_ACCESS_KEY_ID.",
+    secret=True,
+)
+
 # --- Debugging -------------------------------------------------------
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
 ENV.var(

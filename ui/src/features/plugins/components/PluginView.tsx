@@ -17,12 +17,13 @@ import {
   usePluginBundle,
   useSharePluginRepositories,
 } from "@/features/plugins/lib/queries"
+import type { ImageChunk } from "@/features/agents/lib/types"
 
 /** What a plugin's frame may ask of the agent beside it. */
 export interface PluginAgentHooks {
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   chooseChat: (chat: ChatTarget) => void
-  openChat: (text: string | null) => void
+  openChat: (text: string | null, images: Array<ImageChunk>) => void
   shareContext: (context: SharedContext | null) => void
 }
 

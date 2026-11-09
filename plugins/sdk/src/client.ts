@@ -7,11 +7,13 @@ import {
   PROTOCOL_VERSION,
   RUNTIME_GLOBAL,
   type AgentTool,
+  type AttachmentType,
   type ChatScope,
   type CollectionApi,
   type CommitRequest,
   type CursorWire,
   type DocumentScope,
+  type DraftImage,
   type FieldPath,
   type GitHubRepositoryApi,
   type HostApi,
@@ -23,12 +25,14 @@ import {
   type JsonValue,
   type Person,
   type PullRequestDraft,
+  type PullRequestRole,
   type QueryBound,
   type QueryOptions,
   type RepositoryPickOptions,
   type RoomApi,
   type RoomEvent,
   type RoomScope,
+  type StoredAttachment,
   type StoredDocument,
   type StoredJson,
   type Toast,
@@ -210,6 +214,16 @@ export class PluginHost {
     return found
   }
 
+  /** Pull requests across the repositories the person shared, read as them. */
+  readonly pulls = {
+    /**
+     * Open pull requests in every shared repository the person can still
+     * read, by their part in them; `review-requested` includes their teams'.
+     */
+    search: (options: { role: PullRequestRole }) =>
+      settle(this.api.searchPulls(options.role)),
+  }
+
   /** The agent in the dock beside the plugin, which the person chats with. */
   readonly agent = {
     /**
@@ -263,9 +277,22 @@ export class PluginHost {
       settle(
         this.api.shareContext(JSON.stringify(context), options.label ?? null)
       ),
-    /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
-    open: (options: { draft?: string } = {}) =>
-      settle(this.api.openChat(options.draft ?? null)),
+    /**
+     * Opens the dock on the chosen chat, with `draft` and `images` in its
+     * composer; nothing is sent until the person checks it and presses Send.
+     */
+    open: async (
+      options: {
+        draft?: string
+        images?: Array<{ name: string; blob: Blob }>
+      } = {}
+    ) =>
+      settle(
+        this.api.openChat(
+          options.draft ?? null,
+          await Promise.all((options.images ?? []).map(draftImage))
+        )
+      ),
   }
 
   /** Joins a live room; leave it with the returned room's `leave()`. */
@@ -355,7 +382,31 @@ export class Collection<K extends string, V extends JsonDocument<V>> {
     return settle(this.stub.delete(key))
   }
 
-  /** Calls `onChange` whenever anyone writes a document here; returns the unsubscribe. */
+  /**
+   * Keeps `file` as `name` beside the document under `key`, replacing any
+   * file of that name; the document must exist, and deleting it deletes this.
+   */
+  async attach(key: K, name: string, file: Blob): Promise<StoredAttachment> {
+    return settle(
+      this.stub.attach(
+        key,
+        name,
+        new Uint8Array(await file.arrayBuffer()),
+        file.type as AttachmentType
+      )
+    )
+  }
+
+  /** A file kept beside the document under `key`, as a Blob for `URL.createObjectURL`; `null` when absent. */
+  attachment(key: K, name: string): Promise<Blob | null> {
+    return settle(this.stub.attachment(key, name))
+  }
+
+  detach(key: K, name: string): Promise<void> {
+    return settle(this.stub.detach(key, name))
+  }
+
+  /** Calls `onChange` whenever anyone writes a document or attachment here; returns the unsubscribe. */
   watch(onChange: () => void): () => void {
     const subscription = this.stub.watch(() => onChange())
     return () => subscription[Symbol.dispose]()
@@ -417,11 +468,42 @@ export class GitHubRepository {
       })
     )
   }
+  /** The pull request numbered `number` as GitHub has it now; `null` when there is none. */
+  pull(number: number) {
+    return settle(this.stub.pull(number))
+  }
   findPull(head: string) {
     return settle(this.stub.findPull(head))
   }
   openPull(draft: PullRequestDraft) {
     return settle(this.stub.openPull(draft))
+  }
+}
+
+const DRAFT_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+])
+
+async function draftImage(image: {
+  name: string
+  blob: Blob
+}): Promise<DraftImage> {
+  if (!DRAFT_IMAGE_TYPES.has(image.blob.type))
+    throw new HostError(
+      `${image.name} is not a PNG, JPEG, WebP or GIF image`,
+      400
+    )
+  const bytes = new Uint8Array(await image.blob.arrayBuffer())
+  let binary = ""
+  for (let start = 0; start < bytes.length; start += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000))
+  return {
+    name: image.name,
+    mimeType: image.blob.type as DraftImage["mimeType"],
+    base64: btoa(binary),
   }
 }
 

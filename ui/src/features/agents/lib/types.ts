@@ -184,6 +184,13 @@ export interface ImageChunk {
   fileName?: string
 }
 
+/** What a page around a thread puts in its composer; a new `key` puts it there again. */
+export interface ComposerDraft {
+  key: number
+  text: string
+  images?: ReadonlyArray<ImageChunk>
+}
+
 /**
  * An image the transcript references rather than inlines: the log stores
  * metadata plus either an attachment id addressing bytes on our own API, or a

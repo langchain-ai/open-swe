@@ -28,6 +28,7 @@ import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import type {
   AgentPullRequest,
   AgentThread,
+  ComposerDraft,
   ImageChunk,
   Message,
   ThreadFixScope,
@@ -96,9 +97,16 @@ import {
   threadTranscriptPainted,
 } from "@/lib/perf/threadLoad"
 
+/**
+ * Drafts a page around a thread has already put in its composer. The page keeps
+ * handing over its last draft, so without this every remount of the view (the
+ * dock reopening, a layout change) would put the same draft there again.
+ */
+const appliedComposerDrafts = new WeakSet<ComposerDraft>()
+
 interface AgentThreadViewProps {
   thread: AgentThread
-  composerDraft?: { key: number; text: string }
+  composerDraft?: ComposerDraft
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -408,19 +416,17 @@ export function AgentThreadView({
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
-  const [appliedComposerDraft, setAppliedComposerDraft] =
-    useState<typeof composerDraft>(undefined)
-  if (composerDraft !== appliedComposerDraft) {
-    setAppliedComposerDraft(composerDraft)
-    if (composerDraft) {
-      setRestoreDraft((previous) => ({
-        key: (previous?.key ?? 0) + 1,
-        text: composerDraft.text,
-        images: [],
-        replacesSuggestion: true,
-      }))
-    }
-  }
+  useEffect(() => {
+    if (!composerDraft || appliedComposerDrafts.has(composerDraft)) return
+    appliedComposerDrafts.add(composerDraft)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setRestoreDraft((previous) => ({
+      key: (previous?.key ?? 0) + 1,
+      text: composerDraft.text,
+      images: [...(composerDraft.images ?? [])],
+      replacesSuggestion: true,
+    }))
+  }, [composerDraft])
 
   const question = reviewChat?.question
   const clearQuestion = reviewChat?.clearQuestion

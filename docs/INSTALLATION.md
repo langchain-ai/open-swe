@@ -647,6 +647,30 @@ Issue events still reach workspace automations and `listen_events`: the channel 
 
 </details>
 
+<details id="object-storage">
+<summary><strong>Object storage for app files</strong></summary>
+
+Apps keep files beside their documents, such as Design QA's screenshots.
+Files of at most 256 KiB stay in PostgreSQL; larger ones, up to 8 MiB, go to an S3-compatible bucket, and without one they are refused.
+On GCS, Robin uses the XML API with an HMAC key, so it needs no Google credentials file:
+
+1. Create a bucket, and a service account with **Storage Object User** (`roles/storage.objectUser`) on it.
+1. Create an HMAC key for that service account (`gcloud storage hmac create SERVICE_ACCOUNT_EMAIL`).
+1. Set:
+
+   ```bash
+   OBJECT_STORE_URL="https://storage.googleapis.com"
+   OBJECT_STORE_BUCKET="open-swe-files"
+   OBJECT_STORE_ACCESS_KEY_ID=""      # the HMAC key's access ID
+   OBJECT_STORE_SECRET_ACCESS_KEY=""  # its secret
+   ```
+
+S3, R2 and MinIO work the same way with their own endpoint and keys; on S3, also set `OBJECT_STORE_REGION` to the bucket's region.
+The key needs to read, write, delete and list objects under `plugin-attachments/` in that bucket.
+An hourly job deletes the objects no attachment names any longer, once they are a day old.
+
+</details>
+
 <details id="dashboard-on-its-own-origin">
 <summary><strong>Dashboard on its own origin (separate frontend deployment)</strong></summary>
 

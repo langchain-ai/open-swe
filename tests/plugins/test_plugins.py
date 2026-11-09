@@ -2,12 +2,15 @@
 
 import asyncio
 import json
-from datetime import timedelta
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import text
+from starlette.types import Message
 
 from openswe.dashboard import repo_access
 from openswe.database import postgres
@@ -18,7 +21,10 @@ from openswe.plugins import routes as plugin_routes
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import (
+    INLINE_ATTACHMENT_BYTES,
     AppNotFound,
+    AttachmentObjects,
+    AttachmentStorageUnavailable,
     Cursor,
     DocumentQuery,
     DocumentScope,
@@ -33,11 +39,12 @@ from openswe.plugins.records import (
     PreviewHeldByAnother,
 )
 from openswe.plugins.rooms import Room
-from openswe.plugins.routes import RoomJoin, _RoomStream
+from openswe.plugins.routes import DocumentWrite, RoomJoin, _RoomStream
 from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.utils import ttl_cache
+from openswe.utils.object_store import ObjectStore, StoredObject
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -49,7 +56,10 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _bundle(
-    name: str = "docs", permissions: list[str] | None = None, body: str = "<p>docs</p>"
+    name: str = "docs",
+    permissions: list[str] | None = None,
+    body: str = "<p>docs</p>",
+    collections: dict[str, dict[str, str]] | None = None,
 ) -> str:
     manifest = {
         "name": name,
@@ -57,6 +67,7 @@ def _bundle(
         "version": "1.0.0",
         "sidebar": {"label": "Docs"},
         "permissions": permissions if permissions is not None else ["storage"],
+        "collections": collections or {},
     }
     return f'<script type="application/openswe-plugin+json">{json.dumps(manifest)}</script>{body}'
 
@@ -104,6 +115,82 @@ async def test_only_the_first_create_of_a_key_is_stored() -> None:
     assert first.document == second.document
     stored = await docs.get("drafts", shared, "intro.md")
     assert stored is not None and stored.document == first.document
+
+
+async def test_attachments_are_read_like_their_document_and_deleted_with_it() -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    docs = PluginDocuments((await PluginInstallations.get(await _install(ada), ada)).plugin)
+    other = PluginDocuments((await PluginInstallations.get(await _install(bob), bob)).plugin)
+    shared = DocumentScope(repository="acme/app")
+
+    assert await docs.attach("runs", shared, "r1", "a.png", "image/png", b"png", by=ada) is None
+    await docs.put("runs", shared, "r1", {"status": "running"}, by=ada)
+    attached = await docs.attach("runs", shared, "r1", "a.png", "image/png", b"png", by=ada)
+    assert attached is not None and attached.size == 3
+
+    # Rewriting the document keeps its files.
+    await docs.put("runs", shared, "r1", {"status": "complete"}, by=bob)
+    found = await docs.attachment("runs", shared, "r1", "a.png")
+    assert found is not None and found.content == b"png"
+    assert (
+        await docs.attachment("runs", DocumentScope(repository="acme/web"), "r1", "a.png") is None
+    )
+    assert await other.attachment("runs", shared, "r1", "a.png") is None
+
+    await docs.delete("runs", shared, "r1")
+    await docs.put("runs", shared, "r1", {"status": "running"}, by=ada)
+    assert await docs.attachment("runs", shared, "r1", "a.png") is None
+
+
+@dataclass(frozen=True, slots=True)
+class _MemoryStore(ObjectStore):
+    """A bucket in memory: ``objects`` maps each key to its bytes and last write."""
+
+    objects: dict[str, tuple[bytes, datetime]] = field(default_factory=dict)
+
+    async def put(self, key: str, content: bytes, content_type: str) -> None:
+        self.objects[key] = (content, datetime.now(UTC))
+
+    async def get(self, key: str) -> bytes | None:
+        found = self.objects.get(key)
+        return found[0] if found else None
+
+    async def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+    async def list(self, prefix: str) -> AsyncIterator[StoredObject]:
+        for key, (_, modified) in sorted(self.objects.items()):
+            if key.startswith(prefix):
+                yield StoredObject(key, modified)
+
+
+async def test_large_attachments_live_in_object_storage_until_nothing_names_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada = await _person("ada", "1")
+    docs = PluginDocuments((await PluginInstallations.get(await _install(ada), ada)).plugin)
+    shared = DocumentScope(repository="acme/app")
+    await docs.put("runs", shared, "r1", {"status": "complete"}, by=ada)
+    large = b"x" * (INLINE_ATTACHMENT_BYTES + 1)
+
+    monkeypatch.setattr(ObjectStore, "configured", classmethod(lambda _cls: None))
+    with pytest.raises(AttachmentStorageUnavailable):
+        await docs.attach("runs", shared, "r1", "a.png", "image/png", large, by=ada)
+
+    store = _MemoryStore("https://objects.test", "bucket", "auto", "key", "secret")
+    monkeypatch.setattr(ObjectStore, "configured", classmethod(lambda _cls: store))
+    await docs.attach("runs", shared, "r1", "a.png", "image/png", large, by=ada)
+    [first] = store.objects
+    found = await docs.attachment("runs", shared, "r1", "a.png")
+    assert found is not None and found.content == large
+    await docs.attach("runs", shared, "r1", "a.png", "image/png", large + b"y", by=ada)
+
+    # The replaced object goes only once it is past the grace an upload in flight gets.
+    assert await AttachmentObjects(store).sweep() == 0
+    store.objects[first] = (large, datetime.now(UTC) - AttachmentObjects.GRACE * 2)
+    assert await AttachmentObjects(store).sweep() == 1
+    found = await docs.attachment("runs", shared, "r1", "a.png")
+    assert found is not None and found.content == large + b"y"
 
 
 async def test_documents_come_back_ordered_and_bounded() -> None:
@@ -358,6 +445,88 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
         plugin.require(PluginPermission.GITHUB_WRITE)
     with pytest.raises(PluginPermissionDenied):
         await plugin.room("draft", "acme/app")
+
+
+def _upload(content_type: str, body: bytes) -> Request:
+    """An attachment upload as it reaches the route, ``body`` its bytes."""
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "PUT",
+            "headers": [(b"content-type", content_type.encode())],
+            "query_string": b"",
+        },
+        receive,
+    )
+
+
+async def test_people_cannot_change_a_collection_the_app_writes_even_over_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    older = await PluginApps.publish(ada, _bundle(name="qa"), origin={})
+    await PluginApps.set_listed(older.app, ada, True)
+    # Bob stays on the version before the rule; Ada runs the release that declares it.
+    bobs = await PluginInstallations.install(older, user_id=bob)
+    ruled = _bundle(name="qa", collections={"captures": {"write": "app"}})
+    adas = await PluginInstallations.install(
+        await PluginApps.publish(ada, ruled, origin={}), user_id=ada
+    )
+    for person, installation in ((ada, adas), (bob, bobs)):
+        await PluginInstallations.share(installation, person, ["acme/app"])
+
+    async def readable(_user: User, repository: str) -> bool:
+        return repository == "acme/app"
+
+    monkeypatch.setattr(User, "can_read_repository", readable)
+    shared = DocumentScope(repository="acme/app")
+    docs = PluginDocuments(older.app)
+    await docs.put("captures", shared, "pulls/7/c1", {"status": "complete"}, by=ada)
+    await docs.attach("captures", shared, "pulls/7/c1", "a.png", "image/png", b"png", by=ada)
+
+    for person, installation in ((ada, adas), (bob, bobs)):
+        plugin = await _installed(await PluginInstallations.get(installation, person), person)
+        forged = DocumentWrite(repository="acme/app", document={"status": "forged"})
+        writes = [
+            plugin_routes.api_put_plugin_document("captures", "pulls/7/c1", forged, plugin),
+            plugin_routes.api_put_plugin_document(
+                "captures", "pulls/7/c2", forged, plugin, if_absent=True
+            ),
+            plugin_routes.api_delete_plugin_document("captures", "pulls/7/c1", plugin, "acme/app"),
+            plugin_routes.api_put_plugin_attachment(
+                "captures",
+                "a.png",
+                _upload("image/png", b"forged"),
+                plugin,
+                key="pulls/7/c1",
+                repository="acme/app",
+            ),
+            plugin_routes.api_delete_plugin_attachment(
+                "captures", "a.png", plugin, key="pulls/7/c1", repository="acme/app"
+            ),
+        ]
+        for write in writes:
+            with pytest.raises(HTTPException) as refused:
+                await write
+            assert refused.value.status_code == 403
+
+        read = await plugin_routes.api_get_plugin_document(
+            "captures", "pulls/7/c1", plugin, "acme/app"
+        )
+        assert read.document == {"status": "complete"}
+        shot = await plugin_routes.api_get_plugin_attachment(
+            "captures", "a.png", plugin, key="pulls/7/c1", repository="acme/app"
+        )
+        assert shot.body == b"png"
+        # Collections without a rule stay the people's.
+        note = DocumentWrite(repository="acme/app", document={"body": "hi"})
+        await plugin_routes.api_put_plugin_document("notes", f"n-{person}", note, plugin)
+
+    assert await docs.get("captures", shared, "pulls/7/c2") is None
 
 
 async def test_a_repository_read_is_trusted_only_while_github_says_yes(
