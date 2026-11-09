@@ -1712,6 +1712,43 @@ async function handleNavigation(window, event, url) {
   }
 }
 
+function showEditContextMenu(window, params) {
+  const { editFlags, isEditable, misspelledWord, dictionarySuggestions } =
+    params;
+  const hasSelection = params.selectionText.trim().length > 0;
+  if (!isEditable && !hasSelection) return;
+  const template = [];
+  if (isEditable && misspelledWord) {
+    for (const suggestion of dictionarySuggestions)
+      template.push({
+        label: suggestion,
+        click: () => window.webContents.replaceMisspelling(suggestion),
+      });
+    if (!dictionarySuggestions.length)
+      template.push({ label: "No suggestions", enabled: false });
+    template.push(
+      {
+        label: "Add to Dictionary",
+        click: () =>
+          window.webContents.session.addWordToSpellCheckerDictionary(
+            misspelledWord,
+          ),
+      },
+      { type: "separator" },
+    );
+  }
+  if (isEditable)
+    template.push(
+      { role: "cut", enabled: editFlags.canCut },
+      { role: "copy", enabled: editFlags.canCopy },
+      { role: "paste", enabled: editFlags.canPaste },
+      { type: "separator" },
+      { role: "selectAll", enabled: editFlags.canSelectAll },
+    );
+  else template.push({ role: "copy", enabled: editFlags.canCopy });
+  Menu.buildFromTemplate(template).popup({ window });
+}
+
 function createWindow(initialUrl = APP_URL) {
   if (!backendUrl) return createSetupWindow();
   const window = new BrowserWindow({
@@ -1770,6 +1807,9 @@ function createWindow(initialUrl = APP_URL) {
   );
   window.webContents.on("console-message", (_event, details) =>
     rendererConsole.push(normalizeConsoleMessage(details)),
+  );
+  window.webContents.on("context-menu", (_event, params) =>
+    showEditContextMenu(window, params),
   );
   mainWindow = window;
   void loadApp(window, initialUrl);
