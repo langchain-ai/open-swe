@@ -85,7 +85,7 @@ from runtime_api.loop import (
     Prepared,
     RunStarted,
 )
-from runtime_api.model_errors import classify_exception
+from runtime_api.model_errors import classify_exception, is_model_failure_reply
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
@@ -289,6 +289,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
+        # Reports the answers this layer writes for calls it could not make, which never
+        # pass through the inner ``ReportRepliesMiddleware``.
+        self._replies = ReportRepliesMiddleware(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         # Asks for the thread's sandbox before preparing, so the backend binds the thread to it,
@@ -577,7 +580,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         try:
-            return await self._call_planned(request, handler)
+            response = await self._call_planned(request, handler)
         except GraphBubbleUp:
             # Paused before the call for an MCP server's connection the person has not
             # granted; another model would be paused alike.
@@ -585,6 +588,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         except Exception as exc:
             await self._report_failure(exc)
             raise
+        if any(is_model_failure_reply(message) for message in response.result):
+            self._replies.report(request, response)
+        return response
 
     async def _call_planned(
         self,
@@ -610,8 +616,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
             trace.record_model(model.model_id)
         fallback = planned.fallback
-        if fallback is None:
-            return await handler(request)
 
         def attempting(on_fallback: bool) -> None:
             attempted = fallback if on_fallback else model
@@ -619,11 +623,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 trace.record_model(attempted.model_id)
 
         # As the in-process graph did: another provider, and this one again, before
-        # failing the run.
+        # failing the run. Without a fallback the call is made once, but still through
+        # here, which first checks the run may call models as whoever it acts for.
         return await call_with_fallback(
             request,
             handler,
-            lambda: build_model(fallback, use_gateway=planned.use_gateway),
+            None
+            if fallback is None
+            else lambda: build_model(fallback, use_gateway=planned.use_gateway),
             attempting=attempting,
         )
 
@@ -695,6 +702,11 @@ class ReportRepliesMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         response = await handler(request)
+        self.report(request, response)
+        return response
+
+    def report(self, request: ModelRequest, response: ModelResponse) -> None:
+        """Stamp ``response``'s replies and queue them for the backend."""
         held = request.state.get(STATE_KEY)
         held = held if isinstance(held, Mapping) else {}
         route = held.get("model_route")
@@ -730,7 +742,6 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 else None,
             )
         )
-        return response
 
 
 async def reported(

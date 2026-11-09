@@ -42,7 +42,7 @@ from openswe.agent_api.client import (
     mda_runtime_url,
     remote_run_context,
 )
-from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
@@ -59,8 +59,14 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
-# as, which decides whether its catalog names that person's connections.
-_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", ACTING_USER_KEY)
+# as, which decides whether its catalog names that person's connections, and the person
+# whose message started it, whom its model calls bill to.
+_TOKEN_METADATA_KEYS: Final = (
+    "event_match_ids",
+    "ls_attribution_identifier",
+    ACTING_USER_KEY,
+    SENDER_USER_KEY,
+)
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"

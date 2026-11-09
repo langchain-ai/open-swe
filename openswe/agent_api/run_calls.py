@@ -57,6 +57,7 @@ from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
     BROWSER,
     FINISH_SCOUT_PLAN,
+    GATEWAY_CREDENTIAL,
     GOAL,
     INBOX,
     INBOX_RECEIVED,
@@ -82,6 +83,7 @@ from runtime_api.loop import (
     BrowserReport,
     ChosenModel,
     Done,
+    GatewayCredential,
     GitHubProxyRefreshed,
     Goal,
     GoalChange,
@@ -177,6 +179,7 @@ from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.config import ENV
+from openswe.dashboard.langsmith_oauth import LangSmithModelAccess
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
 from openswe.input_messages import run_context
@@ -722,6 +725,15 @@ class TokenRun:
         expires_at = await self._sandbox.refresh_github_proxy(force_refresh=request.force_refresh)
         return GitHubProxyRefreshed(expires_at=expires_at)
 
+    async def gateway_credential(self, _request: RunRequest) -> GatewayCredential:
+        """Who the run's model calls go through the LLM gateway as."""
+        credential = await LangSmithModelAccess.for_run(self.config).credential()
+        logger.info(
+            "Answered a run's gateway credential",
+            extra={"gateway_credential": credential.kind, "thread_id": self.run.thread_id},
+        )
+        return credential
+
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
         """The backend's part of the proxy config MDA writes on the run's sandbox."""
         cfg = RunConfig.from_config(self.config)
@@ -980,6 +992,7 @@ CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 CALLS.serve(INCIDENT_CONTEXT, TokenRun.incident_context)
 CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
+CALLS.serve(GATEWAY_CREDENTIAL, TokenRun.gateway_credential)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
 CALLS.serve(GOAL, TokenRun.goal)

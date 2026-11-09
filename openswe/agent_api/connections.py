@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 #: channel's thread, which the thread router starts as their principal. The run's
 #: ``user_id`` is whom it is attributed to, which is not whom it acts as.
 ACTING_USER_KEY: Final = "acting_user_id"
+#: Run metadata naming the Open SWE user whose own message started the run, on any thread:
+#: whom its model calls bill to (``LangSmithModelAccess``). The backend writes it under the
+#: same rule as ``ACTING_USER_KEY`` but never drops it with that key: a run on the backend's
+#: own thread starts with the backend's key, so it acts as no one, yet still bills its sender.
+SENDER_USER_KEY: Final = "sender_user_id"
 
 _carried: ContextVar[Mapping[str, str]] = ContextVar(
     "operation_credentials", default=MappingProxyType({})

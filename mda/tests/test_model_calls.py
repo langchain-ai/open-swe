@@ -33,6 +33,7 @@ from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
+from rt.gateway import RUN_GATEWAY
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
     MODEL_OUTAGE_MESSAGE,
@@ -46,6 +47,7 @@ from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import ReminderMiddleware, RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
+from runtime_api.loop import GatewayCredential
 from runtime_api.model_errors import is_model_failure_reply
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -515,6 +517,27 @@ async def test_a_model_the_workspace_cannot_use_says_so() -> None:
     assert isinstance(content, str) and "OpenAI returned: The model does not exist." in content
     assert attempts.models == [_ANTHROPIC]
     assert is_model_failure_reply(answer.result[0])
+
+
+async def test_a_run_whose_login_lapsed_tells_the_person_instead_of_calling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Its request's own auth would fail as a connection error the loop retries for the
+    whole budget; the run answers why at once instead."""
+    monkeypatch.setattr(
+        RUN_GATEWAY,
+        "credential",
+        AsyncMock(return_value=GatewayCredential(unavailable="Sign in to Robin again.")),
+    )
+    attempts = _Attempts()
+
+    for fallback in (None, lambda: _OPENAI):
+        answer = await call_with_fallback(
+            ModelRequest(model=_ANTHROPIC, messages=[]), attempts, fallback
+        )
+        assert answer.result[0].content == "Sign in to Robin again."
+        assert is_model_failure_reply(answer.result[0])
+    assert attempts.models == []
 
 
 async def test_without_a_fallback_the_call_is_made_once() -> None:

@@ -7,7 +7,7 @@ from xml.etree import ElementTree
 
 import pytest
 
-from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
 from tests.conftest import serve_runs_from
@@ -152,8 +152,10 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         assert created["metadata"]["user_email"] == "mason@example.com"
         assert created["metadata"]["ls_repo_provider"] == "github"
         assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
-        # Attributed to the person, but a run the backend starts acts as no one.
+        # Attributed to the person, but a run the backend starts acts as no one, and bills
+        # no one.
         assert ACTING_USER_KEY not in created["metadata"]
+        assert SENDER_USER_KEY not in created["metadata"]
 
     # A follow-up the person sent themselves acts as them.
     await dispatch.create_durable_run(
@@ -169,6 +171,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     sent = client.runs.created[-1]
     assert sent["metadata"][ACTING_USER_KEY] == str(user_id)
     assert sent["config"]["metadata"][ACTING_USER_KEY] == str(user_id)
+    assert sent["config"]["metadata"][SENDER_USER_KEY] == str(user_id)
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -181,6 +184,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
             "user_id": str(user_id),
             "user_email": "previous@example.com",
             ACTING_USER_KEY: str(user_id),
+            SENDER_USER_KEY: str(user_id),
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
             "ls_git_branch": "main",
@@ -192,6 +196,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     assert "user_email" not in unknown
     # Only the backend says whom a run acts as, never its caller.
     assert ACTING_USER_KEY not in unknown
+    assert SENDER_USER_KEY not in unknown
     assert "ls_attribution_identifier" not in unknown
     assert "ls_git_repo" not in unknown
     assert "ls_git_branch" not in unknown

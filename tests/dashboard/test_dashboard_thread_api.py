@@ -12,6 +12,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import APIStatusError
 
+from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
@@ -603,6 +604,7 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
                 "user_id": str(first),
                 "user_email": "first@example.com",
                 "ls_attribution_identifier": "first-gh",
+                SENDER_USER_KEY: str(first),
             },
             "config": {
                 "metadata": {
@@ -624,6 +626,8 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     )
     assert enriched["params"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
+    # Whoever sent it is whom its model calls bill, never whom the caller names.
+    assert enriched["params"]["metadata"][SENDER_USER_KEY] == str(second)
     assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
     assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
     assert enriched["params"]["metadata"]["user_email"] == "second@example.com"
@@ -1969,3 +1973,26 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     assert command.event.sender.login == "teammate"
     assert "also check the tests" in command.event.text
     assert updates[-1]["participant_logins"] == {"teammate": True}
+
+    # Had the run ended before reading it, the run that picks it up answers the
+    # teammate as them, whoever's run completion starts it.
+    started: list[tuple[object, dict[str, object]]] = []
+
+    async def fake_configurable(thread_id: str, login: str, *args: object) -> dict[str, object]:
+        return {"login": login}
+
+    async def fake_dispatch(*args: object, **kwargs: object) -> dict[str, str]:
+        started.append((args[2], kwargs))
+        return {"run_id": "pickup"}
+
+    patch_thread_module(monkeypatch, "_build_dashboard_configurable", fake_configurable)
+    patch_thread_module(monkeypatch, "dispatch_agent_run", fake_dispatch)
+    await thread_runs.dispatch_pending_follow_ups("tid", "owner", {}, client=FakeClient())
+    # A Slack edit queued after it is no one's own web message: the pickup acts as no one.
+    await QueuedMessage.put("tid", [{"type": "text", "text": "edited in Slack"}])
+    await thread_runs.dispatch_pending_follow_ups("tid", "owner", {}, client=FakeClient())
+
+    assert [(configurable, kwargs["as_sender"]) for configurable, kwargs in started] == [
+        ({"login": "teammate"}, True),
+        ({"login": "owner"}, False),
+    ]

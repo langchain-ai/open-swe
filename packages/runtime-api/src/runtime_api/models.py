@@ -13,13 +13,16 @@ import logging
 import os
 from collections.abc import Mapping
 from datetime import timedelta
-from typing import Any, Final, Literal, NotRequired, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, NotRequired, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from pydantic import JsonValue, TypeAdapter
 
 from runtime_api.catalog import ModelSpec, RunModels, kept_route
+
+if TYPE_CHECKING:
+    from runtime_api.gateway_auth import GatewayBearer
 
 logger = logging.getLogger(__name__)
 
@@ -443,13 +446,16 @@ def resolve_gateway_enabled(team_value: bool | None) -> bool:
     return team_value
 
 
-def gateway_overrides(model_id: str) -> dict[str, object] | None:
+def gateway_overrides(
+    model_id: str, *, bearer: GatewayBearer | None = None, timeout: float | None = None
+) -> dict[str, object] | None:
     """``init_chat_model`` kwargs that route ``model_id`` through the gateway.
 
-    Returns ``None`` (so the caller keeps talking to the provider directly) when
-    the provider isn't routable through the gateway or no LangSmith API key is
-    available — both cases are logged rather than raised, so a run never fails
-    just because gateway routing couldn't be applied.
+    ``bearer`` authenticates each request as whoever the run acts for; without one the
+    deployment's LangSmith API key does. Returns ``None`` (so the caller keeps talking
+    to the provider directly) when the provider isn't routable through the gateway or
+    there is neither a bearer nor a key — both cases are logged rather than raised, so
+    a run never fails just because gateway routing couldn't be applied.
     """
     provider = model_id.split(":", 1)[0]
     path = _GATEWAY_PROVIDER_PATHS.get(provider)
@@ -459,18 +465,19 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
             provider,
         )
         return None
-    api_key = gateway_api_key()
-    if not api_key:
+    base_url = f"{gateway_base_url()}{path}"
+    if bearer is not None:
+        overrides = bearer.sdk_overrides(provider, base_url, timeout=timeout)
+    elif api_key := gateway_api_key():
+        overrides = {"api_key": api_key}
+    else:
         logger.warning(
             "LangSmith gateway enabled but no LANGSMITH_GATEWAY_API_KEY or "
             "LANGSMITH_API_KEY is set; "
             "calling the provider directly"
         )
         return None
-    overrides: dict[str, object] = {
-        "base_url": f"{gateway_base_url()}{path}",
-        "api_key": api_key,
-    }
+    overrides["base_url"] = base_url
     if provider == "openai":
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.
@@ -540,7 +547,11 @@ def _codex_profile(model_id: str) -> dict[str, object] | None:
 
 
 def model_init_kwargs(
-    model_id: str, kwargs: Mapping[str, object], *, use_gateway: bool | None = None
+    model_id: str,
+    kwargs: Mapping[str, object],
+    *,
+    use_gateway: bool | None = None,
+    gateway: GatewayBearer | None = None,
 ) -> tuple[str, dict[str, object]]:
     """The model id and keyword arguments ``init_chat_model`` builds ``model_id`` from.
 
@@ -568,7 +579,12 @@ def model_init_kwargs(
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     gateway_applied = False
     if enabled:
-        overrides = gateway_overrides(model_id)
+        timeout = model_kwargs.get("timeout")
+        overrides = gateway_overrides(
+            model_id,
+            bearer=gateway,
+            timeout=float(timeout) if isinstance(timeout, int | float) else None,
+        )
         if overrides is not None:
             model_kwargs.update(overrides)
             gateway_applied = True
@@ -595,18 +611,38 @@ def model_init_kwargs(
 
 
 def build_chat_model(
-    model_id: str, kwargs: Mapping[str, object], *, use_gateway: bool | None = None
+    model_id: str,
+    kwargs: Mapping[str, object],
+    *,
+    use_gateway: bool | None = None,
+    gateway: GatewayBearer | None = None,
 ) -> BaseChatModel:
-    """The chat model for ``model_id`` with ``kwargs``, as ``model_init_kwargs`` sets it up."""
-    init_model_id, model_kwargs = model_init_kwargs(model_id, kwargs, use_gateway=use_gateway)
+    """The chat model for ``model_id`` with ``kwargs``, as ``model_init_kwargs`` sets it up.
+
+    ``gateway`` authenticates a gateway-routed model's every request as whoever the run
+    acts for; without it the deployment's LangSmith API key does.
+    """
+    init_model_id, model_kwargs = model_init_kwargs(
+        model_id, kwargs, use_gateway=use_gateway, gateway=gateway
+    )
+    if (
+        gateway is not None
+        and gateway.authenticates(model_kwargs)
+        and model_id.startswith("anthropic:")
+    ):
+        return gateway.chat_anthropic(model_id.split(":", 1)[1], model_kwargs)
     return init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
 
 
 def make_model(
-    model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]
+    model_id: str,
+    *,
+    use_gateway: bool | None = None,
+    gateway: GatewayBearer | None = None,
+    **kwargs: Unpack[ModelKwargs],
 ) -> BaseChatModel:
     """Build a chat model, optionally routed through the LangSmith LLM Gateway."""
-    return build_chat_model(model_id, kwargs, use_gateway=use_gateway)
+    return build_chat_model(model_id, kwargs, use_gateway=use_gateway, gateway=gateway)
 
 
 # --- The model each call goes to ----------------------------------------------------------------

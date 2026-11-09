@@ -40,6 +40,7 @@ from runtime_api.catalog import (
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import QUICK_CALL_SECONDS
+from runtime_api.gateway_auth import GatewayBearer
 from runtime_api.loop import RunSender, RunStarted
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
@@ -76,6 +77,7 @@ from openswe.dashboard.agent_overrides import (
     profile_draft_prs,
     resolve_github_login,
 )
+from openswe.dashboard.langsmith_oauth import LangSmithModelAccess
 from openswe.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     available_requested_models,
@@ -1220,10 +1222,11 @@ def _make_model_or_defer(
     model_id: str,
     *,
     use_gateway: bool,
+    gateway: GatewayBearer | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+        return make_model(model_id, use_gateway=use_gateway, gateway=gateway, **kwargs)
     except Exception as e:  # noqa: BLE001
         logger.warning("Deferring model setup failure for %s", model_id, exc_info=True)
         return make_deferred_error_model(e, model_id=model_id)
@@ -1291,7 +1294,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         if anthropic:
             kwargs.pop("thinking", None)
-        return _make_model_or_defer(turn.title_model_id, use_gateway=turn.use_gateway, **kwargs)
+        return _make_model_or_defer(
+            turn.title_model_id,
+            use_gateway=turn.use_gateway,
+            gateway=LangSmithModelAccess.for_run(self._config).bearer(),
+            **kwargs,
+        )
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (

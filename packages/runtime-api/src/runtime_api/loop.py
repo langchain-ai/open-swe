@@ -73,6 +73,27 @@ class GitHubProxyRefreshed(BaseModel):
     expires_at: datetime | None = None
 
 
+class GatewayCredential(BaseModel):
+    """What the run's model calls authenticate to the LLM gateway with.
+
+    A run a person started calls models as them, on their LangSmith login; any other
+    run uses the deployment's own LangSmith key, which never leaves its environment.
+    """
+
+    # The person's LangSmith OAuth access token; None for a run the deployment's key serves.
+    # A plain string kept out of reprs: a SecretStr would serialize masked over the wire.
+    token: str | None = Field(default=None, repr=False)
+    # Why the run cannot call models as the person it acts for, which they are told.
+    unavailable: str | None = None
+
+    @property
+    def kind(self) -> Literal["person", "deployment", "unavailable"]:
+        """Which credential this is, for logs: never the token itself."""
+        if self.unavailable is not None:
+            return "unavailable"
+        return "person" if self.token is not None else "deployment"
+
+
 class RunNotice(BaseModel):
     """A notice the transcript shows on the run's turn."""
 
@@ -371,6 +392,14 @@ REFRESH_GITHUB_PROXY = Endpoint(
     "refresh_github_proxy",
     RefreshGitHubProxy,
     GitHubProxyRefreshed,
+    seconds=LOOP_CALL_SECONDS,
+    delivery="idempotent",
+)
+# Reads the person's current token, refreshing it when it is near expiry: safe to send again.
+GATEWAY_CREDENTIAL = Endpoint(
+    "gateway_credential",
+    RunRequest,
+    GatewayCredential,
     seconds=LOOP_CALL_SECONDS,
     delivery="idempotent",
 )

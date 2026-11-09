@@ -190,6 +190,7 @@ class InstalledPlugin:
                 tool_results=[ClientToolSpec.result_message(i, outputs[i]) for i in answered],
                 overrides={},
                 plugin_tools=True,
+                as_sender=True,
             )
         except Exception:
             # Nothing resumed, so the calls wait to be answered again.

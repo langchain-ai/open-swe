@@ -1,7 +1,8 @@
 """Chat models for the models Open SWE picked when it dispatched a run.
 
-The backend sends model ids and provider settings, never credentials; keys come
-from this deployment's environment. Both sides build a model with
+The backend sends model ids and provider settings, never keys: a gateway-routed
+model calls as whoever its run acts for (``rt.gateway``), and other keys come from
+this deployment's environment. Both sides build a model with
 ``runtime_api.models``, so its provider settings, gateway routing and context
 window are the ones the backend picked it with. Here the model middleware owns the
 retries (``rt.model_retries``), so a known provider's SDK retries are turned off.
@@ -19,6 +20,8 @@ from langchain_openai import ChatOpenAI
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ModelSpec
 from runtime_api.models import build_chat_model
+
+from rt.gateway import GATEWAY_BEARER
 
 _SDK_RETRY_DISABLE: Final = {
     "openai": 0,
@@ -42,7 +45,7 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
                 extra={"provider": provider},
             )
         kwargs["max_retries"] = disabled
-    return build_chat_model(model_id, kwargs, use_gateway=use_gateway)
+    return build_chat_model(model_id, kwargs, use_gateway=use_gateway, gateway=GATEWAY_BEARER)
 
 
 def middleware_retries(model: object) -> bool:

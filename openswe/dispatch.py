@@ -37,7 +37,7 @@ from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, ConfigDict
 
-from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.config import ENV
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.input_messages import (
@@ -69,6 +69,7 @@ TURN_ATTRIBUTION_FIELDS = frozenset(
         "user_id",
         "user_email",
         ACTING_USER_KEY,
+        SENDER_USER_KEY,
         "ls_repo_provider",
         "ls_attribution_identifier",
         "ls_git_repo",
@@ -412,6 +413,7 @@ async def prepare_durable_run(
     user_id = run_metadata.get("user_id")
     if user_id is not None and (as_sender or channel_of(run_metadata) is not None):
         run_metadata[ACTING_USER_KEY] = user_id
+        run_metadata[SENDER_USER_KEY] = user_id
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
@@ -507,12 +509,13 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
+    as_sender: bool = False,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
-    the graph (``"agent"`` or ``"reviewer"``).
+    the graph (``"agent"`` or ``"reviewer"``); ``as_sender`` as ``create_durable_run``.
     """
     if input is not None and any(
         value is not None for value in (content, context, channels, systems)
@@ -543,4 +546,5 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
+        as_sender=as_sender,
     )
