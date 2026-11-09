@@ -502,7 +502,7 @@ export function SidebarThreadRow({
           />
         ) : (
           <>
-            {source && SourceIcon && !item.pr && (
+            {source && SourceIcon && (!item.pr || source === THIS_MAC_META) && (
               <SourceIcon
                 size={ICON_SIZE}
                 weight="regular"
