@@ -14,7 +14,7 @@ from typing import Any, cast
 import httpx2
 from langchain_core.messages.content import create_text_block
 from pydantic import JsonValue
-from runtime_api.slack import SlackTurnDeclined, SlackTurnPrompt
+from runtime_api.slack import SlackNotice, SlackTurnDeclined, SlackTurnPrompt
 
 from openswe.dashboard.oauth import build_settings_url
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -220,6 +220,15 @@ async def _dispatched_slack_context(thread_id: str) -> tuple[set[str], set[str]]
 
 
 _SLACK_CONTEXT_SENDER_ID = "system:slack-context"
+_SLACK_NOTICE_SENDER: SystemIdentity = {
+    "id": "system:slack-notice",
+    "display_name": "Robin notices",
+    "platform": "slack",
+    "content": (
+        "Notices Robin posts in the Slack thread itself, not an agent: for example, "
+        "where a `/breakout` continues, or that a run failed."
+    ),
+}
 
 
 async def _slack_accounts_by_user_id(
@@ -395,15 +404,21 @@ def _slack_context_input(
     described: set[str] = {trigger_person["id"], *(run_described_person_ids or ())}
     for message in messages:
         timestamp = str(message.get("ts", ""))
-        # The model wrote its own replies and already has them, and it has every
-        # message an earlier dispatch handed it.
+        # The model has every message an earlier dispatch handed it.
         if timestamp == str(event_ts) or timestamp in already_dispatched:
             continue
+        sender_id: str
+        identity: PersonIdentity | SystemIdentity
+        kind: MessageKind
         if not web_only and slack_utils.is_own_slack_message(message, bot_user_id):
-            continue
-        sender_id, identity, kind = _slack_sender(
-            message, user_names_by_id, logins_by_user_id, person_ids_by_user_id
-        )
+            # The model wrote its own replies and already has them; a notice it never saw.
+            if not SlackNotice.marks(message):
+                continue
+            sender_id, identity, kind = _SLACK_NOTICE_SENDER["id"], _SLACK_NOTICE_SENDER, "system"
+        else:
+            sender_id, identity, kind = _slack_sender(
+                message, user_names_by_id, logins_by_user_id, person_ids_by_user_id
+            )
         if sender_id not in described:
             described.add(sender_id)
             add_context(
@@ -995,6 +1010,9 @@ async def _process_slack_mention_impl(
             bot_user_id,
             common.SLACK_BOT_USERNAME,
             treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+            held_timestamps=(
+                set[str]() if holder is None else (await dispatched_context)[1] or None
+            ),
         )[0]
     )
     source_messages = (
@@ -1052,16 +1070,16 @@ async def _process_slack_mention_impl(
     )
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
-    # A private thread's prompt quotes only the people who may prompt it.
+    # A private thread's prompt quotes only the people who may prompt it, and Robin's notices.
     promptable_user_ids: list[str] | None = None
     if common.thread_is_private(thread_metadata):
-        context_messages = [
-            message
-            for message in context_messages
-            if common.thread_is_promptable(
+        context_messages = SlackNotice.private_thread_messages(
+            context_messages,
+            lambda message: common.thread_is_promptable(
                 thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
-            )
-        ]
+            ),
+            bot_user_id=bot_user_id,
+        )
         if not message_update:
             source_messages = context_messages
         promptable_user_ids = [

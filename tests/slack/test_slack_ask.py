@@ -2,6 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from runtime_api.slack import SlackNotice
 
 from openswe.slack import ask as slack_ask
 from openswe.slack import routes as slack_routes
@@ -124,6 +125,12 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     assert await slack_reply.slack_reply("the worker's answer", "final") == {"success": True}
     if reply_thread_ts:
         assert post.await_args.args == ("C1", reply_thread_ts, "the worker's answer")
+        # The conversation's own agent reads the answer from Slack after the question.
+        assert SlackNotice.marks(post.await_args.kwargs)
+        assert (
+            post.await_args.kwargs["blocks"][-1]["block_id"]
+            == SlackNotice(kind="btw", key="123.789").block_id
+        )
         remove_reaction.assert_awaited_once_with("C1", "123.789", "hourglass_flowing_sand")
         replace.assert_not_awaited()
     else:
@@ -177,6 +184,49 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
     assert post.await_args.args == ("C1", "U1", "the answer")
     assert post.await_args.kwargs["blocks"] == [{"type": "markdown", "text": "the answer"}]
     assert post.await_args.kwargs["agent_thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "blocks", "posted"),
+    [
+        ("the answer", None, True),
+        ("the answer", [], True),
+        ("the answer", [{"type": "section", "text": {"type": "mrkdwn", "text": "hi"}}], True),
+        ("x" * 200_000, None, False),
+    ],
+)
+async def test_a_btw_answer_is_posted_as_a_notice_or_not_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    blocks: list[dict[str, Any]] | None,
+    posted: bool,
+) -> None:
+    configurable = {
+        "thread_id": "thread-1",
+        "source": "slack",
+        "slack_ask": True,
+        "slack_by_the_way_thread_ts": "123.456",
+        "slack_by_the_way_message_ts": "123.789",
+        "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+    }
+    monkeypatch.setattr(slack_reply, "get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(slack_reply.event_claims, "claim", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_reply, "settle_slack_thread_status", AsyncMock())
+    monkeypatch.setattr(slack_reply, "remove_slack_reaction", AsyncMock())
+    post = AsyncMock(return_value="123.999")
+    monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
+
+    result = await slack_reply.slack_reply(message, "final", blocks=blocks)
+
+    assert result["success"] is posted
+    if posted:
+        # Slack drops a markdown block's block_id, so the notice rides on a context block.
+        notice = post.await_args.kwargs["blocks"][-1]
+        assert notice["type"] == "context"
+        assert notice["block_id"] == SlackNotice(kind="btw", key="123.789").block_id
+    else:
+        post.assert_not_awaited()
 
 
 def _ask_config(response_url: str) -> dict[str, Any]:

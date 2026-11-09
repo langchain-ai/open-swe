@@ -1074,6 +1074,58 @@ def test_replayed_slack_mentions_ignore_forwarded_tags() -> None:
     assert "could this stack?" in (replayed[0].text or "")
 
 
+@pytest.mark.parametrize(
+    ("held", "expected"),
+    [
+        # The thread holds the earlier ask, not the /btw that went to a thread of its own.
+        ({"1.0", "2.0"}, ["2.0", "3.0", "3.1", "4.0"]),
+        # A new thread holds nothing and reads the Slack thread from its start.
+        (set(), ["1.0", "2.0", "3.0", "3.1", "4.0"]),
+    ],
+)
+def test_context_starts_at_the_last_mention_the_thread_holds(
+    held: set[str], expected: list[str]
+) -> None:
+    messages: list[dict[str, Any]] = [
+        {"ts": "1.0", "text": "first", "user": "U1"},
+        {"ts": "2.0", "text": "<@UBOT> earlier ask", "user": "U1"},
+        {"ts": "3.0", "text": "<@UBOT> /btw how does routing work?", "user": "U2"},
+        {"ts": "3.1", "text": "It goes by channel.", "user": "UBOT", "bot_id": "B1"},
+        {"ts": "4.0", "text": "<@UBOT> now", "user": "U1"},
+    ]
+    selected, _ = webhook_common.select_slack_context_messages(
+        messages, "4.0", "UBOT", held_timestamps=held
+    )
+    assert [message["ts"] for message in selected] == expected
+
+
+def test_replay_shows_a_command_with_the_notice_that_answered_it() -> None:
+    notice = {"type": "context", "block_id": "open_swe_notice.breakout.abc", "elements": []}
+    contents = _context_input(
+        [
+            {"ts": "1.0", "user": "U123", "text": "<@UBOT> /breakout replace baby-sit"},
+            {
+                "ts": "1.1",
+                "user": "UBOT",
+                "bot_id": "B1",
+                "text": "Continued in <https://slack/p2|the breakout thread>.",
+                "blocks": [notice],
+            },
+            {"ts": "1.2", "user": "UBOT", "bot_id": "B1", "text": "on it"},
+        ],
+        user_names_by_id={"U123": "Alice", "UBOT": "Robin"},
+    )
+    replayed = [
+        ElementTree.fromstring(content)
+        for content in contents
+        if isinstance(content, str) and content.startswith("<input-message")
+    ]
+    assert [(m.get("sender"), (m.text or "").strip()) for m in replayed] == [
+        ("slack:U123", "<@UBOT|Robin> /breakout replace baby-sit"),
+        ("system:slack-notice", "Continued in <https://slack/p2|the breakout thread>."),
+    ]
+
+
 def test_slack_context_labels_mentioned_people_with_their_names() -> None:
     contents = _context_input(
         [

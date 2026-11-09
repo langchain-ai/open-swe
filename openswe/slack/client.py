@@ -7,7 +7,7 @@ import hmac
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Collection, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
+from runtime_api.slack import SlackNotice
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
@@ -60,37 +61,6 @@ _SLACK_THREAD_MUTATION_LOCK_SCOPE = "slack-thread-lock"
 _SLACK_THREAD_MUTATION_LOCK_TTL = timedelta(minutes=1)
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
-_SLACK_NOTICE_BLOCK_PREFIX = "open_swe_notice."
-
-
-@dataclass(frozen=True)
-class SlackNotice:
-    """An automatic notice that is not posted again while the thread still ends with it.
-
-    ``key`` is what makes two notices the same, so per-run details such as a trace
-    link stay out of it. The notice is also held back while the thread ends with
-    a notice of a kind in ``quiet_after``.
-    """
-
-    kind: str
-    key: str
-    quiet_after: frozenset[str] = frozenset()
-
-    @property
-    def block_id(self) -> str:
-        digest = hashlib.sha256(self.key.encode()).hexdigest()[:16]
-        return f"{_SLACK_NOTICE_BLOCK_PREFIX}{self.kind}.{digest}"
-
-    def repeats(self, message: Mapping[str, object]) -> bool:
-        blocks = message.get("blocks")
-        for block in blocks if isinstance(blocks, list) else []:
-            block_id = block.get("block_id") if isinstance(block, dict) else None
-            if not isinstance(block_id, str) or not block_id.startswith(_SLACK_NOTICE_BLOCK_PREFIX):
-                continue
-            kind = block_id.removeprefix(_SLACK_NOTICE_BLOCK_PREFIX).partition(".")[0]
-            if block_id == self.block_id or kind in self.quiet_after:
-                return True
-        return False
 
 
 @dataclass(frozen=True)
@@ -307,8 +277,14 @@ def select_slack_context_messages(
     bot_username: str = "",
     *,
     treat_all_messages_as_mentions: bool = False,
+    held_timestamps: Collection[str] | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
-    """Select context from thread start or previous bot mention."""
+    """Select context from thread start or previous bot mention.
+
+    With ``held_timestamps``, the Slack messages the agent thread holds, only a mention it
+    holds starts the context: a ``/btw`` or ``/breakout`` went to another thread, and a
+    new thread holds nothing, so it reads the Slack thread from its start.
+    """
     if not messages:
         return [], "thread_start"
 
@@ -340,7 +316,8 @@ def select_slack_context_messages(
             and not message.get("bot_id")
             and not message.get("bot_profile")
         )
-        if is_explicit_mention or (treat_all_messages_as_mentions and is_user_message):
+        held = held_timestamps is None or str(message.get("ts", "")) in held_timestamps
+        if held and (is_explicit_mention or (treat_all_messages_as_mentions and is_user_message)):
             last_mention_index = index
 
     if last_mention_index >= 0:

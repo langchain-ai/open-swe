@@ -22,9 +22,11 @@ from openswe.slack.blocks import (
     MARKDOWN_TEXT_MAX_CHARS,
     MESSAGE_MAX_BLOCKS,
     block_payload,
+    context,
     option_actions,
 )
 from openswe.slack.client import (
+    SlackNotice,
     get_active_slack_thread,
     get_slack_permalink,
     post_slack_ephemeral_reply,
@@ -398,10 +400,32 @@ async def _by_the_way_reply(
         return {"success": False, "error": "Missing the Slack channel to answer in"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    if blocks is None:
-        blocks = _reply_blocks(message, None, reserve=0)
+    if not blocks:
+        blocks = _reply_blocks(message, None, reserve=1)
+        if blocks is None:
+            return {
+                "success": False,
+                "error": "the answer is too long for one Slack message",
+                "retry": True,
+                "hint": "Nothing was posted. Shorten the answer and link long detail instead.",
+            }
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
+    elif len(blocks) >= MESSAGE_MAX_BLOCKS:
+        return {
+            "success": False,
+            "error": f"a /btw answer holds at most {MESSAGE_MAX_BLOCKS - 1} blocks",
+            "retry": True,
+            "hint": "Nothing was posted. Send fewer blocks.",
+        }
+    # A notice: the conversation's own agent never wrote it, so its later turns read it
+    # from Slack after the question it answers. Slack drops a markdown block's block_id,
+    # so a context block carries it.
+    notice = SlackNotice(
+        kind=SlackNotice.BY_THE_WAY,
+        key=cfg.slack_by_the_way_message_ts or cfg.thread_id or thread_ts,
+    )
+    blocks = [*blocks, {**context("Answered with `/btw`."), "block_id": notice.block_id}]
     reservation = cfg.thread_id or ""
     try:
         reserved = await event_claims.claim(

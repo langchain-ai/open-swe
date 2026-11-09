@@ -18,7 +18,10 @@ through MDA, which hands the run's thread to it, and the backend records where t
 thread went (``slack_moved``). Both act on the run's own thread, from its token.
 """
 
-from typing import Annotated, Final, Literal
+import hashlib
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Annotated, ClassVar, Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue
@@ -364,6 +367,90 @@ class SlackMoved(RunRequest):
 class SlackMoveResult(BaseModel):
     # What ``slack_move_thread`` answers: ``success``, and where the thread went.
     result: dict[str, JsonValue]
+
+
+#: Starts the ``block_id`` of a notice Robin posts in a Slack thread on its own, such as
+#: where a ``/breakout`` continues, as opposed to a reply its agent writes and holds.
+SLACK_NOTICE_BLOCK_PREFIX: Final = "open_swe_notice."
+
+
+@dataclass(frozen=True)
+class SlackNotice:
+    """A message Robin posts in a Slack thread on its own, such as where a ``/breakout``
+    continues or a ``/btw`` answer: no agent thread holds it, so replay reads it from Slack.
+
+    ``key`` is what makes two notices the same, so per-run details such as a trace
+    link stay out of it. The notice is also held back while the thread ends with
+    a notice of a kind in ``quiet_after``.
+    """
+
+    #: The kind of a ``/btw`` answer, keyed by the question it answers.
+    BY_THE_WAY: ClassVar[str] = "btw"
+
+    kind: str
+    key: str
+    quiet_after: frozenset[str] = frozenset()
+
+    @property
+    def block_id(self) -> str:
+        digest = hashlib.sha256(self.key.encode()).hexdigest()[:16]
+        return f"{SLACK_NOTICE_BLOCK_PREFIX}{self.kind}.{digest}"
+
+    def repeats(self, message: Mapping[str, object]) -> bool:
+        """Whether ``message`` is this notice, or one of a kind in ``quiet_after``."""
+        return any(
+            block_id == self.block_id
+            or block_id.removeprefix(SLACK_NOTICE_BLOCK_PREFIX).partition(".")[0]
+            in self.quiet_after
+            for block_id in SlackNotice.block_ids(message)
+        )
+
+    @staticmethod
+    def block_ids(message: Mapping[str, object]) -> set[str]:
+        """The notice ``block_id``s on a Slack message's blocks."""
+        blocks = message.get("blocks")
+        return {
+            block_id
+            for block in (blocks if isinstance(blocks, list) else [])
+            if isinstance(block, dict)
+            and isinstance(block_id := block.get("block_id"), str)
+            and block_id.startswith(SLACK_NOTICE_BLOCK_PREFIX)
+        }
+
+    @staticmethod
+    def marks(message: Mapping[str, object]) -> bool:
+        """Whether a Slack message carries a notice's ``block_id``.
+
+        Any app can post one, so only a message Robin itself posted is its notice.
+        """
+        return bool(SlackNotice.block_ids(message))
+
+    @classmethod
+    def private_thread_messages[M: Mapping[str, object]](
+        cls, messages: Sequence[M], may_prompt: Callable[[M], bool], *, bot_user_id: str
+    ) -> list[M]:
+        """What a private thread reads of its Slack thread: what the people who may prompt
+        it wrote, and Robin's own notices, except a ``/btw`` answer to someone else's question.
+        """
+        answered = {
+            cls(kind=cls.BY_THE_WAY, key=str(message.get("ts") or "")).block_id
+            for message in messages
+            if may_prompt(message)
+        }
+        by_the_way = f"{SLACK_NOTICE_BLOCK_PREFIX}{cls.BY_THE_WAY}."
+        return [
+            message
+            for message in messages
+            if may_prompt(message)
+            or (
+                bool(bot_user_id)
+                and message.get("user") == bot_user_id
+                and any(
+                    not block_id.startswith(by_the_way) or block_id in answered
+                    for block_id in cls.block_ids(message)
+                )
+            )
+        ]
 
 
 #: On a run's last input message: a person's bare ``/breakout`` in the conversation, which

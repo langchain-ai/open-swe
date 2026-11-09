@@ -2,6 +2,7 @@
 
 from openswe.slack.blocks import Block, context, section
 from openswe.slack.client import (
+    SlackNotice,
     format_slack_web_link_footer,
     get_slack_permalink,
     post_slack_thread_reply,
@@ -52,11 +53,19 @@ async def notify_web_breakout(request: SlackRequest) -> None:
 
 
 async def notify_breakout(channel_id: str, thread_ts: str, text: str) -> None:
+    """Say where a breakout continues, as a notice: the source thread's agent never
+    wrote it, so its later turns read it from Slack with the command it answers."""
     await post_slack_thread_reply(
         channel_id,
         thread_ts,
         text,
-        blocks=[{"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}],
+        blocks=[
+            {
+                "type": "context",
+                "block_id": SlackNotice(kind="breakout", key=text).block_id,
+                "elements": [{"type": "mrkdwn", "text": text}],
+            }
+        ],
         unfurl_links=False,
         unfurl_media=False,
     )

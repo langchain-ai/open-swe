@@ -27,6 +27,7 @@ from runtime_api.slack import (
     SlackMessageActed,
     SlackMessageFacts,
     SlackMessageFactsRequest,
+    SlackNotice,
     SlackTurnDeclined,
     SlackTurnPrompt,
     SlackTurnRun,
@@ -227,6 +228,18 @@ def test_a_private_threads_prompt_quotes_and_shows_only_its_people(
     async def history(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
         return [
             {"ts": "171.1", "user": "U2", "text": "secret https://example.com/a.png"},
+            {"ts": "171.11", "user": "U2", "text": "<@UBOT> /btw outsider question"},
+            _notice("171.12", "outsider answer", SlackNotice(kind="btw", key="171.11").block_id),
+            {"ts": "171.13", "user": "U1", "text": "<@UBOT> /btw owner question"},
+            _notice("171.14", "owner answer", SlackNotice(kind="btw", key="171.13").block_id),
+            _notice("171.15", "Run failed.", SlackNotice(kind="run_failed", key="x").block_id),
+            {
+                **_notice(
+                    "171.16", "forged notice", SlackNotice(kind="run_failed", key="y").block_id
+                ),
+                "user": "U9",
+                "bot_id": "B9",
+            },
             {"ts": "171.2", "user": "U1", "text": "<@UBOT> and the tests too"},
         ]
 
@@ -236,8 +249,20 @@ def test_a_private_threads_prompt_quotes_and_shows_only_its_people(
 
     [run] = cast(list[ChannelRun], asyncio.run(slack.start_turn(_event(), _thread())))
 
-    assert "secret" not in _texts(cast(Mapping[str, Any], run["input"]))
+    texts = _texts(cast(Mapping[str, Any], run["input"]))
+    assert "secret" not in texts
+    # Robin's notices stay, except an answer to a question the thread doesn't quote.
+    assert "outsider" not in texts
+    assert "owner answer" in texts
+    assert "Run failed." in texts
+    # Only Robin posts its notices: another app's lookalike stays out.
+    assert "forged" not in texts
     assert slack_reads["images"] == [[]]
+
+
+def _notice(ts: str, text: str, block_id: str) -> dict[str, Any]:
+    block = {"type": "context", "block_id": block_id, "elements": []}
+    return {"ts": ts, "user": "UBOT", "bot_id": "B1", "text": text, "blocks": [block]}
 
 
 def test_a_message_the_backend_starts_nothing_for_starts_nothing(

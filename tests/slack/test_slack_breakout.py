@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 
 import pytest
+from runtime_api.slack import SlackNotice
 
 from openswe.slack import breakout, breakout_links
 from openswe.slack.channels import SlackChannel
@@ -249,14 +250,11 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
 
     if started:
         text = "<@U_ALICE> continued in a <https://dashboard/agents/new|private web breakout>."
-        reply.assert_awaited_once_with(
-            "C1",
-            "100.0",
-            text,
-            blocks=[{"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}],
-            unfurl_links=False,
-            unfurl_media=False,
-        )
+        reply.assert_awaited_once()
+        assert reply.await_args is not None
+        args, kwargs = reply.await_args
+        assert args == ("C1", "100.0", text)
+        assert SlackNotice.marks(kwargs)
     else:
         reply.assert_not_awaited()
     posted.ephemeral.assert_not_awaited()
