@@ -158,6 +158,7 @@ function useLineComments(pr: PullRequestTarget, login: string) {
                     line: posted.line,
                     url: null,
                     replies: [],
+                    finding_id: null,
                   },
                 ],
               }

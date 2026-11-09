@@ -32,6 +32,12 @@ from openswe.review.chat import (
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
 )
+from openswe.review.dismissals import (
+    DismissalRequest,
+    FindingDismisser,
+    FindingNotFound,
+    FindingSettled,
+)
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.eval_jobs import (
     ReviewerEvalStatus,
@@ -403,6 +409,36 @@ async def api_dismiss_walkthrough(
     """Drop the stored walkthrough so the next scout run rebuilds it."""
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return WalkthroughDismissed(dismissed=await Walkthrough.dismiss(owner, repo, pr_number))
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/findings/{finding_id}/dismissal", status_code=204)
+@audit_endpoint
+async def api_dismiss_finding(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    finding_id: str,
+    body: DismissalRequest,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    """Dismiss one of the reviewer's findings, recording who did and why."""
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    dismisser = FindingDismisser(
+        owner=owner,
+        repo=repo,
+        number=pr_number,
+        finding_id=finding_id,
+        login=session["sub"],
+        user_id=session_user_id(session) or user_id_for_login(session["sub"]),
+        reason=(body.reason or "").strip() or None,
+    )
+    try:
+        await dismisser.dismiss()
+    except FindingNotFound as exc:
+        raise HTTPException(404, "Finding not found") from exc
+    except FindingSettled as exc:
+        raise HTTPException(409, f"The finding is already {exc}") from exc
+    return Response(status_code=204)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/comments")

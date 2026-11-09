@@ -35,6 +35,7 @@ from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
     FindingLike,
+    FindingRow,
     comment_ids_for_finding,
     findings_by_thread,
     is_thread_resolved,
@@ -810,6 +811,8 @@ class PreviewThread(BaseModel):
     line: int | None = None
     url: str | None = None
     replies: list[PreviewReply] = []
+    # The open reviewer finding this thread was posted as, which the viewer may dismiss.
+    finding_id: str | None = None
 
 
 class PreviewCheck(BaseModel):
@@ -895,12 +898,13 @@ class _GithubPreviewPull(BaseModel):
     base: _GithubRef | None = None
 
 
-def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
+def _preview_thread(thread: dict[str, Any], findings: Mapping[str, str]) -> PreviewThread:
     parsed = PreviewThread.model_validate(thread)
     # Review bots hide their bookkeeping in HTML comments, which would otherwise
     # be the whole of what a one-line preview shows.
     return parsed.model_copy(
         update={
+            "finding_id": findings.get(parsed.thread_id or ""),
             "body": _clean_comment_body(parsed.body),
             "replies": [
                 reply.model_copy(update={"body": _clean_comment_body(reply.body)})
@@ -922,8 +926,11 @@ async def get_pull_request_preview(pull_request: PullRequestClient) -> PullReque
     """
     repository = pull_request.repo
     owner, repo, pr_number = repository.owner, repository.name, pull_request.number
-    pull_payload, raw_files, threads = await asyncio.gather(
-        pull_request.pull(), pull_request.files(), pull_request.unresolved_threads()
+    pull_payload, raw_files, threads, findings = await asyncio.gather(
+        pull_request.pull(),
+        pull_request.files(),
+        pull_request.unresolved_threads(),
+        FindingRow.open_by_github_thread(owner, repo, pr_number),
     )
     pull = _GithubPreviewPull.model_validate(pull_payload)
     files = [
@@ -983,7 +990,9 @@ async def get_pull_request_preview(pull_request: PullRequestClient) -> PullReque
         deletions=pull.deletions,
         changed_files=pull.changed_files or len(files),
         files=files[:_PREVIEW_FILE_LIMIT],
-        unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
+        unresolved=(
+            None if threads is None else [_preview_thread(thread, findings) for thread in threads]
+        ),
         human_input=walkthrough.human_input if walkthrough else "",
     )
 
