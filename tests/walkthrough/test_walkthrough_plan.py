@@ -18,8 +18,10 @@ from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
     FileHunks,
+    FileNote,
     FileRanges,
     FileSplits,
+    LineNote,
     Plan,
     PlanChunk,
     RangeError,
@@ -91,6 +93,10 @@ def _place(plan: Plan, index: DiffIndex, title: str, *hunks: FileHunks) -> PlanC
     chunk = PlanChunk(title=title, lines=lines)
     plan.add_chunk(chunk)
     return chunk
+
+
+async def _noted(checkout: PinnedCheckout, chunk: PlanChunk, *notes: FileNote) -> list[LineNote]:
+    return LineNote.placed(list(notes), await checkout.find_notes(chunk.lines, notes))
 
 
 def _added(path: str, *spans: tuple[int, int]) -> LineSet:
@@ -224,8 +230,21 @@ async def test_a_push_keeps_planned_lines_git_kept_and_new_lines_join_their_hunk
     index = await _pin(checkout, base, head)
     plan = Plan.start(head, index)
     plan.add_other(claim([FileRanges(path="cli.py", added=[(1, 1)])], plan.unplanned(index)))
-    _place(plan, index, "Print one", FileHunks(path="cli.py", hunks=["+1"]))
-    _place(plan, index, "Return 10", FileHunks(path="core.py", hunks=["-4"]))
+    printed = _place(plan, index, "Print one", FileHunks(path="cli.py", hunks=["+1"]))
+    returned = _place(plan, index, "Return 10", FileHunks(path="core.py", hunks=["-4"]))
+    printed.notes = await _noted(
+        checkout, printed, FileNote(path="cli.py", text="print", note="Prints")
+    )
+    returned.notes = await _noted(
+        checkout,
+        returned,
+        FileNote(path="core.py", text="return 1\n", note="Was 1"),
+        FileNote(path="core.py", text="return 10", note="Now 10"),
+    )
+    with pytest.raises(RangeError, match="matches 2 places"):
+        await _noted(checkout, returned, FileNote(path="core.py", text="return", note="x"))
+    with pytest.raises(RangeError, match="no changed line in this chunk"):
+        await _noted(checkout, printed, FileNote(path="core.py", text="return 10", note="x"))
 
     new_head = _commit(
         repo,
@@ -234,6 +253,12 @@ async def test_a_push_keeps_planned_lines_git_kept_and_new_lines_join_their_hunk
     )
     new_index, carry = await _carry(checkout, head, base, new_head)
     moved = plan.carried_to(new_head, new_index, carry)
+
+    # A note follows its line as git moves it, and goes with a line git dropped.
+    assert [[(n.at.name, n.note) for n in c.notes] for c in moved.chunks] == [
+        [("+3", "Prints")],
+        [("-4", "Was 1")],
+    ]
 
     assert [(c.title, c.lines) for c in moved.chunks] == [
         ("Print one", _added("cli.py", (2, 3))),

@@ -9,7 +9,7 @@ places every changed line at the PR's current head.
 import logging
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -249,12 +249,20 @@ class WalkthroughFileView(BaseModel):
     deleted: list[LineRange]
 
 
+class WalkthroughNoteView(BaseModel):
+    path: str
+    side: Literal["LEFT", "RIGHT"]
+    line: int
+    note: str
+
+
 class WalkthroughStepView(BaseModel):
     index: int
     title: str
     summary: str
     other: bool
     files: list[WalkthroughFileView]
+    notes: list[WalkthroughNoteView] = []
 
 
 class WalkthroughView(BaseModel):
@@ -283,6 +291,15 @@ class WalkthroughView(BaseModel):
                 summary=chunk.explanation,
                 other=False,
                 files=cls._files(chunk.lines),
+                notes=[
+                    WalkthroughNoteView(
+                        path=note.at.path,
+                        side="RIGHT" if note.at.sign == "+" else "LEFT",
+                        line=note.at.lineno,
+                        note=note.note,
+                    )
+                    for note in chunk.notes
+                ],
             )
             for position, chunk in enumerate(plan.chunks, start=1)
         ]

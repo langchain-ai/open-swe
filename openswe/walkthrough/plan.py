@@ -24,6 +24,8 @@ from openswe.walkthrough.lines import SIGNS, LinePoint, LineRange, LineSet, Rang
 MAX_TITLE_CHARS = 120
 MAX_EXPLANATION_CHARS = 1_200
 MAX_OTHER_SUMMARY_CHARS = 1_200
+MAX_NOTE_CHARS = 400
+MAX_NOTES_PER_CHUNK = 5
 _MAX_ERRORS = 20
 
 
@@ -51,6 +53,44 @@ class FileHunks(BaseModel):
 
     path: str
     hunks: list[str]
+
+
+class FileNote(BaseModel):
+    """A note on the chunk's changed lines in ``path`` whose text ``text`` matches exactly once."""
+
+    path: str
+    text: str
+    note: str
+
+
+class LineNote(BaseModel):
+    at: LinePoint
+    note: str
+
+    @classmethod
+    def placed(cls, notes: list[FileNote], matches: list[list[LinePoint]]) -> list[Self]:
+        """``notes``, each at the last line its one match covers, trimmed; one note per line."""
+        if len(notes) > MAX_NOTES_PER_CHUNK:
+            raise RangeError(f"a chunk takes at most {MAX_NOTES_PER_CHUNK} notes")
+        placed: dict[LinePoint, Self] = {}
+        for note, found in zip(notes, matches, strict=True):
+            text = note.note.strip()[:MAX_NOTE_CHARS]
+            if not text:
+                raise RangeError(f"a note on `{note.path}` is empty")
+            if not found:
+                raise RangeError(
+                    f"`{note.path}` has no changed line in this chunk matching {note.text!r}"
+                )
+            if len(found) > 1:
+                raise RangeError(
+                    f"{note.text!r} matches {len(found)} places in `{note.path}`; "
+                    "include more of the surrounding lines to make it unique"
+                )
+            point = found[0]
+            if point in placed:
+                raise RangeError(f"`{note.path}` {point.name} already has a note")
+            placed[point] = cls(at=point, note=text)
+        return list(placed.values())
 
 
 def find_line(path: str, name: str, candidates: LineSet) -> LinePoint:
@@ -254,8 +294,19 @@ class PlanChunk(BaseModel):
     title: str
     explanation: str = ""
     lines: LineSet
+    # Notes a planner pinned to its trickiest lines.
+    notes: list[LineNote] = []
     # The chunk's code as a reader sees it, rendered at the plan's head.
     code: str = ""
+
+    def carried(self, lines: LineSet, carry: Carry) -> Self:
+        """This chunk at a new head's ``lines``, keeping the notes whose line survived."""
+        notes = [
+            note.model_copy(update={"at": point})
+            for note in self.notes
+            if (point := carry.point(note.at)) is not None and point in lines
+        ]
+        return self.model_copy(update={"lines": lines, "notes": notes, "code": ""})
 
 
 class PlannedChunk(BaseModel):
@@ -299,7 +350,7 @@ class Plan(BaseModel):
         moved = type(self).start(head_sha, index)
         for chunk in self.chunks:
             if lines := carry.lines(chunk.lines):
-                moved.chunks.append(chunk.model_copy(update={"lines": lines, "code": ""}))
+                moved.chunks.append(chunk.carried(lines, carry))
         moved.other = carry.lines(self.other)
         moved.other_summary = self.other_summary
         moved.splits = [point for s in self.splits if (point := carry.point(s)) is not None]

@@ -31,6 +31,7 @@ from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_TITLE_CHARS,
     FileHunks,
+    FileNote,
     FileRanges,
     FileSplits,
     claim,
@@ -254,6 +255,7 @@ async def walkthrough_plan_chunk(
     show: list[FileHunks],
     explanation: str,
     other: list[FileHunks] | None = None,
+    notes: list[FileNote] | None = None,
     after: int | None = None,
     replace: list[int] | None = None,
 ) -> dict[str, Any]:
@@ -264,6 +266,7 @@ async def walkthrough_plan_chunk(
             show=show,
             explanation=explanation,
             other=other,
+            notes=notes,
             after=after,
             replace=replace,
         )
