@@ -6,6 +6,7 @@ import {
 } from "@playwright/test";
 
 import {
+  OTHER_USER,
   SAME_ORIGIN_HEADERS,
   SAME_USER,
   dismissOnboardingIfShown,
@@ -19,6 +20,7 @@ import {
 interface Goal {
   state: string;
   reason: string | null;
+  objective: string | null;
   waits: Array<{ kind: string }>;
 }
 
@@ -140,6 +142,88 @@ test.describe("Goal mode (real agent loop, scripted model)", () => {
     await expect(page.getByText("Goal paused")).toBeVisible({
       timeout: 30_000,
     });
+  });
+
+  test("its owner expands the goal into an editor, and saving hands the agent the new goal", async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(150_000);
+    const threadId = await send(
+      page,
+      "<@U0BOT> E2E_GOAL_STALL think about the greeting",
+    );
+    await expect
+      .poll(async () => (await goal(page, threadId))?.reason, {
+        timeout: 90_000,
+      })
+      .toBe("no_progress");
+
+    await page.goto(`/agents/${threadId}`);
+    await dismissOnboardingIfShown(page);
+    const rubric = page.getByText(/That is your Goal mode goal/);
+    await expect(page.getByText("Goal paused")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(rubric).toHaveCount(0);
+
+    // Expanding opens the whole goal straight into its editor; collapsing discards the draft.
+    const expand = page.getByRole("button", { name: "Expand goal" });
+    const editor = page.getByRole("textbox", { name: "Goal" });
+    await expand.click();
+    await expect(editor).toHaveValue(/That is your Goal mode goal/);
+    await editor.fill("Discarded draft");
+    await page.getByRole("button", { name: "Collapse goal" }).click();
+    await expect(editor).toHaveCount(0);
+    await expand.click();
+    await expect(editor).toHaveValue(/think about the greeting/);
+    const runs = (await idle(page, threadId)).runs;
+    await editor.fill("Rename greet to welcome and keep its tests passing");
+    await page.getByRole("button", { name: "Save goal" }).click();
+    await expect(editor).toHaveCount(0);
+    await expect
+      .poll(async () => (await goal(page, threadId))?.objective)
+      .toBe("Rename greet to welcome and keep its tests passing");
+    // Saving hands the agent the new goal at once, in a run of its own.
+    await expect(
+      page
+        .getByText(
+          "Picked up the edited goal: Rename greet to welcome and keep its tests passing",
+        )
+        .first(),
+    ).toBeVisible({ timeout: 60_000 });
+    expect((await idle(page, threadId)).runs).toBeGreaterThan(runs);
+
+    const other = await browser.newContext({
+      baseURL: new URL(page.url()).origin,
+    });
+    try {
+      const otherPage = await other.newPage();
+      await loginAs(otherPage, OTHER_USER);
+      const refused = await otherPage.request.patch(
+        `/dashboard/api/threads/${threadId}/goal`,
+        {
+          headers: SAME_ORIGIN_HEADERS,
+          data: { objective: "Do something else" },
+        },
+      );
+      expect(refused.ok()).toBeFalsy();
+      expect([403, 404]).toContain(refused.status());
+    } finally {
+      await other.close();
+    }
+    expect((await goal(page, threadId))?.objective).toBe(
+      "Rename greet to welcome and keep its tests passing",
+    );
+    // The edit set the goal working again; let it stall out so it posts nothing into the next spec.
+    await expect
+      .poll(async () => (await goal(page, threadId))?.state, {
+        timeout: 90_000,
+      })
+      .toBe("paused");
+    await expect
+      .poll(async () => (await idle(page, threadId)).idle, { timeout: 30_000 })
+      .toBe(true);
   });
 
   test("rests on a wait without being sent back, then resumes when it fires", async ({

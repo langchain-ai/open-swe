@@ -514,6 +514,11 @@ export const agentsApi = {
     agentsRequest<AgentThreadGoal | null>(
       `/threads/${encodeURIComponent(threadId)}/goal`
     ),
+  editThreadGoal: (threadId: string, objective: string) =>
+    agentsRequest<AgentThreadGoal | null>(
+      `/threads/${encodeURIComponent(threadId)}/goal`,
+      { method: "PATCH", body: JSON.stringify({ objective }) }
+    ),
   getThreadBackgroundWork: (threadId: string) =>
     agentsRequest<AgentBackgroundWork>(
       `/threads/${encodeURIComponent(threadId)}/background-work`

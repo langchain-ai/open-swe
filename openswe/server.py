@@ -2017,6 +2017,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             sender=profile_login,
             sender_goal_mode=sender_goal_mode,
             worker=goal_worker,
+            continues_goal=bool(cfg.goal_continuation),
         )
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})

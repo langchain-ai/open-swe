@@ -969,7 +969,9 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              {!embedded && <ThreadGoalBar threadId={thread.id} />}
+              {!embedded && (
+                <ThreadGoalBar threadId={thread.id} editable={ownsThread} />
+              )}
               {!embedded && (
                 <ThreadPullRequests
                   pullRequests={

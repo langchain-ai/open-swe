@@ -14,18 +14,22 @@ from datetime import datetime
 from typing import Final, Literal, TypedDict, Unpack
 from uuid import UUID
 
-from fastapi import APIRouter
-from pydantic import BaseModel, JsonValue, ValidationError
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 from runtime_api.loop import GoalState
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
+from openswe.source_context import SourceContext
 from openswe.tasks.store import GoalCheck, PauseReason, Task, UserWaitReason
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.store import THREADS
 from openswe.ui_invalidations.topics import Topic
+from openswe.users import User
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY, RUNNING_MONITORS_KEY
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["threads"])
 
 REVIEW_PENDING_KEY: Final = "goal_review_pending"
+_EDIT_SENDER: Final = "system:goal-edit"
+_MAX_ASK_CHARS: Final = 1000
 type GoalStateOutcome = Literal["moved", "stale", "check"]
 
 
@@ -55,6 +61,16 @@ class _GoalChange(TypedDict, total=False):
     over_stop: bool
     from_state: GoalState | None
     checked: bool
+
+
+class GoalNotDelivered(Exception):
+    """The edited goal was saved, but no run could carry it to the agent."""
+
+
+class GoalEdit(BaseModel):
+    """The person's own rewrite of their goal's objective."""
+
+    objective: str = Field(min_length=1, max_length=20_000)
 
 
 class Goal(BaseModel):
@@ -153,22 +169,56 @@ class ThreadGoals:
         )
 
     @classmethod
-    async def rewritten(cls, thread_id: str, objective: str) -> None:
-        """The agent rewrote its goal's objective."""
+    async def rewritten(cls, thread_id: str, objective: str, *, by: UUID | None = None) -> None:
+        """The agent, or the person ``by``, rewrote the goal's objective. The agent's rewrite
+        changes only the objective, so a move that lands meanwhile, such as a stop or a
+        report, stands; the person's puts the goal back to work, as a message from them would."""
         task = await cls._task(thread_id)
-        if task is None or task.goal_state is None:
+        if task is None or not await Task.rewrite_goal(
+            task.id, objective, by=by, resume=by is not None
+        ):
             raise ValueError("This thread has no goal to rewrite; Goal mode sets one")
-        await cls._move(
-            thread_id,
-            task.id,
-            state=task.goal_state,
-            reason=task.goal_reason,
-            ask=task.goal_ask,
-            waits=task.goal_waits,
-            objective=objective,
-            check="due",
-            over_stop=False,
-        )
+        await Topic.THREAD_GOALS.invalidate(key=thread_id)
+
+    @classmethod
+    async def edited_by_person(cls, thread_id: str, objective: str, *, by: User) -> None:
+        """The person ``by`` rewrote the goal: the agent stops what it is doing and is told
+        the new goal at once. What the old goal scheduled to wake it is dropped."""
+        from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
+
+        await cls.rewritten(thread_id, objective, by=by.id)
+        try:
+            await cancel_thread_wakeups(thread_id)
+        except Exception:
+            logger.exception(
+                "Could not drop the old goal's wakeups", extra={"agent_thread_id": thread_id}
+            )
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            raise ValueError("This thread no longer exists")
+        configurable = {
+            **follow_up_configurable(thread.metadata, thread_id),
+            "goal_continuation": True,
+        }
+        try:
+            await dispatch_agent_run(
+                thread_id,
+                prompt("goal/edited", objective=objective),
+                configurable,
+                source=str(configurable.get("source") or "dashboard"),
+                thread_title=None,
+                context={"sender_id": _EDIT_SENDER, "surface": "automation", "kind": "system"},
+                systems=[{"id": _EDIT_SENDER, "display_name": "Goal edit", "platform": "open-swe"}],
+                multitask_strategy="interrupt",
+                source_context=SourceContext.from_metadata(thread.metadata),
+            )
+        except Exception as exc:
+            logger.exception(
+                "Saved a goal edit but could not hand it to the agent",
+                extra={"agent_thread_id": thread_id},
+            )
+            await cls.failed(thread_id)
+            raise GoalNotDelivered from exc
 
     @classmethod
     async def failed(cls, thread_id: str) -> None:
@@ -339,15 +389,37 @@ class ThreadGoals:
 
     @classmethod
     async def for_run(
-        cls, thread_id: str, *, sender: str | None, sender_goal_mode: bool, worker: bool
+        cls,
+        thread_id: str,
+        *,
+        sender: str | None,
+        sender_goal_mode: bool,
+        worker: bool,
+        continues_goal: bool = False,
     ) -> bool:
         """Whether a run works in Goal mode: for its sender's Goal mode by default, or for
-        a goal that is not yet complete (a paused one resumes on the person's message)."""
+        a goal that is not yet complete (a paused one resumes on the person's message). A
+        wake no person sent, or a run that continues the goal, follows the goal alone."""
         if worker:
             return False
         goal = await cls.current(thread_id)
         active = goal is not None and goal.active
-        return active if not sender else sender_goal_mode or active
+        return active if not sender or continues_goal else sender_goal_mode or active
+
+    @staticmethod
+    async def owner_as(thread_id: str, login: str) -> User | None:
+        """The person logged in as ``login``, when they own the thread."""
+        from openswe.tasks.schemas import ThreadMetadata, user_for_login
+
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            return None
+        try:
+            owner = await ThreadMetadata.model_validate(thread.metadata).owner()
+        except PermissionError:
+            return None
+        person = await user_for_login(login)
+        return person if person is not None and person.id == owner.id else None
 
     @classmethod
     async def _task(cls, thread_id: str) -> Task | None:
@@ -435,4 +507,29 @@ class ThreadGoals:
 async def api_get_thread_goal(thread_id: str, session: dict[str, str] = SESSION_DEP) -> Goal | None:
     """The thread's goal, for someone allowed to read the thread; None without Goal mode."""
     await _readable_thread_metadata(thread_id, login=session["sub"], email=session.get("email"))
+    return await ThreadGoals.shown(thread_id)
+
+
+@router.patch("/threads/{thread_id}/goal")
+@audit_endpoint
+async def api_edit_thread_goal(
+    thread_id: str, body: GoalEdit, session: dict[str, str] = SESSION_DEP
+) -> Goal | None:
+    """Rewrite the goal's objective, for the thread's owner: the agent is interrupted and told."""
+    await _readable_thread_metadata(thread_id, login=session["sub"], email=session.get("email"))
+    person = await ThreadGoals.owner_as(thread_id, session["sub"])
+    if person is None:
+        raise HTTPException(403, "Only the thread's owner can edit its goal")
+    objective = body.objective.strip()
+    if not objective:
+        raise HTTPException(422, "The goal must not be empty")
+    try:
+        await ThreadGoals.edited_by_person(thread_id, objective, by=person)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except GoalNotDelivered as exc:
+        raise HTTPException(
+            502,
+            "Saved the goal, but couldn't start the agent on it; send a message to resume",
+        ) from exc
     return await ThreadGoals.shown(thread_id)

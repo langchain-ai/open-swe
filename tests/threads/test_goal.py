@@ -13,6 +13,7 @@ from openswe.threads import goal as goal_module
 from openswe.threads import index
 from openswe.threads.goal import ThreadGoals
 from openswe.threads.store import THREADS
+from openswe.users import User
 from openswe.workspaces.rows import WorkspaceRow
 
 _THREAD = "thread-1"
@@ -102,6 +103,9 @@ async def test_an_asked_for_goal_holds_goal_mode_until_it_is_complete(
     assert await ThreadGoals.for_run(goal, sender="other", sender_goal_mode=False, worker=False)
     assert await ThreadGoals.set_state(goal, "waiting_on_user", "complete") == "check"
     assert await ThreadGoals.set_state(goal, "waiting_on_user", "complete") == "moved"
+    assert not await ThreadGoals.for_run(
+        goal, sender="owner", sender_goal_mode=True, worker=False, continues_goal=True
+    )
     assert not await ThreadGoals.for_run(goal, sender="other", sender_goal_mode=False, worker=False)
     assert not await ThreadGoals.for_run(goal, sender=None, sender_goal_mode=False, worker=False)
     await ThreadGoals.change(goal, "working")
@@ -169,9 +173,10 @@ async def test_a_workers_runs_leave_its_coordinators_goal_alone(
     assert await ThreadGoals.current(worker) is None
 
 
-async def test_a_goal_starts_from_the_request_and_the_agent_can_rewrite_or_pause_it(
-    goal: str, wakeups: list[SimpleNamespace]
+async def test_a_goal_starts_from_the_request_and_the_agent_or_its_person_can_rewrite_it(
+    goal: str, wakeups: list[SimpleNamespace], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "owner")
     await ThreadGoals.change(goal, "working", request="Fix the login redirect")
     started = await ThreadGoals.current(goal)
     assert started is not None and started.objective is not None
@@ -186,10 +191,36 @@ async def test_a_goal_starts_from_the_request_and_the_agent_can_rewrite_or_pause
     assert paused is not None
     assert (paused.state, paused.reason) == ("paused", "requested")
     assert paused.objective == "Fix the login redirect and the logout one"
+    person = await User.sign_in("github", "1", login="owner")
+    await ThreadGoals.rewritten(goal, "Fix both redirects and add a test", by=person.id)
+    edited = await ThreadGoals.current(goal)
+    assert edited is not None
+    assert (edited.state, edited.reason) == ("working", None)
+    assert edited.objective == "Fix both redirects and add a test"
     await ThreadGoals.change(goal, "working")
     await ThreadGoals.failed(goal)
     errored = await ThreadGoals.current(goal)
     assert errored is not None and (errored.state, errored.reason) == ("paused", "error")
+
+
+async def test_a_goal_edit_drops_old_wakeups_and_pauses_on_an_undelivered_edit(
+    goal: str, wakeups: list[SimpleNamespace], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "owner")
+    person = await User.sign_in("github", "1", login="owner")
+    await ThreadGoals.change(goal, "working", request="Fix the login redirect")
+    assert await ThreadGoals.set_state(goal, "working", "paused") == "moved"
+    wakeups.append(SimpleNamespace(due_at=datetime(2026, 11, 1, 23, 28, tzinfo=UTC)))
+    monkeypatch.setattr(goal_module, "dispatch_agent_run", AsyncMock(side_effect=OSError("down")))
+
+    with pytest.raises(goal_module.GoalNotDelivered):
+        await ThreadGoals.edited_by_person(goal, "Fix the logout redirect too", by=person)
+
+    kept = await ThreadGoals.current(goal)
+    assert kept is not None
+    assert (kept.state, kept.reason) == ("paused", "error")
+    assert kept.objective == "Fix the logout redirect too"
+    assert not wakeups
 
 
 async def test_only_the_goals_own_slack_thread_stays_quiet_while_the_goal_is_underway(

@@ -228,6 +228,33 @@ class Task(Base):
             return await session.scalar(statement.returning(cls.id)) is not None
 
     @classmethod
+    async def rewrite_goal(
+        cls, task_id: UUID, objective: str, *, by: UUID | None, resume: bool = False
+    ) -> bool:
+        """Rewrite the objective of the task's goal, if it has one, which then owes a completion
+        check; whether it had one.
+        Where the goal stands is left alone unless ``resume`` puts it back to work."""
+        resumed: dict[str, object] = (
+            {
+                "goal_state": "working",
+                "goal_reason": None,
+                "goal_ask": None,
+                "goal_waits": None,
+                "goal_updated_at": func.clock_timestamp(),
+            }
+            if resume
+            else {}
+        )
+        statement = (
+            update(cls)
+            .where(cls.id == task_id, cls.goal_state.is_not(None))
+            .values(goal_objective=objective, goal_check="due", goal_updated_by=by, **resumed)
+            .returning(cls.id)
+        )
+        async with postgres.session() as session:
+            return await session.scalar(statement) is not None
+
+    @classmethod
     async def for_thread(cls, thread_id: str, *, title: str, workspace: str) -> Task:
         """The thread's task, making the thread the coordinator of a new one when it has none."""
         postgres.require_configured()

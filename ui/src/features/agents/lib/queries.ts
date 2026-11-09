@@ -28,6 +28,7 @@ import type {
   AgentSchedule,
   AgentStatus,
   AgentThread,
+  AgentThreadGoal,
   Chunk,
   ImageChunk,
   Message,
@@ -1167,6 +1168,27 @@ export function useAgentThreadGoal(threadId: string) {
     queryFn: () => agentsApi.getThreadGoal(threadId),
     enabled: Boolean(threadId),
     meta: { invalidatedBy: [invalidationTopic("thread-goals", threadId)] },
+  })
+}
+
+export function useEditAgentThreadGoal(threadId: string) {
+  const queryClient = useQueryClient()
+  const queryKey = agentThreadKeys.goal(threadId)
+
+  return useMutation({
+    mutationFn: (objective: string) =>
+      agentsApi.editThreadGoal(threadId, objective),
+    meta: { errorTitle: "Couldn't edit the goal" },
+    onMutate: (objective) =>
+      optimisticUpdate<AgentThreadGoal | null>(queryClient, queryKey, (goal) =>
+        goal ? { ...goal, objective } : goal
+      ),
+    onError: (_error, _objective, undo) => {
+      undo?.()
+      // A failure can come after the goal was saved, so show what the server holds.
+      void queryClient.invalidateQueries({ queryKey, exact: true })
+    },
+    onSuccess: (goal) => queryClient.setQueryData(queryKey, goal),
   })
 }
 

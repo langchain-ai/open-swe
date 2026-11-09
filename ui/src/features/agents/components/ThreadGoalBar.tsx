@@ -1,7 +1,17 @@
 import { Banner } from "@langchain/macaw-components/Banner"
 import type { BannerIntent } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { ArrowsInSimpleIcon } from "@phosphor-icons/react/dist/ssr/ArrowsInSimple"
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOutSimple"
+import { useState } from "react"
 
-import { useAgentThreadGoal } from "@/features/agents/lib/queries"
+import {
+  useAgentThreadGoal,
+  useEditAgentThreadGoal,
+} from "@/features/agents/lib/queries"
+import { cn } from "@/lib/utils"
 import type {
   AgentGoalWait,
   AgentThreadGoal,
@@ -74,15 +84,121 @@ function describe(goal: AgentThreadGoal): {
   }
 }
 
-/** Where the thread's Goal mode work stands, above the composer; nothing without Goal mode. */
-export function ThreadGoalBar({ threadId }: { threadId: string }) {
+/** Where the thread's Goal mode work stands, above the composer; nothing without
+ * Goal mode. Expanding shows the whole goal, which the thread's owner edits in place. */
+export function ThreadGoalBar({
+  threadId,
+  editable,
+}: {
+  threadId: string
+  editable: boolean
+}) {
   const goal = useAgentThreadGoal(threadId).data
+  const edit = useEditAgentThreadGoal(threadId)
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState("")
   if (!goal) return null
   const { intent, title, body } = describe(goal)
+  const objective = goal.objective
+  const expanded = open && objective !== null
+  const toggle = () => {
+    if (!expanded && objective) setDraft(objective)
+    setOpen(!expanded)
+  }
+  const save = () => {
+    const next = draft.trim()
+    if (!next) return
+    setOpen(false)
+    if (next !== objective) edit.mutate(next)
+  }
   return (
-    <Banner intent={intent} title={title} className="mb-space-2">
-      {body ? (
-        <p className="line-clamp-3 text-sm whitespace-pre-wrap">{body}</p>
+    <Banner
+      intent={intent}
+      title={title}
+      action={
+        objective ? (
+          <IconButton
+            icon={expanded ? ArrowsInSimpleIcon : ArrowsOutSimpleIcon}
+            label={expanded ? "Collapse goal" : "Expand goal"}
+            aria-expanded={expanded}
+            size="sm"
+            color="secondary"
+            variant="plain"
+            onClick={toggle}
+          />
+        ) : null
+      }
+      className="mb-space-2"
+    >
+      {body && !(expanded && body === objective) ? (
+        <p
+          className={cn(
+            "text-sm whitespace-pre-wrap",
+            !expanded && "line-clamp-3"
+          )}
+        >
+          {body}
+        </p>
+      ) : null}
+      {expanded && editable ? (
+        <form
+          className={cn(
+            "flex flex-col gap-space-2",
+            body && body !== objective && "mt-space-2"
+          )}
+          onSubmit={(event) => {
+            event.preventDefault()
+            save()
+          }}
+        >
+          <Textarea
+            aria-label="Goal"
+            size="sm"
+            autoFocus
+            autoResize
+            maxHeight={320}
+            maxLength={20_000}
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpen(false)
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault()
+                save()
+              }
+            }}
+          />
+          <div className="flex items-center justify-end gap-space-2">
+            <span className="mr-auto text-xs text-secondary">
+              Saving interrupts the agent and hands it the new goal.
+            </span>
+            <Button
+              size="sm"
+              variant="outlined"
+              color="secondary"
+              type="button"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              type="submit"
+              disabled={!draft.trim() || draft.trim() === objective}
+            >
+              Save goal
+            </Button>
+          </div>
+        </form>
+      ) : expanded ? (
+        <p
+          className={cn(
+            "max-h-64 overflow-y-auto text-sm whitespace-pre-wrap",
+            body && body !== objective && "mt-space-2"
+          )}
+        >
+          {objective}
+        </p>
       ) : null}
     </Banner>
   )

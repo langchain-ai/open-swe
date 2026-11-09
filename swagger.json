@@ -3244,6 +3244,22 @@
         "title": "Goal",
         "type": "object"
       },
+      "GoalEdit": {
+        "description": "The person's own rewrite of their goal's objective.",
+        "properties": {
+          "objective": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Objective",
+            "type": "string"
+          }
+        },
+        "required": [
+          "objective"
+        ],
+        "title": "GoalEdit",
+        "type": "object"
+      },
       "GoalWait": {
         "description": "One thing that wakes the thread again.",
         "properties": {
@@ -26076,6 +26092,72 @@
           }
         ],
         "summary": "Api Get Thread Goal",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      },
+      "patch": {
+        "description": "Rewrite the goal's objective, for the thread's owner: the agent is interrupted and told.",
+        "operationId": "api_edit_thread_goal_dashboard_api_threads__thread_id__goal_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Goal"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Edit Thread Goal Dashboard Api Threads  Thread Id  Goal Patch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Edit Thread Goal",
         "tags": [
           "dashboard",
           "threads",

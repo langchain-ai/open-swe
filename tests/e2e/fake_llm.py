@@ -316,6 +316,7 @@ GOAL_CHECK_URL = f"{BASE_URL}/control/goal-check"
 GOAL_CHECK_PASSED = "GOAL_CHECK_PASSED"
 GOAL_REVIEWER_BOT = "devin-ai-integration[bot]"
 _WORK_STATE_GUARD_SENDER = 'sender="system:work-state-guard"'
+_GOAL_EDIT_SENDER = 'sender="system:goal-edit"'
 _NO_REPLY_CONFIRMATION = "The user cannot see anything I do not send to Slack."
 
 ToolArgs = dict[str, Any]
@@ -992,6 +993,13 @@ def _goal_step(messages: list[BaseMessage]) -> AIMessage:
             return AIMessage(content="Looked into it; ending the turn without reporting.")
         return _goal_report(messages, "call-goal-report", "reported after being sent back.")
     if GOAL_STALL_MARKER in request:
+        edits = [
+            _text(m.content)
+            for m in messages
+            if isinstance(m, HumanMessage) and _GOAL_EDIT_SENDER in _text(m.content)
+        ]
+        if edits and (edited := re.search(r"Your goal is now:\s*(.+?)\s*(?:\n|<|$)", edits[-1])):
+            return AIMessage(content=f"Picked up the edited goal: {edited.group(1)}")
         return AIMessage(content="Still thinking; ending the turn without a wait.")
     if GOAL_WAIT_MARKER in request:
         if _called(messages, "call-goal-monitor") is None:
@@ -1507,6 +1515,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "listen_events",
             {
                 "action": "subscribe",
+                "timeout_seconds": 300,
                 "event_types": ["check_suite.completed"],
                 "timeout_seconds": 300,
                 "instructions": BACKGROUND_WORK_LISTENER_INSTRUCTIONS,
