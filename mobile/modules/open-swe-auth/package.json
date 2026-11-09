@@ -1,0 +1,10 @@
+{
+  "name": "open-swe-auth",
+  "version": "0.1.0",
+  "description": "Native sign-in helpers for the Robin app: the loopback callback listener and local dev sign-in.",
+  "license": "MIT",
+  "author": "LangChain",
+  "homepage": "https://github.com/langchain-ai/open-swe",
+  "main": "index.ts",
+  "private": true
+}

@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Robin",
+    "slug": "open-swe",
+    "scheme": "openswe",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "dev.langchain.openswe",
+      "supportsTablet": false,
+      "icon": "./assets/icon.icon",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "LSApplicationCategoryType": "public.app-category.developer-tools"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

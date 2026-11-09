@@ -3,6 +3,7 @@ packages:
   - ui
   - desktop
   - cli
+  - mobile
   - plugins/*
   - tests/e2e
 
@@ -32,8 +33,11 @@ minimumReleaseAgeExclude:
   - '@langchain/macaw-components@1.7.2'
   - '@langchain/macaw-tokens@1.7.2'
 
+# One @types/react for every package: with two, the hoisted copy hands
+# dependencies of ui or mobile the other app's React types.
 overrides:
   '@hono/node-server': 2.1.3
+  '@types/react': 19.2.18
   '@pierre/trees>@pierre/theming': 1.0.1
   'brace-expansion@>=1.0.0 <2.0.0': 1.1.21
   brace-expansion@2.1.1: 2.1.7
