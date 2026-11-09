@@ -290,16 +290,19 @@ export function LocalWorkspaceSelector({
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex cursor-default items-center gap-space-1 text-secondary select-none">
+      <span className="flex min-w-0 cursor-default items-center gap-space-1 text-secondary select-none">
         <ComposerTriggerIcon icon={icon} />
-        {label}
+        <span className="truncate">{label}</span>
       </span>
     )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={COMPOSER_TRIGGER_CLASS_NAME}>
+      <DropdownMenuTrigger
+        className={cn(COMPOSER_TRIGGER_CLASS_NAME, "min-w-0")}
+        title={label}
+      >
         <ComposerTriggerIcon icon={icon} />
-        <span>{label}</span>
+        <span className="truncate">{label}</span>
         <ComposerControlChevron />
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -373,7 +376,11 @@ export function LocalBranchSelector({
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger
         disabled={disabled}
-        className={cn(COMPOSER_TRIGGER_CLASS_NAME, "max-w-[260px] min-w-0")}
+        className={cn(
+          COMPOSER_TRIGGER_CLASS_NAME,
+          "max-w-[260px] min-w-0 shrink-[2]"
+        )}
+        title={selectedBranch ?? undefined}
       >
         <ComposerTriggerIcon icon={GitBranchIcon} />
         <span className="truncate">{selectedBranch ?? "No branch"}</span>
