@@ -21,6 +21,7 @@ from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.source_context import SourceContext
 from openswe.tasks import presentation, store
@@ -227,7 +228,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         identity = ThreadIdentity(login)
         if identity.user_id is not None:
             if identity.user_id != owner.id:
-                raise PermissionError("Task delivery requires the Agent Workspace owner")
+                raise PermissionError("Task delivery requires the thread owner")
             await identity.authorize()
         else:
             await enforce_github_login_gate(login)
@@ -243,6 +244,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         if identity.user_id is not None:
             config |= {
                 "user_id": str(owner.id),
+                "github_linked": False,
                 "auth_provider": "langsmith",
             }
         else:
@@ -335,9 +337,7 @@ async def _status_owner_actor(actor: Actor) -> Actor:
     email = config.get("user_email")
     return Actor(
         actor.thread_id,
-        f"user:{config['user_id']}"
-        if config.get("auth_provider") == "langsmith"
-        else str(config["github_login"]),
+        f"user:{config['user_id']}" if RunConfig.unlinked(config) else str(config["github_login"]),
         email if isinstance(email, str) else None,
     )
 

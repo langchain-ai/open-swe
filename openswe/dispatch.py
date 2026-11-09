@@ -165,7 +165,7 @@ async def dispatch_input(
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)
-    if not sender_id and cfg.auth_provider == "langsmith" and cfg.user_id:
+    if not sender_id and not cfg.github_linked and cfg.user_id:
         sender_id = f"user:{cfg.user_id}"
         sender = {"id": sender_id}
     if not sender_id and login:
@@ -312,6 +312,7 @@ def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[
     if isinstance(owner, str) and owner.startswith("user:"):
         configurable.update(
             user_id=owner.removeprefix("user:"),
+            github_linked=False,
             auth_provider="langsmith",
             repo_explicitly_none=True,
         )
@@ -363,7 +364,7 @@ async def _run_user_metadata(
     if cfg.background_task_completion:
         return metadata
     try:
-        if cfg.auth_provider == "langsmith" and cfg.user_id:
+        if not cfg.github_linked and cfg.user_id:
             user = await User.get(UUID(cfg.user_id))
         elif (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)

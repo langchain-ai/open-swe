@@ -690,7 +690,7 @@ async def get_dashboard_thread_pull_request_status(
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
     if ThreadIdentity(login).user_id is not None:
-        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
+        raise HTTPException(403, "GitHub is not linked for this thread")
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
@@ -704,7 +704,7 @@ async def get_dashboard_pull_request_checks(
 ) -> dict[str, PullRequestState]:
     """Return batched live state for the pull requests the sidebar is showing."""
     if ThreadIdentity(login).user_id is not None:
-        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
+        raise HTTPException(403, "GitHub is not linked for this thread")
     if not records:
         return {}
     async with GitHubClient.as_user(login) as github:
@@ -722,7 +722,7 @@ async def get_dashboard_thread_pull_request_context(
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
     if ThreadIdentity(login).user_id is not None:
-        raise HTTPException(403, "Agent Workspace has no GitHub repository access")
+        raise HTTPException(403, "GitHub is not linked for this thread")
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     record = next(
         (

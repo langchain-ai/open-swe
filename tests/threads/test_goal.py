@@ -319,7 +319,7 @@ async def test_a_goal_created_outside_goal_mode_hands_its_run_on_as_its_creator(
     from openswe.run_config import RunConfig
     from openswe.tools import goal as goal_tools
 
-    config = RunConfig(thread_id=goal, auth_provider="langsmith", user_id="u-1", source="slack")
+    config = RunConfig(thread_id=goal, github_linked=False, user_id="u-1", source="slack")
     dispatch = AsyncMock(side_effect=RuntimeError("down") if dispatch_fails else None)
     monkeypatch.setattr(RunConfig, "from_runtime", classmethod(lambda cls: config))
     monkeypatch.setattr(goal_tools, "get_config", lambda: {"configurable": {}})
@@ -330,8 +330,8 @@ async def test_a_goal_created_outside_goal_mode_hands_its_run_on_as_its_creator(
     assert result["success"] is not dispatch_fails
     queued = dispatch.await_args
     assert queued is not None
-    assert {key: queued.args[2].get(key) for key in ("auth_provider", "user_id")} == {
-        "auth_provider": "langsmith",
+    assert {key: queued.args[2].get(key) for key in ("github_linked", "user_id")} == {
+        "github_linked": False,
         "user_id": "u-1",
     }
     left = await ThreadGoals.current(goal)

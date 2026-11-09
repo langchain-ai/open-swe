@@ -348,7 +348,7 @@ async def test_langsmith_run_cannot_read_or_refresh_a_cached_bot_token(
     config = {
         "configurable": {
             "thread_id": "tid",
-            "auth_provider": "langsmith",
+            "github_linked": False,
             "user_id": "019abcde-0000-7000-8000-000000000001",
         }
     }

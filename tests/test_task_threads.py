@@ -1058,6 +1058,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
     worker = str((await launch(actor, "local-worker", "Research"))["worker_thread_id"])
     config = await service.recipient_config(worker)
     assert config["user_id"] == str(owner.id)
+    assert config["github_linked"] is False
     assert config["auth_provider"] == "langsmith"
     assert config["repo_explicitly_none"] is True
     assert "github_login" not in config

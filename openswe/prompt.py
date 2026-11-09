@@ -130,12 +130,10 @@ def construct_system_prompt(
     workspace_repos: list[str] | None = None,
     workspace_memory: str = "",
     workspace_memory_triggers: list[str] | None = None,
-    agent_workspace: bool = False,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
     shared = prompt(
         "system/main",
-        agent_workspace=agent_workspace,
         dashboard_context_section=prompt(
             "system/dashboard-context",
             environment=ENV.OPENSWE_ENV.optional(),
@@ -195,7 +193,7 @@ class TurnContext:
     """
 
     working_dir: str
-    agent_workspace: bool = False
+    working_folder: bool = False
     source: str = "dashboard"
     slack_context: bool = False
     slack_ask: bool = False
@@ -222,7 +220,7 @@ class TurnContext:
             else "system/working-environment",
             working_dir=self.working_dir,
             desktop=self.local_checkout_client == "desktop",
-            agent_workspace=self.agent_workspace,
+            working_folder=self.working_folder,
             sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
         if self.implementation_walkthrough_enabled:

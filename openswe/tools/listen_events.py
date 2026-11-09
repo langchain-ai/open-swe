@@ -41,6 +41,7 @@ _CARRIED_CONFIG_KEYS = frozenset(
         "environment",
         "github_login",
         "user_id",
+        "github_linked",
         "auth_provider",
         "github_user_id",
         "user_email",

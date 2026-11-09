@@ -194,7 +194,7 @@ async def test_langsmith_thread_actor_requires_current_authorization(
     monkeypatch.setattr(
         threads_tool,
         "get_config",
-        lambda: {"configurable": {"auth_provider": "langsmith", "user_id": user_id}},
+        lambda: {"configurable": {"github_linked": False, "user_id": user_id}},
     )
     monkeypatch.setattr(
         threads_tool.ThreadIdentity,

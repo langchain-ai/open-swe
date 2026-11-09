@@ -412,7 +412,11 @@ async def _build_dashboard_configurable(
         **(
             {"github_login": login}
             if ThreadIdentity(login).github_login
-            else {"user_id": str(ThreadIdentity(login).user_id), "auth_provider": "langsmith"}
+            else {
+                "user_id": str(ThreadIdentity(login).user_id),
+                "github_linked": False,
+                "auth_provider": "langsmith",
+            }
         ),
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,

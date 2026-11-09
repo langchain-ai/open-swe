@@ -169,7 +169,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     email_value = configurable.get("user_email")
     email = email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
     cfg = RunConfig.parse(configurable)
-    if cfg.auth_provider == "langsmith":
+    if not cfg.github_linked:
         if not cfg.user_id:
             return None
         identity = ThreadIdentity(f"user:{cfg.user_id}")

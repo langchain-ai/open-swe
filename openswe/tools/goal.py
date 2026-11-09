@@ -31,6 +31,7 @@ _GOAL_SENDER: Final[SystemIdentity] = {
 }
 # What the run that takes the goal up carries over from the run that set it.
 _CARRIED_CONFIG: Final = (
+    "github_linked",
     "auth_provider",
     "user_id",
     "repo",

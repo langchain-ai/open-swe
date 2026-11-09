@@ -17,7 +17,7 @@ from tests.conftest import FakeUserRecords
             {"owner": "octo", "name": "repo"},
         ),
         (RunConfig(repo_explicitly_none=True), None),
-        (RunConfig(auth_provider="langsmith"), None),
+        (RunConfig(github_linked=False), None),
     ],
 )
 def test_resolve_prompt_default_repo_never_loads_team_default(

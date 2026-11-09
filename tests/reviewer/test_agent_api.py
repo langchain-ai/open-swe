@@ -1089,7 +1089,7 @@ async def test_langsmith_runtime_tokens_and_worker_grants_recheck_live_access(
     run = RUN.model_copy(
         update={
             "configurable": {
-                "auth_provider": "langsmith",
+                "github_linked": False,
                 "user_id": "019abcde-0000-7000-8000-000000000001",
             }
         }
@@ -2070,7 +2070,7 @@ async def test_langsmith_cloud_run_delegates_to_credential_isolated_sandbox(
         {
             "configurable": {
                 "thread_id": "cloud-thread",
-                "auth_provider": "langsmith",
+                "github_linked": False,
                 "user_id": "019abcde-0000-7000-8000-000000000001",
             }
         },

@@ -361,13 +361,14 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     )
     config = first["params"]["config"]["configurable"]
     if langsmith:
+        assert config["github_linked"] is False
         assert config["auth_provider"] == "langsmith"
         assert config["user_id"] == subject.removeprefix("user:")
         assert "github_login" not in config
         assert "repo" not in config
     else:
         assert config["github_login"] == subject
-        assert "auth_provider" not in config
+        assert "github_linked" not in config
     metadata = created["metadata"]
     assert isinstance(metadata, dict)
     assert metadata["owner_login"] == subject
@@ -385,7 +386,7 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
             "config": {
                 "configurable": {
                     "github_login": "admin",
-                    "auth_provider": "github",
+                    "github_linked": True,
                 }
             },
         },
@@ -396,12 +397,13 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     )
     resumed = next_run["params"]["config"]["configurable"]
     if langsmith:
+        assert resumed["github_linked"] is False
         assert resumed["auth_provider"] == "langsmith"
         assert resumed["user_id"] == subject.removeprefix("user:")
         assert "github_login" not in resumed
     else:
         assert resumed["github_login"] == subject
-        assert "auth_provider" not in resumed
+        assert "github_linked" not in resumed
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(

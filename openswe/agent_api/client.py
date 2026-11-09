@@ -130,12 +130,12 @@ async def start_remote_run(
     back with the token rather than reading it. A run whose catalog cannot be resolved is
     not started: resolving it raises here, to whoever asked for the run.
     """
-    if configurable.get("auth_provider") == "langsmith":
+    if RunConfig.unlinked(configurable):
         from openswe.threads.identity import ThreadIdentity
 
         user_id = configurable.get("user_id")
         if not isinstance(user_id, str):
-            raise PermissionError("Agent Workspace requires a user identity")
+            raise PermissionError("LangSmith-authenticated runs require a user identity")
         await ThreadIdentity(f"user:{user_id}").authorize()
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")

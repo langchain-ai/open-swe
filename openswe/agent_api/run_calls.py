@@ -707,7 +707,7 @@ class TokenRun:
 
     async def refresh_github_proxy(self, request: RefreshGitHubProxy) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
-        if cfg.auth_provider == "langsmith":
+        if not cfg.github_linked:
             return GitHubProxyRefreshed()
         turn = self.run.settings.agent
         if turn is not None and turn.coordinator_thread_id is not None:

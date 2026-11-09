@@ -247,8 +247,10 @@ async def get_github_app_installation_token_with_expiry(
         cfg = RunConfig.from_runtime()
     except RuntimeError:
         cfg = None
-    if cfg is not None and cfg.auth_provider == "langsmith":
-        raise PermissionError("Agent Workspace cannot use GitHub App credentials")
+    if cfg is not None and not cfg.github_linked:
+        raise PermissionError(
+            "Threads without a linked GitHub account cannot use GitHub App credentials"
+        )
     resolved_installation_id = str(
         GITHUB_APP_INSTALLATION_ID if installation_id is None else installation_id
     ).strip()

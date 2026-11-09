@@ -48,7 +48,7 @@ class RunSandbox:
         return await ManagedSandbox.for_thread(
             self._cfg.thread_id,
             self._cfg.workspace_slug,
-            allow_github=self._cfg.auth_provider != "langsmith",
+            allow_github=self._cfg.github_linked,
             github_repositories=repositories,
             github_permissions=permissions,
         )

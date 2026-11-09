@@ -251,6 +251,7 @@ def test_langsmith_system_followup_runs_without_github() -> None:
         },
         "thread-1",
     )
+    assert configurable["github_linked"] is False
     assert configurable["auth_provider"] == "langsmith"
     assert configurable["user_id"] == "019abcde-0000-7000-8000-000000000001"
     assert configurable["repo_explicitly_none"] is True
