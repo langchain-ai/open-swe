@@ -143,7 +143,7 @@ async def test_coalesced_work_shares_a_waiting_run_and_follows_a_running_one() -
     await queue.coalesce("probe", {"v": 2}, key="probe:d", due_at=_PAST)
     await queue.coalesce("probe", {"v": 3}, key="probe:d", due_at=later)
     [waiting] = await queue.find({})
-    assert (waiting.payload, waiting.due_at) == ({"v": 1}, _PAST)
+    assert (waiting.payload, waiting.due_at) == ({"v": 2}, _PAST)
 
     [running] = await queue.claim_due(1)
     await queue.coalesce("probe", {"v": 4}, key="probe:d", due_at=later)

@@ -204,7 +204,7 @@ async def _human_review_settle(job: Job) -> None:
     if target.number is None:
         await settle_repository(target.owner, target.repo)
     else:
-        await settle_pull_request(target.owner, target.repo, target.number)
+        await settle_pull_request(target.owner, target.repo, target.number, retries=target.retries)
 
 
 @_sandbox_work(RECONCILE)

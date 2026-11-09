@@ -67,7 +67,7 @@ from openswe.human_review.requests import (
     HumanReviewParticipant,
     HumanReviewRequest,
 )
-from openswe.human_review.settling import SETTLED_KINDS
+from openswe.human_review.settling import SETTLED_KINDS, SettleTarget
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -1228,16 +1228,18 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     return True
 
 
-async def settle_pull_request(owner: str, repo: str, number: int) -> None:
+async def settle_pull_request(owner: str, repo: str, number: int, *, retries: int = 0) -> None:
     request = await HumanReviewRequest.active_for(owner, repo, number)
-    if request is not None:
-        await settle(request)
+    if request is not None and not await settle(request):
+        await SettleTarget.retry(owner, repo, number, retries)
 
 
 async def settle_repository(owner: str, repo: str) -> None:
     """Re-check every open standard or posted request in a repository, for events that name no PR."""
     for request in await HumanReviewRequest.open_in_repository(owner, repo, kinds=SETTLED_KINDS):
-        await settle(request)
+        if not await settle(request):
+            pr = request.pull_request
+            await SettleTarget.retry(pr.owner, pr.repo, pr.number)
 
 
 @dataclass(frozen=True, slots=True)

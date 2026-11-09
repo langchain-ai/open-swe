@@ -245,7 +245,8 @@ async def coalesce(
 
     A trigger can bring the job forward but never puts it off, so a slow trigger
     (a retry minutes out) never holds back a prompt one. A job still waiting under
-    ``key`` covers this trigger and runs no later than it asks. One a worker is running
+    ``key`` covers this trigger and runs no later than it asks, taking its payload when it
+    brings the job forward. One a worker is running
     may have read its inputs before the trigger, so it becomes due again while keeping
     its claim: no other worker starts it meanwhile, and ``Job.finish`` releases it to
     run once more.
@@ -257,10 +258,11 @@ async def coalesce(
             if job.claim_token is None:
                 await conn.execute(
                     text(
-                        f"UPDATE job SET due_at = :due_at, {_SYSTEM_WRITE} "
+                        "UPDATE job SET due_at = :due_at, payload = CAST(:payload AS jsonb), "
+                        f"{_SYSTEM_WRITE} "
                         "WHERE id = :id AND claim_token IS NULL AND due_at > :due_at"
                     ),
-                    {"id": job.id, "due_at": due},
+                    {"id": job.id, "due_at": due, "payload": json.dumps(dict(payload))},
                 )
                 return
             # A due time still ahead is a rerun already asked for; one behind is the run's own.
