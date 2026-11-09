@@ -4,6 +4,7 @@ type DesktopLinkHandlers = {
   backendUrl: () => string | null;
   /** The origins the backend says serve its dashboard; may need a request to learn. */
   dashboardOrigins: (backendUrl: string) => Promise<readonly string[]>;
+  hasPage: (pathname: string, backendUrl: string) => Promise<boolean>;
   openApp: (url: string) => void;
   openExternal: (url: string) => Promise<unknown>;
 };
@@ -27,34 +28,46 @@ export class DesktopLinks {
     return url ? this.open(url) : false;
   }
 
-  /**
-   * True when the link opened in the app right away. A link on another origin
-   * waits for the backend's dashboard origins, then opens in the app if it is one
-   * of them (robin.langchain.dev while the app points at openswe.langchain.dev, say)
-   * or in the browser otherwise.
-   */
   private open(url: string): boolean {
     const backendUrl = this.handlers.backendUrl();
-    const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-    if (target) {
-      this.handlers.openApp(target);
-      return true;
-    }
     void this.openOnDashboardOrigin(url, backendUrl);
     return false;
+  }
+
+  async appUrl(
+    url: string,
+    backendUrl = this.handlers.backendUrl(),
+  ): Promise<string | null> {
+    if (
+      !backendUrl ||
+      !URL.canParse(url) ||
+      !["http:", "https:"].includes(new URL(url).protocol)
+    )
+      return null;
+    const target =
+      desktopDeepLinkUrl(url, backendUrl) ??
+      desktopDeepLinkUrl(
+        url,
+        backendUrl,
+        await this.handlers.dashboardOrigins(backendUrl).catch(() => []),
+      );
+    if (!target) return null;
+    try {
+      return (await this.handlers.hasPage(new URL(url).pathname, backendUrl))
+        ? target
+        : null;
+    } catch (error) {
+      console.warn("Could not resolve desktop UI route", error);
+      return null;
+    }
   }
 
   private async openOnDashboardOrigin(
     url: string,
     backendUrl: string | null,
   ): Promise<void> {
-    const origins = backendUrl
-      ? await this.handlers.dashboardOrigins(backendUrl).catch(() => [])
-      : [];
-    const target =
-      backendUrl &&
-      origins.length > 0 &&
-      desktopDeepLinkUrl(url, backendUrl, origins);
+    const target = await this.appUrl(url, backendUrl);
+    if (this.handlers.backendUrl() !== backendUrl) return;
     if (target) {
       this.handlers.openApp(target);
       return;

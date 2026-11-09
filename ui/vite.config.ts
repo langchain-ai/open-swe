@@ -1,4 +1,6 @@
 import http from "node:http"
+import { readFile } from "node:fs/promises"
+import ts from "typescript"
 import { execSync } from "node:child_process"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
@@ -279,7 +281,32 @@ function buildInfoStamp(): Plugin {
     name: "build-info-stamp",
     apply: "build",
     applyToEnvironment: (environment) => environment.name === "client",
-    generateBundle() {
+    async generateBundle() {
+      const tree = ts.createSourceFile(
+        "routeTree.gen.ts",
+        await readFile(
+          new URL("./src/routeTree.gen.ts", import.meta.url),
+          "utf8"
+        ),
+        ts.ScriptTarget.Latest
+      )
+      const routes = tree.statements.find(
+        (node) =>
+          ts.isInterfaceDeclaration(node) &&
+          node.name.text === "FileRoutesByFullPath"
+      )
+      if (!routes || !ts.isInterfaceDeclaration(routes))
+        throw new Error("Desktop routes were not generated")
+      const paths = routes.members.map((member) => {
+        if (!ts.isPropertySignature(member) || !ts.isStringLiteral(member.name))
+          throw new Error("Invalid generated desktop route")
+        return member.name.text
+      })
+      this.emitFile({
+        type: "asset",
+        fileName: "desktop-routes.json",
+        source: JSON.stringify({ version: 1, paths }),
+      })
       const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
       const commit = sourceCommit()
       if (commit) info.commit = commit

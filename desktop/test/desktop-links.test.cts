@@ -11,6 +11,10 @@ function desktopLinks(backendUrl, dashboardOrigins = []) {
   const links = new DesktopLinks({
     backendUrl: () => backendUrl,
     dashboardOrigins: async () => dashboardOrigins,
+    hasPage: async (pathname) =>
+      /^\/(?:agents\/[^/]+(?:\/plan)?|review|my-settings\/connections)$/.test(
+        pathname,
+      ),
     openApp: (url) => appLinks.push(url),
     openExternal: async (url) => browserLinks.push(url),
   });
@@ -45,7 +49,7 @@ test("resolves cold-start links once, including unconfigured backends", async ()
     links.open(url);
     assert.deepEqual(links.browserLinks, []);
     assert.deepEqual(links.appLinks, []);
-    assert.equal(links.ready(), backend === "https://prod.example");
+    assert.equal(links.ready(), false);
     assert.equal(links.ready(), false);
     await settle();
     assert.deepEqual(
@@ -97,6 +101,10 @@ test("falls back to the browser when the backend can't name its origins", async 
     dashboardOrigins: async () => {
       throw new Error("offline");
     },
+    hasPage: async (pathname) =>
+      /^\/(?:agents\/[^/]+(?:\/plan)?|review|my-settings\/connections)$/.test(
+        pathname,
+      ),
     openApp: () => assert.fail("opened in the app"),
     openExternal: async (url) => browserLinks.push(url),
   });
@@ -104,4 +112,41 @@ test("falls back to the browser when the backend can't name its origins", async 
   links.receive("https://robin.example/agents/thread-1");
   await settle();
   assert.deepEqual(browserLinks, ["https://robin.example/agents/thread-1"]);
+});
+
+test("resolves clicked artifact and settings URLs after dashboard discovery", async () => {
+  let discover;
+  const origins = new Promise((resolve) => {
+    discover = resolve;
+  });
+  const links = new DesktopLinks({
+    backendUrl: () => "https://openswe.example",
+    dashboardOrigins: () => origins,
+    hasPage: async (pathname) =>
+      /^\/(?:agents\/[^/]+(?:\/plan)?|review|my-settings\/connections)$/.test(
+        pathname,
+      ),
+    openApp: () => assert.fail("resolution must not navigate"),
+    openExternal: async () => assert.fail("resolution must not open a browser"),
+  });
+  const artifact = links.appUrl(
+    "https://robin.example/agents/thread-1/plan?view=full#section",
+  );
+  discover(["https://robin.example"]);
+  assert.equal(
+    await artifact,
+    "open-swe://app/agents/thread-1/plan?view=full#section",
+  );
+  assert.equal(
+    await links.appUrl("https://robin.example/my-settings/connections"),
+    "open-swe://app/my-settings/connections",
+  );
+  assert.equal(
+    await links.appUrl("https://elsewhere.example/agents/thread-1/plan"),
+    null,
+  );
+  assert.equal(
+    await links.appUrl("https://robin.example/dashboard/api/auth/login"),
+    null,
+  );
 });

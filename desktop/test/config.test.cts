@@ -260,7 +260,7 @@ test("localizes backend OAuth callbacks and post-login redirects", () => {
   );
 });
 
-test("opens only dashboard links from the configured backend", () => {
+test("localizes web URLs only from the configured backend", () => {
   const backend = "https://openswe.langchain.dev";
   assert.equal(
     desktopDeepLinkUrl(`${backend}/agents/thread-1?tab=plan#latest`, backend),
@@ -289,8 +289,7 @@ test("opens only dashboard links from the configured backend", () => {
   for (const url of [
     "http://openswe.langchain.dev/agents/thread-1",
     "https://openswe.vercel.app/agents/thread-1",
-    `${backend}/dashboard/api/auth/callback?code=secret`,
-    `${backend}/assets/app.js`,
+    "https://user:secret@openswe.langchain.dev/agents/thread-1",
     "open-swe://link/agents/thread-1",
     "javascript:alert(1)",
   ])
@@ -314,7 +313,6 @@ test("opens dashboard links on the origins the backend names", () => {
   );
   for (const url of [
     "http://robin.langchain.dev/agents/thread-1",
-    "https://robin.langchain.dev/dashboard/api/auth/callback?code=secret",
     "https://other.langchain.dev/agents/thread-1",
   ])
     assert.equal(desktopDeepLinkUrl(url, backend, origins), null);
