@@ -1,10 +1,6 @@
 import { LogoMark } from "@/components/Branding"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
-import {
-  ReviewChatActionsContext,
-  ReviewExcerptChips,
-} from "@/features/reviews/components/ReviewChatActions"
-import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import {
@@ -69,6 +65,7 @@ import {
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
+import type { ComposerAttachment } from "@/features/agents/components/composer/ComposerAttachments"
 import type {
   ComposerSubmission,
   RestoredDraft,
@@ -90,6 +87,10 @@ import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSource
 import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
 import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
+import {
+  ImageAnnotationContext,
+  type ImageAnnotation,
+} from "@/components/ImageLightbox"
 import {
   threadHydrated,
   threadHydrationFailed,
@@ -374,24 +375,6 @@ export function AgentThreadView({
     ]
   )
 
-  // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
-  const submitWithExcerpts = useCallback(
-    async (submission: ComposerSubmission, options?: SubmitOptions) => {
-      const excerpts = reviewChat?.excerpts ?? []
-      await submitMessage(
-        excerpts.length
-          ? {
-              ...submission,
-              text: serializeExcerpts(submission.text, excerpts),
-            }
-          : submission,
-        options
-      )
-      if (excerpts.length) reviewChat?.clearExcerpts?.()
-    },
-    [reviewChat, submitMessage]
-  )
-
   const submitText = useCallback(
     (content: string) => submitMessage(plainSubmission(content)),
     [submitMessage]
@@ -428,7 +411,7 @@ export function AgentThreadView({
     if (!question || !canPost) return
     clearQuestion?.()
     // oxlint-disable-next-line react/set-state-in-effect
-    submitWithExcerpts(plainSubmission(question)).catch((error: unknown) => {
+    submitMessage(plainSubmission(question)).catch((error: unknown) => {
       console.error("Could not send the review question", error)
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
@@ -436,26 +419,30 @@ export function AgentThreadView({
         images: [],
       }))
     })
-  }, [question, canPost, clearQuestion, submitWithExcerpts])
+  }, [question, canPost, clearQuestion, submitMessage])
 
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
   } | null>(null)
-  const [addedReply, setAddedReply] = useState<{
+  const [addedAttachment, setAddedAttachment] = useState<{
     key: number
-    reply: PassageReply
+    attachment: ComposerAttachment
   } | null>(null)
-  const addReply = (reply: PassageReply) =>
-    setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
+  const attach = (attachment: ComposerAttachment) =>
+    setAddedAttachment((previous) => ({
+      key: (previous?.key ?? 0) + 1,
+      attachment,
+    }))
+  const addReply = (reply: PassageReply) => attach({ kind: "reply", reply })
   const pageReply = reviewChat?.reply
   const takePageReply = reviewChat?.takeReply
   useEffect(() => {
     if (!pageReply || !takePageReply?.(pageReply)) return
     // oxlint-disable-next-line react/set-state-in-effect
-    setAddedReply((previous) => ({
+    setAddedAttachment((previous) => ({
       key: (previous?.key ?? 0) + 1,
-      reply: pageReply,
+      attachment: { kind: "reply", reply: pageReply },
     }))
   }, [pageReply, takePageReply])
   const restoreQueuedToComposer = useCallback(
@@ -771,6 +758,11 @@ export function AgentThreadView({
     return () => cancelAnimationFrame(frame)
   }, [isHydrating, thread.id, visibleMessages])
 
+  const replyWithImage = canPost
+    ? ({ image, comment }: ImageAnnotation) =>
+        attach({ kind: "image", image, comment })
+    : null
+
   return (
     <div className="flex min-w-0 flex-1">
       <div
@@ -906,65 +898,67 @@ export function AgentThreadView({
               <LogoMark alt="" className="size-12 animate-pulse" />
             </div>
           ) : (
-            <ReplyOptionContext.Provider
-              value={canPost ? submitText : undefined}
-            >
-              <PullRequestPreviewProvider
-                pullRequests={thread.pullRequests ?? []}
-                health={pullRequestHealth}
-                healthUnavailable={pullRequestStatus.isError}
+            <ImageAnnotationContext.Provider value={replyWithImage}>
+              <ReplyOptionContext.Provider
+                value={canPost ? submitText : undefined}
               >
-                <Profiler
-                  id="transcript"
-                  onRender={(_id, _phase, actualDuration) =>
-                    runTranscriptCommitted(thread.id, actualDuration)
-                  }
+                <PullRequestPreviewProvider
+                  pullRequests={thread.pullRequests ?? []}
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
                 >
-                  <Messages
-                    messages={visibleMessages}
-                    threadId={thread.id}
-                    scrollKey={thread.id}
-                    showPlanArtifact={Boolean(thread.planStatus)}
-                    runCosts={thread.runCosts}
-                    emptyState={
-                      <div className="flex min-h-60 items-center justify-center">
-                        {hydrationFailed ? (
-                          <Banner intent="error" className="max-w-3xl">
-                            This thread&apos;s messages could not be loaded.
-                            Reload to try again.
-                          </Banner>
-                        ) : (
-                          (embedded?.emptyState ?? (
-                            <p className="text-xs text-tertiary">
-                              This thread has no messages yet.
-                            </p>
-                          ))
-                        )}
-                      </div>
+                  <Profiler
+                    id="transcript"
+                    onRender={(_id, _phase, actualDuration) =>
+                      runTranscriptCommitted(thread.id, actualDuration)
                     }
-                    onOpenFile={handleOpenFile}
-                    loadEarlier={loadEarlier}
-                    queuedMessages={queuedRows}
-                    onRemoveQueuedMessage={
-                      canPost ? removeQueuedMessage : undefined
-                    }
-                    onReply={canPost ? addReply : undefined}
-                    isStreaming={isStreaming}
-                    streamIsLoading={source.isRunning}
-                    scrollControlRef={scrollControlRef}
-                    isThinking={isThinking}
-                    isWaitingForDelegatedWork={
-                      thread.waitingForDelegatedWork && !source.isRunning
-                    }
-                    isOffloading={source.isOffloading}
-                    reconnectLabel={reconnect.label}
-                    settingUpSandbox={settingUpSandbox}
-                    pollWorkflowApprovalsWhileActive={isStreaming}
-                    contentWidthClass="max-w-3xl"
-                  />
-                </Profiler>
-              </PullRequestPreviewProvider>
-            </ReplyOptionContext.Provider>
+                  >
+                    <Messages
+                      messages={visibleMessages}
+                      threadId={thread.id}
+                      scrollKey={thread.id}
+                      showPlanArtifact={Boolean(thread.planStatus)}
+                      runCosts={thread.runCosts}
+                      emptyState={
+                        <div className="flex min-h-60 items-center justify-center">
+                          {hydrationFailed ? (
+                            <Banner intent="error" className="max-w-3xl">
+                              This thread&apos;s messages could not be loaded.
+                              Reload to try again.
+                            </Banner>
+                          ) : (
+                            (embedded?.emptyState ?? (
+                              <p className="text-xs text-tertiary">
+                                This thread has no messages yet.
+                              </p>
+                            ))
+                          )}
+                        </div>
+                      }
+                      onOpenFile={handleOpenFile}
+                      loadEarlier={loadEarlier}
+                      queuedMessages={queuedRows}
+                      onRemoveQueuedMessage={
+                        canPost ? removeQueuedMessage : undefined
+                      }
+                      onReply={canPost ? addReply : undefined}
+                      isStreaming={isStreaming}
+                      streamIsLoading={source.isRunning}
+                      scrollControlRef={scrollControlRef}
+                      isThinking={isThinking}
+                      isWaitingForDelegatedWork={
+                        thread.waitingForDelegatedWork && !source.isRunning
+                      }
+                      isOffloading={source.isOffloading}
+                      reconnectLabel={reconnect.label}
+                      settingUpSandbox={settingUpSandbox}
+                      pollWorkflowApprovalsWhileActive={isStreaming}
+                      contentWidthClass="max-w-3xl"
+                    />
+                  </Profiler>
+                </PullRequestPreviewProvider>
+              </ReplyOptionContext.Provider>
+            </ImageAnnotationContext.Provider>
           )}
           {!isHydrating && (
             <AgentComposerDock>
@@ -989,7 +983,6 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
               )}
-              {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 key={`${session.data?.user_id}:${thread.id}`}
                 draftKey={
@@ -1019,11 +1012,12 @@ export function AgentThreadView({
                 activeRun={activeRun}
                 onStop={stopRun}
                 stoppable={!mirroredSession}
-                onSubmit={submitWithExcerpts}
+                onSubmit={submitMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
-                addedReply={addedReply}
+                addedAttachment={addedAttachment}
+                pageAttachments={reviewChat?.attachments}
                 models={models}
                 routed={routed}
                 selection={activeSelection}

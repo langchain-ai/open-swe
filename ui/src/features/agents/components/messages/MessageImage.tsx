@@ -2,6 +2,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
 
 import { cn } from "@/lib/utils"
+import { ExpandableImage } from "@/components/ImageLightbox"
 import { fetchImageBlob } from "@/features/agents/lib/transcript/api"
 import type { AnyImageChunk } from "@/features/agents/lib/types"
 
@@ -74,7 +75,7 @@ export function MessageImage({
       </div>
     )
   return (
-    <img
+    <ExpandableImage
       src={src}
       alt={label}
       className={cn(className, "duration-slow animate-in fade-in")}

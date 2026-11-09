@@ -168,9 +168,9 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   const meta = useReviewChat(pr)
   const chatDraft = useReviewPage((state) => state.chatDraft)
   const jumpTo = useReviewPage((state) => state.jumpTo)
-  const excerpts = useReviewPage((state) => state.chatExcerpts)
-  const removeExcerpt = useReviewPage((state) => state.removeChatExcerpt)
-  const clearExcerpts = useReviewPage((state) => state.clearChatExcerpts)
+  const attachments = useReviewPage((state) => state.chatAttachments)
+  const removeAttachment = useReviewPage((state) => state.removeChatAttachment)
+  const clearAttachments = useReviewPage((state) => state.clearChatAttachments)
   const question = useReviewPage((state) => state.chatQuestion)
   const clearQuestion = useReviewPage((state) => state.clearChatQuestion)
   const reply = useReviewPage((state) => state.chatReplies[0])
@@ -187,9 +187,11 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
           line: range.endLine,
           side: range.side,
         }),
-      excerpts,
-      removeExcerpt,
-      clearExcerpts,
+      attachments: {
+        items: attachments,
+        remove: removeAttachment,
+        clear: clearAttachments,
+      },
       question,
       clearQuestion,
       reply,
@@ -198,9 +200,9 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
     [
       pr,
       jumpTo,
-      excerpts,
-      removeExcerpt,
-      clearExcerpts,
+      attachments,
+      removeAttachment,
+      clearAttachments,
       question,
       clearQuestion,
       reply,

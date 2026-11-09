@@ -11,9 +11,13 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
+import {
+  ComposerAttachmentCards,
+  withAttachments,
+  type ComposerAttachment,
+  type PendingAttachment,
+} from "./ComposerAttachments"
 import { FuzzySearch } from "@/lib/fuzzySearch"
-import { ComposerReplyCards } from "./ComposerReplyCards"
-import type { PendingReply } from "./ComposerReplyCards"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -75,6 +79,7 @@ import {
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
+import { ExpandableImage } from "@/components/ImageLightbox"
 
 export type { ActiveRun }
 
@@ -137,7 +142,7 @@ class ComposerDrafts {
     {
       text: string
       images: Array<ImageChunk>
-      replies: Array<PendingReply>
+      attachments: Array<PendingAttachment>
     }
   >()
 
@@ -149,12 +154,12 @@ class ComposerDrafts {
     key: string | undefined,
     text: string,
     images: Array<ImageChunk>,
-    replies: Array<PendingReply>
+    attachments: Array<PendingAttachment>
   ) {
     if (!key) return
     this.drafts.delete(key)
-    if (!text && !images.length && !replies.length) return
-    this.drafts.set(key, { text, images, replies })
+    if (!text && !images.length && !attachments.length) return
+    this.drafts.set(key, { text, images, attachments })
     if (this.drafts.size > 50) {
       const oldest = this.drafts.keys().next().value
       if (oldest) this.drafts.delete(oldest)
@@ -186,8 +191,14 @@ export interface ChatComposerProps {
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
-  /** A reply to a passage the user selected; it rides ahead of their next message. */
-  addedReply?: { key: number; reply: PassageReply } | null
+  /** A reply or marked-up image the user added; it rides ahead of their next message. */
+  addedAttachment?: { key: number; attachment: ComposerAttachment } | null
+  /** Attachments the surrounding page keeps, such as code lines on the review page; cleared once sent. */
+  pageAttachments?: {
+    items: ReadonlyArray<ComposerAttachment>
+    remove: (index: number) => void
+    clear: () => void
+  }
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -369,7 +380,8 @@ export const ChatComposer = memo(function ChatComposer({
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
-  addedReply = null,
+  addedAttachment = null,
+  pageAttachments,
   models = [],
   selection = null,
   onSelectionChange,
@@ -412,21 +424,36 @@ export const ChatComposer = memo(function ChatComposer({
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>(
     () => composerDrafts.read(draftKey)?.images ?? []
   )
-  const [pendingReplies, setPendingReplies] = useState<Array<PendingReply>>(
-    () => composerDrafts.read(draftKey)?.replies ?? []
-  )
+  const [pendingAttachments, setPendingAttachments] = useState<
+    Array<PendingAttachment>
+  >(() => composerDrafts.read(draftKey)?.attachments ?? [])
   useEffect(() => {
-    composerDrafts.write(draftKey, value, pendingImages, pendingReplies)
-  }, [draftKey, value, pendingImages, pendingReplies])
-  const [appliedReply, setAppliedReply] = useState<typeof addedReply>(null)
-  if (addedReply !== appliedReply) {
-    setAppliedReply(addedReply)
-    if (addedReply)
-      setPendingReplies((prev) => [
+    composerDrafts.write(draftKey, value, pendingImages, pendingAttachments)
+  }, [draftKey, value, pendingImages, pendingAttachments])
+  const [appliedAttachment, setAppliedAttachment] =
+    useState<typeof addedAttachment>(null)
+  if (addedAttachment !== appliedAttachment) {
+    setAppliedAttachment(addedAttachment)
+    if (addedAttachment)
+      setPendingAttachments((prev) => [
         ...prev,
-        { id: `added:${addedReply.key}`, reply: addedReply.reply },
+        {
+          id: `added:${addedAttachment.key}`,
+          attachment: addedAttachment.attachment,
+        },
       ])
   }
+  const pageItems = pageAttachments?.items
+  const attachmentCards = useMemo(
+    () => [
+      ...(pageItems ?? []).map((attachment, index) => ({
+        id: `page:${index}`,
+        attachment,
+      })),
+      ...pendingAttachments,
+    ],
+    [pageItems, pendingAttachments]
+  )
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -485,8 +512,8 @@ export const ChatComposer = memo(function ChatComposer({
   }, [autoFocus])
 
   useEffect(() => {
-    if (addedReply) editorRef.current?.focusAtEnd()
-  }, [addedReply])
+    if (addedAttachment) editorRef.current?.focusAtEnd()
+  }, [addedAttachment])
 
   // Synchronous double-submit guard: blocks a same-tick second send (Enter +
   // click, or two rapid Enters) before React re-renders. Scoped to the send
@@ -554,7 +581,7 @@ export const ChatComposer = memo(function ChatComposer({
   const composerEmpty =
     value.trim().length === 0 &&
     pendingImages.length === 0 &&
-    pendingReplies.length === 0
+    attachmentCards.length === 0
   const canSubmit =
     !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
 
@@ -586,10 +613,10 @@ export const ChatComposer = memo(function ChatComposer({
     }
     const restoredReplies = restoreDraft.replies ?? []
     if (restoredReplies.length > 0) {
-      setPendingReplies((prev) => [
+      setPendingAttachments((prev) => [
         ...restoredReplies.map((reply, index) => ({
           id: `restored:${restoreDraft.key}:${index}`,
-          reply,
+          attachment: { kind: "reply" as const, reply },
         })),
         ...prev,
       ])
@@ -604,7 +631,7 @@ export const ChatComposer = memo(function ChatComposer({
       // has not yet round-tripped through state would otherwise be dropped.
       const snapshot = editorRef.current?.readSnapshot()
       const trimmed = (snapshot?.value ?? value).trim()
-      const attached = pendingImages.length + pendingReplies.length
+      const attached = pendingImages.length + attachmentCards.length
       if (trimmed.length === 0 && attached === 0) return
 
       if (trimmed === "/offload" && (!canOffload || attached)) {
@@ -616,16 +643,17 @@ export const ChatComposer = memo(function ChatComposer({
         return
       }
 
-      const submission = {
-        text: trimmed,
-        images: pendingImages,
-        replies: pendingReplies.map((pending) => pending.reply),
-      }
+      const submission = withAttachments(
+        trimmed,
+        pendingImages,
+        attachmentCards.map((card) => card.attachment)
+      )
       submittingRef.current = true
       setIsSubmitting(true)
       applyPrompt("", 0)
       setPendingImages([])
-      setPendingReplies([])
+      setPendingAttachments([])
+      if (pageItems?.length) pageAttachments?.clear()
       setComposerError(null)
       try {
         await onSubmit?.(submission, options)
@@ -641,7 +669,9 @@ export const ChatComposer = memo(function ChatComposer({
       disabled,
       onSubmit,
       pendingImages,
-      pendingReplies,
+      attachmentCards,
+      pageAttachments,
+      pageItems?.length,
       value,
       canOffload,
     ]
@@ -1031,13 +1061,16 @@ export const ChatComposer = memo(function ChatComposer({
           type="file"
         />
 
-        <ComposerReplyCards
-          replies={pendingReplies}
-          onRemove={(id) =>
-            setPendingReplies((prev) =>
-              prev.filter((pending) => pending.id !== id)
-            )
-          }
+        <ComposerAttachmentCards
+          attachments={attachmentCards}
+          onRemove={(id) => {
+            if (id.startsWith("page:"))
+              pageAttachments?.remove(Number(id.slice("page:".length)))
+            else
+              setPendingAttachments((prev) =>
+                prev.filter((pending) => pending.id !== id)
+              )
+          }}
         />
 
         {pendingImages.length > 0 && (
@@ -1047,10 +1080,11 @@ export const ChatComposer = memo(function ChatComposer({
                 className="group relative"
                 key={`${image.fileName ?? "image"}-${index}`}
               >
-                <img
+                <ExpandableImage
                   alt={image.fileName || "Pending image"}
                   className="size-16 rounded-lg border border-default object-cover"
                   src={`data:${image.mimeType};base64,${image.base64}`}
+                  annotatable={false}
                 />
                 <IconButton
                   className="absolute -top-1.5 -right-1.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
