@@ -952,6 +952,45 @@ async def test_bot_authorization_is_checked_before_execution(monkeypatch, bot_ru
     assert "run_create" not in captured
 
 
+@pytest.mark.parametrize("owner_login", ["", "alice"])
+async def test_bot_starts_an_mda_placeholder_only_when_no_person_owns_it(bot_run, owner_login):
+    request, threads, captured = bot_run
+    threads.metadata = {
+        "visibility": "private",
+        webhook_common.PROVISIONAL_VISIBILITY_KEY: True,
+        "source": "slack",
+    }
+    if owner_login:
+        threads.metadata["owner_login"] = owner_login
+    await slack_webhooks._process_slack_mention_impl(request, None)
+    if owner_login:
+        assert "run_create" not in captured
+        assert threads.metadata["visibility"] == "private"
+        return
+    assert "run_create" in captured
+    assert threads.metadata["owner_type"] == "system"
+    assert threads.metadata["visibility"] == "public"
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
+
+
+async def test_a_bots_first_turn_on_an_mda_placeholder_keeps_its_slack_context(
+    monkeypatch, bot_run
+):
+    request, threads, captured = bot_run
+    threads.metadata = {
+        "visibility": "private",
+        webhook_common.PROVISIONAL_VISIBILITY_KEY: True,
+        "source": "slack",
+    }
+    earlier = {"ts": "1700000000.000100", "user": "U999", "text": "Deploy failed on staging"}
+    monkeypatch.setattr(
+        webhook_common, "fetch_slack_thread_messages", AsyncMock(return_value=[earlier])
+    )
+    await slack_webhooks._process_slack_mention_impl(request, None)
+    assert "Deploy failed on staging" in str(captured["run_create"]["kwargs"]["input"])
+
+
 @pytest.mark.parametrize("race", ["before-upsert", "during-create"])
 async def test_bot_cannot_take_over_a_concurrently_created_thread(monkeypatch, bot_run, race):
     request, threads, captured = bot_run

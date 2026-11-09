@@ -588,7 +588,11 @@ async def upsert_agent_thread_metadata(
     # A thread a bot started stays one, whoever speaks in its Slack thread later.
     if thread_is_bot_triggered(existing_meta):
         metadata.pop("trigger_kind")
-    if owner_type == "system" and existing_meta:
+    if (
+        owner_type == "system"
+        and existing_meta
+        and not ThreadRecord.is_unowned_placeholder(existing_meta)
+    ):
         expected_bot = source_context.slack_thread if source_context else None
         saved_bot = existing_context.slack_thread
         if (
@@ -846,8 +850,24 @@ class ThreadRecord:
         """
         return self.exists and self.metadata.get(PROVISIONAL_VISIBILITY_KEY) is not True
 
-    def authorize(self, github_login: str) -> JsonObject:
-        """Reject a private-thread follow-up from someone who may not prompt it."""
+    @staticmethod
+    def is_unowned_placeholder(metadata: Mapping[str, object]) -> bool:
+        """Whether a thread is a stub MDA's Slack channel claimed with no person as its owner.
+
+        An allow-listed bot may start one like a new thread: its first metadata write
+        replaces the stub's provisional private visibility.
+        """
+        return metadata.get(PROVISIONAL_VISIBILITY_KEY) is True and not metadata.get("owner_login")
+
+    def authorize(self, github_login: str, *, bot: bool = False) -> JsonObject:
+        """Reject a private-thread follow-up from someone who may not prompt it.
+
+        ``bot`` is an allow-listed Slack bot, which may start an unowned placeholder. It
+        reads as the public thread the bot's first metadata write makes it (bots start
+        none in private channels or DMs), so the bot's first turn keeps its Slack context.
+        """
+        if bot and self.is_unowned_placeholder(self.metadata):
+            return {**self.metadata, "visibility": "public"}
         if thread_is_private(self.metadata) and not thread_is_promptable(
             self.metadata, github_login
         ):

@@ -933,7 +933,7 @@ async def _process_slack_mention_impl(
         else:
             existing_metadata = existing_thread.get("metadata") or {}
             opening_slack = SourceContext.from_metadata(existing_metadata).slack_thread
-            if (
+            if not common.ThreadRecord.is_unowned_placeholder(existing_metadata) and (
                 existing_metadata.get("owner_type") != "system"
                 or existing_metadata.get("visibility") != "public"
                 or opening_slack is None
@@ -964,7 +964,7 @@ async def _process_slack_mention_impl(
         sender_profile,
     )
     user_email, user_name, user_timezone = sender.email, sender.name, sender.timezone
-    thread_metadata = thread_record.authorize(mapped_login or "")
+    thread_metadata = thread_record.authorize(mapped_login or "", bot=allowed_bot is not None)
     # A new thread's metadata links back to Slack. Looking that link up here keeps
     # it off the metadata write, which would otherwise wait on it before dispatch.
     opening_permalink = asyncio.ensure_future(
