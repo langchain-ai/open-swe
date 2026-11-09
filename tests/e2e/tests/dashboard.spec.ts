@@ -94,7 +94,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // hydrates, or the empty-state bar before it — both mean they can type).
     const composer = composerFor(
       page,
-      /Add a follow up|Send the first message/,
+      /Work with Robin|Send the first message/,
     );
     await expect(composer.editor).toBeVisible();
     await expect(composer.prompt).toBeVisible();
@@ -825,7 +825,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // …and a non-owner now gets a composer too (owner-only restriction removed).
     const composer = composerFor(
       page,
-      /Add a follow up|Send the first message/,
+      /Work with Robin|Send the first message/,
     );
     await expect(composer.editor).toBeVisible();
     await expect(composer.prompt).toBeVisible();

@@ -1008,7 +1008,7 @@ export function AgentThreadView({
                           ? "Mirrored from Claude Code. Continue this session there"
                           : canPost
                             ? hasConversation
-                              ? "Add a follow up"
+                              ? "Work with Robin"
                               : "Send the first message"
                             : "Only workspace admins can send messages in this thread"
                 }
