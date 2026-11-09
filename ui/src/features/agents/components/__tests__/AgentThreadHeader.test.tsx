@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -10,10 +11,16 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { AgentThreadHeader } from "./AgentThreadHeader"
+import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import type { AgentThread } from "@/features/agents/lib/types"
 
-vi.mock("@/lib/session", () => ({ useSession: () => ({ data: null }) }))
+import { toast } from "sonner"
+
+const { shareThread } = vi.hoisted(() => ({ shareThread: vi.fn() }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: { login: "owner" } }),
+}))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
   useLocalThread: () => null,
 }))
@@ -28,14 +35,100 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useResolveAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useDeleteAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useContinueThreadPrivately: () => ({ isPending: false, mutate: vi.fn() }),
-  useShareThreadWithWorkspace: () => ({ isPending: false, mutate: vi.fn() }),
+  useShareThreadWithWorkspace: () => ({
+    isPending: false,
+    mutate: shareThread,
+  }),
 }))
 
 const title = "Show the thread title"
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  vi.clearAllMocks()
+})
 
 describe("AgentThreadHeader", () => {
+  it("shares the thread without copying its link automatically", async () => {
+    const copyPageLink = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal("openSweDesktop", { copyPageLink })
+    render(
+      <AgentThreadHeader
+        target="Cloud"
+        panelCollapsed={false}
+        thread={
+          {
+            id: "thread-1",
+            repoFullName: "",
+            ownerLogin: "owner",
+            visibility: "private",
+          } as AgentThread
+        }
+      />
+    )
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Thread visibility" }),
+      {
+        key: "Enter",
+      }
+    )
+    fireEvent.click(
+      await screen.findByRole("menuitemradio", { name: "Workspace" })
+    )
+    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("button", { name: "Share entire thread" }))
+    expect(copyPageLink).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    const [, callbacks] = shareThread.mock.calls[0] as [
+      string,
+      { onSuccess: () => void },
+    ]
+    await act(async () => callbacks.onSuccess())
+    expect(copyPageLink).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("offers a web link after a private thread is shared in desktop", async () => {
+    const copyPageLink = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal("openSweDesktop", { copyPageLink })
+    const thread = {
+      id: "thread-1",
+      title,
+      repoFullName: "",
+      visibility: "private",
+    } as AgentThread
+    const { rerender } = render(
+      <AgentThreadHeader
+        target="Cloud"
+        panelCollapsed={false}
+        thread={thread}
+      />
+    )
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Thread visibility" }),
+      {
+        key: "Enter",
+      }
+    )
+    await screen.findByRole("menuitemradio", { name: "Private" })
+    expect(
+      screen.queryByRole("menuitem", { name: "Copy thread link" })
+    ).toBeNull()
+    rerender(
+      <AgentThreadHeader
+        target="Cloud"
+        panelCollapsed={false}
+        thread={{ ...thread, visibility: "public" }}
+      />
+    )
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy thread link" })
+    )
+    await waitFor(() => expect(copyPageLink).toHaveBeenCalledOnce())
+  })
+
   it.each(["Cloud", "This Mac", "Local CLI"] as const)(
     "only shows the run target indicator for local targets: %s",
     (target) => {

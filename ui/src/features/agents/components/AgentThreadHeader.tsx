@@ -40,6 +40,7 @@ import {
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
+import { copyPageLink } from "@/features/reviews/lib/copyText"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { reportError } from "@/lib/errorReporting"
@@ -174,6 +175,7 @@ export function AgentThreadHeader({
   const visibilityMenu = thread ? (
     <ThreadVisibilityMenu
       value={thread.visibility ?? "public"}
+      onCopyLink={thread.visibility === "private" ? undefined : copyPageLink}
       onChange={(next) => {
         if (next === "private") continueThreadPrivately()
         else if (canShare) setShareOpen(true)
