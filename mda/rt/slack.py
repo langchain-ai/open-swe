@@ -66,6 +66,8 @@ _REQUEST_SUBTYPES: Final = frozenset({"", "file_share", "thread_broadcast"})
 #: A concierge DM's one conversation, as the backend keys it.
 CONCIERGE_TS: Final = "0"
 _LEADING_MENTION: Final = re.compile(r"\s*<@([^>]+)>")
+#: What a person's post links for the backend to watch it, as ``/webhooks/slack`` checks.
+_PULL_REQUEST_LINKS: Final = ("/pull/", "/agents/reviews/")
 _REVIEW_CARD_PREFIXES: Final = ("Review requested for ", "Expedited review requested for ")
 
 logger = logging.getLogger(__name__)
@@ -230,11 +232,22 @@ def _decide(
     if not (message.user_id or bot) or (bot_user_id and message.user_id == bot_user_id):
         return None
     dm = facts.dm
+    # A person's post linking a pull request, though not for the agent: the backend
+    # watches it, reacting as the pull request is merged or fails, and may offer a review.
+    unaddressed = (
+        BACKEND
+        if is_message
+        and not (bot or dm or explicit)
+        and message.subtype in _REQUEST_SUBTYPES
+        and not (bot_user_id and f"<@{bot_user_id}>" in message.text)
+        and any(link in message.text for link in _PULL_REQUEST_LINKS)
+        else None
+    )
     kitchen = facts.kitchen_channel and not dm and is_message and not explicit
     leading = _LEADING_MENTION.match(message.text)
     if not dm and not bot and leading and leading[1] != bot_user_id:
         # Addressed to another person.
-        return None
+        return unaddressed
     direct_message = dm and bool(message.user_id)
     if not (
         explicit
@@ -243,7 +256,7 @@ def _decide(
         or direct_message
         or facts.solo_followup
     ):
-        return None
+        return unaddressed
     breakout = Breakout.of(parsed)
     kind = _kind(message, facts, parsed, breakout, dm=dm, bot=bot)
     if kind is None or kind is BACKEND:

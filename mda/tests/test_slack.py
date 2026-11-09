@@ -543,6 +543,64 @@ def test_messages_the_backend_answers_go_back_to_it(
     assert handed.event == event.payload
 
 
+_PR = "<https://github.com/o/r/pull/7|o/r#7>"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        _event(f"please review {_PR}", key="message"),
+        _event(f"<@U9> can you look? {_PR}", key="message"),
+        _event(
+            "https://openswe.test/agents/reviews/1",
+            key="message",
+            payload={"type": "message", "subtype": "file_share", "text": "x"},
+        ),
+    ],
+    ids=["post", "to-another-person", "review-link"],
+)
+@pytest.mark.usefixtures("slack_reads")
+def test_a_persons_pull_request_post_goes_back_to_the_backend(
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent
+) -> None:
+    # The backend watches it to react as the pull request is merged; it heard it only
+    # from /webhooks/slack, which Slack no longer calls.
+    facts = SlackMessageFacts(conversation="new")
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
+
+    assert asyncio.run(slack.start_turn(event, _thread())) is None
+
+    assert backend.turns == []
+    [handed] = backend.handed_back
+    assert handed.event == event.payload
+
+
+@pytest.mark.parametrize(
+    ("event", "facts"),
+    [
+        (
+            _event(f"look {_PR}", user_id=None, payload={"type": "message", "bot_id": "B1"}),
+            SlackMessageFacts(conversation="new"),
+        ),
+        (
+            _event(f"look {_PR}", key="message", payload={"type": "message", "subtype": "x"}),
+            SlackMessageFacts(conversation="new"),
+        ),
+        (_event(f"look {_PR}", key="message"), SlackMessageFacts(channel="external")),
+    ],
+    ids=["bot", "other-subtype", "external"],
+)
+@pytest.mark.usefixtures("slack_reads")
+def test_other_pull_request_links_stay_unwatched(
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent, facts: SlackMessageFacts
+) -> None:
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
+
+    assert asyncio.run(slack.start_turn(event, _thread())) is None
+    assert backend.turns == []
+    assert backend.handed_back == []
+
+
 @pytest.mark.usefixtures("slack_reads")
 def test_an_untagged_kitchen_channel_message_or_solo_followup_is_a_turn(
     monkeypatch: pytest.MonkeyPatch,
