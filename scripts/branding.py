@@ -21,6 +21,12 @@ class Branding:
             (cls.ROOT / "ui/assets/playstore-icon.png", 512),
         ):
             icon.resize((size, size), Image.Resampling.LANCZOS).save(path)
+        bird = icon.crop((180, 230, 850, 800))
+        bird.putalpha(
+            Image.eval(bird.getchannel("B"), lambda blue: max(0, (255 - blue) * 255 / 239))
+        )
+        bird = bird.crop(bird.getbbox())
+        bird.save(cls.PUBLIC / "bird-mark.png")
         for environment, color in (
             ("preview", (255, 107, 157)),
             ("staging", (92, 225, 166)),
