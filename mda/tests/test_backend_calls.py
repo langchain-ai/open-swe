@@ -37,9 +37,10 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 from langchain_core.tracers.langchain import LangChainTracer
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
+from langchain_quickjs._prompt import render_ptc_prompt
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt.tool_node import ToolCallRequest
@@ -2621,3 +2622,55 @@ async def test_the_goal_tool_waits_for_the_edits_reported_before_it(
     # Only the goal tool waits, and it waits before its own operation goes out.
     assert order.count("drained") == 1
     assert order.index("drained") == len(order) - 2
+
+
+class TestCodeModeSchemas:
+    class Arguments(BaseModel):
+        channel_id: str
+        message_ts: str
+        limit: int = 10
+
+    @staticmethod
+    async def read_thread(channel_id: str, message_ts: str, limit: int = 10) -> str:
+        return f"{channel_id}:{message_ts}:{limit}"
+
+    @pytest.mark.parametrize("schema_kind", ["dictionary", "description", "reference", "pydantic"])
+    async def test_rendered_arguments_can_be_called(self, schema_kind: str) -> None:
+        schema = self.Arguments.model_json_schema()
+        if schema_kind == "description":
+            schema["description"] = "Thread arguments"
+        elif schema_kind == "reference":
+            schema["$defs"] = {"Timestamp": {"type": "string"}}
+            schema["properties"]["message_ts"] = {"$ref": "#/$defs/Timestamp"}
+        original = deepcopy(schema)
+        thread = StructuredTool.from_function(
+            coroutine=self.read_thread,
+            name="read_thread",
+            description="Read a Slack thread",
+            args_schema=self.Arguments if schema_kind == "pydantic" else schema,
+        )
+
+        listing = render_ptc_prompt([thread])
+
+        assert "channel_id: string;" in listing
+        assert "message_ts: string;" in listing
+        assert "limit?: number;" in listing
+        assert "Record<string, unknown>" not in listing
+        assert "description:" not in listing
+        assert schema == original
+        assert await thread.ainvoke({"channel_id": "C123", "message_ts": "123.456"}) == (
+            "C123:123.456:10"
+        )
+
+    @pytest.mark.parametrize("schema", [{}, {"properties": []}, {"$ref": "#/$defs/missing"}])
+    async def test_unrepresentable_schema_keeps_fallback(
+        self, schema: dict[str, JsonValue]
+    ) -> None:
+        thread = StructuredTool.from_function(
+            coroutine=self.read_thread,
+            name="read_thread",
+            description="Read a Slack thread",
+            args_schema=schema,
+        )
+
+        assert "input: Record<string, unknown>" in render_ptc_prompt([thread])
