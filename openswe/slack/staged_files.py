@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+from uuid import UUID
 
 from langgraph_sdk import get_client
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -26,15 +27,17 @@ logger = logging.getLogger(__name__)
 
 PENDING_SLACK_FILES_KEY = "slack_files_pending"
 SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
+DASHBOARD_FILE_DIR = "/workspace/.open-swe/attachments"
 _MAX_SLACK_FILE_ATTACHMENTS = 10
 
 
 @dataclass(frozen=True)
 class SlackFileEntry:
-    """A non-image file Slack attached to a message."""
+    """A non-image file a message brought: served by Slack, or stored as a thread attachment."""
 
     name: str
-    url: str
+    url: str = ""
+    attachment_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -86,8 +89,22 @@ def slack_files_section(staged: list[StagedSlackFile]) -> str:
 
 
 class _PendingFile(BaseModel):
-    url: str
+    url: str = ""
+    attachment_id: UUID | None = None
     path: str
+
+    async def content(self, thread_id: str) -> bytes | None:
+        """The file's bytes, from the thread's attachments or Slack; ``None`` when unavailable."""
+        if self.attachment_id is not None:
+            from openswe.transcript import attachments
+
+            stored = await attachments.load(thread_id, self.attachment_id)
+            return stored.data if stored is not None else None
+        try:
+            return await slack_utils.download_slack_file(self.url)
+        except slack_utils.SlackFileDownloadError as error:
+            logger.info("Slack file download skipped", extra={"slack_error": error.code})
+            return None
 
 
 _pending_files = TypeAdapter(list[_PendingFile])
@@ -115,7 +132,9 @@ def _sanitize_slack_filename(name: str, url: str) -> str:
     return filename[:120]
 
 
-async def queue_slack_files(thread_id: str, entries: list[SlackFileEntry]) -> list[StagedSlackFile]:
+async def queue_slack_files(
+    thread_id: str, entries: list[SlackFileEntry], *, directory: str = SLACK_FILE_DIR
+) -> list[StagedSlackFile]:
     """Where each file goes in the thread's sandbox, recorded for the run to write it there."""
     if not entries:
         return []
@@ -125,7 +144,11 @@ async def queue_slack_files(thread_id: str, entries: list[SlackFileEntry]) -> li
     pending = _pending(await get_sandbox_metadata(thread_id))
     used_names = {posixpath.basename(file.path) for file in pending}
     staged: list[StagedSlackFile] = []
+    queued = {file.attachment_id: file.path for file in pending if file.attachment_id}
     for entry in entries:
+        if path := queued.get(entry.attachment_id):
+            staged.append(StagedSlackFile(posixpath.basename(path), path))
+            continue
         filename = _sanitize_slack_filename(entry.name, entry.url)
         base = filename
         suffix = 1
@@ -133,12 +156,18 @@ async def queue_slack_files(thread_id: str, entries: list[SlackFileEntry]) -> li
             filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
             suffix += 1
         used_names.add(filename)
-        sandbox_path = posixpath.join(SLACK_FILE_DIR, filename)
-        pending.append(_PendingFile(url=entry.url, path=sandbox_path))
+        sandbox_path = posixpath.join(directory, filename)
+        pending.append(
+            _PendingFile(url=entry.url, attachment_id=entry.attachment_id, path=sandbox_path)
+        )
         staged.append(StagedSlackFile(filename, sandbox_path))
     await get_client().threads.update(
         thread_id=thread_id,
-        metadata={PENDING_SLACK_FILES_KEY: _pending_files.dump_python(pending, mode="json")},
+        metadata={
+            PENDING_SLACK_FILES_KEY: _pending_files.dump_python(
+                pending, mode="json", exclude_none=True
+            )
+        },
     )
     return staged
 
@@ -156,23 +185,25 @@ async def deliver_slack_files(
         return
     from openswe.sandboxes.state import get_sandbox_metadata
 
-    delivered = {(file.url, file.path) for file in pending}
+    delivered = {file.path for file in pending}
     left = [
         file
         for file in _pending(await get_sandbox_metadata(thread_id))
-        if (file.url, file.path) not in delivered
+        if file.path not in delivered
     ]
     await get_client().threads.update(
         thread_id=thread_id,
         metadata={
-            PENDING_SLACK_FILES_KEY: _pending_files.dump_python(left, mode="json") if left else None
+            PENDING_SLACK_FILES_KEY: _pending_files.dump_python(
+                left, mode="json", exclude_none=True
+            )
+            if left
+            else None
         },
     )
     for file in pending:
-        try:
-            content = await slack_utils.download_slack_file(file.url)
-        except slack_utils.SlackFileDownloadError as error:
-            logger.info("Slack file download skipped", extra={"slack_error": error.code})
+        content = await file.content(thread_id)
+        if content is None:
             continue
         try:
             responses = await backend.aupload_files([(file.path, content)])

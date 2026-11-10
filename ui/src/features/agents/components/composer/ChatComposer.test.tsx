@@ -426,7 +426,7 @@ describe("ChatComposer options", () => {
     )
 
     expect(
-      await screen.findByRole("menuitem", { name: "Attach images" })
+      await screen.findByRole("menuitem", { name: "Attach files" })
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
   })

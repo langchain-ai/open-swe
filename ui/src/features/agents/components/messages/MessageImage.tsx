@@ -1,3 +1,4 @@
+import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
 
@@ -49,8 +50,30 @@ function useImageSource(chunk: AnyImageChunk): {
   return { src: chunk.url, failed }
 }
 
-/** One image from a message, whatever form the transcript recorded it in. */
+/** One attachment from a message: an image, or a named chip for any other file. */
 export function MessageImage({
+  chunk,
+  className,
+}: {
+  chunk: AnyImageChunk
+  className?: string
+}) {
+  if (!chunk.mimeType || chunk.mimeType.startsWith("image/"))
+    return <MessageImageContent chunk={chunk} className={className} />
+  return <AttachedFile name={chunk.fileName || "file"} />
+}
+
+/** A non-image attachment, shown by name. */
+export function AttachedFile({ name }: { name: string }) {
+  return (
+    <div className="flex h-16 max-w-48 items-center gap-space-2 rounded-lg border border-default bg-surface-level-2 px-space-3 text-xs text-secondary">
+      <FileTextIcon className="size-4 shrink-0 text-icon-secondary" />
+      <span className="truncate">{name}</span>
+    </div>
+  )
+}
+
+function MessageImageContent({
   chunk,
   className,
 }: {
