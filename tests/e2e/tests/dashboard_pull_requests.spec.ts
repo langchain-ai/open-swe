@@ -262,7 +262,7 @@ test.describe("thread pull requests", () => {
 
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
-      "text-error-secondary",
+      "text-warning-secondary",
     );
     await expect(summary).toContainText("3 checks");
     await expect(summary).toContainText("2 comments");

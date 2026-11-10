@@ -275,7 +275,11 @@ def _breakout_without_files(
         "post_slack_top_level_message_with_ts",
         AsyncMock(return_value="1700000002.0"),
     )
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", AsyncMock())
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "post_slack_thread_reply_with_ts",
+        AsyncMock(return_value="1700000003.0"),
+    )
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", bind)
     monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "claim_breakout", claim)
     monkeypatch.setattr(slack_breakout_tool, "allow_solo_thread_followup", AsyncMock())
@@ -314,7 +318,10 @@ async def test_a_breakout_of_an_mda_conversation_is_mda_s_too(
         assert slack_breakout_tool.PROVISIONAL_VISIBILITY_KEY not in metadata
 
 
-async def test_a_breakout_mda_cant_open_starts_no_run(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("deletes", [True, False])
+async def test_a_breakout_mda_cant_open_starts_no_run(
+    monkeypatch: pytest.MonkeyPatch, deletes: bool
+) -> None:
     _, run, _ = _breakout_without_files(monkeypatch)
     monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "holds", AsyncMock(return_value=True))
     monkeypatch.setattr(
@@ -323,12 +330,30 @@ async def test_a_breakout_mda_cant_open_starts_no_run(monkeypatch: pytest.Monkey
         AsyncMock(side_effect=slack_breakout_tool.ChannelThreadError("no secret")),
     )
 
+    deleted: list[str] = []
+
+    async def delete(channel_id: str, message_ts: str) -> bool:
+        deleted.append(message_ts)
+        return deletes
+
+    detach = AsyncMock()
+    monkeypatch.setattr(slack_breakout_tool, "delete_slack_message", delete)
+    monkeypatch.setattr(slack_breakout_tool, "delete_slack_thread_associations", detach)
+
     result = await slack_breakout_tool.slack_breakout_thread(
         "Investigate", "Investigate the follow-up.", destination="C1"
     )
 
-    assert result == {"success": False, "error": "Could not open the new thread; try again."}
     run.assert_not_awaited()
+    # The root goes only after its reply, so a failure never leaves a rootless thread.
+    assert deleted == (["1700000003.0", "1700000002.0"] if deletes else ["1700000003.0"])
+    if deletes:
+        assert result == {"success": False, "error": "Could not open the new thread; try again."}
+        detach.assert_awaited_once()
+    else:
+        # A surviving post keeps its binding and must not be retried beside.
+        assert "Do not retry" in str(result["error"])
+        detach.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -804,6 +829,7 @@ async def test_slack_breakout_thread_returns_detail_failure_without_dispatch(
         captured["dispatched"] = True
         return {"run_id": "run-123"}
 
+    monkeypatch.setattr(slack_breakout_tool, "delete_slack_message", AsyncMock(return_value=True))
     monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
