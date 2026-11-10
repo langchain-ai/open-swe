@@ -448,7 +448,8 @@ test.describe("review page", () => {
       const labels: string[] = [button.textContent ?? ""];
       const callout = button.parentElement!;
       new MutationObserver(() => {
-        const label = callout.querySelector("button")?.textContent ?? "";
+        const label =
+          callout.querySelector(":scope > button")?.textContent ?? "";
         if (labels[labels.length - 1] !== label) labels.push(label);
       }).observe(callout, {
         subtree: true,

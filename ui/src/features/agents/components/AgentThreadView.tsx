@@ -1,5 +1,6 @@
 import { productAnalytics } from "@/lib/analytics"
 import { LogoMark } from "@/components/Branding"
+import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
@@ -20,6 +21,7 @@ import {
 } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
+import { Text } from "@langchain/macaw-components/Text"
 import { Icon } from "@langchain/macaw-components/Icon"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
@@ -867,8 +869,15 @@ export function AgentThreadView({
                 ) : undefined
               }
             >
-              The last run hit an error before it could finish. Send another
-              message to retry.
+              <Text as="span" variant="sm" color="secondary">
+                The last run hit an error before it could finish. Send another
+                message to retry.
+              </Text>{" "}
+              <CopyErrorButton
+                error="The last run hit an error before it could finish."
+                details={{ Thread: thread.id, Trace: thread.traceUrl }}
+                className="-my-space-1 align-middle"
+              />
             </Banner>
           </div>
         )}
