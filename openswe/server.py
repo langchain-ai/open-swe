@@ -1524,6 +1524,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         # Reads only who the run is for, so it runs alongside participants.
         recent_threads = asyncio.create_task(self._recent_threads(cfg))
+        workspace_settings = asyncio.create_task(cached_workspace_settings(workspace_slug(cfg)))
         # A dashboard switched back to Auto drops the route the thread kept.
         reroute = (
             not requested_model
@@ -1564,6 +1565,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
+        defaults = await workspace_settings
         turn = TurnContext(
             working_dir=work_dir,
             working_folder=cfg.repo_explicitly_none is True,
@@ -1573,13 +1575,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             slack_by_the_way=cfg.slack_ask_mode and bool(cfg.slack_by_the_way_thread_ts),
             slack_breakout=cfg.slack_breakout is True,
             slack_follow_up_suggestions=_slack_concierge_run(cfg)
-            or (await cached_workspace_settings(workspace_slug(cfg))).get(
-                "slack_follow_up_suggestions"
-            )
-            is True,
-            implementation_walkthrough_enabled=(
-                await cached_workspace_settings(workspace_slug(cfg))
-            ).get("implementation_walkthrough_enabled")
+            or defaults.get("slack_follow_up_suggestions") is True,
+            implementation_walkthrough_enabled=defaults.get("implementation_walkthrough_enabled")
             is True,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
@@ -1641,10 +1638,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
     async def _render_system_prompt(self, cfg: RunConfig) -> SystemPrompt:
         """The thread's system prompt, from what holds for it as its first run starts."""
-        async with aphase(self._thread_id, "prepare.default_repo"):
-            default_repo = await _resolve_prompt_default_repo(cfg)
-        async with aphase(self._thread_id, "prepare.workspace"):
-            workspace = await load_workspace(workspace_slug(cfg))
+        default_repo, workspace = await asyncio.gather(
+            _timed(self._thread_id, "prepare.default_repo", _resolve_prompt_default_repo(cfg)),
+            _timed(self._thread_id, "prepare.workspace", load_workspace(workspace_slug(cfg))),
+        )
         return construct_system_prompt(
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
@@ -2074,7 +2071,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
-    if not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled:
+    if not settings.expedited_review_enabled:
         static_tools = [
             tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
         ]

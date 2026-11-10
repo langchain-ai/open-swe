@@ -50,6 +50,7 @@ from openswe.server import (
     runtime_runs,
 )
 from openswe.threads.access import agent_version_metadata
+from openswe.utils.thread_reads import shared_thread_reads
 
 # MDA's own deep agent runs subagents and code.
 _SYNC_SUBAGENT_TOOL: Final = "task"
@@ -98,8 +99,10 @@ class RunCatalog:
         # Resolved from the run as dispatch stamped it, never from the settings it decides.
         config = run_config(run, settled=False)
         surface = ToolSurface()
-        await kind.catalog(config, surface)
-        await surface.prepare()
+        # The kind's lookups consult the thread's ownership and access many times over.
+        async with shared_thread_reads():
+            await kind.catalog(config, surface)
+            await surface.prepare()
         return cls(kind, run, surface, config)
 
     async def start(self) -> RunStart:
