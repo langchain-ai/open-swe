@@ -43,6 +43,7 @@ from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
 from langgraph_sdk.errors import (
     APIStatusError,
     InternalServerError,
@@ -1890,8 +1891,9 @@ async def test_the_skills_open_swe_ships_are_served_from_this_deployment(
         assert read.error is None
 
 
+@pytest.mark.parametrize("code_mode", [False, True])
 async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, code_mode: bool
 ) -> None:
     from deepagents.middleware.filesystem import FilesystemMiddleware
     from deepagents.middleware.skills import SkillsState
@@ -1948,27 +1950,120 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
         store=None,
     )
     in_sandbox = AsyncMock()
-    read = await files.awrap_tool_call(
-        ToolCallRequest(
-            tool_call={
-                "name": "read_file",
-                "args": {"file_path": "/organization-skills/deploy/SKILL.md"},
-                "id": "call-1",
-                "type": "tool_call",
-            },
-            tool=None,
-            state={"messages": []},
-            runtime=runtime,
-        ),
-        in_sandbox,
-    )
+    collector = RunCollectorCallbackHandler()
+
+    async def read_skill(path: str) -> ToolMessage | Command:
+        if code_mode:
+            [read_tool] = files.code_tools(["read_file"])
+            return await read_tool.ainvoke({"file_path": path, "runtime": runtime})
+        return await files.awrap_tool_call(
+            ToolCallRequest(
+                tool_call={
+                    "name": "read_file",
+                    "args": {"file_path": path},
+                    "id": "call-1",
+                    "type": "tool_call",
+                },
+                tool=None,
+                state={"messages": []},
+                runtime=runtime,
+            ),
+            in_sandbox,
+        )
+
+    reader = RunnableLambda(read_skill)
+    client = MagicMock(spec=Client)
+    tracer = LangChainTracer(client=client, project_name="test")
+    config: RunnableConfig = {"callbacks": [tracer, collector]}
+    with tracing_context(enabled=True):
+        read = await reader.ainvoke("/organization-skills/deploy/SKILL.md", config=config)
+        await reader.ainvoke("/organization-skills/deploy/reference.md", config=config)
+        missing = await reader.ainvoke("/organization-skills/deleted/SKILL.md", config=config)
+    assert isinstance(missing, ToolMessage) and missing.status == "error"
     await backend.outbox.drain()
+    assert len(collector.traced_runs) == 3
+    patches = {call.kwargs["run_id"]: call.kwargs for call in client.update_run.call_args_list}
+    for index, root in enumerate(collector.traced_runs):
+        pending = list(root.child_runs)
+        reads = []
+        while pending:
+            span = pending.pop()
+            pending.extend(span.child_runs)
+            if span.name == "read_file" and not span.child_runs:
+                reads.append(span)
+        assert len(reads) == 1
+        assert _run_metadata(patches[reads[0].id]).get("ls_skill_name") == (
+            "deploy" if index == 0 else None
+        )
+        assert "ls_skill_name" not in _run_metadata(patches[root.id])
 
     assert isinstance(read, ToolMessage) and "Run make deploy." in read.text
     in_sandbox.assert_not_awaited()
     # Listed once for the run, and no file was read through the backend's files.
     assert asked.count("skills") == 1
     assert not [name for name in asked if name.startswith("files.")]
+
+
+@pytest.mark.parametrize(
+    ("path", "skill"),
+    [
+        ("/workspace/repo/.agents/skills/review/SKILL.md", "review"),
+        ("/workspace/repo/.claude/skills/deploy/SKILL.md", "deploy"),
+        ("/workspace/repo/docs/SKILL.md", None),
+        ("/workspace/repo/.agents/skills/review/reference.md", None),
+    ],
+)
+@pytest.mark.parametrize("failure", [None, "message", "text", "exception"])
+async def test_repository_skill_reads_are_tagged_without_changing_the_shared_tool(
+    monkeypatch: pytest.MonkeyPatch, path: str, skill: str | None, failure: str | None
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend(catalog=Catalog(sandbox=_IN_SANDBOX))
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+
+    @tool
+    async def read_file(file_path: str) -> str | ToolMessage:
+        """Read a file."""
+        if failure == "exception":
+            raise FileNotFoundError(file_path)
+        if failure == "message":
+            return ToolMessage(content="Error: not found", tool_call_id="read", status="error")
+        if failure == "text":
+            return "Error: not found"
+        return file_path
+
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    model = _ToolCallingModel(
+        messages=iter(
+            [
+                AIMessage(
+                    "",
+                    tool_calls=[{"name": "read_file", "args": {"file_path": path}, "id": "read"}],
+                ),
+                AIMessage("done"),
+            ]
+        )
+    )
+    collector = RunCollectorCallbackHandler()
+    graph = create_agent(model, tools=[read_file], middleware=[files])
+    client = MagicMock(spec=Client)
+    tracer = LangChainTracer(client=client, project_name="test")
+    with tracing_context(enabled=True):
+        await graph.ainvoke({"messages": [("user", "read")]}, {"callbacks": [tracer, collector]})
+    patches = {call.kwargs["run_id"]: call.kwargs for call in client.update_run.call_args_list}
+    pending = list(collector.traced_runs)
+    reads = []
+    while pending:
+        span = pending.pop()
+        pending.extend(span.child_runs)
+        if span.name == "read_file":
+            reads.append(span)
+    assert len(reads) == 1
+    assert _run_metadata(patches[reads[0].id]).get("ls_skill_name") == (
+        skill if failure is None else None
+    )
+    assert read_file.metadata is None
 
 
 class _ToolCallingModel(GenericFakeChatModel):
