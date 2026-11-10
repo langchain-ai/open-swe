@@ -22,6 +22,7 @@ __all__ = [
     "DEPRECATED_MODEL_REPLACEMENTS",
     "FABLE_MODEL_IDS",
     "NON_DEFAULT_MODEL_IDS",
+    "RETIRED_MODEL_REPLACEMENTS",
     "SUPPORTED_MODELS",
     "SUPPORTED_MODEL_IDS",
     "ModelOption",
@@ -79,6 +80,12 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
 )
 
 DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = dict.fromkeys(DEPRECATED_MODEL_IDS, "")
+
+# Retired ids whose saved selections move to a named successor. Any other
+# unsupported id is still rejected when written or configured.
+RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
+    "google_genai:gemini-4-argon": "google_genai:gemini-4-carbon",
+}
 
 
 def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
@@ -161,10 +168,15 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
     supports it, otherwise uses that model's default effort. Returns ``None`` when
     no supported model shares the provider.
 
+    A retired id moves to its successor in ``RETIRED_MODEL_REPLACEMENTS``.
     Explicitly deprecated ids inherit the workspace default instead.
     """
     if not isinstance(model_id, str) or model_id in DEPRECATED_MODEL_IDS:
         return None
+    successor = RETIRED_MODEL_REPLACEMENTS.get(model_id)
+    for m in SUPPORTED_MODELS:
+        if m["id"] == successor:
+            return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     provider = _provider_of(model_id)
     if provider is None:
         return None
@@ -183,6 +195,10 @@ def default_model_pair() -> tuple[str, str]:
     """Deployment fallback used when neither the workspace nor the instance sets a default."""
     model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
     effort = ENV.LLM_REASONING_EFFORT.get()
+    if model_id in RETIRED_MODEL_REPLACEMENTS and (
+        pair := provider_fallback_pair(model_id, effort)
+    ):
+        return pair
     for model in SUPPORTED_MODELS:
         if model["id"] == model_id and model.get("can_be_default", True):
             effort = (

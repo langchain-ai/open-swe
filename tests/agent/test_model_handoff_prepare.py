@@ -187,6 +187,17 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
     infer.assert_awaited_once()
 
 
+async def test_a_saved_choice_no_longer_offered_falls_back_to_the_runs_model(
+    handoff: Handoff,
+) -> None:
+    handoff.settings.update(
+        model_handoff_complete=True, requested_model="google_genai:gemini-4-argon"
+    )
+    prepared = await handoff.prepare()
+    assert prepared["selected_model_id"] == "openai:gpt-6.1-sol"
+    assert prepared["requested_model"] is None
+
+
 @pytest.mark.parametrize("previous_route", ["fast", "default"])
 async def test_explicit_auto_selection_has_the_run_classify_the_route_again(
     handoff: Handoff, monkeypatch: pytest.MonkeyPatch, previous_route: SelectedRoute

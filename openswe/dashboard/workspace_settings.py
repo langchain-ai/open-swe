@@ -28,6 +28,7 @@ from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
+    RETIRED_MODEL_REPLACEMENTS,
     SUPPORTED_MODEL_IDS,
     default_model_pair,
     gate_fable_model,
@@ -255,6 +256,8 @@ def _normalize_stale_model_pair(
 ) -> tuple[str | None, str | None]:
     if model in DEPRECATED_MODEL_IDS:
         return None, None
+    if model in RETIRED_MODEL_REPLACEMENTS:
+        return provider_fallback_pair(model, effort) or (model, effort)
     return model, effort
 
 

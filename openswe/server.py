@@ -1463,6 +1463,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 decision.pin_persisted = bool(requested_model)
             else:
                 requested_model = settings.get("requested_model")
+                if requested_model not in self._requested_models:
+                    requested_model = None
                 decision.requested_model = requested_model
                 decision.outcome = "reused_saved_choice" if requested_model else "not_classified"
                 decision.reason = (

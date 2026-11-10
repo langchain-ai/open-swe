@@ -108,8 +108,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "context_window": 272_000,
     },
     {
-        "id": "google_genai:gemini-4-argon",
-        "label": "Gemini 4 Argon",
+        "id": "google_genai:gemini-4-carbon",
+        "label": "Gemini 4 Carbon",
         "efforts": ["low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
@@ -225,13 +225,15 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
 
 
 def model_request_defaults(model_id: str) -> ModelKwargs:
-    if model_id == "google_genai:gemini-4-argon":
+    if model_id == "google_genai:gemini-4-carbon":
         return {"timeout": 900.0, "temperature": None}
     return {}
 
 
 def supports_google_thinking_level(model_id: str) -> bool:
-    return model_id.startswith("google_genai:gemini-3") or model_id == "google_genai:gemini-4-argon"
+    return (
+        model_id.startswith("google_genai:gemini-3") or model_id == "google_genai:gemini-4-carbon"
+    )
 
 
 def openai_reasoning_for(
