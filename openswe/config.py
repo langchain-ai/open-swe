@@ -532,7 +532,7 @@ ENV.var(
     "OBJECT_STORE_URL",
     "Endpoint of the object storage that keeps large files, such as app attachments: "
     "https://storage.googleapis.com for GCS (its XML API, with an HMAC key), or an S3, R2 or "
-    "MinIO endpoint. Unset, only files small enough to keep in PostgreSQL are accepted.",
+    "MinIO endpoint. Unset, PostgreSQL keeps every file.",
 )
 ENV.var("OBJECT_STORE_BUCKET", "Bucket the object storage keeps those files in.")
 ENV.var(

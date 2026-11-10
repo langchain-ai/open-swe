@@ -265,6 +265,7 @@ from openswe.tools.admin_gate import (
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
+from openswe.tools.manage_review_apps import manage_review_apps
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
 from openswe.tools.note_on_diff import note_on_diff
@@ -778,6 +779,7 @@ AGENT_TOOLS: Final = (
     execute_database_sql,
     write_database_rows,
     manage_feature_flags,
+    manage_review_apps,
     manage_review_approval_mode,
     manage_review_shadow,
     manage_review_repos,

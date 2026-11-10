@@ -42,6 +42,15 @@ export interface PluginManifest {
   description: string
   sidebar: { label: string; icon: SidebarIcon }
   permissions: Array<PluginPermission>
+  /** What reviews do for the app in workspaces that add it to them. */
+  review?: ReviewStep | null
+}
+
+/** An app's step in pull request reviews: instructions, what it writes, and a browser. */
+export interface ReviewStep {
+  instructions: string
+  writes: Array<string>
+  browser: boolean
 }
 
 /** One immutable build of an app. */

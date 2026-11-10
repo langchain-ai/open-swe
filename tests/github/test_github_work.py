@@ -135,6 +135,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
                 "track_pull_request_state",
                 "track_pull_request_usage",
                 "settle_review_on_close",
+                "delete_app_documents_on_close",
                 "update_reviewer_watch",
             ),
             id="pr-closed",

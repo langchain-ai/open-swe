@@ -64,12 +64,17 @@ from openswe.plugins.manifest import (
     PluginPermission,
 )
 from openswe.plugins.records import (
+    ATTACHMENT_TYPES,
+    MAX_ATTACHMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
     AppNotFound,
     AppVersion,
     Attachment,
+    AttachmentName,
     AttachmentStorageUnavailable,
     ConflictingDocumentWrites,
     Cursor,
+    DocumentKey,
     DocumentQuery,
     Installation,
     InstallationNotFound,
@@ -89,9 +94,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
-MAX_DOCUMENT_BYTES = 256_000
-
-DocumentKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
 FieldPath = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9_-]{1,64}){0,7}$")
 ]
@@ -115,7 +117,7 @@ def _as_http() -> Iterator[None]:
     except (PluginNameTaken, PreviewHeldByAnother, ConflictingDocumentWrites) as exc:
         raise HTTPException(409, str(exc)) from exc
     except AttachmentStorageUnavailable as exc:
-        raise HTTPException(413, str(exc)) from exc
+        raise HTTPException(503, str(exc)) from exc
     except ObjectStoreError as exc:
         logger.warning("Object storage failed a plugin call", exc_info=True)
         raise HTTPException(502, "object storage could not be reached") from exc
@@ -573,13 +575,6 @@ async def api_delete_plugin_document(
         if not await plugin.documents.delete(collection, scope, key):
             raise HTTPException(404, "document not found")
     return Response(status_code=204)
-
-
-MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
-ATTACHMENT_TYPES = frozenset(
-    {"image/png", "image/jpeg", "image/webp", "image/gif", "video/webm", "video/mp4"}
-)
-AttachmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$")]
 
 
 class AttachmentModel(BaseModel):

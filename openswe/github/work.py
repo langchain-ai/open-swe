@@ -78,7 +78,7 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts) -> list[GitHubWorkNam
     if action == "opened" or action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("track_pull_request_usage")
     if action == "closed":
-        work.append("settle_review_on_close")
+        work += ["settle_review_on_close", "delete_app_documents_on_close"]
     elif action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("settle_human_reviews")
     if action in GH_PR_WATCH_TOGGLE_ACTIONS:

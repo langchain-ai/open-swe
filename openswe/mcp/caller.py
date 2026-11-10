@@ -27,6 +27,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.workspaces",
     "openswe.tools.organization_skills",
     "openswe.tools.manage_feature_flags",
+    "openswe.tools.manage_review_apps",
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_shadow",
     "openswe.tools.slack_bots",

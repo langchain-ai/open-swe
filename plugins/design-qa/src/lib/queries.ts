@@ -1,5 +1,6 @@
 import {
   HostError,
+  type JsonObject,
   type PluginHost,
   type PullRequest,
 } from "@openswe/plugin-sdk"
@@ -13,6 +14,7 @@ import {
   capturePrefix,
   type CaptureKey,
   type FrontendReviewRun,
+  StoredCapture,
 } from "./capture"
 import { repositoryOf, type PullRequestRef } from "./pullRequest"
 
@@ -83,10 +85,9 @@ export class DesignQa {
   }
 
   captures(repository: string) {
-    return this.host.storage.collection<CaptureKey, FrontendReviewRun>(
-      CAPTURES,
-      { repository }
-    )
+    return this.host.storage.collection<CaptureKey, JsonObject>(CAPTURES, {
+      repository,
+    })
   }
 
   async latestRuns(
@@ -99,7 +100,9 @@ export class DesignQa {
       direction: "desc",
       limit,
     })
-    return found.map(({ document }) => document)
+    return found.map((stored) =>
+      StoredCapture.settled(StoredCapture.read(stored))
+    )
   }
 
   /** The pull request as GitHub has it now; `undefined` when GitHub would not answer. */
@@ -156,7 +159,7 @@ export class DesignQa {
       captureKey(pr.number, id)
     )
     if (!found) throw new Error("this run is no longer saved")
-    return found.document
+    return StoredCapture.settled(StoredCapture.read(found))
   }
 
   async media(target: RunMedia, name: string): Promise<Blob> {

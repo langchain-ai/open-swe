@@ -404,11 +404,23 @@ export interface AllowedSlackBotEntry {
   image_url: string
 }
 
+/** An app reviews follow, by id, pinned to the release (an app version id) an admin approved. */
+export interface ReviewAppRelease {
+  app: string
+  release: string
+}
+
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
 export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** The apps whose review step reviews of private repositories follow, each at the release an admin approved. */
+  review_apps?: Array<ReviewAppRelease> | null
+  /** Instance only: the domains, each with its subdomains, a review's browser may sign in to. */
+  review_browser_domains?: Array<string> | null
+  /** Instance only: the `<connection>/<tool>` that signs a review's browser in. */
+  review_browser_session_tool?: string | null
   /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */

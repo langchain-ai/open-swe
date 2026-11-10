@@ -283,9 +283,10 @@ def _parts(graph: Graph) -> _Parts:
             RunToolsMiddleware(toolsets, backend_tools=backend_tools),
             _code_mode(graph, toolsets, files, backend_tools),
             DescribedToolsMiddleware(backend),
-            # The coding agent's browser, a LangSmith browser per thread the dashboard
-            # shows; the deployment's workspace needs the LangSmith browser beta.
-            ReportedBrowserMiddleware(backend, enabled=graph == "agent"),
+            # A LangSmith browser per thread the dashboard shows: the coding agent's, and
+            # a review's whose apps ask for one; the deployment's workspace needs the
+            # LangSmith browser beta.
+            ReportedBrowserMiddleware(backend, graph=graph),
             # The system prompt in the order of how many runs share each part, for the
             # provider's prompt cache (``rt.run_prompt``).
             RunPromptMiddleware(),

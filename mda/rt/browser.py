@@ -1,9 +1,14 @@
-"""The coding agent's LangSmith browser, reported to the backend so the dashboard can show it.
+"""The LangSmith browser of a run, reported to the backend so the dashboard can show it.
 
 MDA's browser middleware names each thread's browser itself, from the
 deployment. Each run tells the backend that name when it starts, so a person
 can open the browser from the thread's Browser panel before the agent has, and
 again once the agent first browses, so the panel opens on its own.
+
+The coding agent always has its browser. A review has one only when its catalog
+asks for it (``Catalog.browser``), for an app it works for. The pages it opens
+run code the pull request's author wrote, so a review's browser never reaches the
+review's sandbox, and takes sign-in sessions only for the domains its catalog names.
 """
 
 import asyncio
@@ -14,9 +19,12 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
 
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages.content import create_text_block
 from langchain_core.tools import StructuredTool
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 from langsmith import tracing_context
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import (
@@ -26,10 +34,11 @@ from managed_deepagents.browser import (
     _Session,
 )
 from pydantic import JsonValue
+from runtime_api.catalog import BrowserSpec
 from runtime_api.endpoint import call
 from runtime_api.loop import BROWSER, BrowserReport
 
-from rt.backend import OpenSweBackend
+from rt.backend import BackendCallError, OpenSweBackend
 from rt.session_handoff import HeldSessions
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
@@ -48,15 +57,19 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
-    def __init__(self, backend: OpenSweBackend, *, enabled: bool = True) -> None:
+    def __init__(self, backend: OpenSweBackend, *, graph: str) -> None:
         super().__init__()
         self._backend = backend
-        # Every graph has the middleware, so all of them share one shape; only the
-        # coding agent's has a browser.
-        self._enabled = enabled
+        # Every graph has the middleware, so all of them share one shape. The coding
+        # agent's always browses; a review's only in a run whose catalog asks it to.
+        self._always = graph == "agent"
+        self._enabled = self._always or graph == "reviewer"
         # No browser_handoff: Open SWE runs only what its backend signs, so MDA's watcher
         # cannot start the run that tells the agent the user handed the browser back.
-        self.tools = [tool for tool in self.tools if enabled and tool.name != "browser_handoff"]
+        self.tools = [
+            tool for tool in self.tools if self._enabled and tool.name != "browser_handoff"
+        ]
+        self._names = frozenset(tool.name for tool in self.tools)
         self._arguments.pop("browser_handoff", None)
         run = next((tool for tool in self.tools if tool.name == "browser_run"), None)
         if isinstance(run, StructuredTool) and run.coroutine is not None:
@@ -96,6 +109,8 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         host, key, session = data.get("host"), data.get("storage_key"), data.get("session")
         if not isinstance(host, str) or not _SESSION_HOSTS.fullmatch(host):
             return "The session's host is not a LangSmith site."
+        if not self._may_sign_in(host):
+            return "This review signs in only to its base and preview sites."
         if not isinstance(key, str) or not isinstance(session, dict):
             return "The MCP result held no browser session."
         with tracing_context(enabled=False):
@@ -120,8 +135,29 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         await page.goto(f"https://{host}")
         return _INSTALLED
 
+    def _review_browser(self) -> BrowserSpec | None:
+        """The browser the review in progress has; None outside a review that browses."""
+        if self._always or not self._enabled:
+            return None
+        with contextlib.suppress(BackendCallError):  # outside an Open SWE run
+            return self._backend.run.catalog.browser
+        return None
+
+    def _active(self) -> bool:
+        """Whether the run in progress browses."""
+        return self._always or self._review_browser() is not None
+
+    def _may_sign_in(self, host: str) -> bool:
+        """Whether the run may install a session for ``host``: a review only on its domains."""
+        if self._always:
+            return True
+        review = self._review_browser()
+        return review is not None and any(
+            host == domain or host.endswith(f".{domain}") for domain in review.session_domains
+        )
+
     async def abefore_agent(self, state: BrowserState, runtime: Runtime) -> None:
-        if not self._enabled:
+        if not self._active():
             return
         with contextlib.suppress(RuntimeError):  # no thread, so no browser
             name = self.browser_name(runtime)
@@ -131,7 +167,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
             self._report_later(name, state, opened=False)
 
     async def aafter_agent(self, state: BrowserState, runtime: Runtime) -> None:
-        if self._enabled:
+        if self._active():
             await super().aafter_agent(state, runtime)
 
     async def awrap_model_call(
@@ -139,16 +175,44 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         request: ModelRequest[None],
         handler: Callable[[ModelRequest[None]], Awaitable[ModelResponse[object]]],
     ) -> ModelResponse[object]:
-        # The browser's instructions only where its tools are.
-        if not self._enabled:
-            return await handler(request)
-        return await super().awrap_model_call(request, handler)
+        # The browser's tools and instructions only in a run that browses.
+        if not self._active():
+            offered = [
+                tool for tool in request.tools if getattr(tool, "name", None) not in self._names
+            ]
+            return await handler(request.override(tools=offered))
+        if self._always:
+            return await super().awrap_model_call(request, handler)
+        # A review's browser has no localhost, so its instructions leave that note out.
+        system = request.system_message
+        blocks = [
+            *(system.content_blocks if system else []),
+            create_text_block(self._instructions),
+        ]
+        return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[object]]],
+    ) -> ToolMessage | Command[object]:
+        call = request.tool_call
+        if call["name"] in self._names and not self._active():
+            return ToolMessage(
+                content=f"Error: `{call['name']}` is not available in this run.",
+                tool_call_id=call["id"],
+                name=call["name"],
+                status="error",
+            )
+        return await super().awrap_tool_call(request, handler)
 
     async def _share(
         self, session: object, name: str, key: str, runtime: ManagedToolRuntime
     ) -> None:
-        # Runs before every browser call, with the browser's name once it is open.
-        await super()._share(session, name, key, runtime)  # ty: ignore[invalid-argument-type]
+        # Runs before every browser call, with the browser's name once it is open. Only the
+        # coding agent's browser gets its sandbox's localhost.
+        if self._always:
+            await super()._share(session, name, key, runtime)  # ty: ignore[invalid-argument-type]
         self._report_later(name, runtime.state, opened=True)
 
     def _report_later(self, name: str, state: Mapping[str, object], *, opened: bool) -> None:

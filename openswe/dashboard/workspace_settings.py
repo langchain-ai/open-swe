@@ -10,6 +10,7 @@ that honour them. Per-repo style prompts live in :mod:`openswe.review.styles`.
 
 import asyncio
 import logging
+import re
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, NamedTuple, TypedDict
 from uuid import UUID
@@ -49,6 +50,18 @@ DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6.1-sol", "medium")
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_DOMAIN = re.compile(rf"(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+")
+# An MCP connection's name, then the name of a tool on its server.
+_SESSION_TOOL = re.compile(r"[a-z][a-z0-9_-]{0,31}/[A-Za-z0-9_.-]{1,128}")
+
+
+class ReviewAppRelease(TypedDict):
+    """An app reviews follow, pinned to the release an admin approved, so its owner's later
+    releases change no review until an admin picks them up."""
+
+    app: str
+    release: str
 
 
 class WorkspaceSettingsUpdate(BaseModel):
@@ -68,6 +81,15 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_trace_links: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    review_apps: list[ReviewAppRelease] | None = Field(default=None, max_length=20)
+    """The apps whose review step reviews follow, each at the release an admin approved;
+    managed with ``manage_review_apps``."""
+    # Where the browser of a review that works for apps may sign in, each domain with its
+    # subdomains, and the instance or workspace MCP tool that signs it in, as
+    # <connection>/<tool>. Only the instance record's values are read: they decide where
+    # reviews sign in, and as whom.
+    review_browser_domains: list[str] | None = Field(default=None, max_length=20)
+    review_browser_session_tool: str | None = None
     # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
@@ -118,6 +140,40 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_shadow_percent: int | None = Field(default=None, ge=0, le=100, strict=True)
     review_shadow_model: str | None = None
     review_shadow_reasoning_effort: str | None = None
+
+    @field_validator("review_apps")
+    @classmethod
+    def _app_releases(cls, v: list[ReviewAppRelease] | None) -> list[ReviewAppRelease] | None:
+        if v is None:
+            return None
+        chosen: dict[str, str] = {}
+        try:
+            for entry in v:
+                chosen[str(UUID(entry["app"].strip()))] = str(UUID(entry["release"].strip()))
+        except ValueError:
+            raise ValueError("a review app is an app id and the id of its release") from None
+        return [ReviewAppRelease(app=app, release=release) for app, release in chosen.items()]
+
+    @field_validator("review_browser_domains")
+    @classmethod
+    def _browser_domains(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        domains = list(dict.fromkeys(d.strip().lower() for d in v if d.strip()))
+        for domain in domains:
+            if not _DOMAIN.fullmatch(domain):
+                raise ValueError(f"{domain!r} isn't a domain, such as review.example.com")
+        return domains
+
+    @field_validator("review_browser_session_tool", mode="before")
+    @classmethod
+    def _session_tool(cls, v: object) -> str | None:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        tool = str(v).strip()
+        if not _SESSION_TOOL.fullmatch(tool):
+            raise ValueError("the session tool is <connection>/<tool>, such as homebase/sign_in")
+        return tool
 
     @field_validator("managed_tools_gateway_id", mode="before")
     @classmethod
@@ -260,6 +316,9 @@ def _default_settings() -> dict[str, Any]:
         "implementation_walkthrough_enabled": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "review_apps": [],
+        "review_browser_domains": [],
+        "review_browser_session_tool": None,
         "model_routing_enabled": None,
         "gateway_enabled": None,
         "fable_enabled": False,
@@ -672,6 +731,19 @@ class WorkspaceSettings(Mapping[str, Any]):
         return bool(self.get("review_trace_links", True))
 
     @property
+    def review_app_releases(self) -> dict[UUID, UUID]:
+        """Each app whose review step reviews follow, by id, to the release an admin approved,
+        in the order they were added."""
+        value = self.get("review_apps")
+        found: dict[UUID, UUID] = {}
+        for entry in value if isinstance(value, list) else []:
+            try:
+                found[UUID(str(entry["app"]))] = UUID(str(entry["release"]))
+            except KeyError, TypeError, ValueError:
+                continue
+        return found
+
+    @property
     def model_routing_enabled(self) -> bool:
         value = self.get("model_routing_enabled")
         return value if isinstance(value, bool) else False
@@ -718,6 +790,18 @@ class WorkspaceSettings(Mapping[str, Any]):
     def managed_tools_gateway_id(self) -> str | None:
         """The LangSmith Managed Tools gateway this workspace's private threads load."""
         value = self.get("managed_tools_gateway_id")
+        return value if isinstance(value, str) and value else None
+
+    @property
+    def review_browser_domains(self) -> list[str]:
+        """The domains, each with its subdomains, a review's browser may sign in to."""
+        value = self.get("review_browser_domains")
+        return [d for d in value if isinstance(d, str)] if isinstance(value, list) else []
+
+    @property
+    def review_browser_session_tool(self) -> str | None:
+        """The ``<connection>/<tool>`` that signs a review's browser in."""
+        value = self.get("review_browser_session_tool")
         return value if isinstance(value, str) and value else None
 
     @property

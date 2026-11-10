@@ -5625,6 +5625,16 @@
             "title": "Permissions",
             "type": "array"
           },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sidebar": {
             "$ref": "#/components/schemas/SidebarEntry"
           },
@@ -7880,6 +7890,25 @@
         ],
         "type": "string"
       },
+      "ReviewAppRelease": {
+        "description": "An app reviews follow, pinned to the release an admin approved, so its owner's later\nreleases change no review until an admin picks them up.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "release": {
+            "title": "Release",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "release"
+        ],
+        "title": "ReviewAppRelease",
+        "type": "object"
+      },
       "ReviewChat": {
         "properties": {
           "assistant_id": {
@@ -8001,6 +8030,36 @@
           "started"
         ],
         "title": "ReviewScoutTrigger",
+        "type": "object"
+      },
+      "ReviewStep": {
+        "description": "What the app has a pull request's review do for it, once a workspace adds it to reviews.\n\nThe review follows ``instructions`` beside its own, writes only the collections in\n``writes`` (each app-written, so people cannot forge what it saves), and gets the\nthread's browser when ``browser`` asks for it.",
+        "properties": {
+          "browser": {
+            "default": false,
+            "title": "Browser",
+            "type": "boolean"
+          },
+          "instructions": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "writes": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Writes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instructions"
+        ],
+        "title": "ReviewStep",
         "type": "object"
       },
       "ReviewStyle": {
@@ -11459,6 +11518,47 @@
               }
             ],
             "title": "Pr Summaries"
+          },
+          "review_apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewAppRelease"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Apps"
+          },
+          "review_browser_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Browser Domains"
+          },
+          "review_browser_session_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Browser Session Tool"
           },
           "review_draft_prs": {
             "agent_feature_flag": true,

@@ -221,6 +221,7 @@ class RunCatalog:
                 checks=list(surface.file_checks),
             ),
             incident_evidence=surface.loop.incident,
+            browser=surface.browser,
             worker_webhook=COMPLETION_WEBHOOK_URL if surface.delegates else None,
             skill_sources=list(surface.skill_sources),
             inbox=surface.inbox,

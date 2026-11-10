@@ -24,7 +24,6 @@ from openswe.plugins.records import (
     INLINE_ATTACHMENT_BYTES,
     AppNotFound,
     AttachmentObjects,
-    AttachmentStorageUnavailable,
     Cursor,
     DocumentQuery,
     DocumentScope,
@@ -173,9 +172,11 @@ async def test_large_attachments_live_in_object_storage_until_nothing_names_them
     await docs.put("runs", shared, "r1", {"status": "complete"}, by=ada)
     large = b"x" * (INLINE_ATTACHMENT_BYTES + 1)
 
+    # Without object storage, PostgreSQL keeps it.
     monkeypatch.setattr(ObjectStore, "configured", classmethod(lambda _cls: None))
-    with pytest.raises(AttachmentStorageUnavailable):
-        await docs.attach("runs", shared, "r1", "a.png", "image/png", large, by=ada)
+    await docs.attach("runs", shared, "r1", "kept.png", "image/png", large, by=ada)
+    kept = await docs.attachment("runs", shared, "r1", "kept.png")
+    assert kept is not None and kept.content == large
 
     store = _MemoryStore("https://objects.test", "bucket", "auto", "key", "secret")
     monkeypatch.setattr(ObjectStore, "configured", classmethod(lambda _cls: store))

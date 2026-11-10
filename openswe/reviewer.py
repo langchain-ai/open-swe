@@ -80,6 +80,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
+from openswe.review_apps.apps import ReviewApps
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -105,6 +106,7 @@ from openswe.tools import (
     update_finding,
     web_search,
 )
+from openswe.tools.review_apps import ReviewAppTools
 from openswe.utils import ttl_cache
 from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
@@ -146,6 +148,7 @@ def _reviewer_system_prompt(
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
     skills_prompt: str | None = None,
+    review_apps: ReviewApps | None = None,
 ) -> SystemPrompt:
     """The reviewer's system prompt: what every review shares, then what its repository's
     do, then what depends on the pull request's changed files and checkout, such as the
@@ -183,6 +186,14 @@ def _reviewer_system_prompt(
                 if scoped_agents_md
                 else "",
                 skills_prompt or "",
+                prompt(
+                    "reviewer/review-apps",
+                    apps=review_apps.apps,
+                    number=review_apps.number,
+                    browses=review_apps.browses,
+                )
+                if review_apps is not None
+                else "",
             )
             if part
         ),
@@ -919,6 +930,7 @@ async def prepare_reviewer_run(
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
         skills_prompt=checkout.skills_prompt,
+        review_apps=await ReviewApps.of(cfg),
     )
     run_context = prompt(
         "reviewer/run-context",
@@ -1069,6 +1081,8 @@ async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None
     use_gateway = models.use_gateway
 
     surface.base_tools = reviewer_tools()
+    if (app_tools := await ReviewAppTools.of_run(cfg)) is not None:
+        await app_tools.offer(surface)
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
     surface.models = SurfaceModels(

@@ -18,7 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck, InboxSpec, LoopRules, McpServerSpec
+from runtime_api.catalog import BrowserSpec, FileCheck, InboxSpec, LoopRules, McpServerSpec
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -126,6 +126,8 @@ class ToolSurface:
     integration_names: list[str] = field(default_factory=list)
     # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
     mcp_servers: Sequence[McpServerSpec] = ()
+    # A review's browser; None gives a review none. The coding agent always has its own.
+    browser: BrowserSpec | None = None
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
     # Paths in the thread's files this deployment serves rather than the sandbox.

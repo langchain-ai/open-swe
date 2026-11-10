@@ -139,18 +139,11 @@ export function ReportView({
               : run.status === "running"
                 ? "Capturing screenshots…"
                 : run.status === "blocked"
-                  ? run.auth_mode === "dummy"
-                    ? "Authentication required"
-                    : "Capture blocked"
+                  ? "Capture blocked"
                   : "Capture failed"}
           </h3>
+          {/* A review says why: a preview or base that won't load, or a sign-in it couldn't do. */}
           {run.error && <p className="text-sm text-secondary">{run.error}</p>}
-          {run.status === "blocked" && run.auth_mode === "dummy" && (
-            <p className="text-xs text-secondary">
-              No preview was contacted and no page was reviewed. A disposable QA
-              identity is required.
-            </p>
-          )}
         </Card>
       )}
       {scenarios.map((scenario, index) => (

@@ -10,6 +10,8 @@ Dashboard paths are relative to the active deployment's base URL shown in **Dash
 Default agent model and reasoning effort come from workspace settings, changed by a workspace admin.
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
+Apps in reviews have reviews of private repositories also do an app's review step, such as saving screenshots of a frontend pull request's preview to Design QA; an admin adds them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_apps`.
+Only an instance admin sets where their browser signs in, the domains and the MCP tool that signs it in, under **Review browser** in **Defaults** (`/admin`); no workspace overrides it, and no tool changes it.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
   Workspace editors let admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode; Ask channels validate bug reports, propose bot-authored fixes, and identify a human validator.

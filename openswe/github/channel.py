@@ -56,6 +56,7 @@ from openswe.github.work import delivery_work
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.mda_channels.api import ChannelCall
 from openswe.merge_queue.controller import wake_native_queue
+from openswe.review_apps.cleanup import ReviewAppData
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.threads.router import (
@@ -268,6 +269,9 @@ def _tasks(
         "notify_pr_updated": lambda: notify_pr_updated(payload),
         "review_fork_push": lambda: service.process_github_pr_synchronize(payload),
         "settle_review_on_close": lambda: service.settle_human_review_on_close(payload),
+        # Reviews can save documents and files to apps for a pull request, such as Design QA's
+        # screenshots; they're kept only while it's open.
+        "delete_app_documents_on_close": lambda: ReviewAppData.delete_on_close(payload),
         "settle_human_reviews": lambda: service.settle_human_reviews(payload),
         "update_reviewer_watch": lambda: service.process_github_pr_close(payload),
         "review_pull_request": lambda: _review_pull_request(payload),

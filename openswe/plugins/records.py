@@ -6,10 +6,10 @@ import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import ClassVar, Final
+from typing import Annotated, ClassVar, Final
 from uuid import UUID, uuid7
 
-from pydantic import ValidationError
+from pydantic import StringConstraints, ValidationError
 from sqlalchemy import (
     ColumnElement,
     ForeignKey,
@@ -468,6 +468,37 @@ class PluginApps:
         return None if row is None else AppVersion.of(row)
 
     @staticmethod
+    async def releases(pinned: Mapping[UUID, UUID]) -> list[AppVersion]:
+        """Each app's pinned release, by app id to release id, in ``pinned``'s order; an app
+        whose release is gone, or is not its own, is left out."""
+        if not pinned:
+            return []
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(PluginVersionRow).where(
+                    PluginVersionRow.id.in_(list(pinned.values())),
+                    PluginVersionRow.preview_of.is_(None),
+                )
+            )
+            found = {
+                row.plugin: AppVersion.of(row) for row in rows if pinned.get(row.plugin) == row.id
+            }
+        return [found[app] for app in pinned if app in found]
+
+    @staticmethod
+    async def review_writes(app_id: UUID) -> frozenset[str]:
+        """The collections any of the app's releases has reviews write, since a workspace can
+        keep reviews on an older release than the newest."""
+        async with postgres.session() as session:
+            manifests = await session.scalars(
+                select(PluginVersionRow.manifest).where(
+                    PluginVersionRow.plugin == app_id, PluginVersionRow.preview_of.is_(None)
+                )
+            )
+            steps = [PluginManifest.model_validate(manifest).review for manifest in manifests]
+        return frozenset(name for step in steps if step is not None for name in step.writes)
+
+    @staticmethod
     async def newest_preview(thread_id: str, owner: UUID) -> AppVersion | None:
         """The newest build ``owner``'s agent previewed in ``thread_id``, running or not."""
         async with postgres.session() as session:
@@ -919,6 +950,15 @@ class ConflictingDocumentWrites(RuntimeError):
         super().__init__(f"{key} kept changing while it was being created; try again")
 
 
+MAX_DOCUMENT_BYTES = 256_000
+DocumentKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+ATTACHMENT_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/webp", "image/gif", "video/webm", "video/mp4"}
+)
+AttachmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$")]
+# Files over this go to object storage where it is set up; without it, PostgreSQL keeps
+# every file, up to MAX_ATTACHMENT_BYTES.
 INLINE_ATTACHMENT_BYTES = 256 * 1024
 """The largest attachment kept in PostgreSQL; larger ones go to object storage."""
 
@@ -929,8 +969,7 @@ ATTACHMENT_SWEEP_SCHEDULE: Final = "23 * * * *"
 class AttachmentStorageUnavailable(RuntimeError):
     def __init__(self) -> None:
         super().__init__(
-            f"files over {INLINE_ATTACHMENT_BYTES // 1024} KiB need object storage, "
-            "which this Robin instance has not set up"
+            "this file is in object storage, which this Robin instance no longer has set up"
         )
 
 
@@ -1002,7 +1041,10 @@ class AttachmentObjects:
 
 
 class PluginDocuments:
-    """One plugin's documents, the same for every installation of it."""
+    """One plugin's documents, the same for every installation of it.
+
+    A write's ``by`` is the person who made it, or ``None`` for the app's own writes.
+    """
 
     def __init__(self, plugin: UUID) -> None:
         self.plugin = plugin
@@ -1041,7 +1083,13 @@ class PluginDocuments:
             return [PluginDocument(row.key, row.document, row.updated_at) for row in rows]
 
     async def put(
-        self, collection: str, scope: DocumentScope, key: str, document: JsonObject, *, by: UUID
+        self,
+        collection: str,
+        scope: DocumentScope,
+        key: str,
+        document: JsonObject,
+        *,
+        by: UUID | None,
     ) -> PluginDocument:
         async with postgres.session() as session:
             row = (
@@ -1081,7 +1129,13 @@ class PluginDocuments:
             return PluginDocument(row.key, row.document, row.updated_at)
 
     async def create(
-        self, collection: str, scope: DocumentScope, key: str, document: JsonObject, *, by: UUID
+        self,
+        collection: str,
+        scope: DocumentScope,
+        key: str,
+        document: JsonObject,
+        *,
+        by: UUID | None,
     ) -> PluginDocument:
         """Stores ``document`` under ``key`` unless one is there; returns whichever is stored.
 
@@ -1142,6 +1196,50 @@ class PluginDocuments:
                 )
             return deleted is not None
 
+    async def delete_unattended_under(
+        self, collection: str, scope: DocumentScope, prefix: str
+    ) -> int:
+        """Deletes every document whose key starts with ``prefix`` that no person created or
+        changed, with its files; returns how many. Objects of deleted files are left for the
+        sweep."""
+        async with postgres.session() as session:
+            deleted = list(
+                await session.scalars(
+                    delete(PluginDocumentRow)
+                    .where(
+                        *self._where(collection, scope),
+                        PluginDocumentRow.key.startswith(prefix, autoescape=True),
+                        PluginDocumentRow.created_by.is_(None),
+                        PluginDocumentRow.updated_by.is_(None),
+                    )
+                    .returning(PluginDocumentRow.id)
+                )
+            )
+            if deleted:
+                await Topic.PLUGIN_DOCUMENTS.invalidate(
+                    session, key=scope.topic_key(self.plugin, collection)
+                )
+            return len(deleted)
+
+    @staticmethod
+    async def collections_under(scope: DocumentScope, prefix: str) -> list[tuple[UUID, str]]:
+        """Each app's collections with a document in ``scope`` whose key starts with ``prefix``."""
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(PluginDocumentRow.plugin, PluginDocumentRow.collection)
+                .where(
+                    PluginDocumentRow.repository.is_(None)
+                    if scope.repository is None
+                    else PluginDocumentRow.repository == scope.repository,
+                    PluginDocumentRow.user_id.is_(None)
+                    if scope.user_id is None
+                    else PluginDocumentRow.user_id == scope.user_id,
+                    PluginDocumentRow.key.startswith(prefix, autoescape=True),
+                )
+                .distinct()
+            )
+            return [(plugin, collection) for plugin, collection in rows.tuples()]
+
     def _document_id(self, collection: str, scope: DocumentScope, key: str) -> Select[UUID]:
         return select(PluginDocumentRow.id).where(
             *self._where(collection, scope), PluginDocumentRow.key == key
@@ -1156,14 +1254,15 @@ class PluginDocuments:
         content_type: str,
         content: bytes,
         *,
-        by: UUID,
+        by: UUID | None,
     ) -> Attachment | None:
         """Keeps ``content`` as ``name`` beside the document, replacing any file of that name.
 
         ``None`` when there is no document under ``key`` to attach it to. A file the row
         replaces, or one stored for a document deleted meanwhile, is left for the sweep.
         """
-        objects = None if len(content) <= INLINE_ATTACHMENT_BYTES else AttachmentObjects.of()
+        store = ObjectStore.configured() if len(content) > INLINE_ATTACHMENT_BYTES else None
+        objects = AttachmentObjects(store) if store is not None else None
         async with postgres.session() as session:
             if await session.scalar(self._document_id(collection, scope, key)) is None:
                 return None

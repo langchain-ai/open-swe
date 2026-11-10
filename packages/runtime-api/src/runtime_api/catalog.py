@@ -312,6 +312,13 @@ class LoopRules(BaseModel):
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
 
 
+class BrowserSpec(BaseModel):
+    """A review's browser, which opens pages the pull request's author controls."""
+
+    # The domains, each with its subdomains, it may install a sign-in session for.
+    session_domains: list[str] = []
+
+
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
@@ -343,6 +350,8 @@ class Catalog(BaseModel):
     files: FilesSpec = FilesSpec()
     # Whether each tool result is recorded as incident evidence, which the result then cites.
     incident_evidence: bool = False
+    # A review's browser; None gives a review none. The coding agent always has its own.
+    browser: BrowserSpec | None = None
     # Where the Agent Server reports a launched worker's run ending; None launches none.
     worker_webhook: str | None = None
     # The most model calls one run of the graph makes; None leaves it to the runtime.

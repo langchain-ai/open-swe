@@ -101,6 +101,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`. |
 | `permissions` | What the plugin may ask for; see below. |
 | `collections` | Optional rules for storage collections, by name: `{ "captures": { "write": "app" } }`; see [Who writes a collection](#who-writes-a-collection). |
+| `review` | Optional work pull request reviews do for the app: `{ "instructions": "…", "writes": ["captures"], "browser": true }`; see [Review steps](#review-steps). |
 
 ### Permissions
 
@@ -323,9 +324,35 @@ Another owner's app of the same name never sees it.
 
 Anyone using the app who may read a scope may change it: write, create and delete its documents, and attach and detach their files.
 A collection the manifest marks `"write": "app"` is written only by the app's own server-side work; people read it, and every change they make, from the frame or straight over HTTP, fails with status 403.
-Robin runs no app code on the server yet, so for now nothing writes such a collection through this API.
+Today that work is the app's [review step](#review-steps): reviews write the collections it names.
 
 A rule binds the app's data as soon as the version that declares it runs: an install still pinned to an older version, or a preview, can't change a collection the newest release marks `app`.
+
+#### Review steps
+
+An app can have pull request reviews do work for it, such as screenshotting a frontend change, by declaring a review step:
+
+```json
+"review": {
+  "instructions": "Screenshot the routes the diff changes on the preview and on the base…",
+  "writes": ["captures"],
+  "browser": true
+}
+```
+
+- `instructions`, at most 8,000 characters, are what the review does for the app, after reviewing the code.
+  Reviews read them inside the app's own block; they can't change the review's rules, add tools, or widen where it writes.
+- `writes` names collections the manifest marks `"write": "app"`, so what a review saves can't be forged or deleted by people.
+  The review saves with `save_app_document`: a document and files from its sandbox as attachments, in the reviewed repository's scope, only under keys starting `pulls/<number>/` of that pull request.
+  A key ending in `/` gets a time-ordered id, so the newest of a prefix reads first.
+  A save keeps its document only once every file is attached.
+  A PNG is kept as a lossless WebP, under the name the review gave it, whenever that is smaller and changes no pixel, so take a file's type from its Blob, not its name.
+  When the pull request closes, merged or not, Robin deletes what reviews saved under its `pulls/<number>/` in these collections, with the files; a document a person created or changed stays, as does anything in the app's other collections.
+- `browser` gives the review the thread's LangSmith browser and `compare_images`, which diffs two screenshots pixel by pixel.
+  The browser never reaches the review's sandbox, and signs in only to the domains an instance admin lists under **Defaults → Review browser**, with the one MCP tool named there; sessions install only on LangSmith sites.
+
+A workspace admin adds apps to reviews in **Settings → Review → Apps in reviews**, or with `manage_review_apps`.
+Reviews follow the release that was newest when the admin added the app, so a later release changes no review until an admin updates it, and only on private repositories, whose previews run only code the organization's members pushed.
 
 ### GitHub
 

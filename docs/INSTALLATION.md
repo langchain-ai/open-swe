@@ -696,7 +696,8 @@ Issue events still reach workspace automations and `listen_events`: the channel 
 <summary><strong>Object storage for app files</strong></summary>
 
 Apps keep files beside their documents, such as Design QA's screenshots.
-Files of at most 256 KiB stay in PostgreSQL; larger ones, up to 8 MiB, go to an S3-compatible bucket, and without one they are refused.
+Files of at most 256 KiB stay in PostgreSQL; larger ones, up to 8 MiB, go to an S3-compatible bucket when one is set up, and otherwise stay in PostgreSQL too.
+A bucket is optional: set one up when files would grow the database more than you want.
 On GCS, Robin uses the XML API with an HMAC key, so it needs no Google credentials file:
 
 1. Create a bucket, and a service account with **Storage Object User** (`roles/storage.objectUser`) on it.
@@ -713,6 +714,26 @@ On GCS, Robin uses the XML API with an HMAC key, so it needs no Google credentia
 S3, R2 and MinIO work the same way with their own endpoint and keys; on S3, also set `OBJECT_STORE_REGION` to the bucket's region.
 The key needs to read, write, delete and list objects under `plugin-attachments/` in that bucket.
 An hourly job deletes the objects no attachment names any longer, once they are a day old.
+
+</details>
+
+<details id="review-apps">
+<summary><strong>Apps in reviews, such as Design QA screenshots</strong></summary>
+
+An app's [review step](PLUGINS.md#review-steps) has pull request reviews do work for it; Design QA's screenshots a frontend pull request's preview beside its base ([reference](reference/frontend-reviewer.md)).
+
+1. Publish the app in **Settings → Apps** (for Design QA, build `plugins/design-qa` with `pnpm --filter openswe-plugin-design-qa build` and upload `plugins/design-qa/bundle/index.html`), and mark it listed so others can add it.
+1. For apps whose review step uses the browser, an instance admin fills in **Defaults → Review browser**.
+   List the domains, each with its subdomains, the review's browser may sign in to: your previews' and their base site's, never production.
+   Optionally, name the instance or workspace MCP tool that returns a browser session, as `<connection>/<tool>`.
+   Workspaces can't override either.
+
+   The deployment's LangSmith workspace needs the LangSmith browser beta, as the coding agent's browser does.
+   Browser sessions install only on LangSmith sites, so a review signs in to LangSmith previews; it browses any other preview signed out.
+1. Add the app in a workspace's **Settings → Review → Apps in reviews**.
+   Only reviews of private repositories follow it.
+   Reviews follow the release that was newest when it was added; when its owner releases again, **Update** there moves reviews to the new one.
+1. Say where the previews' base site is in the workspace's review guidelines, so the review knows where to take "before" screenshots.
 
 </details>
 

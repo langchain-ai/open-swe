@@ -5,5 +5,6 @@
   "description": "Compare the saved before and after screenshots of your pull requests, and ask the agent about a change.",
   "sidebar": { "label": "Design QA", "icon": "kanban" },
   "permissions": ["storage", "github:read", "agent"],
-  "collections": { "captures": { "write": "app" } }
+  "collections": { "captures": { "write": "app" } },
+  "review": { "writes": ["captures"], "browser": true }
 }
