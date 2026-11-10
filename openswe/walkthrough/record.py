@@ -291,7 +291,7 @@ class WalkthroughView(BaseModel):
                 WalkthroughStepView(
                     index=len(steps) + 1,
                     title=OTHER_TITLE,
-                    summary=plan.other_summary,
+                    summary="",
                     other=True,
                     files=cls._files(plan.other, plan.other_files),
                 )

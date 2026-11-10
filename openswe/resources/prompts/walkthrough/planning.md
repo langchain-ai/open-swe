@@ -49,8 +49,6 @@ Never hide a real behavior change in Other: a new condition, a different call, a
   Wrap identifiers, types, flags and paths in `backticks`.
 - `walkthrough_split_hunks` splits unplanned hunks at changed lines you name, before you place their parts.
 - `walkthrough_move_to_other` sends hunks to Other without placing a chunk, or with `restore: true` takes them out again.
-- `walkthrough_describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds.
-  Update it when Other changes in kind.
 
 When the pull request moved since the plan was made, chunks kept every line git left unchanged, and a new line in a hunk a chunk already holds joined that chunk.
 Only hunks no chunk holds are unplanned.

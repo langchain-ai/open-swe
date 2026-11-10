@@ -694,7 +694,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
             return Prepared(update={"scout_nothing_to_plan": False})
         if name == "operation":
             operations.append(str(body["name"]))
-            assert operations == ["walkthrough_describe_other"]
+            assert operations == ["walkthrough_move_to_other"]
             return OperationResult(
                 content='{"success": false, "error": "The pull request moved on. Stop."}',
                 state={"scout_nothing_to_plan": True},
@@ -707,7 +707,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
             ToolSpec(name=name, description=name, parameters={"type": "object"}), backend
         )
         for name in (
-            "walkthrough_describe_other",
+            "walkthrough_move_to_other",
             "walkthrough_plan_chunk",
             "check_async_task",
             "start_async_task",
@@ -720,7 +720,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
                     AIMessage(
                         content="",
                         tool_calls=[
-                            ToolCall(name="walkthrough_describe_other", args={}, id="call-1")
+                            ToolCall(name="walkthrough_move_to_other", args={}, id="call-1")
                         ],
                     )
                 ]
@@ -732,7 +732,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
 
     result = await graph.ainvoke({"messages": [("user", "Plan the walkthrough")]})
 
-    assert operations == ["walkthrough_describe_other"]
+    assert operations == ["walkthrough_move_to_other"]
     assert isinstance(result["messages"][-1], ToolMessage)
     assert result["messages"][-1].tool_call_id == "call-1"
 

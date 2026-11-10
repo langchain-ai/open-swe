@@ -282,7 +282,7 @@ class Reader:
         lines = self.remaining(self.plan.other)
         files = self.other_files_left
         stat = _other_stat(lines, files)
-        text = f"*Other · {len(lines)} lines*\n{self.plan.other_summary}\n\n{_fenced(stat)}"
+        text = f"*Other · {len(lines)} lines*\n\n{_fenced(stat)}"
         seen_files = [
             fingerprint
             for path, fingerprint in zip(

@@ -130,17 +130,3 @@ async def walkthrough_move_to_other(
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace)
-
-
-async def walkthrough_describe_other(
-    summary: str, scout: ScoutPlanning, tool_call_id: CallId, pr_url: str | None = None
-) -> dict[str, object] | Command:
-    """Implement the `walkthrough_describe_other` tool."""
-    try:
-        workspace = await _workspace(pr_url) if pr_url is not None else await _workspace()
-        await workspace.describe_other(summary)
-    except PlanMovedError as exc:
-        return _moved(exc, scout, tool_call_id)
-    except PLANNING_ERRORS as exc:
-        return {"success": False, "error": str(exc)}
-    return await _planned(workspace)

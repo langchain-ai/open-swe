@@ -32,7 +32,6 @@ from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
-    MAX_OTHER_SUMMARY_CHARS,
     MAX_TITLE_CHARS,
     FileHunks,
     FileSplits,
@@ -310,11 +309,3 @@ class PlanWorkspace:
         if lines:
             await self._edit(lambda plan: plan.add_other(lines))
         return len(lines)
-
-    async def describe_other(self, summary: str) -> None:
-        trimmed = summary.strip()[:MAX_OTHER_SUMMARY_CHARS]
-
-        def describe(plan: Plan) -> None:
-            plan.other_summary = trimmed
-
-        await self._edit(describe)

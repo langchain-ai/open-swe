@@ -2005,7 +2005,6 @@ async def test_only_preparation_is_cancelled_on_disconnect(
         ),
         ("walkthrough_split_hunks", {"files": []}, "split"),
         ("walkthrough_move_to_other", {"files": []}, "move_to_other"),
-        ("walkthrough_describe_other", {"summary": "Noise"}, "describe_other"),
     ],
 )
 @pytest.mark.parametrize("scout", [False, True])

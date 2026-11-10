@@ -894,7 +894,6 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
                 plan_walkthrough.walkthrough_plan_chunk,
                 plan_walkthrough.walkthrough_split_hunks,
                 plan_walkthrough.walkthrough_move_to_other,
-                plan_walkthrough.walkthrough_describe_other,
             ]
         ),
     ]
@@ -2167,7 +2166,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             plan_walkthrough.walkthrough_plan_chunk,
             plan_walkthrough.walkthrough_split_hunks,
             plan_walkthrough.walkthrough_move_to_other,
-            plan_walkthrough.walkthrough_describe_other,
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
