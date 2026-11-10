@@ -111,7 +111,11 @@ async def test_service_source_fingerprint_matches_policy_format(fault):
             assert (actual == approved) is (fault is None)
 
 
-async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
+@pytest.mark.parametrize("total", [250, 300])
+@pytest.mark.parametrize("counted", [False, True])
+async def test_pages_read_the_rest_of_a_counted_list_concurrently(
+    total: int, counted: bool
+) -> None:
     later_pages = asyncio.Barrier(2)
     requested: list[int] = []
 
@@ -120,15 +124,51 @@ async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
         requested.append(page)
         if page > 1:
             await asyncio.wait_for(later_pages.wait(), timeout=1)
-        size = 50 if page == 3 else 100
+        size = total - 200 if page == 3 else 100
         runs = [{"id": page * 1000 + i} for i in range(size)]
-        return httpx2.Response(200, json={"total_count": 250, "check_runs": runs})
+        headers = (
+            {"Link": f'<https://api.github.com/check-runs?page={page + 1}>; rel="next"'}
+            if page < 3
+            else {}
+        )
+        return httpx2.Response(
+            200, json={"total_count": total, "check_runs": runs}, headers=headers
+        )
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
-        runs = await GitHubClient(http).pages("check-runs", key="check_runs")
+        runs = await GitHubClient(http).pages(
+            "check-runs", key="check_runs", total=total if counted else None
+        )
 
-    assert len(runs) == 250
+    assert len(runs) == total
     assert sorted(requested) == [1, 2, 3]
+
+
+@pytest.mark.parametrize("max_pages", [None, 1])
+@pytest.mark.parametrize("total", [0, 100, 101, 200])
+async def test_pages_follow_next_links_without_an_empty_terminal_request(
+    total: int, max_pages: int | None
+) -> None:
+    requested: list[int] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        requested.append(page)
+        start = (page - 1) * 100
+        headers = (
+            {"Link": f'<https://api.github.com/items?page={page + 1}>; rel="next"'}
+            if start + 100 < total
+            else {}
+        )
+        return httpx2.Response(
+            200, json=[{"id": i} for i in range(start, min(start + 100, total))], headers=headers
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        items = await GitHubClient(http).pages("items", max_pages=max_pages)
+
+    assert items == [{"id": i} for i in range(min(total, 100) if max_pages else total)]
+    assert requested == ([1, 2] if total > 100 and max_pages is None else [1])
 
 
 def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
@@ -452,6 +492,32 @@ async def test_check_runs_retains_results_without_a_known_replacement(
     async with httpx2.AsyncClient() as http:
         result = await GitHubClient(http).repo("acme", "app").check_runs("a" * 40)
     assert result == ([runs[0]] if distinct == "older_success" else runs)
+
+
+@pytest.mark.parametrize("distinct", ["app", "non_actions", "missing_suite"])
+async def test_check_runs_skip_workflow_reads_without_supersedable_duplicates(
+    monkeypatch: pytest.MonkeyPatch, distinct: str
+) -> None:
+    runs = [
+        {
+            "id": i,
+            "name": "test",
+            "app": {"id": 1, "slug": "github-actions"},
+            "check_suite": {"id": i},
+        }
+        for i in (10, 20)
+    ]
+    if distinct == "app":
+        runs[1]["app"]["id"] = 2
+    elif distinct == "non_actions":
+        runs[1]["app"]["slug"] = "other-ci"
+    else:
+        runs[1].pop("check_suite")
+    pages = AsyncMock(return_value=runs)
+    monkeypatch.setattr(github_http.RepoClient, "pages", pages)
+    async with httpx2.AsyncClient() as http:
+        assert await GitHubClient(http).repo("acme", "app").check_runs("a" * 40) == runs
+    pages.assert_awaited_once()
 
 
 @pytest.mark.parametrize("outcome", ["success", "proxy_failure", "cancelled"])

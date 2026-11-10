@@ -174,6 +174,9 @@ async def test_every_page_of_a_large_pr_is_loaded_even_past_a_stale_count() -> N
                     {"filename": name, "status": "added", "additions": 1, "deletions": 0}
                     for name in batch
                 ],
+                headers={"Link": f'<https://api.github.com{path}?page={page + 1}>; rel="next"'}
+                if page * size < len(names)
+                else {},
             )
         if "/compare/" in path:
             return httpx2.Response(200, json={"merge_base_commit": {"sha": "b" * 40}})

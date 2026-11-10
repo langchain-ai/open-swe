@@ -55,6 +55,7 @@ from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.pick_modals import SNOOZE_DURATIONS
 from openswe.human_review.picking import (
     Area,
+    Candidates,
     Coverage,
     Pick,
     ReviewerAvailability,
@@ -1365,9 +1366,14 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
         if row is None or row.state != "open" or _REMAINING_OWNERS_ASKED in row.run_config:
             return
         row.run_config = {**row.run_config, _REMAINING_OWNERS_ASKED: True}
+    candidates = await Candidates.of_request(request)
     suggestions: list[Suggestion] = []
     for area in open_areas:
-        choice = await choose_reviewer(request, area=area)
+        choice = (
+            await choose_reviewer(request, area=area, candidates=candidates)
+            if candidates is not None
+            else None
+        )
         suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
     logger.info(
         "Asking for reviewers for the code owners an approval left",

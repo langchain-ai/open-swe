@@ -1,6 +1,8 @@
 from collections import Counter
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import httpx2
@@ -169,3 +171,42 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         record for record in caplog.records if record.message == "Filtered reviewer candidates"
     )
     assert filtered.skipped == ({"ada": skip_reason} if skip_reason else {})
+
+
+async def test_remaining_owner_suggestions_share_one_github_history_read() -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.github.http import GitHubClient, RepoClient
+    from openswe.human_review import standard
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    owners = CodeOwners.parse("/a.py @ada\n/b.py @grace\n/c.py @linus")
+    files = [ChangedFile(filename=name) for name in ("a.py", "b.py", "c.py")]
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncGenerator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    @asynccontextmanager
+    async def github_app(owner: str, repo: str) -> AsyncGenerator[GitHubClient]:
+        yield GitHubClient(MagicMock())
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(GitHubClient, "as_app", github_app),
+        patch.object(ChangedFile, "of_pull", AsyncMock(return_value=files)),
+        patch.object(CodeOwners, "fetch", AsyncMock(return_value=owners)),
+        patch.object(RepoClient, "commits", AsyncMock(return_value=[])) as history,
+        patch.object(User, "for_login", AsyncMock(return_value=None)),
+        patch.object(standard, "_auto_assign_hold", AsyncMock(return_value=False)),
+        patch.object(standard, "_wake_picker", AsyncMock(return_value=True)) as wake,
+    ):
+        await standard._pick_remaining_owners(request, ["ada"])
+
+    assert history.await_count == len(files)
+    assert {call.kwargs["path"] for call in history.await_args_list} == {
+        file.filename for file in files
+    }
+    suggestions = wake.await_args.kwargs["suggestions"]
+    assert [suggestion.area.handles for suggestion in suggestions] == [("@grace",), ("@linus",)]

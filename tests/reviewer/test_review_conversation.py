@@ -191,7 +191,15 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
         page = request.url.params["page"]
         match request.url.path:
             case "/repos/acme/app/issues/7/comments":
-                return httpx2.Response(200, json=full_page if page == "1" else [late_comment])
+                return httpx2.Response(
+                    200,
+                    json=full_page if page == "1" else [late_comment],
+                    headers={
+                        "Link": '<https://api.github.com/repos/acme/app/issues/7/comments?page=2>; rel="next"'
+                    }
+                    if page == "1"
+                    else {},
+                )
             case "/repos/acme/app/pulls/7/reviews":
                 return httpx2.Response(200, json=reviews)
             case "/repos/acme/app/pulls/7/comments":

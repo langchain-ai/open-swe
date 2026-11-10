@@ -276,7 +276,7 @@ async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) 
 
 
 async def choose_reviewer(
-    request: HumanReviewRequest, *, area: Area | None = None
+    request: HumanReviewRequest, *, area: Area | None = None, candidates: Candidates | None = None
 ) -> Pick | Wait | None:
     """The best on-shift owner of ``area``, when to try again, or ``None`` when nobody qualifies.
 
@@ -293,7 +293,11 @@ async def choose_reviewer(
     try:
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
             return await _choose_reviewer(
-                request, github.repo(pr.owner, pr.repo).pull_request(pr.number), area, extra
+                request,
+                github.repo(pr.owner, pr.repo).pull_request(pr.number),
+                area,
+                extra,
+                candidates=candidates,
             )
     except GitHubAppUnavailable:
         logger.warning("No GitHub App token to pick a reviewer", extra=extra)
@@ -380,9 +384,12 @@ async def _choose_reviewer(
     pull: PullRequestClient,
     area: Area | None,
     extra: dict[str, object],
+    *,
+    candidates: Candidates | None = None,
 ) -> Pick | Wait | None:
     pr = request.pull_request
-    candidates = await Candidates.gather(request, pull, extra)
+    if candidates is None:
+        candidates = await Candidates.gather(request, pull, extra)
     if candidates is None:
         return None
     author = (pr.author or "").lower()

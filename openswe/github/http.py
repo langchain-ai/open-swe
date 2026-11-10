@@ -492,28 +492,31 @@ class GitHubClient:
         """Every item of a paginated list; ``key`` names the list inside each page's object.
 
         ``total`` is how many items the list should hold: the pages that many fill
-        are read concurrently, and reading goes on while the last one comes back full.
+        are read concurrently, and GitHub's next-page link decides whether reading goes on.
         A list whose pages report a ``total_count`` reads the rest of its pages
         concurrently once the first page says how many there are.
         """
 
-        async def read(page: int) -> tuple[list[object], int | None]:
-            payload = await self.get(
-                path, {**(params or {}), "per_page": str(_PAGE_SIZE), "page": str(page)}
+        async def read(page: int) -> tuple[list[object], int | None, bool]:
+            response = await self.request(
+                "GET",
+                path,
+                params={**(params or {}), "per_page": str(_PAGE_SIZE), "page": str(page)},
             )
+            payload = response.json()
             batch = (
                 payload if key is None else payload.get(key) if isinstance(payload, dict) else None
             )
             if not isinstance(batch, list):
                 raise ValueError(f"GitHub answered {path} without a list")
             reported = payload.get("total_count") if isinstance(payload, dict) else None
-            return batch, reported if isinstance(reported, int) else None
+            return batch, reported if isinstance(reported, int) else None, "next" in response.links
 
         semaphore = asyncio.Semaphore(_PAGE_CONCURRENCY)
 
-        async def bounded(page: int) -> list[object]:
+        async def bounded(page: int) -> tuple[list[object], int | None, bool]:
             async with semaphore:
-                return (await read(page))[0]
+                return await read(page)
 
         def page_count(items: int) -> int:
             count = max(1, -(-items // _PAGE_SIZE))
@@ -524,17 +527,18 @@ class GitHubClient:
                 *(bounded(page) for page in range(1, page_count(total) + 1))
             )
         else:
-            first, reported = await read(1)
+            first = await read(1)
             batches = [first]
-            if reported is not None and len(first) == _PAGE_SIZE:
+            reported = first[1]
+            if reported is not None and first[2]:
                 batches += await asyncio.gather(
                     *(bounded(page) for page in range(2, page_count(reported) + 1))
                 )
         page = len(batches)
-        while len(batches[-1]) == _PAGE_SIZE and page != max_pages:
+        while batches[-1][2] and page != max_pages:
             page += 1
-            batches.append((await read(page))[0])
-        return [item for batch in batches for item in batch if isinstance(item, dict)]
+            batches.append(await read(page))
+        return [item for batch, _, _ in batches for item in batch if isinstance(item, dict)]
 
     async def graphql(
         self, query: str, variables: Mapping[str, object], *, partial: bool = False
@@ -992,8 +996,25 @@ class RepoClient:
             key="check_runs",
             params={"filter": "all" if include_superseded else "latest"},
         )
-        names = [run["name"] for run in runs if isinstance(run.get("name"), str)]
-        if include_superseded or len(names) == len(set(names)):
+        if include_superseded:
+            return runs
+        eligible: dict[int, tuple[int, int, str, int]] = {}
+        for index, run in enumerate(runs):
+            app, suite = run.get("app"), run.get("check_suite")
+            if not isinstance(app, dict) or not isinstance(suite, dict):
+                continue
+            app_id, suite_id = app.get("id"), suite.get("id")
+            name, order = run.get("name"), run.get("id")
+            if (
+                app.get("slug") == "github-actions"
+                and isinstance(app_id, int)
+                and isinstance(suite_id, int)
+                and isinstance(name, str)
+                and isinstance(order, int)
+            ):
+                eligible[index] = (app_id, suite_id, name, order)
+        names = [(app_id, name) for app_id, _, name, _ in eligible.values()]
+        if len(names) == len(set(names)):
             return runs
         try:
             payloads = await self.pages(
@@ -1013,20 +1034,8 @@ class RepoClient:
         identities: dict[int, tuple[int, int, str, str]] = {}
         latest: dict[tuple[int, int, str, str], int] = {}
         orders: dict[int, int] = {}
-        for index, run in enumerate(runs):
-            app, suite = run.get("app"), run.get("check_suite")
-            if not isinstance(app, dict) or not isinstance(suite, dict):
-                continue
-            app_id, suite_id = app.get("id"), suite.get("id")
-            name, order = run.get("name"), run.get("id")
-            if (
-                app.get("slug") != "github-actions"
-                or not isinstance(app_id, int)
-                or not isinstance(suite_id, int)
-                or not isinstance(name, str)
-                or not isinstance(order, int)
-                or (workflow := workflows.get(suite_id)) is None
-            ):
+        for index, (app_id, suite_id, name, order) in eligible.items():
+            if (workflow := workflows.get(suite_id)) is None:
                 continue
             identity = (app_id, workflow.workflow_id, workflow.event, name)
             identities[index], orders[index] = identity, order
