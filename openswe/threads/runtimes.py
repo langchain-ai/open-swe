@@ -76,6 +76,10 @@ _CHANNEL_CONVERSATIONS_LIMIT: Final = 4096
 #: How long a channel thread's conversation is kept before MDA is asked again: a run
 #: may hand its thread to another conversation, a Slack thread it moved to.
 _CHANNEL_CONVERSATION_SECONDS: Final = 60.0
+# Connections each MDA client holds at once: the short calls, then the streams, which
+# stay open as long as someone watches a thread.
+_MDA_CONNECTIONS: Final = 100
+_MDA_STREAM_CONNECTIONS: Final = 1000
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -222,13 +226,19 @@ class MdaRuntime:
         self._channel_conversations: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
         self._http: httpx.AsyncClient | None = None
         self._read_http: httpx.AsyncClient | None = None
+        self._stream_http: httpx.AsyncClient | None = None
 
-    def _client(self, extra: Mapping[str, str]) -> httpx.AsyncClient:
+    def _client(
+        self, extra: Mapping[str, str], *, max_connections: int = _MDA_CONNECTIONS
+    ) -> httpx.AsyncClient:
         headers = dict(extra)
         if api_key := mda_runtime_api_key():
             headers["x-api-key"] = api_key
         return httpx.AsyncClient(
-            base_url=self.url, headers=headers, timeout=httpx.Timeout(30.0, read=None)
+            base_url=self.url,
+            headers=headers,
+            timeout=httpx.Timeout(30.0, read=None),
+            limits=httpx.Limits(max_connections=max_connections),
         )
 
     @property
@@ -244,6 +254,18 @@ class MdaRuntime:
         if self._read_http is None:
             self._read_http = self._client(MDA_STUDIO_READ_HEADERS)
         return self._read_http
+
+    @property
+    def stream_http(self) -> httpx.AsyncClient:
+        """For reads held open until a run ends or a tab closes: thread and run streams, joins.
+
+        Their own pool, so open dashboard tabs never leave runs unable to start or stop.
+        """
+        if self._stream_http is None:
+            self._stream_http = self._client(
+                MDA_STUDIO_READ_HEADERS, max_connections=_MDA_STREAM_CONNECTIONS
+            )
+        return self._stream_http
 
     def sdk(self) -> LangGraphClient:
         """For writes, scoped to the threads the backend owns."""

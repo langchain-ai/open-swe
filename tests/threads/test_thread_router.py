@@ -127,6 +127,8 @@ class _Harness:
         self.acted_as: list[dict[str, str]] = []
         # Calls that reached MDA through its read client, as (method, path).
         self.read: list[tuple[str, str]] = []
+        # Reads held open, through the client kept apart for them, as (method, path).
+        self.held: list[tuple[str, str]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
         self.while_starting: Callable[[], Awaitable[object]] | None = None
@@ -153,6 +155,14 @@ class _Harness:
 
         mda_runtime._read_http = httpx.AsyncClient(
             base_url=mda_runtime.url, transport=httpx.MockTransport(mda_reads)
+        )
+
+        def mda_held_reads(request: httpx.Request) -> httpx.Response:
+            self.held.append((request.method, request.url.path))
+            return httpx.Response(200, json={})
+
+        mda_runtime._stream_http = httpx.AsyncClient(
+            base_url=mda_runtime.url, transport=httpx.MockTransport(mda_held_reads)
         )
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
@@ -834,17 +844,24 @@ async def test_without_the_service_secret_a_channel_thread_refuses_writes(
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "body"),
+    ("method", "path", "body", "held"),
     [
-        ("GET", "/state", None),
-        ("GET", "/runs", None),
-        ("GET", "/runs/run-1/join", None),
-        ("POST", "/history", {"limit": 10}),
-        ("POST", "/commands", {"id": 1, "method": "subscription.subscribe", "params": {}}),
+        ("GET", "/state", None, False),
+        ("GET", "/runs", None, False),
+        ("POST", "/history", {"limit": 10}, False),
+        (
+            "POST",
+            "/commands",
+            {"id": 1, "method": "subscription.subscribe", "params": {}},
+            False,
+        ),
+        # Held open while someone watches, so kept off the pool runs start and stop on.
+        ("GET", "/runs/run-1/join", None, True),
+        ("POST", "/stream/events", {"channels": ["lifecycle"]}, True),
     ],
 )
 async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
-    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue, held: bool
 ) -> None:
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
@@ -852,7 +869,8 @@ async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
     status, _ = await harness.request(method, f"/threads/{THREAD}{path}", body)
 
     assert status == 200
-    assert harness.read == [(method, f"/threads/{THREAD}{path}")]
+    reached = [(method, f"/threads/{THREAD}{path}")]
+    assert (harness.held, harness.read) == ((reached, []) if held else ([], reached))
     assert harness.forwarded == []
     # The channel created the thread on MDA; the backend creates no copy of its own.
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
