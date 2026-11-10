@@ -208,15 +208,8 @@ async def _conversation(message: SlackMessage, root_ts: str) -> Literal["mda", "
 
 
 async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurnStarted:
-    """The run a message MDA's Slack channel decided on starts, and whether it interrupts.
-
-    A new conversation becomes MDA's here, once its sender passed the account gate. For
-    a ``turn`` the channel built the prompt from Slack: the run's input is empty, and
-    ``prompt`` says what the prompt needs from Open SWE's records. A ``/btw`` question, a
-    breakout and a move are built whole, as the backend always built them. A call sent
-    again under the same ``webhook-id`` gets the run built again, but no decline it
-    answered already.
-    """
+    """Prepare the turn MDA's Slack channel requested, replaying repeated deliveries."""
+    logger.info("Slack turn starting", extra={"has_action_token": bool(turn.action_token)})
     webhook_id = call.request.headers.get("webhook-id", "")
     fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
     # An edit keeps its message's timestamp, and a message may be edited more than once.

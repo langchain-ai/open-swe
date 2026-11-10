@@ -131,8 +131,7 @@ def _text(value: object) -> str:
 async def start_turn(
     event: SlackMessageEvent, thread: SlackChannelThread
 ) -> ChannelRunResult | ChannelReplyResult | None:
-    """The run a message starts on its conversation's thread, the reply that says why
-    it starts none, or ``None``."""
+    """Start a message's turn, explain its refusal, or return ``None``."""
     raw = event.payload
     nested = raw.get("assistant_thread")
     grant_holder = nested if isinstance(nested, dict) else {}
@@ -156,6 +155,7 @@ async def start_turn(
         explicit_mention=event.key == "mention",
         action_token=_text(raw.get("action_token")) or _text(grant_holder.get("action_token")),
     )
+    logger.info("Slack turn received", extra={"has_action_token": bool(message.action_token)})
     if not message.team_id or not message.app_id:
         return None
     parsed = ParsedSlackMessage.parse(event.text, bot_user_id, bot_username)

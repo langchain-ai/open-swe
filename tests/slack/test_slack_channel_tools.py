@@ -5,6 +5,7 @@ import pytest
 from openswe import tools
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
+from openswe.slack.tools.search import SlackSearch, SlackSearchRefused
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
@@ -331,3 +332,34 @@ async def test_slack_search_stops_once_the_grants_searches_are_spent(
     refused = await tools.slack_search("launch plan")
     assert refused["success"] is False
     assert len(slack_api.calls) == 6
+
+
+class TestSearchRefusal:
+    @pytest.fixture
+    async def registry_db(self) -> None:
+        """Refusals happen before any database access."""
+
+    @pytest.mark.parametrize("has_thread", [False, True])
+    async def test_missing_grant_does_not_blame_an_explicit_mention(
+        self,
+        slack_api: SlackAPI,
+        has_thread: bool,
+    ) -> None:
+        cfg = RunConfig.parse(
+            {
+                "slack_thread": {
+                    "channel_id": "C123",
+                    "thread_ts": "1.0",
+                    "channel_context": {"id": "C123"},
+                }
+                if has_thread
+                else None,
+                "explicit_bot_mention": True,
+            }
+        )
+        with pytest.raises(SlackSearchRefused) as refused:
+            SlackSearch.for_run(cfg)
+        error = str(refused.value)
+        assert ("Slack thread" in error) is (not has_thread)
+        assert "@mention" not in error
+        assert slack_api.calls == []

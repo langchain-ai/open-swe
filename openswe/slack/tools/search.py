@@ -19,8 +19,7 @@ SEARCHES_PER_GRANT = 6
 _GRANT_WINDOW = timedelta(hours=1)
 
 _NO_ACTION_TOKEN = (
-    "Slack grants search only for a message that @mentions Open SWE or is sent to it in a "
-    "DM, and this run's message did neither. Ask the person to @mention Open SWE to search."
+    "This run has no Slack search grant for its message. Search is unavailable for this turn."
 )
 _SHARED_CHANNEL = (
     "Search is unavailable in a channel shared with another organization, because its "
@@ -81,9 +80,12 @@ class SlackSearch:
 
     @classmethod
     def for_run(cls, cfg: RunConfig) -> SlackSearch:
+        logger.info(
+            "Slack search requested", extra={"has_action_token": bool(cfg.slack_action_token)}
+        )
         slack = cfg.slack_thread
         if slack is None:
-            raise SlackSearchRefused(_NO_ACTION_TOKEN)
+            raise SlackSearchRefused("Slack search requires a run associated with a Slack thread.")
         if slack.channel_context is None or not slack.channel_context.allows_operations:
             raise SlackSearchRefused(_SHARED_CHANNEL)
         if not cfg.slack_action_token:
