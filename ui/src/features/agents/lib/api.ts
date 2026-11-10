@@ -5,7 +5,6 @@ import type {
   AgentPullRequestStatusResponse,
   AgentBackgroundOutput,
   AgentBackgroundWork,
-  AgentThreadGoal,
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
@@ -512,15 +511,6 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
-    ),
-  getThreadGoal: (threadId: string) =>
-    agentsRequest<AgentThreadGoal | null>(
-      `/threads/${encodeURIComponent(threadId)}/goal`
-    ),
-  editThreadGoal: (threadId: string, objective: string) =>
-    agentsRequest<AgentThreadGoal | null>(
-      `/threads/${encodeURIComponent(threadId)}/goal`,
-      { method: "PATCH", body: JSON.stringify({ objective }) }
     ),
   getThreadBackgroundWork: (threadId: string) =>
     agentsRequest<AgentBackgroundWork>(

@@ -25,7 +25,7 @@ Pick the tool by how many notifications you need:
   `command` is then a check: it runs every `interval` seconds until it exits 0, and its output at that moment is the one event, after which the monitor ends.
   For example, a server up: `command="curl -fsS localhost:3000/health"`, `interval=5`; a file written: `command="test -s out/report.json"`, `interval=10`.
   For CI, notice individual failures promptly and use a bounded wait that resumes even if notifications are missing.
-  Write no polling loop yourself: in Goal mode `execute` and `background_execute` refuse commands that wait by sleeping.
+  Write no polling loop yourself.
 
 Silence is not success.
 A filter that only matches the happy path stays silent through a crash or a hang.

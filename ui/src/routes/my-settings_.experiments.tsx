@@ -33,11 +33,6 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="goal_mode"
-          label="Goal mode by default"
-          description="Every request you send sets a goal: Robin keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Robin review with the obvious findings fixed, and a walkthrough of the latest version. Without it, ask Robin to set a goal when you want one."
-        />
-        <ProfileSwitchRow
           field="experimental_conditional_approval"
           label="Conditional approval"
           description="For pull requests you author, let Robin request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."

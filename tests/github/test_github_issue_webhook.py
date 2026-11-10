@@ -498,10 +498,9 @@ def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
     assert ref.url in result["error"]
 
 
-@pytest.mark.parametrize("review_source", ["slack", "dashboard", "goal"])
+@pytest.mark.parametrize("review_source", ["slack", "dashboard"])
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_source: str) -> None:
     dashboard_draft = review_source == "dashboard"
-    goal_mode = review_source == "goal"
     captured: dict[str, object] = {}
     metadata: dict[str, object] = {
         "slack_thread": {"channel_id": "COLD", "thread_ts": "1700000000.000001"}
@@ -525,7 +524,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
         captured["metadata_token"] = token
         return {
             "html_url": pr_ref.url,
-            "draft": dashboard_draft or goal_mode,
+            "draft": dashboard_draft,
             "base": {"sha": "base-sha"},
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
@@ -592,9 +591,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
                 url="https://github.com/langchain-ai/open-swe/pull/1244",
             ),
             source="slack",
-            slack_channel_id="" if goal_mode else "C123",
-            slack_thread_ts="" if goal_mode else "1700000000.000100",
-            allow_draft=goal_mode,
+            slack_channel_id="C123",
+            slack_thread_ts="1700000000.000100",
         )
     )
 
@@ -617,7 +615,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
-    if dashboard_draft or goal_mode:
+    if dashboard_draft:
         assert "slack_thread" not in config
         assert get_thread_slack_ref(metadata) is None
     else:

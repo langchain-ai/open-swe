@@ -36,12 +36,6 @@ REPLY_GUARD: SystemIdentity = {
     "platform": "open-swe",
 }
 
-WORK_STATE_GUARD: SystemIdentity = {
-    "id": "system:work-state-guard",
-    "display_name": "Work state guard",
-    "platform": "open-swe",
-}
-
 
 def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
     """The surface this thread currently owes its answer to."""
@@ -74,15 +68,5 @@ def reply_nudge(
         {"sender_id": REPLY_GUARD["id"], "surface": "automation", "kind": "system"},
         systems=[REPLY_GUARD],
         injected_dynamic_context_hashes=set(introduced or ()),
-    )
-    return [Nudge.of(message) for message in built]
-
-
-def work_state_nudge(tool_name: str) -> list[Nudge]:
-    """What sends a goal-mode run back to work until it reports where the work stands."""
-    built = build_input_messages(
-        prompt("runs/unfinished-work", tool=tool_name),
-        {"sender_id": WORK_STATE_GUARD["id"], "surface": "automation", "kind": "system"},
-        systems=[WORK_STATE_GUARD],
     )
     return [Nudge.of(message) for message in built]

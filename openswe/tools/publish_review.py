@@ -50,7 +50,6 @@ from openswe.review.findings import (
 from openswe.review.findings import (
     list_findings as list_findings_async,
 )
-from openswe.review.goal_review import GoalReview
 from openswe.review.publish import (
     PublishSelection,
     ReviewAssessment,
@@ -73,7 +72,6 @@ from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
-from openswe.threads.goal import ThreadGoals
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
@@ -166,16 +164,6 @@ async def publish_review(
             state=state,
             assessment=assessment,
         )
-        if result.get("success") and not result.get("goal_review"):
-            reviewer_thread_id = get_thread_id_from_runtime()
-            await GoalReview.published(
-                reviewer_thread_id,
-                await get_thread_metadata(reviewer_thread_id),
-                owner=cfg.repo.owner,
-                repo=cfg.repo.name,
-                pr_number=pr_number,
-                severity_threshold=severity_threshold,
-            )
         events = ReviewEvents.from_config(cfg)
         if events is not None:
             await events.append(
@@ -377,19 +365,6 @@ async def _publish_review_async(
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
     reviewed_head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
-    goal_review = GoalReview.of(await get_thread_metadata(thread_id))
-    if goal_review is not None and (
-        goal_result := await goal_review.publish(
-            reviewer_thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            head_sha=reviewed_head_sha,
-            token=token,
-            severity_threshold=severity_threshold,
-        )
-    ):
-        return goal_result
     if assessment is not None and assessment.head_sha != reviewed_head_sha:
         return {
             "success": False,
@@ -1171,8 +1146,7 @@ async def _maybe_post_slack_completion_reply(
 
     Only fires for first reviews (gated by the caller). No-op if the reviewer
     thread has no ``slack_thread`` metadata — i.e. the review wasn't started
-    from Slack — or when that Slack thread belongs to the goal the PR's thread
-    works toward, which hears only from its own agent until the goal says so.
+    from Slack.
     """
     metadata = await get_thread_metadata(thread_id)
     slack_ref = get_thread_slack_ref(metadata)
@@ -1181,8 +1155,6 @@ async def _maybe_post_slack_completion_reply(
     channel_id = slack_ref.get("channel_id")
     thread_ts = slack_ref.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
-        return
-    if await ThreadGoals.quiets_slack_thread(owner, repo, pr_number, (channel_id, thread_ts)):
         return
 
     if surfaced_count == 0:

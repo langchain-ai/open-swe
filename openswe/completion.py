@@ -36,7 +36,6 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
-from openswe.review.goal_review import GoalReview
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import (
@@ -50,7 +49,6 @@ from openswe.slack.routed_work import RoutedWork
 from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.threads.goal import ThreadGoals
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
@@ -593,9 +591,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
-    if status in _TERMINAL_FAILURE_STATUSES:
-        await ThreadGoals.failed(thread_id)
-        await GoalReview.run_failed(thread_id)
     if (
         status in _TERMINAL_FAILURE_STATUSES
         and isinstance(payload_metadata, dict)

@@ -351,7 +351,6 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
-  goal_mode?: boolean
   experimental_conditional_approval?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
@@ -371,7 +370,6 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
-  goal_mode?: boolean
   experimental_conditional_approval?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean

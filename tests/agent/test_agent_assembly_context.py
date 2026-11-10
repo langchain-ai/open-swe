@@ -358,35 +358,6 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
     assert configurable["draft_prs"] is False
 
 
-@pytest.mark.parametrize("channel, thread_ts", [("C1", "1.0"), ("D1", "1.0"), ("D1", "0")])
-@pytest.mark.parametrize("explicit_goal", [False, True])
-async def test_dm_runs_only_use_goal_mode_when_a_goal_is_already_active(
-    channel: str, thread_ts: str, explicit_goal: bool
-) -> None:
-    from openswe.threads.goal import Goal, ThreadGoals
-    from openswe.users.preferences import UserPreferences
-
-    config = _base_config()
-    config["configurable"].update(
-        source="slack",
-        slack_thread={"channel_id": channel, "thread_ts": thread_ts},
-    )
-    with (
-        patch("openswe.server.THREADS.get", AsyncMock(return_value=None)),
-        patch.object(
-            ThreadGoals, "current", AsyncMock(return_value=Goal() if explicit_goal else None)
-        ),
-        patch(
-            "openswe.server.User.preferences_for_login",
-            AsyncMock(return_value=UserPreferences(goal_mode=True)),
-        ),
-    ):
-        agent = await _agent_catalog(config)
-
-    turn = cast(AgentTurnSettings, agent["turn"])
-    assert turn.goal_mode is (explicit_goal or channel == "C1")
-
-
 @pytest.mark.asyncio
 async def test_routed_default_route_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()

@@ -36,7 +36,6 @@ from runtime_api.catalog import (
     McpServerSpec,
     ReplyRules,
     RoutingRules,
-    WorkStateRules,
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import QUICK_CALL_SECONDS
@@ -113,10 +112,8 @@ from openswe.middleware.require_user_reply import (
     REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
-    WORK_STATE_GUARD,
     ReplySurface,
     reply_nudge,
-    work_state_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import StaleWorkspaceReporter
@@ -168,7 +165,6 @@ from openswe.thread_title import (
     schedule_thread_title_generation,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
-from openswe.threads.goal import ThreadGoals
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -197,10 +193,6 @@ from openswe.tools import (
     fetch_url,
     get_human_review_status,
     get_thread,
-    goal_create,
-    goal_get,
-    goal_set_objective,
-    goal_set_state,
     http_request,
     link_pull_request,
     list_automations,
@@ -637,10 +629,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "background_task",
         "monitor",
         # Only the parent's own turn can say where the work stands.
-        "goal_create",
-        "goal_get",
-        "goal_set_objective",
-        "goal_set_state",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
@@ -757,10 +745,6 @@ AGENT_TOOLS: Final = (
     recreate_sandbox,
     report_platform_issue,
     schedule_thread_wakeup,
-    goal_create,
-    goal_get,
-    goal_set_objective,
-    goal_set_state,
     request_rollout_check,
     listen_events,
     list_event_types,
@@ -1038,10 +1022,7 @@ _NOT_FROM_CODE = (
 # Everyday tools code mode still offers the model directly. Every other tool it calls
 # from code, where the run's tools can differ from person to person and run to run without
 # changing the tools offered to the model, which the provider's prompt cache keys on.
-_GOAL_TOOLS: Final = frozenset({"goal_create", "goal_get", "goal_set_objective", "goal_set_state"})
-_DIRECT_IN_CODE_MODE = (
-    SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"} | _GOAL_TOOLS
-)
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"}
 
 
 def callable_from_code(name: str) -> bool:
@@ -1592,7 +1573,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
-            goal_mode=self._turn.goal_mode,
             implementation_walkthrough_enabled=(
                 await cached_workspace_settings(workspace_slug(cfg))
             ).get("implementation_walkthrough_enabled")
@@ -1937,11 +1917,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    goal_worker = bool(task_coordination and task_coordination.is_worker)
-    sender_goal_mode = sender_preferences.goal_mode and not (
-        cfg.slack_thread is not None and cfg.slack_thread.is_dm
-    )
-    goal_mode = bool(profile_login) and not goal_worker and sender_goal_mode
     try:
         if cfg.source != "incidents_agent":
             indexed = await THREADS.get(thread_id)
@@ -1951,16 +1926,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
                 title=title if isinstance(title, str) and title.strip() else "Untitled",
                 workspace=cfg.workspace_slug or "default",
             )
-        goal_mode = await ThreadGoals.for_run(
-            thread_id,
-            sender=profile_login,
-            sender_goal_mode=sender_goal_mode,
-            worker=goal_worker,
-            continues_goal=bool(cfg.goal_continuation),
-        )
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
-    work_state_tool = _registered_tool_name(goal_set_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -2058,8 +2025,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if goal_mode else (goal_get, goal_set_objective, goal_set_state)),
-        *((goal_create,) if goal_worker else ()),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
@@ -2197,7 +2162,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         bridge_client=bridge_client,
         review_guide=guide is not None,
         review_guide_closed=walkthrough is not None and walkthrough.closed,
-        goal_mode=goal_mode,
         coordinator_thread_id=task_coordination.coordinator_thread_id
         if task_coordination
         else None,
@@ -2247,19 +2211,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         cli_result=CliResultRules(tool=cli_result_tool, nudges=cli_result_nudge(cli_result_tool))
         if cli_result_required
-        else None,
-        work_state=WorkStateRules(
-            tool=work_state_tool,
-            waits=[
-                _registered_tool_name(tool)
-                for tool in (schedule_thread_wakeup, background_execute, monitor)
-            ],
-            reminder=prompt("runs/goal-waiting-on-user"),
-            sleep_refusal=prompt("tools/no-sleep"),
-            nudges=work_state_nudge(work_state_tool),
-            nudge_sender=WORK_STATE_GUARD["id"],
-        )
-        if goal_mode
         else None,
         task_context=task_coordination.task_context() if task_coordination else None,
         task_coordination=task_coordination is not None,

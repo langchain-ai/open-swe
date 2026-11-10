@@ -393,12 +393,10 @@ class EventSubscription(Base):
 
     @staticmethod
     async def _changed(thread_id: str) -> None:
-        """Refresh what the dashboard shows the thread listening for: its background
-        work and the waits its goal rests on."""
+        """Refresh what the dashboard shows the thread listening for: its background work."""
         from openswe.ui_invalidations.topics import Topic
 
         await Topic.THREAD_BACKGROUND_WORK.invalidate(key=thread_id)
-        await Topic.THREAD_GOALS.invalidate(key=thread_id)
 
     @classmethod
     def _expired(cls) -> ColumnElement[bool]:

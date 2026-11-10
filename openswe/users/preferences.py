@@ -41,8 +41,6 @@ class UserPreferences(BaseModel):
     concierge_mode: bool = False
     personal_kitchen_channel_id: str = ""
     pr_failure_reactions: bool = False
-    # Stay silent until blocked on this person or a reviewed, green PR with a walkthrough is ready.
-    goal_mode: bool = False
     experimental_conditional_approval: bool = False
     # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
     experimental_classify: bool = False
@@ -53,7 +51,6 @@ class UserPreferencesPatch(KitchenChannelPreference):
     pr_failure_reactions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    goal_mode: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     experimental_conditional_approval: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )

@@ -93,9 +93,6 @@ class UnreadConnectionError(RuntimeError):
         return ToolMessage(content=str(self), tool_call_id=tool_call_id, status="error")
 
 
-_SHELL_OPERATIONS: Final = frozenset({"background_execute"})
-
-
 def run_id() -> str | None:
     """The Agent Server run this graph is executing, as the backend keys it."""
     config = get_config()
@@ -345,20 +342,6 @@ async def run_operation(
 ) -> ToolMessage | Command:
     """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
     reads of the connections it names."""
-    if spec.name in _SHELL_OPERATIONS and (
-        refusal := backend.run.sleep_refusal(arguments.get("command"))
-    ):
-
-        async def refused(tool_call_id: str) -> ToolMessage:
-            return ToolMessage(
-                content=refusal, tool_call_id=tool_call_id, name=spec.name, status="error"
-            )
-
-        return await called(backend, spec.name, arguments, runtime, refused)
-    work_state = backend.run.catalog.loop.work_state
-    if work_state is not None and spec.name == work_state.tool:
-        # The goal reads the edits reported before this call, which may still be on their way.
-        await backend.outbox.drain()
     # Read before code mode reports the call: a pause for a grant runs the code again,
     # which reports the call under a new id, so a report made first would never finish.
     try:

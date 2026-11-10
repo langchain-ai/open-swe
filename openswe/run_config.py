@@ -206,7 +206,6 @@ class RunConfig(BaseModel):
     watch_key: str | None = None
     schedule_id: str | None = None
     background_task_completion: bool | None = None
-    goal_continuation: bool | None = None
 
     @model_validator(mode="before")
     @classmethod

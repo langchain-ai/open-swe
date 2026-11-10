@@ -28,7 +28,6 @@ import type {
   AgentSchedule,
   AgentStatus,
   AgentThread,
-  AgentThreadGoal,
   Chunk,
   ImageChunk,
   Message,
@@ -67,7 +66,6 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
-  goal: (threadId: string) => ["agent-threads", threadId, "goal"] as const,
   backgroundOutput: (threadId: string, taskId: string) =>
     ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
@@ -1159,36 +1157,6 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
-  })
-}
-
-export function useAgentThreadGoal(threadId: string) {
-  return useQuery({
-    queryKey: agentThreadKeys.goal(threadId),
-    queryFn: () => agentsApi.getThreadGoal(threadId),
-    enabled: Boolean(threadId),
-    meta: { invalidatedBy: [invalidationTopic("thread-goals", threadId)] },
-  })
-}
-
-export function useEditAgentThreadGoal(threadId: string) {
-  const queryClient = useQueryClient()
-  const queryKey = agentThreadKeys.goal(threadId)
-
-  return useMutation({
-    mutationFn: (objective: string) =>
-      agentsApi.editThreadGoal(threadId, objective),
-    meta: { errorTitle: "Couldn't edit the goal" },
-    onMutate: (objective) =>
-      optimisticUpdate<AgentThreadGoal | null>(queryClient, queryKey, (goal) =>
-        goal ? { ...goal, objective } : goal
-      ),
-    onError: (_error, _objective, undo) => {
-      undo?.()
-      // A failure can come after the goal was saved, so show what the server holds.
-      void queryClient.invalidateQueries({ queryKey, exact: true })
-    },
-    onSuccess: (goal) => queryClient.setQueryData(queryKey, goal),
   })
 }
 

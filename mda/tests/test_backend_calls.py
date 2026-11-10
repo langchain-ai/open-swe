@@ -92,7 +92,6 @@ from runtime_api.catalog import (
     SandboxSpec,
     TaskContext,
     ToolSpec,
-    WorkStateRules,
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
@@ -1597,59 +1596,6 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
 
 
 @pytest.mark.parametrize(
-    ("command", "goal_mode", "refused"),
-    [
-        ("for i in $(seq 60); do gh pr checks 1 && break; sleep 30; done", True, True),
-        ("sleep 240; gh pr view 1", True, True),
-        ("sleep 240; make test", False, False),
-        ("npm run dev & sleep 3 && curl localhost:3000", True, False),
-        ("for i in 1 2 3; do curl -f localhost:3000 && break; sleep 2; done", True, False),
-        ('git commit -m "wait: sleep 30 before retry"', True, False),
-        ("bash -c 'until gh pr checks 1; do sleep 30; done'", True, True),
-        ("sleep 5 && kubectl wait --for=condition=Ready pod/web --timeout=120s", True, False),
-        ("for((i=0;i<3;i++)); do sleep 5; done", True, True),
-    ],
-)
-async def test_a_goal_mode_execute_that_waits_by_sleeping_is_refused(
-    monkeypatch: pytest.MonkeyPatch, command: str, goal_mode: bool, refused: bool
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
-        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    work_state = WorkStateRules(tool="goal_set_state", sleep_refusal="use monitor")
-    backend = _run_backend(
-        catalog=Catalog(
-            loop=LoopRules(work_state=work_state if goal_mode else None), sandbox=_IN_SANDBOX
-        )
-    )
-    post = AsyncMock()
-    monkeypatch.setattr(backend, "post", post)
-    runtime = ToolRuntime(
-        state={"messages": []},
-        context=None,
-        config={},
-        stream_writer=lambda event: None,
-        tool_call_id="call-1",
-        store=None,
-    )
-    request = ToolCallRequest(
-        tool_call={"name": "execute", "args": {"command": command}, "id": "call-1"},
-        tool=None,
-        state={"messages": []},
-        runtime=runtime,
-    )
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
-
-    screened = await files._screened(request)
-
-    if refused:
-        assert isinstance(screened, ToolMessage) and screened.content == "use monitor"
-    else:
-        assert screened is request
-    post.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
     ("command", "output", "refreshed"),
     [
         (
@@ -2582,42 +2528,3 @@ def test_the_backend_hears_where_summarization_cut_the_conversation() -> None:
     }
 
     assert held_state(state) == {"reply_surface": "slack", "visible_from": 4}
-
-
-async def test_the_goal_tool_waits_for_the_edits_reported_before_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
-    backend = _run_backend(
-        catalog=Catalog(loop=LoopRules(work_state=WorkStateRules(tool="goal_set_state")))
-    )
-    order: list[str] = []
-
-    async def drained() -> None:
-        order.append("drained")
-
-    async def answer(name: str, _body: dict[str, JsonValue]) -> BaseModel:
-        order.append(name)
-        return OperationResult(content="done")
-
-    monkeypatch.setattr(backend.outbox, "drain", drained)
-    _answering(monkeypatch, backend, answer)
-    runtime = ToolRuntime(
-        state={"messages": []},
-        context=None,
-        config={},
-        stream_writer=lambda event: None,
-        tool_call_id="call-1",
-        store=None,
-    )
-    for name in ("web_search", "goal_set_state"):
-        served = operation_tool(
-            ToolSpec(name=name, description=name, parameters={"type": "object"}), backend
-        )
-        assert served.coroutine is not None
-        await served.coroutine(runtime=runtime)
-
-    # Only the goal tool waits, and it waits before its own operation goes out.
-    assert order.count("drained") == 1
-    assert order.index("drained") == len(order) - 2

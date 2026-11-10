@@ -25,7 +25,6 @@ from openswe.tasks.store import sidebar_memberships
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
-from openswe.threads.goal import ThreadGoals
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.index import STOPPED_AT_KEY
 from openswe.threads.listing import (
@@ -283,7 +282,6 @@ async def cancel_dashboard_thread(
     if on_interrupted is not None:
         await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
-    await ThreadGoals.stopped(thread_id, by=login)
 
     metadata_update: dict[str, Any] = _stopped_metadata()
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
@@ -348,7 +346,6 @@ async def admin_cancel_dashboard_thread(
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
-    await ThreadGoals.stopped(thread_id, by=login)
 
     await client.threads.update(
         thread_id=thread_id,

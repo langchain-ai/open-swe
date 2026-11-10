@@ -22,7 +22,6 @@ type KeyedTopic =
   | "thread-queues"
   | "thread-browsers"
   | "thread-background-work"
-  | "thread-goals"
   | "task-workers"
   | "plugin-documents"
   | "plugin-chat-calls"

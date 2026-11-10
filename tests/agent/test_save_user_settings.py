@@ -316,7 +316,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "concierge_mode": False,
                 "personal_kitchen_channel_id": "",
                 "pr_failure_reactions": False,
-                "goal_mode": False,
                 "experimental_classify": False,
                 "experimental_conditional_approval": False,
             },

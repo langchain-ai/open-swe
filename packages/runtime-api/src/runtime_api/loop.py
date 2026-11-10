@@ -121,7 +121,6 @@ class ModelCall(BaseModel):
     # Another provider's model, tried once when a call to ``model`` fails.
     fallback: ModelSpec | None = None
     use_gateway: bool = False
-    reminder: str | None = None
 
 
 class BeforeModel(PhaseResult):
@@ -276,32 +275,6 @@ class ChosenModel(RunRequest):
     effort: str | None = None
 
 
-GoalState = Literal["working", "waiting", "waiting_on_user", "paused", "complete"]
-
-
-class GoalRead(RunRequest):
-    waits: bool = False
-
-
-class Goal(BaseModel):
-    """A Goal mode thread's goal as the backend keeps it."""
-
-    state: GoalState | None = None
-    reason: str | None = None
-    objective: str | None = None
-    ask: str | None = None
-    updated_at_ms: int = 0
-    waits: list[str] = []
-
-
-class GoalChange(RunRequest):
-    """The run moved its thread's goal; None clears it."""
-
-    state: Literal["working", "waiting", "paused"] | None
-    reason: Literal["no_progress", "failing_commands"] | None = None
-    request: str | None = None
-
-
 class IncidentContext(BaseModel):
     """The incident a run investigates, as each model call tells the model."""
 
@@ -359,8 +332,6 @@ REFRESH_GITHUB_PROXY = Endpoint(
     delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
-GOAL = Endpoint("goal", GoalRead, Goal, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
-SET_GOAL = Endpoint("set_goal", GoalChange, Done, seconds=LOOP_CALL_SECONDS)
 # The run's turn began: the transcript opens it, and the thread and usage record what
 # it runs as.
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)
