@@ -18,6 +18,7 @@ from sqlalchemy import RowMapping, text
 from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
 from openswe.thread_ids import mda_successor_thread_id
+from openswe.threads.creation import TITLE_LOCKED_KEY
 
 Runtime = Literal["local", "mda"]
 ThreadStatus = Literal["idle", "busy", "interrupted", "error"]
@@ -405,15 +406,23 @@ async def current_thread_id(thread_id: str) -> str:
     return thread_id
 
 
-async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedThread | None:
-    """Merge ``metadata`` into the thread's, key by key, as the Agent Server's PATCH does."""
+async def update(
+    thread_id: str, metadata: Mapping[str, JsonValue], *, unless_title_locked: bool = False
+) -> IndexedThread | None:
+    """Merge ``metadata`` into the thread's, key by key, as the Agent Server's PATCH does;
+    with ``unless_title_locked``, not into a thread a person renamed."""
+    locked = (
+        f"AND metadata -> '{TITLE_LOCKED_KEY}' IS DISTINCT FROM 'true' "
+        if unless_title_locked
+        else ""
+    )
     async with transaction() as conn:
         row = (
             (
                 await conn.execute(
                     text(
                         f"UPDATE thread_index SET metadata = metadata || CAST(:metadata AS jsonb), "
-                        f"updated_at = clock_timestamp() WHERE thread_id = :thread_id "
+                        f"updated_at = clock_timestamp() WHERE thread_id = :thread_id {locked}"
                         f"RETURNING {_COLUMNS}"
                     ),
                     {"thread_id": thread_id, "metadata": json.dumps(dict(metadata))},

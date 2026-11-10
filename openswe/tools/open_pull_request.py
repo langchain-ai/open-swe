@@ -42,8 +42,8 @@ from openswe.slack.code_channels import (
 )
 from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
+from openswe.threads.store import THREADS
 from openswe.threads.summary import upsert_pull_request_record
-from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXTS, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from openswe.utils.http_pool import pooled_transport
@@ -847,13 +847,9 @@ async def _record_pr_telemetry(
             }
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
+            await THREADS.update(thread_id, metadata)
             if record_opening and retitle_thread and isinstance(pr_title, str) and pr_title:
-                metadata.update({"title": pr_title, "title_seed": None})
-            await get_client().threads.update(thread_id=thread_id, metadata=metadata)
-            if "title" in metadata:
-                await mirror_thread_metadata(
-                    thread_id, {"title": metadata["title"], "title_seed": None}
-                )
+                await THREADS.retitle(thread_id, pr_title)
             origin = (
                 cfg.slack_thread
                 if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
@@ -1217,7 +1213,6 @@ async def _open_pull_request(
             "draft": draft,
         }
         from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-        from openswe.threads.store import THREADS
 
         cfg = _configurable()
         if (

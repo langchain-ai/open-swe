@@ -643,10 +643,11 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
     langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
-    langgraph.threads.update = AsyncMock()
     monkeypatch.setattr(opr, "get_client", lambda: langgraph)
-    mirror_metadata = AsyncMock()
-    monkeypatch.setattr(opr, "mirror_thread_metadata", mirror_metadata)
+    update = AsyncMock()
+    monkeypatch.setattr(opr.THREADS, "update", update)
+    retitle = AsyncMock()
+    monkeypatch.setattr(opr.THREADS, "retitle", retitle)
     details = {
         "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
         "number": 3,
@@ -678,18 +679,14 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     assert record_usage.await_args.kwargs["model_id"] == "anthropic:claude-opus-5-5"
 
     if concierge:
-        langgraph.threads.update.assert_not_awaited()
-        mirror_metadata.assert_not_awaited()
+        update.assert_not_awaited()
+        retitle.assert_not_awaited()
         return
-    assert langgraph.threads.update.await_args is not None
-    metadata = langgraph.threads.update.await_args.kwargs["metadata"]
+    update.assert_awaited_once()
     if retitle_thread and record_opening:
-        assert metadata["title"] == "feat: x"
-        assert metadata["title_seed"] is None
-        mirror_metadata.assert_awaited_once_with("t1", {"title": "feat: x", "title_seed": None})
+        retitle.assert_awaited_once_with("t1", "feat: x")
     else:
-        assert "title" not in metadata
-        mirror_metadata.assert_not_awaited()
+        retitle.assert_not_awaited()
 
 
 @pytest.mark.asyncio
