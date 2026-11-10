@@ -12,10 +12,8 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.settling import SETTLE_JOB
-from openswe.jobs import queue
 from openswe.slack.pr_links import linked_pull_requests
-from openswe.users import User, UserIdentity, UserPreferences
+from openswe.users import User, UserIdentity
 from tests.support.slack_api import SlackAPI
 
 
@@ -137,28 +135,10 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
     await settle_with_reactions(set())
 
-    preferences = UserPreferences()
-
-    async def owner_preferences(login: str) -> UserPreferences:
-        assert login == "ada"
-        return preferences
-
-    monkeypatch.setattr(User, "preferences_for_login", owner_preferences)
-    await settle_with_reactions(set())
     snapshot.check_state = "failure"
     await settle_with_reactions(set())
     snapshot.mergeable = False
-    await settle_with_reactions({"construction"})
-    snapshot.mergeable = None
-    preferences.pr_failure_reactions = True
-    await settle_with_reactions({"warning"})
-    preferences.pr_failure_reactions = False
-    await settle_with_reactions(set())
-    preferences.pr_failure_reactions = True
-    snapshot.mergeable = False
     snapshot.mergeable_state = "dirty"
-    await settle_with_reactions({"warning", "construction"})
-    snapshot.check_state = "success"
     await settle_with_reactions({"construction"})
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
@@ -171,7 +151,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     assert stored is not None and stored.state == "merged"
 
 
-async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_explain_failures(
+async def test_multiple_prs_clear_approval_reactions_but_keep_blockers(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = User(identities=[UserIdentity(provider="slack", external_id="U1")])
@@ -202,15 +182,8 @@ async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_expla
         reactions.discard(emoji)
         return True
 
-    wake = AsyncMock()
     monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
     monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
-    monkeypatch.setattr(lifecycle, "wake_thread_owner", wake)
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(pr_failure_reactions=True)),
-    )
     first, second = map(ReviewCard, requests)
     reactions.update({"x", "white_check_mark"})
     await first.mark_approved()
@@ -231,34 +204,21 @@ async def test_multiple_prs_clear_approval_reactions_but_keep_blockers_and_expla
         failing_checks=["unit tests"],
         unresolved_threads=0,
     )
-    wake.side_effect = RuntimeError("thread owner unavailable")
     await first.update_blocked_reactions(snapshot)
-    assert {"warning", "construction"} <= reactions
-    assert [job.kind for job in await queue.find({})] == [SETTLE_JOB]
-    wake.side_effect = None
-    await first.update_blocked_reactions(snapshot)
-    assert wake.await_count == 2
-    args = wake.await_args.args
-    assert args[:3] == ("C1", "1.0", "U1")
-    assert urls[0] in args[3] and "unit tests" in args[3]
-    await first.update_blocked_reactions(snapshot)
-    assert wake.await_count == 2
+    assert "construction" in reactions
+    assert "warning" not in reactions
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
     snapshot.check_state = "success"
     await second.update_blocked_reactions(snapshot)
-    assert {"warning", "construction"} <= reactions
+    assert "construction" in reactions
     await first.update_blocked_reactions(snapshot)
-    assert not reactions & {"warning", "construction"}
+    assert "construction" not in reactions
     async with HumanReviewRequest.locked(requests[1].id) as (_, row):
         assert row is not None
         row.approved_at = None
     await second.update_post_reactions()
     assert "white_check_mark" not in reactions
-    snapshot.check_state = "failure"
-    await second.update_blocked_reactions(snapshot)
-    assert wake.await_count == 3
-    assert urls[1] in wake.await_args.args[3]
     snapshot.draft = True
     await second.update_blocked_reactions(snapshot)
     assert "pencil2" in reactions

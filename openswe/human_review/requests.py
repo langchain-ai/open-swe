@@ -686,13 +686,6 @@ class HumanReviewRequest(Base):
         for row in requests:
             await row.log_changes(before[row.id])
 
-    @classmethod
-    async def withdraw_failure_notice(cls, request_id: UUID, notice: str, previous: object) -> None:
-        """Forget a post's failure notice that never reached its owner, so the next settle retries."""
-        async with cls.locked(request_id) as (_, row):
-            if row is not None and row.run_config.get("posted_failure_notice") == notice:
-                row.run_config = {**row.run_config, "posted_failure_notice": previous}
-
     async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
         """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
         async with self.locked(self.id) as (_, row):

@@ -91,7 +91,6 @@ class ProfileUpdate(KitchenChannelPreference):
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
-    pr_failure_reactions: bool | None = None
     experimental_conditional_approval: bool | None = None
     experimental_classify: bool | None = None
     draft_prs: bool | None = None
@@ -410,7 +409,6 @@ async def put_my_profile(
             UserPreferencesPatch(
                 personal_kitchen_channel_id=update.personal_kitchen_channel_id,
                 concierge_mode=update.concierge_mode,
-                pr_failure_reactions=update.pr_failure_reactions,
                 experimental_conditional_approval=update.experimental_conditional_approval,
                 experimental_classify=update.experimental_classify,
             ),
@@ -420,7 +418,6 @@ async def put_my_profile(
     if preferences is None and (
         update.personal_kitchen_channel_id is not None
         or update.concierge_mode
-        or update.pr_failure_reactions
         or update.experimental_conditional_approval
         or update.experimental_classify
     ):
