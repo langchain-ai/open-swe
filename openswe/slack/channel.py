@@ -48,6 +48,7 @@ from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
+from openswe.slack.ask_messages import AskChannelMessage
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, web_opening
 from openswe.slack.breakout_links import notify_web_breakout
 from openswe.slack.client import SlackThreadMappingError
@@ -151,6 +152,16 @@ async def slack_message_facts(
                 user_id=message.user_id,
                 explicit_mention=False,
             )
+    if (
+        (kitchen or solo_followup)
+        and not (message.explicit_mention or message.bot_id)
+        and not await AskChannelMessage.for_robin(
+            channel_id=message.channel_id,
+            thread_ts=message.thread_ts,
+            message_ts=message.message_ts,
+        )
+    ):
+        kitchen = solo_followup = False
     return SlackMessageFacts(
         dm=dm,
         code_channel=code_channel,

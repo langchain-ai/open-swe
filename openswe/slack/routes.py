@@ -29,6 +29,7 @@ from openswe.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
+from openswe.slack.ask_messages import AskChannelMessage
 from openswe.slack.breakout import (
     BreakoutCommand,
     process_slack_breakout,
@@ -834,6 +835,14 @@ class SlackEventsDelivery:
                     user_id=user_id,
                     explicit_mention=False,
                 )
+        if (
+            (in_kitchen_channel or solo_followup)
+            and not (explicit_mention or is_message_update or allowed_bot)
+            and not await AskChannelMessage.for_robin(
+                channel_id=channel_id, thread_ts=thread_ts, message_ts=original_message_ts
+            )
+        ):
+            in_kitchen_channel = solo_followup = False
         if not (in_kitchen_channel or solo_followup):
             suggest_review()
         if not (
