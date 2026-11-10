@@ -143,7 +143,9 @@ async def request_human_review(
                 "tools/human-review-channel-mismatch",
                 channel=result.channel,
                 requested_channel=result.requested_channel,
-            ),
+            )
+            + "\n\n"
+            + prompt("tools/human-review-follow-up", pr_url=pr_ref.url),
         }
     if result.summary_updated:
         posted = "The open review card now shows your new inline_summary."
@@ -164,7 +166,9 @@ async def request_human_review(
         "slack_channel_name": await SlackChannel.name_for(result.channel),
         "next": f"{posted} People sign up from the card. {merge_note} "
         "You are woken if nobody signs up. Do not announce or link the card; do not poll."
-        + _supplementary_note(result, supplementary_review),
+        + _supplementary_note(result, supplementary_review)
+        + "\n\n"
+        + prompt("tools/human-review-follow-up", pr_url=pr_ref.url),
     }
 
 
@@ -203,7 +207,9 @@ async def _request_for_mcp_caller(
                 "tools/human-review-channel-mismatch",
                 channel=result.channel,
                 requested_channel=result.requested_channel,
-            ),
+            )
+            + "\n\n"
+            + prompt("tools/human-review-follow-up", pr_url=pr_ref.url),
         }
     if result.reused or result.summary_updated:
         posted = "This pull request already had an open review request; no new card was posted."
@@ -228,7 +234,9 @@ async def _request_for_mcp_caller(
         "permalink": result.permalink,
         "next": f"{posted} People sign up from the card. {merge_note} "
         "If nobody signs up, Robin picks a reviewer. Do not poll."
-        + _supplementary_note(result, supplementary_review),
+        + _supplementary_note(result, supplementary_review)
+        + "\n\n"
+        + prompt("tools/human-review-follow-up", pr_url=pr_ref.url),
     }
 
 
