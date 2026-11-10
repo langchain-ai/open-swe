@@ -224,10 +224,14 @@ class ThreadStore:
         thread = await self.get(thread_id)
         if thread is None:
             return None
+        return await self.state_of(thread)
+
+    async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
+        """The state of a thread already read from the index, as its runtime keeps it."""
         if thread.runtime == "mda" and channel_of(thread.metadata) is None:
             # The channel created its threads there; the backend's own may need it.
-            await RUNTIMES.mda_runtime.ensure_remote_thread(thread_id)
-        return await RUNTIMES.runs_on(thread.runtime).state(thread_id)
+            await RUNTIMES.mda_runtime.ensure_remote_thread(thread.thread_id)
+        return await RUNTIMES.runs_on(thread.runtime).state(thread.thread_id)
 
     async def command(
         self, thread_id: str, body: bytes, *, user_id: str | None = None

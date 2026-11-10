@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import AsyncMock
@@ -29,6 +30,7 @@ from openswe.threads import listing as thread_listing
 from openswe.threads import proxy as thread_proxy
 from openswe.threads import routes as thread_routes
 from openswe.threads import runs as thread_runs
+from openswe.threads.runtimes import MdaRun
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
@@ -1259,15 +1261,16 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
         async def get_state(self, thread_id: str) -> dict[str, object]:
             return {"values": {"messages": []}, "next": []}
 
-    class FakeRuns:
-        async def list(self, thread_id: str, *, limit: int) -> list[dict[str, str]]:
-            return [{"run_id": "run-1", "status": "running"}]
-
     class FakeClient:
         threads = FakeThreads()
-        runs = FakeRuns()
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    running = MdaRun(run_id="run-1", status="running", created_at=datetime.now(UTC))
+    monkeypatch.setattr(
+        handlers.RUNTIMES,
+        "runs_on",
+        lambda _runtime: SimpleNamespace(latest_run=AsyncMock(return_value=running)),
+    )
 
     state = await handlers.get_dashboard_thread_state("tid", "owner")
 

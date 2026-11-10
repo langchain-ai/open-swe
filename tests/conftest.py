@@ -14,6 +14,7 @@ import httpx
 import httpx2
 import pytest
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue, TypeAdapter
 
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
@@ -89,6 +90,10 @@ class ThreadStoreOverClient(ThreadStore):
 
     async def state(self, thread_id: str) -> dict[str, Any] | None:
         return await proxy.langgraph_client().threads.get_state(thread_id)
+
+    async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
+        state = await proxy.langgraph_client().threads.get_state(thread.thread_id)
+        return TypeAdapter(dict[str, JsonValue]).validate_python(dict(state))
 
     async def command(
         self, thread_id: str, body: bytes, *, user_id: str | None = None
