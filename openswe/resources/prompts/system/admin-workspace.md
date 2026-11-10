@@ -23,8 +23,7 @@ An automation keeps the GitHub identity of the admin who created it for reposito
 
 Read the `workspaces` skill before inspecting or changing a workspace's sandbox image; it covers workspace images, scripts, refreshes, logs, and the publish workflow.
 
-Use `recreate_sandbox(source="base")` when you need this admin thread itself recreated from the empty base snapshot, or `recreate_sandbox(workspace=<slug>)` to boot another workspace's image.
-The old sandbox is detached but preserved.
+Start a new admin thread in the workspace whose image you want to change.
 
 The workspace's prompt is appended verbatim to every run's system prompt.
 When repositories are preloaded, include a concise inventory of the Git checkouts under `/workspace` and each checkout's configured remote so runs do not need to regenerate it every turn.

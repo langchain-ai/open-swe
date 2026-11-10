@@ -55,7 +55,6 @@ _TOOL_MODULES = {
     "read_only_sql": ".read_only_sql",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
-    "recreate_sandbox": ".recreate_sandbox",
     "configure_repository": ".workspaces",
     "configure_workspace": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
@@ -162,7 +161,6 @@ __all__ = [
     "read_only_sql",
     "read_user_settings",
     "record_human_input",
-    "recreate_sandbox",
     "configure_repository",
     "configure_workspace",
     "report_platform_issue",
@@ -302,7 +300,6 @@ if TYPE_CHECKING:
     from openswe.tools.read_only_sql import read_only_sql
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
-    from openswe.tools.recreate_sandbox import recreate_sandbox
     from openswe.tools.remember import forget, recall, remember
     from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread

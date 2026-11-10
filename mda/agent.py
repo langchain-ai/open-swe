@@ -235,7 +235,7 @@ def _parts(graph: Graph) -> _Parts:
     # What the run calls that its catalog leaves out, as the backend names it.
     backend_tools = BackendTools(backend)
     skills = RunSkillsMiddleware(backend, skill_files)
-    managed_sandbox = ManagedSandboxMiddleware(backend)
+    managed_sandbox = ManagedSandboxMiddleware()
     # The backend's transcript and usage see every reply and every tool call.
     reports: list[AgentMiddleware] = [
         ReportRepliesMiddleware(backend),

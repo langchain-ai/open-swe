@@ -33,11 +33,10 @@ The image you publish is whatever you are sitting on plus your changes, so start
 |---|---|---|
 | **Edit** a workspace's image | in that workspace (composer → Workspace picker) | change it, `publish_workspace` under the **same** name |
 | **Fork** one into a new workspace | in the parent | change what differs, `publish_workspace` under a **new** name |
-| Build **from scratch** | in no workspace, or `recreate_sandbox(source="base")` | provision everything, publish |
+| Build **from scratch** | in no workspace | provision everything, publish |
 
-Already on a private admin surface and need a different image?
-`recreate_sandbox(workspace=<slug>)` with a slug from `list_workspaces`.
-The old sandbox is detached, not deleted.
+Need a different image?
+Start a new admin thread in that workspace.
 
 ## `setup_script` — the reproducibility contract
 

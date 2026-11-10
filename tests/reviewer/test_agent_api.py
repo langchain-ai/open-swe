@@ -196,7 +196,9 @@ async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
             built.append(config["configurable"].get("run_id"))
             return Machine()
 
-    async def reconnected(self: RunSandbox) -> None:
+    async def gone(
+        self: RunSandbox, *, sandbox_id: str | None = None, reason: str | None = None
+    ) -> None:
         return None
 
     run_calls._files.clear()
@@ -214,8 +216,8 @@ async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
     await TokenRun.answer(kind, other, "files.execute", {"command": "ls", "run_id": "run-3"})
     assert built == ["run-1", "run-3"]
 
-    monkeypatch.setattr(RunSandbox, "reconnect", reconnected)
-    await TokenRun.answer(kind, run, "sandbox_replaced", {"run_id": "run-1"})
+    monkeypatch.setattr(RunSandbox, "tell_gone", gone)
+    await TokenRun.answer(kind, run, "sandbox_unreachable", {"run_id": "run-1"})
     await TokenRun.answer(kind, run, "files.execute", {"command": "ls", "run_id": "run-1"})
     assert built == ["run-1", "run-3", "run-1"]
     run_calls._files.clear()

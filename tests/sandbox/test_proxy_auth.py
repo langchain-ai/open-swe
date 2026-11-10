@@ -328,7 +328,7 @@ class TestRefreshThreadGithubProxy:
 
 
 _TAG = "00000000-0000-0000-0000-000000000001"
-# The cloud identity rule of the workspace a replacement asked for.
+# The cloud identity rule of the workspace.
 _AWS_RULE = {
     "name": "aws",
     "type": "aws",
@@ -336,35 +336,20 @@ _AWS_RULE = {
 }
 # The egress rule of the workspace the thread's sandbox was last bound in.
 _RECORDED_RULE = {"name": "mine-egress", "match_hosts": ["internal.mine.invalid"]}
-_REPLACEMENT = {"workspace": "other", "source": "workspace"}
 
 
 class TestMdaProxyConfig:
     @pytest.mark.parametrize(
         ("metadata", "expected"),
         [
-            # Before binding records the replacement's rules.
-            ({"sandbox_replacement": _REPLACEMENT}, _AWS_RULE),
-            # A replacement whose create failed after the old sandbox was renamed: the next
-            # run creates the sandbox from the record, so the old sandbox's recorded rules are stale.
-            (
-                {
-                    "sandbox_replacement": _REPLACEMENT,
-                    SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
-                },
-                _AWS_RULE,
-            ),
-            # With no replacement pending, the rules recorded for the bound sandbox.
+            ({}, _AWS_RULE),
             ({SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]}}, _RECORDED_RULE),
         ],
     )
     async def test_the_backends_part_keeps_the_cloud_identity_the_sandbox_was_created_with(
         self, metadata: dict[str, object], expected: dict[str, object]
     ) -> None:
-        """MDA writes the whole proxy config of its sandbox, so the backend's part must carry the
-        workspace's cloud identity rule, the one the sandbox was created with: that of the
-        replacement ``recreate_sandbox`` asked for until the backend reconnects to it, never
-        the old sandbox's."""
+        """Keep the sandbox's cloud identity when MDA writes its proxy config."""
         from openswe.sandboxes.lifecycle import mda_proxy_config
         from openswe.workspaces.store import Workspace
 
@@ -390,6 +375,6 @@ class TestMdaProxyConfig:
                 return_value=tools_rule,
             ),
         ):
-            config = await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="mine")
+            config = await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="other")
 
         assert config["rules"] == [tools_rule, expected]

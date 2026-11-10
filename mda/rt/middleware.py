@@ -93,7 +93,6 @@ from rt.backend import (
     OpenSweBackend,
     Run,
     RunLocal,
-    harness_message,
     human_messages,
     namespace,
     reporting,
@@ -422,19 +421,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
         update = {**update, "open_swe_prepared_for": invocation}
-        if opened.workspace_lost:
-            messages = update.get("messages", [])
-            update["messages"] = [
-                *(messages if isinstance(messages, list) else []),
-                harness_message(
-                    "The sandbox provider confirmed that this thread's bound workspace "
-                    "was deleted. A fresh workspace was created under the same name. "
-                    "Tell the user that local files and unpushed work from the deleted "
-                    "workspace are unavailable; do not claim they were recovered.",
-                    message_id=f"run-guidance:workspace-lost:{invocation}",
-                    source="run_guidance",
-                ),
-            ]
         return update, opened.error is None
 
     def _started(self, state: RunState, prepared: Prepared) -> RunStarted:

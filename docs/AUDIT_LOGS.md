@@ -21,7 +21,7 @@ Neither mechanism retains arguments, payloads, or returned values, with one exce
 | Reviews and GitHub | PR actions, review requests/assignment, comments and pending-review edits, submission/discard, labels, re-review/scout, review-style edits | Summary queries, viewed telemetry, chat history/streams |
 | Bridges | Open and close | Heartbeats, claims and request replies (transport/liveness traffic) |
 | Analytics | None | Page views and client-error reports |
-| Agent tools | User settings/instructions/skills, shared flags/approval mode, workspace/automation administration, PR opening/linking/readiness/approval/review publication, human/expedited review actions, thread lifecycle, sandbox recreation, thread feedback | Reads/search, sandbox file/command operations, previews/downloads, polling/watches, wakeups/subscriptions, Slack delivery, internal finding/walkthrough bookkeeping, assessment ratings and draft review proposals |
+| Agent tools | User settings/instructions/skills, shared flags/approval mode, workspace/automation administration, PR opening/linking/readiness/approval/review publication, human/expedited review actions, thread lifecycle, thread feedback | Reads/search, sandbox file/command operations, previews/downloads, polling/watches, wakeups/subscriptions, Slack delivery, internal finding/walkthrough bookkeeping, assessment ratings and draft review proposals |
 
 Tool audit wrappers also apply when the same tool is invoked from code mode or through MCP exposure; the generic transport itself is not audited.
 Internal helpers are not separately wrapped, avoiding an audit entry for each implementation step.

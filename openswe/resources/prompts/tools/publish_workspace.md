@@ -3,7 +3,7 @@ Capture this thread's sandbox as the workspace's image and record its definition
 Provision the sandbox first with ordinary tools — clone the repos, install toolchains, warm caches — and call this when it works.
 Everything on its filesystem is captured as ``name:latest``; only once that capture succeeds is the workspace created or updated to point at it, so a failed capture leaves nothing half-written and a failed provision is fixed here, interactively, rather than in a script run somewhere you cannot see.
 
-Boot from the right image before provisioning: ``recreate_sandbox(source="base")`` for a rebuild from scratch, or ``recreate_sandbox(workspace=<slug>)`` to layer one change onto that workspace's current image.
+Start the admin thread in the workspace whose image you want to change before provisioning.
 
 ``setup_script`` is optional and is the reproducibility contract: when given, a nightly rebuild runs it from the base snapshot on a throwaway sandbox and replaces the image only if it succeeds, so drift between what you did by hand and what the script does shows up as a failed refresh on the Workspaces page rather than silently.
 Leave no secrets or tokens on disk.
