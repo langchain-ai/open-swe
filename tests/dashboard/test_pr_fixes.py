@@ -167,7 +167,12 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
 
 
 async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(setup):
-    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    from openswe.review.routes import api_get_review_chat
+
+    chat = await api_get_review_chat("acme", "app", 12, {"sub": "alice"})
+    assert chat == {"available": True, "assistant_id": "agent", "thread_id": "existing"}
+    pr_fixes.require_repo_access_for_user.assert_awaited_once_with("alice", "acme/app")
+    setup.client.threads.get.assert_awaited_once_with("existing")
     setup.client.threads.update.assert_not_awaited()
     setup.threads["existing"]["metadata"]["review_chat"] = True
     await pr_fixes.start_pull_request_thread(
@@ -182,10 +187,17 @@ async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(set
     assert setup.client.threads.update.await_args.kwargs["metadata"]["review_chat"] is False
 
 
-async def test_denied_repo_never_reads_or_starts_threads(setup):
+@pytest.mark.parametrize("intent", [OPEN, FIX])
+async def test_denied_repo_never_reads_or_starts_threads(setup, intent):
+    from openswe.review.routes import api_get_review_chat
+
     pr_fixes.require_repo_access_for_user.side_effect = HTTPException(403, "denied")
-    with pytest.raises(HTTPException):
-        await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
+    with pytest.raises(HTTPException) as error:
+        if intent is OPEN:
+            await api_get_review_chat("acme", "app", 12, {"sub": "alice"})
+        else:
+            await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+    assert error.value.status_code == 403
     setup.client.threads.get.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     pr_fixes.dispatch_agent_run.assert_not_awaited()

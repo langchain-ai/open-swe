@@ -382,10 +382,10 @@ async def start_pull_request_thread(
             title=intent.thread_title(full_name, number),
             review_chat=isinstance(intent, (OpenThreadIntent, MessageIntent)),
         )
-        current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
         if not intent.dispatches_run:
             return PullRequestThreadRun(thread_id=thread_id)
+        current = await client.threads.get(thread_id)
+        _assert_thread_postable(thread_metadata(current), login, email)
         busy = current.get("status") == "busy"
         if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
