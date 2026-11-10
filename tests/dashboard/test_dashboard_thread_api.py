@@ -1038,6 +1038,12 @@ _REFUSED_START = json.dumps(
     ("refusal", "status_code"),
     [
         pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
+        pytest.param(httpx.PoolTimeout(""), 500, id="pool-exhausted"),
+        pytest.param(
+            thread_proxy.CommandReply(503, b'{"detail":"runtime unavailable"}', "application/json"),
+            503,
+            id="http-refused",
+        ),
         pytest.param(
             thread_proxy.CommandReply(200, _REFUSED_START, "application/json"),
             200,
@@ -1046,7 +1052,7 @@ _REFUSED_START = json.dumps(
     ],
 )
 async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
-    monkeypatch, refusal: Exception | thread_proxy.CommandReply, status_code: int
+    monkeypatch, caplog, refusal: Exception | thread_proxy.CommandReply, status_code: int
 ) -> None:
     turn_id = uuid7()
 
@@ -1078,12 +1084,34 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
     monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
     monkeypatch.setattr(thread_proxy, "fail_unstarted_turn", failed)
 
-    status, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+    status, body, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "ada", b'{"method": "run.start", "params": {}}'
     )
 
     assert status == status_code
-    failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
+    failed.assert_awaited_once_with(
+        "tid",
+        turn_id,
+        error=(
+            "The message could not be started. Try sending it again. "
+            "If it fails again, share the debug details with the Robin team."
+        ),
+    )
+    record = next(r for r in caplog.records if r.message == "Dashboard run start failed")
+    assert record.thread_id == "tid"
+    assert record.turn_id == str(turn_id)
+    assert record.status_code == status_code
+    if isinstance(refusal, Exception):
+        delivery = next(
+            r for r in caplog.records if r.message == "Delivering a thread command failed"
+        )
+        assert delivery.error_type == type(refusal).__name__
+        assert delivery.command_method == "run.start"
+        if isinstance(refusal, httpx.PoolTimeout):
+            assert "No connection was available" in json.loads(body)["detail"]
+    else:
+        payload = json.loads(refusal.content)
+        assert (payload.get("message") or payload.get("detail")) not in caplog.text
     notify.assert_not_awaited()
 
 
