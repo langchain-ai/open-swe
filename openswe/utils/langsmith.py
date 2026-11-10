@@ -59,6 +59,7 @@ class LangSmithErrorLink:
 class LangSmithLocator:
     kind: Literal["thread", "run"]
     id: str
+    project_id: str | None = None
 
 
 class LangSmithCostUnavailable(RuntimeError):
@@ -351,7 +352,16 @@ def parse_langsmith_locator(locator: str) -> LangSmithLocator | None:
             return None
         if not identifier or "/" in identifier:
             return None
-        return LangSmithLocator(kind="thread" if segments[index] == "t" else "run", id=identifier)
+        project_id = (
+            unquote(segments[index - 1])
+            if index >= 3 and segments[index - 3 : index - 1] == ["projects", "p"]
+            else None
+        )
+        return LangSmithLocator(
+            kind="thread" if segments[index] == "t" else "run",
+            id=identifier,
+            project_id=project_id or None,
+        )
     return None
 
 
@@ -369,8 +379,13 @@ async def get_open_swe_thread_id_from_langsmith(locator: str) -> str | None:
     client = _build_langsmith_client()
     if client is None:
         return None
+    project_id = parsed.project_id or await _resolve_project_id_by_name(tracing_project())
+    if not project_id:
+        return None
     try:
-        run = await client.read_run(parsed.id)
+        run = await client.runs.retrieve(
+            parsed.id, project_id=project_id, selects=["METADATA", "EXTRA"]
+        )
     except Exception:  # noqa: BLE001
         logger.debug("Could not resolve LangSmith run %s", parsed.id, exc_info=True)
         return None

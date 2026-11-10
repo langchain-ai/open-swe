@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from langsmith import AsyncClient, Client
-from langsmith.schemas import Run
+from langsmith.types.run import Run
 from langsmith.utils import LangSmithConflictError
 
 logger = logging.getLogger(__name__)
@@ -115,9 +115,15 @@ async def record_experiment_costs(experiment: str, reviewer_project: str) -> Cos
         (await asyncio.to_thread(client.read_project, project_name=reviewer_project)).id
     )
     experiment_project = await asyncio.to_thread(client.read_project, project_name=experiment)
-    runs: list[Run] = await asyncio.to_thread(
-        lambda: list(client.list_runs(project_id=experiment_project.id, is_root=True))
-    )
+    runs = [
+        run
+        async for run in async_client.runs.query(
+            project_ids=[str(experiment_project.id)],
+            is_root=True,
+            min_start_time=experiment_project.start_time,
+            selects=["ID", "OUTPUTS"],
+        )
+    ]
     semaphore = asyncio.Semaphore(_MAX_CONCURRENT_LOOKUPS)
 
     async def _price(run: Run) -> PrCost | str:
@@ -131,19 +137,20 @@ async def record_experiment_costs(experiment: str, reviewer_project: str) -> Cos
         if priced is None:
             return pr_url
         cost_usd, total_tokens = priced
+        run_id = uuid.UUID(str(run.id))
         await asyncio.to_thread(
-            _write_feedback, client, experiment_project.id, run.id, "cost_usd", score=cost_usd
+            _write_feedback, client, experiment_project.id, run_id, "cost_usd", score=cost_usd
         )
         # LangSmith caps feedback scores below 100k, which one review's tokens exceed.
         await asyncio.to_thread(
             _write_feedback,
             client,
             experiment_project.id,
-            run.id,
+            run_id,
             "total_tokens",
             value=total_tokens,
         )
-        return PrCost(run.id, pr_url, thread_id, cost_usd, total_tokens)
+        return PrCost(run_id, pr_url, thread_id, cost_usd, total_tokens)
 
     results = await asyncio.gather(*(_price(run) for run in runs))
     summary = CostSummary(
