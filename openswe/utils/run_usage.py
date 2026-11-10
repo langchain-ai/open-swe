@@ -22,6 +22,12 @@ class RunUsageSummary:
     input_tokens: int | None = None
     output_tokens: int | None = None
     reasoning_effort: str | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+
+
+def _number(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 @dataclass(frozen=True)
@@ -29,31 +35,36 @@ class _TokenCounts:
     input_tokens: int | None
     output_tokens: int | None
     total_tokens: int
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
-
-def _number(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
-
-
-def _tokens(usage: Any) -> _TokenCounts | None:
-    if not isinstance(usage, dict):
-        return None
-    input_tokens = _number(usage.get("input_tokens"))
-    output_tokens = _number(usage.get("output_tokens"))
-    total_tokens = _number(usage.get("total_tokens"))
-    if total_tokens is None:
-        if input_tokens is None or output_tokens is None:
+    @classmethod
+    def from_usage(cls, usage: object) -> _TokenCounts | None:
+        if not isinstance(usage, dict):
             return None
-        total_tokens = input_tokens + output_tokens
-    input_details = usage.get("input_token_details")
-    cache_read = (
-        _number(input_details.get("cache_read")) if isinstance(input_details, dict) else None
-    ) or 0
-    return _TokenCounts(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=max(total_tokens - cache_read, 0),
-    )
+        input_tokens = _number(usage.get("input_tokens"))
+        output_tokens = _number(usage.get("output_tokens"))
+        total_tokens = _number(usage.get("total_tokens"))
+        if total_tokens is None:
+            if input_tokens is None or output_tokens is None:
+                return None
+            total_tokens = input_tokens + output_tokens
+        details = usage.get("input_token_details")
+        details = details if isinstance(details, dict) else {}
+        cache_read = _number(details.get("cache_read"))
+        return cls(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=max(total_tokens - (cache_read or 0), 0),
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=_number(details.get("cache_creation")),
+        )
+
+    @staticmethod
+    def sum(values: list[int | None]) -> int | None:
+        """Sum the reported values; None when no message reported any."""
+        known = [value for value in values if value is not None]
+        return sum(known) if known else None
 
 
 def _message_model(message: AIMessage) -> str | None:
@@ -94,18 +105,20 @@ def summarize_run_usage(
 
     models = {model for message in ai_messages if (model := _message_model(message))}
     reported = [
-        tokens for message in ai_messages if (tokens := _tokens(message.usage_metadata)) is not None
+        tokens
+        for message in ai_messages
+        if (tokens := _TokenCounts.from_usage(message.usage_metadata)) is not None
     ]
     total_tokens = sum(tokens.total_tokens for tokens in reported) if reported else None
-    input_values = [tokens.input_tokens for tokens in reported if tokens.input_tokens is not None]
-    output_values = [
-        tokens.output_tokens for tokens in reported if tokens.output_tokens is not None
-    ]
     if not models and total_tokens is None:
         return None
     return RunUsageSummary(
         models=tuple(sorted(models)),
         total_tokens=total_tokens,
-        input_tokens=sum(input_values) if input_values else None,
-        output_tokens=sum(output_values) if output_values else None,
+        input_tokens=_TokenCounts.sum([tokens.input_tokens for tokens in reported]),
+        output_tokens=_TokenCounts.sum([tokens.output_tokens for tokens in reported]),
+        cache_read_tokens=_TokenCounts.sum([tokens.cache_read_tokens for tokens in reported]),
+        cache_creation_tokens=_TokenCounts.sum(
+            [tokens.cache_creation_tokens for tokens in reported]
+        ),
     )

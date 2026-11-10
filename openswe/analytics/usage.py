@@ -139,6 +139,8 @@ async def record_agent_invocation_completion(
         input_tokens=usage.input_tokens if usage else None,
         output_tokens=usage.output_tokens if usage else None,
         total_tokens=usage.total_tokens if usage else None,
+        cache_read_tokens=usage.cache_read_tokens if usage else None,
+        cache_creation_tokens=usage.cache_creation_tokens if usage else None,
     )
     if status == "success":
         name = EventName.RUN_COMPLETED
@@ -147,18 +149,14 @@ async def record_agent_invocation_completion(
         name = EventName.RUN_CANCELED
         payload = RunCanceledPayload(
             cancellation_source="superseded" if status == "interrupted" else "user",
-            input_tokens=counts.input_tokens,
-            output_tokens=counts.output_tokens,
-            total_tokens=counts.total_tokens,
+            **counts.model_dump(),
         )
     else:
         name = EventName.RUN_FAILED
         payload = RunFailedPayload(
             failure_class="timeout" if status == "timeout" else "error",
             failure_code=failure_code,
-            input_tokens=counts.input_tokens,
-            output_tokens=counts.output_tokens,
-            total_tokens=counts.total_tokens,
+            **counts.model_dump(),
         )
     return await emitter.enqueue_event(
         name,

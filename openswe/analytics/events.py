@@ -79,6 +79,8 @@ class RunCompletedPayload(StrictPayload):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    cache_read_tokens: int | None = Field(default=None, ge=0)
+    cache_creation_tokens: int | None = Field(default=None, ge=0)
 
 
 class RunFailedPayload(RunCompletedPayload):
