@@ -95,7 +95,7 @@ class SystemPrompt:
     conversation. What can change from one turn to the next is a ``TurnContext``.
 
     ``shared`` is the same for every thread of the deployment, ``workspace`` for every
-    thread of its workspace that opened since its curator last published, and
+    thread of its workspace, and
     ``thread`` is what only this thread's says. Each part is shared by fewer threads
     than the one before it, so a new thread's first model call reads the parts ahead
     of its own from the cache earlier threads wrote.
@@ -128,8 +128,6 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
-    workspace_memory: str = "",
-    workspace_memory_triggers: list[str] | None = None,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
     shared = prompt(
@@ -161,20 +159,7 @@ def construct_system_prompt(
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
     )
-    workspace = "\n\n".join(
-        section
-        for section in (
-            _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
-            prompt(
-                "system/workspace-memory",
-                memory=workspace_memory.strip(),
-                triggers=workspace_memory_triggers or [],
-            )
-            if workspace_memory.strip() or workspace_memory_triggers
-            else "",
-        )
-        if section
-    )
+    workspace = _render_workspace_section(workspace_name, workspace_instructions, workspace_repos)
     return SystemPrompt(shared=shared, workspace=workspace, thread=thread)
 
 
@@ -210,8 +195,6 @@ class TurnContext:
     tool_catalog_note: str = ""
     # The sender's other recent threads, whose activity changes from turn to turn.
     recent_threads: str = ""
-    # The workspace a curator run curates; its instructions stay in view across wakes.
-    curated_workspace: str = ""
 
     def environment(self) -> str:
         environment = prompt(
@@ -270,8 +253,6 @@ class TurnContext:
         guidance = {"environment": self.environment(), "source": self.source_guidance()}
         if self.recent_threads:
             guidance["recent-threads"] = self.recent_threads
-        if self.curated_workspace:
-            guidance["curator"] = prompt("curator/instructions", workspace=self.curated_workspace)
         blocks = {
             context_id: run_context(context_id, text) for context_id, text in guidance.items()
         }

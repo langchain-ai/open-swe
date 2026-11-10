@@ -312,9 +312,6 @@ class LoopRules(BaseModel):
     # backend's ``task_context`` before each call. Remove once every deployment reads
     # ``task_context``.
     task_coordination: bool = False
-    # Whether the backend reads each new message a person sends for the reminders it calls for
-    # (``reminders``), which the model then reads beside it.
-    reminders: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
     # Open SWE's own framing of the tools the client runs, after every call's system prompt;

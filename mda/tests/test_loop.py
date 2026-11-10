@@ -37,10 +37,8 @@ from runtime_api.loop import (
     GitHubProxyRefreshed,
     Goal,
     IncidentContext,
-    PersonMessage,
     PhaseResult,
     Prepared,
-    Reminders,
     Routed,
 )
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY
@@ -184,36 +182,6 @@ async def test_the_framing_of_the_clients_tools_follows_the_system_prompt(
 
     assert planned.call is not None
     assert planned.call.system_prompt.endswith("The Docs plugin is open beside you.")
-
-
-async def test_a_persons_message_is_read_for_reminders_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    note = HumanMessage(
-        content='<input-message sender="system:reminder" surface="automation" kind="system">'
-        "Save a memory.</input-message>",
-        id="reminder-1",
-    )
-    backend, calls = _backend(
-        monkeypatch,
-        {"reminders": Reminders(messages=[{"type": "human", "data": note.model_dump()}])},
-        LoopRules(reminders=True),
-    )
-    loop = RunLoop(backend)
-    person = HumanMessage(
-        content='<input-message sender="user:1" surface="slack" kind="human">'
-        "You ignored me again.</input-message>",
-        id="human-1",
-    )
-
-    first = await loop.before_model(_state(person))
-    again = await loop.before_model(_state(person, **first.update))
-
-    assert [m.content for m in messages_from_dict(first.messages)] == [note.content]
-    assert again.messages == []
-    [(name, body)] = calls
-    assert name == "reminders"
-    assert messages_from_dict([PersonMessage.model_validate(body).message]) == [person]
 
 
 async def test_a_refresh_asked_for_a_call_that_is_not_made_is_stopped(

@@ -6209,17 +6209,6 @@
             ],
             "title": "Experimental Conditional Approval"
           },
-          "experimental_memory": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Memory"
-          },
           "goal_mode": {
             "anyOf": [
               {

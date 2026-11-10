@@ -1,7 +1,7 @@
 """Open SWE's middleware around each model call, run here as the catalog's ``LoopRules`` say.
 
 Before each call it ends the run where a rule says to, adds the thread's task
-context and the reminders a person's new message calls for, keeps the sandbox's
+context, keeps the sandbox's
 GitHub proxy fresh, picks the call's route and model, and assembles its system
 prompt and tool list. A thread's route is classified here, once, alongside the run's
 preparation (``rt.routing``). After an answer that calls no tool, it
@@ -30,7 +30,6 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     ToolMessage,
-    messages_from_dict,
     messages_to_dict,
 )
 from langgraph.config import get_stream_writer
@@ -53,7 +52,6 @@ from runtime_api.loop import (
     GOAL,
     INCIDENT_CONTEXT,
     REFRESH_GITHUB_PROXY,
-    REMINDERS,
     REPLY_ON_BEHALF,
     RUN_ENDED,
     SET_GOAL,
@@ -65,7 +63,6 @@ from runtime_api.loop import (
     GoalChange,
     GoalRead,
     ModelCall,
-    PersonMessage,
     PhaseResult,
     Prepared,
     RefreshGitHubProxy,
@@ -85,9 +82,7 @@ from rt.backend import (
     RunLocal,
     harness_message,
     human_messages,
-    namespace,
     run_call,
-    since_last_reply,
 )
 from rt.routing import Route, RouteClassifier
 from rt.tools import STATE_KEY, run_id
@@ -121,8 +116,6 @@ _ROLE: Final = "task-role:"
 _RUN_CONTEXT: Final = "run-context:"
 # Starts the id of the message holding an incident run's instructions for its next call.
 _INCIDENT: Final = "incident-context:"
-# Held state: the person's message the backend last read for reminders, read once each.
-_REMINDED_FOR: Final = "reminded_for"
 
 
 def content_text(content: object) -> str:
@@ -439,11 +432,7 @@ class RunLoop:
                         provenance=Provenance(kind="context", sender="run:incident"),
                     )
                 )
-        route, (reminded, reminders) = await asyncio.gather(
-            self._route(held, [*visible, *added]), self._reminders(held, messages)
-        )
-        update.update(reminded)
-        added.extend(reminders)
+        route = await self._route(held, [*visible, *added])
         if route is not None:
             update.update(self._kept(route))
         current = {**held, **update}
@@ -600,35 +589,6 @@ class RunLoop:
             if isinstance(model_id, str) and model_id:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
         return Route(route=route, persist=persist)
-
-    async def _reminders(
-        self, held: Mapping[str, object], messages: Sequence[BaseMessage]
-    ) -> tuple[dict[str, JsonValue], list[BaseMessage]]:
-        """The reminders a person's message the model has not answered calls for, asked once
-        per message, and the held state that records it was asked."""
-        if not self.rules.reminders or namespace():
-            return {}, []
-        pending = since_last_reply(messages)
-        person = next(
-            (
-                message
-                for message in reversed(pending)
-                if (provenance := Provenance.of(message)) is not None and provenance.human
-            ),
-            None,
-        )
-        if person is None or (person.id is not None and held.get(_REMINDED_FOR) == person.id):
-            return {}, []
-        reminded: dict[str, JsonValue] = {_REMINDED_FOR: person.id} if person.id else {}
-        asked = PersonMessage(
-            run_id=run_id(), message=_json_dicts.validate_python(messages_to_dict([person]))[0]
-        )
-        try:
-            found = await call(self._backend, REMINDERS, asked)
-        except Exception:
-            logger.warning("Could not read a person's message for reminders", exc_info=True)
-            return reminded, []
-        return reminded, messages_from_dict(found.messages)
 
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
         """The prompt every thread shares, the part its workspace's threads share, and the

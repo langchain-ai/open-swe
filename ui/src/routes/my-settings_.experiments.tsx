@@ -43,11 +43,6 @@ function ExperimentsPage() {
           description="For pull requests you author, let Robin request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."
         />
         <ProfileSwitchRow
-          field="experimental_memory"
-          label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded, and remind the agent to save a lesson when you sound frustrated."
-        />
-        <ProfileSwitchRow
           field="experimental_classify"
           label="Classify tool"
           description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."

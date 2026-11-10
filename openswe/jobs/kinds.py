@@ -40,9 +40,6 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER, JobWorker
-from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
-from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
-from openswe.memories.curator import WorkspaceCurator
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
@@ -249,7 +246,6 @@ async def _tool_sets_purge(_job: Job) -> None:
 
 
 WORKER.register(EVENT_CLAIM_PURGE)(event_claims.purge_lapsed)
-WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
 
 
 @WORKER.register(ATTACHMENT_SWEEP_JOB)
@@ -299,7 +295,6 @@ async def start_jobs() -> None:
         ),
         lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
         lambda: queue.schedule(EVENT_CLAIM_PURGE, cron=EVENT_CLAIM_SCHEDULE, key=EVENT_CLAIM_PURGE),
-        lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
         lambda: queue.schedule(
             GITHUB_QUOTA_SAMPLE, cron=GITHUB_QUOTA_SCHEDULE, key=GITHUB_QUOTA_SAMPLE
         ),

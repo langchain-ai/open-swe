@@ -99,7 +99,6 @@ from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.runtime import MCPTools, catalog_note
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
-from openswe.memories.store import CURATOR_SOURCE, MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -186,9 +185,7 @@ from openswe.tools import (
     create_automation,
     create_project,
     create_sandbox_file_download_url,
-    decide_memory,
     delete_automation,
-    delete_memory_trigger,
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
@@ -198,7 +195,6 @@ from openswe.tools import (
     expedite_pr_approval,
     expose_port,
     fetch_url,
-    forget,
     get_human_review_status,
     get_thread,
     goal_create,
@@ -206,12 +202,9 @@ from openswe.tools import (
     goal_set_objective,
     goal_set_state,
     http_request,
-    link_memory_trigger,
     link_pull_request,
     list_automations,
     list_event_types,
-    list_memories,
-    list_memory_triggers,
     list_projects,
     list_threads,
     list_workspaces,
@@ -230,13 +223,9 @@ from openswe.tools import (
     publish_app,
     publish_artifact,
     publish_workspace,
-    publish_workspace_prompt,
     read_only_sql,
     read_user_settings,
-    read_workspace_prompt,
-    recall,
     recreate_sandbox,
-    remember,
     reorder_sidebar_threads,
     reorder_thread_pins,
     report_platform_issue,
@@ -244,13 +233,12 @@ from openswe.tools import (
     request_pr_review,
     request_rollout_check,
     save_organization_skill,
+    save_user_instructions,
     save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
     search_pull_requests,
     send_announcement,
-    set_memory_trigger,
-    set_memory_trigger_guidance,
     share_project,
     slack_add_reaction,
     slack_attach_html,
@@ -501,17 +489,10 @@ async def _thread_participant(
             slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
-    curated_in = (
-        RunConfig.from_config(config).workspace_slug
-        if user is not None and user.typed_preferences.experimental_memory
-        else None
-    )
-    profile, workspace_admin, instructions, memories, triggers = await asyncio.gather(
+    profile, workspace_admin, instructions = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
-        MEMORIES.personal(user.id if user else None, curated_in=curated_in),
-        MEMORIES.triggers(user.id if user else None, curated_in=curated_in),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
@@ -525,8 +506,6 @@ async def _thread_participant(
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
-        memories=tuple(memory.line for memory in memories),
-        memory_triggers=tuple(trigger.line for trigger in triggers),
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -690,18 +669,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "share_project",
         "unshare_project",
         "move_thread_to_project",
-        "remember",
-        "forget",
-        "recall",
-        "list_memories",
-        "read_workspace_prompt",
-        "decide_memory",
-        "publish_workspace_prompt",
-        "list_memory_triggers",
-        "set_memory_trigger",
-        "set_memory_trigger_guidance",
-        "delete_memory_trigger",
-        "link_memory_trigger",
+        "save_user_instructions",
         "record_incident_report",
         "search_incidents",
         "start_thread",
@@ -748,18 +716,7 @@ AGENT_TOOLS: Final = (
     publish_artifact,
     preview_app,
     publish_app,
-    remember,
-    forget,
-    recall,
-    list_memories,
-    read_workspace_prompt,
-    decide_memory,
-    publish_workspace_prompt,
-    list_memory_triggers,
-    set_memory_trigger,
-    set_memory_trigger_guidance,
-    delete_memory_trigger,
-    link_memory_trigger,
+    save_user_instructions,
     save_user_settings,
     list_projects,
     create_project,
@@ -1645,7 +1602,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
             recent_threads=await recent_threads,
-            curated_workspace=(cfg.workspace_slug or "") if self._source == CURATOR_SOURCE else "",
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
@@ -1705,19 +1661,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-            curated = (
-                workspace
-                and self._profile_login
-                and (await User.preferences_for_login(self._profile_login)).experimental_memory
-            )
-            memory, shared_triggers = (
-                await asyncio.gather(
-                    MEMORIES.workspace_prompt(workspace.slug),
-                    MEMORIES.shared_triggers(workspace.slug),
-                )
-                if workspace and curated
-                else ("", [])
-            )
         return construct_system_prompt(
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
@@ -1726,8 +1669,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_name=workspace.name if workspace else None,
             workspace_instructions=workspace.instructions if workspace else None,
             workspace_repos=workspace.repos if workspace else None,
-            workspace_memory=memory,
-            workspace_memory_triggers=[trigger.line for trigger in shared_triggers],
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
@@ -2322,8 +2263,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         else None,
         task_context=task_coordination.task_context() if task_coordination else None,
         task_coordination=task_coordination is not None,
-        reminders=sender_preferences.experimental_memory
-        and _registered_tool_name(remember) in reserved_tool_names - excluded_tools,
         client_tools=client_tools is not None,
         client_prompt="\n\n".join(
             part
