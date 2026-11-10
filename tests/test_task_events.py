@@ -439,7 +439,6 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
         )
     assert [message.id for message in await TaskMessage.owed(_WORKER)] == [pending.id]
     async with postgres.session() as session:
-        assert await session.get(TaskMessage, delivered.id) is None
         replay = TaskMessage(
             task_id=task.id,
             thread_id=_COORDINATOR,
@@ -447,7 +446,7 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
             content="Done",
             run_config={},
         )
-        await replay.record(session)
+        assert await replay.record(session)
     assert replay.id == delivered.id
 
 

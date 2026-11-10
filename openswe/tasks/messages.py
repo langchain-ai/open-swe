@@ -77,9 +77,11 @@ class TaskMessage(Base):
 
     @classmethod
     async def owed(cls, thread_id: str) -> list[Self]:
-        """Messages no run of the thread has received yet, oldest first."""
+        """Messages no run of the thread has received yet, oldest first.
+
+        Read before each model call, so it leaves pruning delivered messages to ``record``.
+        """
         async with postgres.session() as session:
-            await session.execute(delete(cls).where(cls.delivered_at < func.now() - _RETAINED))
             return list(
                 await session.scalars(
                     select(cls)
