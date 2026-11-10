@@ -192,7 +192,7 @@ class _SdkThreads:
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        await self.client.threads.update(thread_id, metadata=dict(metadata))
+        await self.client.threads.update(thread_id, metadata=dict(metadata), return_minimal=True)
 
     async def delete(self, thread_id: str) -> None:
         try:

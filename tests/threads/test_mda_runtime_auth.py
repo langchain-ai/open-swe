@@ -34,6 +34,9 @@ async def test_thread_reads_and_writes_take_their_own_clients(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.method, request.url.path, request.headers.get("x-auth-scheme")))
+        if request.method == "PATCH":
+            assert request.headers["Prefer"] == "return=minimal"
+            return httpx.Response(204)
         if request.url.path in {"/threads/search", "/threads/t1/runs"}:
             return httpx.Response(200, json=[])
         return httpx.Response(200, json={"thread_id": "t1", "metadata": {}, "values": {}})
