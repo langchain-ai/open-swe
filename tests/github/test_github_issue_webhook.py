@@ -13,6 +13,7 @@ from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun
 
 from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
+from openswe.github.comments import ROBIN_NOTIFICATION_MARKER
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.review.findings import get_thread_slack_ref
 from openswe.review.reviews import trigger_re_review
@@ -316,6 +317,13 @@ def _untagged_pr_event(
         ("issue_comment", "", {"login": "stranger"}, None, False),
         ("issue_comment", "", {"login": "octocat"}, "!keep-open", False),
         ("issue_comment", "", {"login": "octocat"}, "@open-swe !keep-open", True),
+        (
+            "issue_comment",
+            "",
+            {"login": "octocat"},
+            f"Sandbox unreachable.\n\n{ROBIN_NOTIFICATION_MARKER}",
+            False,
+        ),
         ("pull_request_review", "", {"login": "octocat"}, None, True),
         ("pull_request_review", "edited", {"login": "octocat"}, None, True),
         ("pull_request_review", "", {"login": "octocat"}, "!keep-open", True),
@@ -366,7 +374,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     expected_thread_id = None if webhook_common.mentions_open_swe(body) else "agent-thread"
     assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
     if body is not None and not accepted:
-        # An untagged workflow command reaches the backend as no work at all.
+        # An untagged workflow command or a Robin notification reaches the backend as no work.
         assert not delivered.comment
 
 

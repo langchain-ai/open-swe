@@ -26,6 +26,9 @@ COMMENT_ACTIONS: Final = {
     "pull_request_review_comment": frozenset({"created", "edited"}),
     "pull_request_review": frozenset({"submitted", "edited"}),
 }
+# Marks the notifications Robin posts, including with a person's token, which
+# ``from_app`` can't tell from that person's own comments.
+NOTIFICATION_MARKER: Final = "<!-- robin-notification -->"
 # The pull request actions an automation's trigger fires on.
 PR_AUTOMATION_ACTIONS: Final = frozenset({"opened", "closed"})
 # The event keys whose deliveries may start an agent run: the channel's handler takes
@@ -97,6 +100,9 @@ def route(
         return Route()
     comment = _fields(payload.get("comment") or payload.get("review"))
     body = str(comment.get("body") or "")
+    if NOTIFICATION_MARKER in body:
+        # Answering Robin's own notification, such as a sandbox failure, would loop.
+        return Route()
     mentioned = mentions(body, facts.tags)
     if event == "issue_comment" and not _fields(payload.get("issue")).get("pull_request"):
         return Route(issue_run=mentioned)
