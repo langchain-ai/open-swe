@@ -142,10 +142,12 @@ async def test_gemini_sdk_uses_allowlisted_gateway_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paths: list[str] = []
+    services: list[str | None] = []
     expected_path = "/gemini/v1beta/models/gemini-4-argon:streamGenerateContent"
 
     async def handler(request: web.Request) -> web.Response:
         paths.append(request.path)
+        services.append(request.headers.get(model.GATEWAY_SERVICE_HEADER))
         if request.path != expected_path:
             return web.json_response({"error": "path not allow-listed by gateway"}, status=501)
         return web.Response(
@@ -166,6 +168,43 @@ async def test_gemini_sdk_uses_allowlisted_gateway_path(
 
     assert "".join(str(chunk.content) for chunk in chunks) == "ok"
     assert paths == [expected_path]
+    assert services == ["robin"]
+
+
+@pytest.mark.parametrize(
+    ("model_id", "kwargs"),
+    [
+        ("openai:gpt-5.6-sol", {}),
+        ("anthropic:claude-opus-5-5", {}),
+        ("baseten:zai-org/GLM-5", {}),
+        (
+            "fireworks:accounts/fireworks/models/glm-5p2",
+            {"model_kwargs": {"reasoning_effort": "high"}},
+        ),
+    ],
+)
+async def test_gateway_calls_name_robin_as_the_service(
+    monkeypatch: pytest.MonkeyPatch, model_id: str, kwargs: dict[str, object]
+) -> None:
+    """Every gateway-routed provider sends the service header, keeping its own request settings."""
+    requests: list[tuple[str | None, bytes]] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requests.append((request.headers.get(model.GATEWAY_SERVICE_HEADER), await request.read()))
+        return web.json_response({"error": {"message": "stop"}}, status=400)
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "dummy")
+    async with _http_server(handler) as base_url:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
+        chat_model = model.build_chat_model(
+            model_id, {"max_retries": 0, **kwargs}, use_gateway=True
+        )
+        with pytest.raises(Exception):  # noqa: B017, PT011 - the stub always answers 400
+            await chat_model.ainvoke("hi")
+
+    assert [service for service, _ in requests] == ["robin"]
+    if "model_kwargs" in kwargs:
+        assert b'"reasoning_effort":"high"' in requests[0][1].replace(b" ", b"")
 
 
 # --- resolve_gateway_enabled --------------------------------------------------

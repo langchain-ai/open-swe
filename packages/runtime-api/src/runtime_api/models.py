@@ -360,6 +360,14 @@ def provider_model_kwargs(
 
 DEFAULT_GATEWAY_BASE_URL: Final = "https://gateway.smith.langchain.com"
 
+# The gateway records every ``X-Gateway-*`` request header as metadata. Gateway
+# usage can be broken down by it, and spend caps and rate limits can be scoped to
+# it. ``X-Gateway-Service`` is the gateway's conventional header for the calling
+# product, so Robin's model calls stay separable from the same person's other
+# gateway traffic.
+GATEWAY_SERVICE_HEADER: Final = "X-Gateway-Service"
+GATEWAY_SERVICE_NAME: Final = "robin"
+
 # Provider prefix -> base-URL suffix appended to the gateway host. Each suffix
 # matches the SDK's own path handling: the OpenAI SDK appends
 # ``/chat/completions`` to a ``/v1`` base, Fireworks appends
@@ -471,12 +479,20 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
         "base_url": f"{gateway_base_url()}{path}",
         "api_key": api_key,
     }
+    headers = {GATEWAY_SERVICE_HEADER: GATEWAY_SERVICE_NAME}
     if provider == "openai":
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.
         overrides["use_responses_api"] = gateway_openai_use_responses()
-    elif provider == "google_genai":
+    if provider == "google_genai":
         overrides["api_version"] = "v1beta"
+        overrides["additional_headers"] = headers
+    elif provider == "fireworks":
+        # ChatFireworks has no client-level header option; it sends
+        # ``model_kwargs["extra_headers"]`` with every request.
+        overrides["model_kwargs"] = {"extra_headers": headers}
+    else:
+        overrides["default_headers"] = headers
     return overrides
 
 
@@ -570,7 +586,17 @@ def model_init_kwargs(
     if enabled:
         overrides = gateway_overrides(model_id)
         if overrides is not None:
-            model_kwargs.update(overrides)
+            for key, value in overrides.items():
+                existing = model_kwargs.get(key)
+                if isinstance(existing, Mapping) and isinstance(value, Mapping):
+                    merged = dict(existing)
+                    for inner_key, inner_value in value.items():
+                        current = merged.get(inner_key)
+                        if isinstance(current, Mapping) and isinstance(inner_value, Mapping):
+                            inner_value = {**current, **inner_value}
+                        merged[inner_key] = inner_value
+                    value = merged
+                model_kwargs[key] = value
             gateway_applied = True
 
     if model_id.startswith("openai:"):
