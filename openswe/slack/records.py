@@ -167,7 +167,7 @@ class SlackRun(Base):
     thread_ts: Mapped[str]
     message_ts: Mapped[str | None] = mapped_column(default=None)
     trace_message_ts: Mapped[str | None] = mapped_column(default=None)
-    # The message the run keeps updating with its latest work; its final reply replaces it.
+    # Unused: kept for rows written by the removed Slack live activity message.
     live_message_ts: Mapped[str | None] = mapped_column(default=None)
     triggering_user_id: Mapped[str | None] = mapped_column(default=None)
     agent_thread_id: Mapped[str | None] = mapped_column(default=None)
@@ -195,48 +195,6 @@ class SlackRun(Base):
         if run is None or not _live(run.reply_expires_at):
             return set(), 0
         return set(run.reply_seen_ts or ()), run.reply_conflicts or 0
-
-    @classmethod
-    async def live_message(cls, channel_id: str, run_id: str) -> str | None:
-        """The message the run is keeping updated with its latest work, if it has one now."""
-        async with postgres.session() as session:
-            run = await _run(session, channel_id, run_id)
-        return run.live_message_ts if run is not None else None
-
-    @classmethod
-    async def is_live_message(cls, channel_id: str, message_ts: str) -> bool:
-        """Whether ``message_ts`` is the live message of a run that is still working."""
-        async with postgres.session() as session:
-            found = await session.scalar(
-                select(cls.id).where(
-                    cls.channel_id == channel_id, cls.live_message_ts == message_ts
-                )
-            )
-        return found is not None
-
-    @classmethod
-    async def set_live_message(
-        cls, channel_id: str, thread_ts: str, run_id: str, message_ts: str | None
-    ) -> None:
-        """Record the run's live message, or with ``None`` that it has none right now."""
-        upsert = insert(cls).values(
-            id=uuid7(),
-            channel_id=channel_id,
-            run_id=run_id,
-            thread_ts=thread_ts,
-            live_message_ts=message_ts,
-        )
-        async with postgres.session() as session:
-            await SlackChannel.ensure(session, channel_id)
-            await session.execute(
-                upsert.on_conflict_do_update(
-                    index_elements=[cls.channel_id, cls.run_id],
-                    set_={
-                        "live_message_ts": upsert.excluded.live_message_ts,
-                        "updated_at": func.clock_timestamp(),
-                    },
-                )
-            )
 
     @classmethod
     async def record_reply_conflict(

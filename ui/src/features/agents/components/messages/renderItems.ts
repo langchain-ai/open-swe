@@ -154,8 +154,7 @@ export type WorkTailEntry =
  * folded run shows what it is doing without its full log. A tool call takes
  * one line; a thought takes its heading and up to three lines of its latest
  * paragraph. Calls waiting on approval are left out: the fold shows those in
- * full. The Slack live message (`openswe/slack/live_activity.py`) selects by
- * the same rules.
+ * full.
  */
 export class WorkTail {
   static readonly MAX_LINES = 10

@@ -184,8 +184,6 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     slack_ask: bool | None = None
     slack_kickoff_eligible: bool | None = None
-    # The run keeps a live activity message in its Slack thread, which its final reply replaces.
-    slack_live_activity: bool | None = None
     # First run of a thread broken out from another Slack thread.
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
