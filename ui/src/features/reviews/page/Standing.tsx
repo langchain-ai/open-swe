@@ -27,6 +27,7 @@ import type {
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn, INHERITED_LINK } from "@/lib/utils"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -680,7 +681,8 @@ function BranchRow({
             />
           }
         >
-          Conflicts with {detail.pr.base_ref} must be resolved
+          Conflicts with <BranchLink pr={pr} branch={detail.pr.base_ref} /> must
+          be resolved
         </Row>
       )}
       {status.mergeState === "behind" && canUpdateBranch(status) && (
@@ -691,7 +693,7 @@ function BranchRow({
             <UpdatePullRequestBranch pr={status} onUpdated={refresh.status} />
           }
         >
-          Behind {detail.pr.base_ref}
+          Behind <BranchLink pr={pr} branch={detail.pr.base_ref} />
         </Row>
       )}
       {status.draft && (
@@ -735,12 +737,30 @@ function MergeRow({
         />
       }
     >
-      {merged
-        ? "Merging…"
-        : status.mergeState === "unstable"
-          ? `Into ${baseRef}, though some checks aren't passing`
-          : `Into ${baseRef}`}
+      {merged ? (
+        "Merging…"
+      ) : (
+        <>
+          Into <BranchLink pr={pr} branch={baseRef} />
+          {status.mergeState === "unstable" &&
+            ", though some checks aren't passing"}
+        </>
+      )}
     </Row>
+  )
+}
+
+function BranchLink({ pr, branch }: { pr: PullRequestRef; branch: string }) {
+  return (
+    <MacawLink
+      variant="xs"
+      href={githubUrls.branch(pr, branch)}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(INHERITED_LINK, subtleLink)}
+    >
+      {branch}
+    </MacawLink>
   )
 }
 
