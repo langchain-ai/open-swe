@@ -9,7 +9,7 @@ reference ``users.id`` instead of a provider-specific handle.
 """
 
 import logging
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
@@ -515,6 +515,19 @@ class User(Base):
         if "@" in handle:
             return await cls.for_email(handle)
         return await cls.for_login("github", handle)
+
+    @classmethod
+    async def automation_creator(cls, record: Mapping[str, object]) -> Self | None:
+        """Who created an automation: by stable user id, or by login for rows saved before it."""
+        if user_id := record.get("created_by_user_id"):
+            try:
+                return await cls.get(UUID(str(user_id)))
+            except ValueError:
+                return None
+        login = record.get("created_by")
+        if not isinstance(login, str) or not login.strip():
+            return None
+        return await cls.for_login("github", login.strip())
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:

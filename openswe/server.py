@@ -1683,6 +1683,23 @@ async def record_agent_run(
     if thread_id is None:
         return
     sender = started.sender or (None if carried else agent_sender(config, turn))
+    if sender is not None and not (
+        sender.github_login or sender.github_user_id or sender.user_email
+    ):
+        # An automation runs as no one; its usage is its creator's.
+        try:
+            creator = await cfg.automation_creator()
+        except Exception:
+            logger.warning(
+                "Failed to look up the automation's creator",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+            creator = None
+        if creator is not None and creator.github_login:
+            sender = sender.model_copy(
+                update={"github_login": creator.github_login, "user_email": creator.email}
+            )
     model_id = started.model_id or (None if carried else cfg.resolved_agent_model_id)
     effort = started.effort or (None if carried else cfg.resolved_agent_effort)
     source = (sender.source if sender is not None else None) or "dashboard"

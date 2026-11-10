@@ -407,6 +407,12 @@ async def _run_user_metadata(
         elif cfg.user_email:
             user = await User.for_email(cfg.user_email)
         else:
+            # An automation runs as no one; only its spend is credited to its creator.
+            creator = await cfg.automation_creator()
+            if creator is not None:
+                billing = creator.billing_trace_metadata()
+                billing.pop("user_id", None)
+                metadata.update(billing)
             return metadata
         if user is not None:
             metadata.update(user.billing_trace_metadata())

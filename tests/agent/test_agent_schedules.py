@@ -1162,6 +1162,114 @@ async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_th
     assert "admin_thread" not in configurable
 
 
+async def test_automation_spend_is_credited_to_its_creator_without_acting_as_them(
+    fake_client, monkeypatch
+) -> None:  # noqa: ANN001
+    from openswe import dispatch
+    from openswe.agent_api.connections import ACTING_USER_KEY
+    from openswe.users import User, UserIdentity
+
+    alice = User(
+        id=uuid.uuid4(),
+        identities=[
+            UserIdentity(provider="github", external_id="1", login="alice"),
+            UserIdentity(provider="slack", external_id="U1", email="alice@example.com"),
+        ],
+    )
+
+    async def by_login(provider: str, login: str) -> User | None:
+        return alice if (provider, login) == ("github", "alice") else None
+
+    async def by_id(user_id: uuid.UUID) -> User | None:
+        return alice if user_id == alice.id else None
+
+    monkeypatch.setattr(User, "for_login", by_login)
+    monkeypatch.setattr(User, "get", by_id)
+    await _seed({"id": SCHED_1, "prompt": "Triage", "enabled": True, "created_by": "alice"})
+
+    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
+
+    run = fake_client.runs.created[0]
+    assert run["metadata"]["billing_bucket"] == "user"
+    assert run["metadata"]["billed_robin_user_id"] == str(alice.id)
+    assert run["metadata"]["billed_user_email"] == "alice@example.com"
+    # Crediting spend never makes the run act as, or with the credentials of, its creator.
+    assert "user_id" not in run["metadata"]
+    assert ACTING_USER_KEY not in run["metadata"]
+    assert "github_login" not in run["config"]["configurable"]
+    assert "user_email" not in run["config"]["configurable"]
+
+    # A run that names the automation but isn't on its own thread credits no one.
+    await fake_client.threads.create(
+        thread_id="another-thread",
+        metadata={"owner_type": "user", "visibility": "private", "schedule_id": SCHED_1},
+    )
+    await dispatch.create_durable_run(
+        "another-thread",
+        "agent",
+        input={"messages": []},
+        source="schedule",
+        thread_title=None,
+        config={
+            "configurable": {
+                "thread_id": "another-thread",
+                "source": "schedule",
+                "schedule_id": SCHED_1,
+            }
+        },
+        client=fake_client,
+    )
+    assert fake_client.runs.created[-1]["metadata"]["billing_bucket"] == "system"
+    assert "billed_robin_user_id" not in fake_client.runs.created[-1]["metadata"]
+
+
+async def test_automation_spend_follows_its_creator_across_a_github_rename(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    from openswe.users import User
+
+    alice = await User.sign_in("github", "3001", login="alice", email="alice@example.com")
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default", prompt="Triage", triggers=[ScheduleTrigger(cron="0 9 * * *")]
+        ),
+        email="alice@example.com",
+    )
+    record = await schedules.get_agent_schedule(created["id"])
+    assert record is not None
+    assert record["created_by_user_id"] == str(alice.id)
+
+    await User.sign_in("github", "3001", login="alice-renamed")
+    await User.sign_in("github", "3002", login="alice")
+
+    assert (await schedules.launch_scheduled_agent_run(created["id"]))["status"] == "started"
+    run = fake_client.runs.created[-1]
+    assert run["metadata"]["billed_robin_user_id"] == str(alice.id)
+    assert "automation_creator_user_id" not in run["config"]["configurable"]
+
+
+async def test_automation_spend_is_credited_after_the_automation_is_deleted(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    from openswe.run_config import RunConfig
+    from openswe.users import User
+
+    alice = await User.sign_in("github", "3003", login="alice", email="alice@example.com")
+    await _seed({"id": SCHED_1, "prompt": "Triage", "enabled": True, "created_by": "alice"})
+    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
+    configurable = fake_client.runs.created[-1]["config"]["configurable"]
+
+    await schedules.delete_agent_schedule(SCHED_1)
+
+    assert await schedules.get_agent_schedule(SCHED_1) is None
+    creator = await RunConfig.model_validate(configurable).automation_creator()
+    assert creator is not None
+    assert creator.id == alice.id
+
+
 @pytest.mark.parametrize(("private", "scope"), [(False, ["langchain-ai/open-swe"]), (True, None)])
 async def test_an_issue_automation_on_a_public_repository_records_a_single_repository_scope(
     fake_client, auth, planning, private: bool, scope: list[str] | None

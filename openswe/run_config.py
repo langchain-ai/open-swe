@@ -23,7 +23,8 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from uuid import UUID
 
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
@@ -33,6 +34,9 @@ from openswe.invocation import resolve_invocation_id
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.page_commands.offers import PageSession
 from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
+
+if TYPE_CHECKING:
+    from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -376,3 +380,25 @@ class RunConfig(BaseModel):
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    async def automation_creator(self) -> User | None:
+        """Who created the automation this run executes on its own thread, to credit its spend to.
+
+        Only for attribution: an automation run never acts as, or with the credentials
+        of, its creator.
+        """
+        from openswe.schedules.store import get_agent_schedule, schedule_thread_metadata
+        from openswe.users import User
+
+        if not self.schedule_id:
+            return None
+        metadata = await schedule_thread_metadata(self)
+        if metadata is None or metadata.get("schedule_id") != self.schedule_id:
+            return None
+        if creator_id := metadata.get("automation_creator_user_id"):
+            try:
+                return await User.get(UUID(str(creator_id)))
+            except ValueError:
+                return None
+        record = await get_agent_schedule(self.schedule_id)
+        return await User.automation_creator(record) if record is not None else None

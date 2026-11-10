@@ -362,6 +362,9 @@ async def _load_records(
                 "branch_prefix": row["branch_prefix"],
                 "enabled": row["enabled"],
                 "created_by": row["created_by"],
+                "created_by_user_id": str(row["created_by_user_id"])
+                if row.get("created_by_user_id")
+                else None,
                 "updated_by": row["updated_by"],
                 "user_email": row["user_email"],
                 "created_at": _iso(row["created_at"]),
@@ -701,6 +704,7 @@ async def create_agent_schedule(
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     automation_id = str(uuid.uuid4())
     trigger_ids = [uuid.uuid4() for _ in triggers]
+    creator = await User.for_login("github", login)
     cron_ids = await _create_crons(
         automation_id, triggers, trigger_ids, enabled=True, created_by=login, saved_by=login
     )
@@ -710,9 +714,9 @@ async def create_agent_schedule(
                 text(
                     "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, "
                     "model, effort, base_branch, branch_prefix, enabled, created_by, "
-                    "updated_by, user_email) VALUES (:id, :workspace_id, :name, :prompt, "
-                    ":admin_thread, :model, :effort, :base_branch, :branch_prefix, true, "
-                    ":login, :login, :user_email)"
+                    "updated_by, user_email, created_by_user_id) VALUES (:id, :workspace_id, "
+                    ":name, :prompt, :admin_thread, :model, :effort, :base_branch, "
+                    ":branch_prefix, true, :login, :login, :user_email, :creator_id)"
                 ),
                 {
                     "id": uuid.UUID(automation_id),
@@ -726,6 +730,7 @@ async def create_agent_schedule(
                     "branch_prefix": profile.get("branch_prefix"),
                     "login": login,
                     "user_email": (run_email or "").strip().lower(),
+                    "creator_id": creator.id if creator is not None else None,
                 },
             )
             await _insert_triggers(conn, automation_id, triggers, trigger_ids, cron_ids)
@@ -881,7 +886,7 @@ def _admin_thread_enabled(record: dict[str, Any]) -> bool:
     )
 
 
-async def _schedule_thread_metadata(cfg: RunConfig) -> dict[str, Any] | None:
+async def schedule_thread_metadata(cfg: RunConfig) -> dict[str, Any] | None:
     """Metadata of the public system thread an automation run executes on, if it is one."""
     if cfg.source != "schedule" or not cfg.thread_id or cfg.github_login or cfg.user_email:
         return None
@@ -898,7 +903,7 @@ async def authorized_schedule_run(cfg: RunConfig) -> dict[str, Any] | None:
     """The automation whose own thread this run executes on, or ``None`` for any other run."""
     if not cfg.schedule_id:
         return None
-    metadata = await _schedule_thread_metadata(cfg)
+    metadata = await schedule_thread_metadata(cfg)
     if metadata is None or metadata.get("schedule_id") != cfg.schedule_id:
         return None
     return await get_agent_schedule(cfg.schedule_id)
@@ -908,7 +913,7 @@ async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
     """Verify a system admin grant against its saved invocation and current schedule."""
     if cfg.admin_thread is not True or not cfg.invocation_id:
         return None
-    metadata = await _schedule_thread_metadata(cfg)
+    metadata = await schedule_thread_metadata(cfg)
     if metadata is None:
         return None
     grant = metadata.get("system_authorization")
@@ -924,7 +929,7 @@ async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
     return record if record and _admin_thread_enabled(record) else None
 
 
-def _agent_run_metadata(
+async def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
     repo: dict[str, str] | None,
@@ -960,6 +965,8 @@ def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if admin_thread:
         metadata["admin_thread"] = True
+    if (creator := await User.automation_creator(record)) is not None:
+        metadata["automation_creator_user_id"] = str(creator.id)
     return metadata
 
 
@@ -1058,7 +1065,7 @@ async def _launch_agent_schedule_record(
     run_config = await _agent_run_config(
         record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
-    metadata = _agent_run_metadata(
+    metadata = await _agent_run_metadata(
         record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
     if token_repositories is not None:
@@ -1605,7 +1612,7 @@ async def _planned_channel_automation(
     schedule_id = record["id"]
     admin_thread = _admin_thread_enabled(record)
     run_config = await _agent_run_config(record, thread_id, repo, admin_thread=admin_thread)
-    metadata = _agent_run_metadata(record, thread_id, repo, admin_thread=admin_thread)
+    metadata = await _agent_run_metadata(record, thread_id, repo, admin_thread=admin_thread)
     if token_repositories is not None:
         metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
     if admin_thread:
