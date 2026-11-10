@@ -703,7 +703,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     }
 
     const toggle = page
-      .getByRole("button", { name: "Checking the snapshot status" })
+      .getByRole("button", { name: "Thought Checking the snapshot status" })
       .first();
     await expect(toggle).toBeVisible();
     await expect(

@@ -13,6 +13,7 @@ import { Thought } from "@/features/agents/components/messages/thought"
 
 export type WorkEntryIconName =
   | "bot"
+  | "brain"
   | "check"
   | "circle-alert"
   | "eye"
