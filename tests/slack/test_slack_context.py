@@ -576,6 +576,46 @@ async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
     assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
 
 
+@pytest.mark.parametrize(
+    ("settled", "dm", "quoted"),
+    [
+        # A conversation MDA's channel just claimed is private only as a placeholder: in a
+        # channel, its first turn quotes everyone who spoke before the mention.
+        (False, False, None),
+        (False, True, ["U123"]),
+        # A thread someone made private quotes only those who may prompt it.
+        (True, False, ["U123"]),
+    ],
+)
+async def test_a_new_conversations_first_turn_quotes_everyone_in_its_channel(
+    slack_file_mention, monkeypatch, settled, dm, quoted
+):
+    request, threads, _ = slack_file_mention
+    if dm:
+        request = request.model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
+
+    async def login_for_slack(slack_user_id: str) -> str:
+        return "mason-gh" if slack_user_id == "U123" else "suraj-gh"
+
+    monkeypatch.setattr(webhook_common.User, "login_for_slack", login_for_slack)
+    threads.metadata = {
+        "visibility": "private",
+        "owner_login": "mason-gh",
+        "source": "slack",
+        **({} if settled else {webhook_common.PROVISIONAL_VISIBILITY_KEY: True}),
+    }
+    read = slack_webhooks.SlackTurnRead(
+        clean_text="do it",
+        context_user_ids=["U123", "U456"],
+        participant_user_ids=["U123", "U456"],
+    )
+
+    _, prompt = await slack_webhooks.prepare_slack_channel_run(request, None, read=read)
+
+    assert prompt is not None
+    assert prompt.promptable_user_ids == quoted
+
+
 @pytest.mark.parametrize("ask_channel", [False, True])
 async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(
     slack_file_mention, monkeypatch, ask_channel

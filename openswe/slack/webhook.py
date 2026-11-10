@@ -1070,8 +1070,15 @@ async def _process_slack_mention_impl(
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     # A private thread's prompt quotes only the people who may prompt it, and Robin's notices.
+    # A conversation MDA's channel just claimed is private only as a placeholder until this
+    # turn writes its visibility, so it quotes as that visibility says.
+    private = (
+        common.thread_is_private(thread_metadata)
+        if common.visibility_is_settled(thread_metadata)
+        else request.web_only or _slack_thread_visibility(channel_context) == "private"
+    )
     promptable_user_ids: list[str] | None = None
-    if common.thread_is_private(thread_metadata):
+    if private:
         context_messages = SlackNotice.private_thread_messages(
             context_messages,
             lambda message: common.thread_is_promptable(
