@@ -47,6 +47,7 @@ from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
 from openswe.utils.langsmith import resolve_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,12 @@ _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
 # as, which decides whether its catalog names that person's connections.
-_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", ACTING_USER_KEY)
+_TOKEN_METADATA_KEYS: Final = (
+    "event_match_ids",
+    "ls_attribution_identifier",
+    ACTING_USER_KEY,
+    *BILLING_FIELDS,
+)
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
@@ -483,6 +489,45 @@ class MdaRuntime:
         assistant_id = payload.get("assistant_id")
         if not isinstance(assistant_id, str):
             raise ValueError("A run needs an assistant_id")
+        run_metadata.pop("billed_user_id", None)
+        run_metadata["created_by"] = None
+        run_metadata.setdefault(
+            "billing_bucket", "channel" if dispatch.channel_of(thread_metadata) else "system"
+        )
+        actor = run_metadata.get(ACTING_USER_KEY)
+        if (
+            assistant_id == "agent"
+            and isinstance(actor, str)
+            and actor != run_metadata.get("billed_robin_user_id")
+        ):
+            from uuid import UUID
+
+            from openswe.users import User
+
+            for key in BILLING_USER_FIELDS:
+                run_metadata.pop(key, None)
+            run_metadata["billing_bucket"] = (
+                "channel" if dispatch.channel_of(thread_metadata) else "system"
+            )
+            try:
+                user = await User.get(UUID(actor))
+                if user is not None:
+                    run_metadata.update(user.billing_trace_metadata())
+            except Exception:
+                logger.warning("Could not resolve acting user for trace metadata", exc_info=True)
+        if run_metadata.get("user_id") != run_metadata.get("billed_robin_user_id"):
+            run_metadata.pop("user_id", None)
+        raw_config_metadata = config.get("metadata")
+        if isinstance(raw_config_metadata, dict):
+            config["metadata"] = {
+                **{
+                    key: value
+                    for key, value in raw_config_metadata.items()
+                    if key not in BILLING_FIELDS and key != "billed_user_id"
+                },
+                **{key: run_metadata[key] for key in BILLING_FIELDS if key in run_metadata},
+                "created_by": None,
+            }
         context = dict(
             await remote_run_context(
                 configurable,

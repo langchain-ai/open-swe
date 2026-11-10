@@ -424,6 +424,7 @@ async def test_a_new_thread_runs_on_mda(
     assert run_config(signed)["metadata"] == {
         "event_match_ids": ["match-1"],
         "ls_attribution_identifier": "trigger",
+        "billing_bucket": "system",
     }
 
 
@@ -459,8 +460,20 @@ async def test_runs_include_the_current_slack_thread_link(
     assert status == 200
     [(_, sent)] = harness.forwarded
     expected: dict[str, JsonValue] = {"slack_thread_url": permalink} if permalink else {}
-    assert sent["metadata"] == {"kind": "follow_up", **expected}
-    assert sent["config"] == {"metadata": {"invocation_id": "turn-1", **expected}}
+    assert sent["metadata"] == {
+        "kind": "follow_up",
+        "created_by": None,
+        "billing_bucket": "system",
+        **expected,
+    }
+    assert sent["config"] == {
+        "metadata": {
+            "invocation_id": "turn-1",
+            "created_by": None,
+            "billing_bucket": "system",
+            **expected,
+        }
+    }
 
 
 async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(

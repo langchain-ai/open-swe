@@ -1221,6 +1221,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         "ls_repo_provider": "github",
         "ls_attribution_identifier": "trigger",
         "LANGSMITH_AGENT_VERSION": "backend-sha",
+        "user_id": "7e6f62e6-0313-413c-b964-710ddc5461a4",
+        "billed_user_email": "human@example.com",
+        "billing_bucket": "user",
     }
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = _run_backend(
@@ -1253,7 +1256,12 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 
     client.update_run.side_effect = update
     tracer = LangChainTracer(client=client, project_name="test")
-    parent = RunTree(name="external request", run_type="chain", ls_client=client)
+    parent = RunTree(
+        name="external request",
+        run_type="chain",
+        ls_client=client,
+        extra={"metadata": {"created_by": "system"}},
+    )
     monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     graph = create_deep_agent(
         model=FakeListChatModel(responses=["done"]),
@@ -1265,6 +1273,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         "callbacks": [tracer],
         "metadata": {
             "invocation_id": "turn",
+            "created_by": "system",
             "existing_key": "preserved",
             "revision_id": "queued-sha",
             "LANGSMITH_AGENT_VERSION": "queued-agent-sha",
@@ -1306,6 +1315,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert reconciled[root_id]["revision_id"] == "runtime-sha"
     assert reconciled[root_id]["LANGSMITH_AGENT_VERSION"] == "backend-sha"
     assert reconciled[root_id]["environment"] == "production"
+    assert "created_by" not in reconciled[root_id]
+    assert parent.metadata["created_by"] == "system"
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
     final["ls_git_branch"] = "Next/turn"
@@ -1322,6 +1333,46 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         )
     await turn_trace(backend.run).ended()
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
+
+
+@pytest.mark.parametrize("creator", ["system", "known-creator", None])
+async def test_root_attribution_survives_a_missing_catalog(
+    monkeypatch: pytest.MonkeyPatch, creator: str | None
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = RunContext(run_token="token", invocation_id="turn").run().backend
+    client = MagicMock(spec=Client)
+    updates: list[tuple[object, dict[str, object]]] = []
+
+    def update(run_id: object, **kwargs: object) -> None:
+        updates.append((run_id, deepcopy(kwargs)))
+
+    client.update_run.side_effect = update
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=[BackendRunMiddleware(backend)],
+    )
+    billing = {
+        "user_id": "7e6f62e6-0313-413c-b964-710ddc5461a4",
+        "billing_bucket": "user",
+    }
+    with tracing_context(enabled=True):
+        with pytest.raises(BackendCallError, match="without its catalog"):
+            await graph.ainvoke(
+                {"messages": [("user", "hello")]},
+                {
+                    "callbacks": [LangChainTracer(client=client, project_name="test")],
+                    "metadata": {"invocation_id": "turn", "created_by": creator, **billing},
+                },
+            )
+    root = turn_trace(backend.run).root
+    assert root is not None
+    assert root.metadata.items() >= billing.items()
+    assert root.metadata.get("created_by") == (None if creator == "system" else creator)
+    root_patches = [patch for run_id, patch in updates if run_id == root.id]
+    assert root_patches
+    assert _run_metadata(root_patches[-1]).items() >= billing.items()
+    assert _run_metadata(root_patches[-1]).get("created_by") != "system"
 
 
 @pytest.mark.parametrize("destination", ["project", "address"])

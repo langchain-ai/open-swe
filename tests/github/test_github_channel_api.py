@@ -119,6 +119,7 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         AsyncMock(
             return_value={
                 "ls_repo_provider": "github",
+                "billing_bucket": "user",
                 "user_id": "user-1",
                 "ls_attribution_identifier": "ada",
             }

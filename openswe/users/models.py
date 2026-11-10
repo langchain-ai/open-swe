@@ -87,6 +87,17 @@ class User(Base):
         """This person's handle on ``provider``, for display; never an identity key."""
         return self._identity_field(provider, "login") or self.display_name or str(self.id)[:8]
 
+    def billing_trace_metadata(self) -> dict[str, str]:
+        """Trace-only attribution to this Robin user."""
+        metadata = {
+            "user_id": str(self.id),
+            "billing_bucket": "user",
+            "billed_robin_user_id": str(self.id),
+        }
+        if self.email:
+            metadata["billed_user_email"] = self.email
+        return metadata
+
     @property
     def github_login(self) -> str:
         """The GitHub handle, or ``""`` — unlike :meth:`login_for`, never a stand-in."""

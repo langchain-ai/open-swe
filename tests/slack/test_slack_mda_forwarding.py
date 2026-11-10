@@ -856,7 +856,9 @@ def _prepared(
     monkeypatch.setattr(slack_service, "prepare_slack_channel_run", prepare)
     monkeypatch.setattr(slack_channel.index, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_channel, "channel_run_starting", AsyncMock())
-    monkeypatch.setattr(dispatch, "_run_user_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        dispatch, "_run_user_metadata", AsyncMock(return_value={"billing_bucket": "system"})
+    )
     stub_mda_runtime(monkeypatch)
     return prepare
 
@@ -981,6 +983,7 @@ async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
         AsyncMock(
             return_value={
                 "ls_repo_provider": "github",
+                "billing_bucket": "user",
                 "user_id": "user-1",
                 "ls_attribution_identifier": "ada",
             }

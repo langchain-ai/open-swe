@@ -374,7 +374,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         """The update preparing the run makes, and whether the sandbox is open, as far as
         this run tried."""
         trace = turn_trace(self._backend.run)
-        trace.start(self._trace_metadata())
+        trace.start()
+        trace.update(self._trace_metadata())
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
             thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
@@ -382,6 +383,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
+            trace.update(self._trace_metadata())
         for read in self._read_ahead:
             read()
         # What an earlier run left unsent goes out before anything this one does.

@@ -4,12 +4,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 
 from openswe.threads import wake_budget
 from openswe.threads.oswe_thread import OsweThreadState
+from openswe.users import User, UserIdentity
 
 wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
 
@@ -385,6 +387,13 @@ async def test_queued_wakeups_run_even_when_late(
 
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: SimpleNamespace(runs=_Runs()))
     monkeypatch.setattr(wakeup_tool, "COMPLETION_WEBHOOK_URL", "https://example.com/complete")
+    actor = User(
+        id=UUID("00000000-0000-4000-8000-000000000001"),
+        identities=[
+            UserIdentity(provider="langsmith", external_id="00000000-0000-4000-8000-000000000002")
+        ],
+    )
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=actor))
     now = datetime.now(UTC)
     due_at = now - timedelta(seconds=lateness_seconds)
     original_input = wakeup_tool.build_run_input(
@@ -395,7 +404,14 @@ async def test_queued_wakeups_run_even_when_late(
         {
             "thread_id": "t1",
             "input": original_input,
-            "config": {"configurable": {"thread_id": "t1", "source": "slack"}},
+            "config": {
+                "configurable": {
+                    "thread_id": "t1",
+                    "source": "slack",
+                    "github_login": "alice",
+                    "invocation_id": "wakeup-invocation",
+                }
+            },
             "metadata": {"kind": "thread_wakeup", "thread_id": "t1"},
             "expires_at": (due_at + timedelta(seconds=90)).isoformat(),
         }
@@ -409,8 +425,11 @@ async def test_queued_wakeups_run_even_when_late(
     [run] = started
     assert run["thread_id"] == "t1"
     assert run["assistant_id"] == "agent"
-    assert run["config"] == payload["config"]
-    assert run["metadata"] == payload["metadata"]
+    prepared = wakeup_tool._run_config.validate_python(run["config"])
+    assert prepared["configurable"]["invocation_id"] == "wakeup-invocation"
+    assert run["metadata"] == prepared["metadata"]
+    assert prepared["metadata"].items() >= actor.billing_trace_metadata().items()
+    assert prepared["metadata"]["kind"] == "thread_wakeup"
     assert run["multitask_strategy"] == "enqueue"
     assert run["webhook"] == "https://example.com/complete"
     run_input = wakeup_tool._run_input.validate_python(run["input"])

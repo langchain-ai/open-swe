@@ -85,14 +85,19 @@ class TurnTrace:
             return current
         return None
 
-    def start(self, metadata: Mapping[str, JsonValue]) -> None:
+    def start(self) -> None:
         self.root = None
         try:
             self.root = self.current_root()
-            if self.root is not None:
-                self.root.metadata.update({**metadata, **_deployment_provenance()})
+            self.update({})
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
+
+    def update(self, metadata: Mapping[str, JsonValue]) -> None:
+        if self.root is not None:
+            self.root.metadata.update({**metadata, **_deployment_provenance()})
+            if self.root.metadata.get("created_by") == "system":
+                self.root.metadata.pop("created_by")
 
     def record_model(self, model_id: str) -> None:
         """Tag the turn with its most recently attempted model, without relabeling child calls."""
@@ -176,6 +181,8 @@ class TurnTrace:
                 ) != root.metadata.get("invocation_id"):
                     continue
                 run.metadata.update(metadata)
+                if run is root and run.metadata.get("created_by") == "system":
+                    run.metadata.pop("created_by")
                 runs.append(run)
                 pending.extend(run.child_runs)
 

@@ -44,7 +44,7 @@ from runtime_api.workers import (
 from openswe.agent_api.client import start_remote_run
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.tokens import RemoteRun, WorkerGrant, sign_worker_grant
-from openswe.dispatch import prepare_run_config
+from openswe.dispatch import prepare_durable_run
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.prompts import prompt
 from openswe.tasks import service, store
@@ -149,7 +149,8 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
     # Registered as the coordinator's worker_launched registers it, whichever comes first.
     instructions = _assigned_instructions(grant.coordinator.thread_id, body.instructions)
     await service.register_async_worker(actor, grant.request_id, body.thread_id, instructions)
-    configurable = prepare_run_config(
+    prepared = await prepare_durable_run(
+        grant.coordinator.assistant_id,
         {
             "configurable": {
                 **await service.recipient_config(body.thread_id),
@@ -157,11 +158,11 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
             }
         },
         None,
-    )["configurable"]
+        source="task",
+    )
     started = await start_remote_run(
-        _json_object.validate_python(configurable),
-        # MDA started this run, not a task message: no run metadata comes with it.
-        metadata={},
+        _json_object.validate_python(prepared["configurable"]),
+        metadata=_json_object.validate_python(prepared["metadata"]),
         thread_id=body.thread_id,
         assistant_id=grant.coordinator.assistant_id,
     )

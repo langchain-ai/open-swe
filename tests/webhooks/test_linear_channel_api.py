@@ -240,6 +240,7 @@ async def test_a_session_turn_gets_the_run_context_mda_starts_it_with(
         AsyncMock(
             return_value={
                 "ls_repo_provider": "github",
+                "billing_bucket": "user",
                 "user_id": "user-1",
                 "ls_attribution_identifier": "ada",
             }

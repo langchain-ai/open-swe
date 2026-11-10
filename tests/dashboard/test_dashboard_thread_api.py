@@ -33,6 +33,7 @@ from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User
+from openswe.users.models import UserIdentity
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
@@ -582,9 +583,19 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     first = uuid7()
     second = uuid7()
 
-    async def by_login(provider: str, login: str) -> SimpleNamespace | None:
+    async def by_login(provider: str, login: str) -> User | None:
         return (
-            SimpleNamespace(id=second, github_login=login, email="second@example.com")
+            User(
+                id=second,
+                identities=[
+                    UserIdentity(
+                        provider="github",
+                        external_id="second",
+                        login=login,
+                        email="second@example.com",
+                    )
+                ],
+            )
             if (provider, login) == ("github", "second-gh")
             else None
         )
