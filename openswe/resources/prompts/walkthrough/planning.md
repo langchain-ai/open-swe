@@ -22,7 +22,9 @@ A chunk is one coherent concept, told through the hunks that make it up, whereve
 Gather related hunks from different files into one chunk instead of giving each hunk or each file its own.
 When git's hunk spans different chunks, or mixes imports with a real change, split it so each part lands in the chunk, or Other, it belongs to.
 Split between whole statements and blocks, never line by line: every chunk should read as contiguous code with its closing braces, not scattered single lines.
-Order the chunks so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, with related tests alongside the behavior they cover.
+Spend the first one or two chunks on the changes that are hard to undo once shipped: database migrations, public API changes and SDK changes.
+Skip this when the change has none.
+After those, order the chunks so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, with related tests alongside the behavior they cover.
 
 Send to Other the hunks that hold nothing but:
 
