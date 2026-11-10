@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import httpx2
 from fastmcp import Client
+from fastmcp.client.auth.oauth import ClientNotFoundError, ExpiredClientRegistrationError
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
@@ -23,6 +24,7 @@ from langsmith import tracing_context
 from runtime_api.catalog import McpServerSpec
 from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
 
+from mcp.client.auth.exceptions import OAuthFlowError
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
@@ -74,15 +76,106 @@ def catalog_note(failures: Sequence[str]) -> str:
     )
 
 
-def _backoff_failure(error: BaseException) -> bool:
-    if isinstance(error, BaseExceptionGroup):
-        return any(_backoff_failure(child) for child in error.exceptions)
-    return (
-        isinstance(error, MCPError)
-        and error.code == -32601
-        or isinstance(error, httpx2.HTTPStatusError)
-        and error.response.status_code == 404
-    )
+@dataclass(frozen=True)
+class _DiscoveryFailure:
+    error: BaseException
+
+    def exceptions(self) -> list[BaseException]:
+        pending = [self.error]
+        found: list[BaseException] = []
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            found.append(current)
+            if isinstance(current, BaseExceptionGroup):
+                pending.extend(reversed(current.exceptions))
+            cause = current.__cause__ or current.__context__
+            if cause is not None:
+                pending.append(cause)
+        return found
+
+    @staticmethod
+    def is_authentication(error: BaseException) -> bool:
+        return (
+            isinstance(
+                error,
+                (
+                    MCPOAuthError,
+                    OAuthFlowError,
+                    ClientNotFoundError,
+                    ExpiredClientRegistrationError,
+                ),
+            )
+            or isinstance(error, httpx2.HTTPStatusError)
+            and error.response.status_code in (401, 403)
+            or isinstance(error, RuntimeError)
+            and (
+                re.fullmatch(r"Unexpected authorization response: [1-5][0-9]{2}", str(error))
+                is not None
+                or str(error) == "OAuth callback handler could not be started"
+            )
+        )
+
+    def backoff(self, namespace: tuple[str, ...]) -> timedelta | None:
+        errors = self.exceptions()
+        if any(self.is_authentication(error) for error in errors):
+            return timedelta(minutes=15)
+        if namespace[0:1] == ("managed_tools",) and any(
+            isinstance(error, MCPError)
+            and error.code == -32601
+            or isinstance(error, httpx2.HTTPStatusError)
+            and error.response.status_code == 404
+            for error in errors
+        ):
+            return _MANAGED_FAILURE_BACKOFF
+        return None
+
+    def reason(self) -> str:
+        """Name the failure without echoing anything the request carried, such as credentials."""
+        errors = self.exceptions()
+        if any(self.is_authentication(current) for current in errors):
+            statuses = sorted(
+                {
+                    current.response.status_code
+                    for current in errors
+                    if isinstance(current, httpx2.HTTPStatusError)
+                    and current.response.status_code in (401, 403)
+                }
+            )
+            detail = f" (HTTP {', '.join(map(str, statuses))})" if statuses else ""
+            return (
+                f"MCP authentication failed{detail}; check the connection's credentials, "
+                "permissions, and OAuth settings; reconnect or update the connection"
+            )
+        unknown: list[str] = []
+        for current in errors:
+            if isinstance(current, BaseExceptionGroup):
+                continue
+            elif isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
+                return str(current)
+            elif isinstance(current, MCPError):
+                return f"MCP server returned error {current.code} while listing tools"
+            elif isinstance(current, httpx2.HTTPStatusError):
+                status = current.response.status_code
+                hint = {
+                    401: "Check the authentication headers",
+                    403: "Check credentials, permissions, the server region, and MCP access settings",
+                    404: "Check the MCP server URL",
+                    429: "Wait before retrying; the MCP server is rate limiting requests",
+                }.get(status, "Check the MCP server availability")
+                return f"MCP tool discovery failed (HTTP {status}). {hint}"
+            elif isinstance(current, (TimeoutError, httpx2.TimeoutException)):
+                return "MCP tool discovery timed out; check the server and try again"
+            elif isinstance(current, httpx2.NetworkError):
+                return f"Could not reach the MCP server ({type(current).__name__}); check DNS, TLS, and connectivity"
+            elif isinstance(current, httpx2.RemoteProtocolError):
+                return "The MCP server sent an invalid HTTP response; check the URL"
+            else:
+                unknown.append(type(current).__name__)
+        return f"Could not discover MCP tools ({' -> '.join(dict.fromkeys(unknown))}); check the URL and authentication headers"
 
 
 @dataclass(frozen=True)
@@ -151,39 +244,6 @@ async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> 
     return tools
 
 
-def _discovery_error(error: Exception) -> str:
-    """Name the failure without echoing anything the request carried, such as credentials."""
-    pending: list[BaseException] = [error]
-    unknown: list[str] = []
-    while pending:
-        current = pending.pop()
-        if isinstance(current, BaseExceptionGroup):
-            pending.extend(reversed(current.exceptions))
-        elif isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
-            return str(current)
-        elif isinstance(current, MCPError):
-            return f"MCP server returned error {current.code} while listing tools"
-        elif isinstance(current, httpx2.HTTPStatusError):
-            status = current.response.status_code
-            hint = {
-                401: "Check the authentication headers",
-                403: "Check credentials, permissions, the server region, and MCP access settings",
-                404: "Check the MCP server URL",
-                429: "Wait before retrying; the MCP server is rate limiting requests",
-            }.get(status, "Check the MCP server availability")
-            return f"MCP tool discovery failed (HTTP {status}). {hint}"
-        elif isinstance(current, (TimeoutError, httpx2.TimeoutException)):
-            return "MCP tool discovery timed out; check the server and try again"
-        # OS and TLS errors name the host at most, never the path, query, or headers.
-        elif isinstance(current, httpx2.NetworkError):
-            return f"Could not reach the MCP server: {current}"
-        elif isinstance(current, httpx2.RemoteProtocolError):
-            return "The MCP server sent an invalid HTTP response; check the URL"
-        else:
-            unknown.append(type(current).__name__)
-    return f"Could not discover MCP tools ({unknown[0]}); check the URL and authentication headers"
-
-
 def _discovery_slots() -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
     slots = _DISCOVERY_SLOTS.get(loop)
@@ -201,33 +261,30 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
 
     from langgraph_api.cache import cache_get, cache_set
 
-    key: str | None = None
-    if namespace[0:1] == ("managed_tools",):
-        key = (
-            "mcp-failure:"
-            + hashlib.sha256(
-                json.dumps((namespace, record.name, record.revision)).encode()
-            ).hexdigest()
-        )
-        failure: object = await cache_get(key)
-        if (
-            isinstance(failure, list)
-            and len(failure) == 2
-            and isinstance(failure[0], str)
-            and isinstance(failure[1], (int, float))
-            and time() < failure[1]
-        ):
-            raise MCPDiscoveryError(failure[0])
+    key = (
+        "mcp-failure:"
+        + hashlib.sha256(json.dumps((namespace, record.name, record.revision)).encode()).hexdigest()
+    )
+    failure: object = await cache_get(key)
+    if (
+        isinstance(failure, list)
+        and len(failure) == 2
+        and isinstance(failure[0], str)
+        and isinstance(failure[1], (int, float))
+        and time() < failure[1]
+    ):
+        raise MCPDiscoveryError(failure[0])
     try:
         async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
             tools = await _discover_tools(record, namespace)
     except Exception as exc:
-        reason = _discovery_error(exc)
-        if key is not None and _backoff_failure(exc):
+        failure = _DiscoveryFailure(exc)
+        reason = failure.reason()
+        if backoff := failure.backoff(namespace):
             await cache_set(
                 key,
-                [reason, time() + _MANAGED_FAILURE_BACKOFF.total_seconds()],
-                ttl=_MANAGED_FAILURE_BACKOFF,
+                [reason, time() + backoff.total_seconds()],
+                ttl=backoff,
             )
         raise MCPDiscoveryError(reason) from None
     return tools
@@ -379,9 +436,14 @@ async def _load_tools(
         ]
         return tools, outcome
     except Exception as exc:
+        failure = _DiscoveryFailure(exc)
+        reason = failure.reason()
         if source.scope == "managed":
-            failures.append(_discovery_error(exc))
-        logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
+            failures.append(reason)
+        logger.warning(
+            "MCP discovery failed",
+            extra={"mcp_name": record.name, "mcp_reason": reason},
+        )
         return [], "failed"
 
 
