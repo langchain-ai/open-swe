@@ -918,13 +918,15 @@ export const ChatComposer = memo(function ChatComposer({
     [addFiles]
   )
 
-  const executionTarget = runTarget && (
-    <RunTargetSelector
-      onChange={onRunTargetChange}
-      pending={runTargetPending}
-      value={runTarget}
-    />
-  )
+  const executionTarget = runTarget &&
+    (runTarget === "local" ||
+      (typeof window !== "undefined" && window.openSweDesktop)) && (
+      <RunTargetSelector
+        onChange={onRunTargetChange}
+        pending={runTargetPending}
+        value={runTarget}
+      />
+    )
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
       {runTarget !== "local" && onWorkspaceChange && (

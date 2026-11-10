@@ -339,6 +339,19 @@ describe("ChatComposer drafts", () => {
 })
 
 describe("ChatComposer options", () => {
+  it.each([false, true])(
+    "shows the Cloud target only in the desktop app (desktop: %s)",
+    (desktop) => {
+      vi.stubGlobal("openSweDesktop", desktop ? {} : undefined)
+      try {
+        renderComposer(false, { runTarget: "cloud" })
+        expect(Boolean(screen.queryByText("Cloud"))).toBe(desktop)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
   it("offers a project picker locally and shows branch controls only for Git folders", async () => {
     const local = {
       runTarget: "local" as const,
