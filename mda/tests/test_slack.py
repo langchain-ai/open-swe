@@ -718,3 +718,36 @@ def test_an_edit_of_a_message_the_agent_never_got_starts_nothing(
     assert asyncio.run(slack.start_edit(_edit(), _thread())) is None
     assert asyncio.run(slack.start_edit(_edit(), _thread({"messages": []}))) is None
     assert backend.turns == []
+
+
+class TestSearchGrant:
+    @pytest.mark.parametrize("nested", [False, True])
+    @pytest.mark.parametrize(
+        ("key", "kind"), [("mention", "app_mention"), ("directMessage", "message")]
+    )
+    @pytest.mark.usefixtures("slack_reads")
+    def test_message_grant_reaches_backend_turn(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        nested: bool,
+        key: str,
+        kind: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        backend = _backend(
+            monkeypatch,
+            SlackTurnStarted(run=_RUN, prompt=_PROMPT),
+            SlackMessageFacts(conversation="mda", dm=key == "directMessage"),
+        )
+        grant = {"action_token": "test-search-grant"}
+        payload = {
+            "type": kind,
+            "thread_ts": "171.1",
+            **({"assistant_thread": grant} if nested else grant),
+        }
+        with caplog.at_level("INFO", logger="rt.slack"):
+            result = asyncio.run(slack.start_turn(_event(key=key, payload=payload), _thread()))
+        assert result
+        assert backend.turns[0].action_token == "test-search-grant"
+        assert "test-search-grant" not in caplog.text
+        assert any(getattr(record, "has_action_token", False) for record in caplog.records)
