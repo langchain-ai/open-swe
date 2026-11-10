@@ -44,7 +44,7 @@ def test_me_reauthenticates_only_a_confirmed_missing_account(
     monkeypatch.setattr(
         auth_routes,
         "get_user_preferences",
-        AsyncMock(return_value={"follow_up_behavior": "queue"}),
+        AsyncMock(return_value={"follow_up_behavior": "queue", "auto_show_changes": True}),
     )
     app = FastAPI()
     app.include_router(routes.router)
@@ -75,7 +75,7 @@ async def test_me_returns_current_avatar_on_first_load(
     monkeypatch.setattr(
         auth_routes,
         "get_user_preferences",
-        AsyncMock(return_value={"follow_up_behavior": "queue"}),
+        AsyncMock(return_value={"follow_up_behavior": "queue", "auto_show_changes": True}),
     )
     session = {
         "sub": f"user:{user.id}",

@@ -268,6 +268,8 @@ export interface SessionUser {
   base_orgs?: Array<string>
   /** Mirrors the user's preference: what Enter does while a run is live. */
   follow_up_behavior?: FollowUpBehavior
+  /** Mirrors the user's preference: open Changes when a run that edited files finishes. */
+  auto_show_changes?: boolean
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -807,6 +809,7 @@ export interface UserPreferences {
   default_visibility: ThreadVisibility
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
+  auto_show_changes: boolean
 }
 
 export interface Skill {

@@ -85,6 +85,7 @@ it("keeps preference labels when closed and saves workspace values, not labels",
     default_visibility: "private",
     default_workspace: null,
     follow_up_behavior: "queue",
+    auto_show_changes: true,
   }
   vi.spyOn(api, "getMyPreferences").mockImplementation(async () => stored)
   vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
@@ -183,6 +184,7 @@ it("optimistically selects a personal kitchen, rolls back a failed save, and cle
     default_visibility: "private",
     default_workspace: null,
     follow_up_behavior: "queue",
+    auto_show_changes: true,
   })
   vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
     default_slug: "default",

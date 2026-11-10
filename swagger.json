@@ -10411,6 +10411,17 @@
       },
       "UserPreferencesUpdate": {
         "properties": {
+          "auto_show_changes": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Show Changes"
+          },
           "default_visibility": {
             "enum": [
               "public",

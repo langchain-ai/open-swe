@@ -322,6 +322,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "default_workspace": "mine",
                 "default_visibility": "private",
                 "follow_up_behavior": "steer",
+                "auto_show_changes": True,
             },
             "instructions": "",
         }

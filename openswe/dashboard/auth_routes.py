@@ -287,6 +287,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         # The web UI shows these organizations' repositories by name alone; plugins never see the list.
         "base_orgs": list(allowed_orgs()),
         "follow_up_behavior": preferences["follow_up_behavior"],
+        "auto_show_changes": preferences["auto_show_changes"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": True,

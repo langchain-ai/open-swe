@@ -35,6 +35,7 @@ import type {
   ImageChunk,
   Message,
   ThreadFixScope,
+  ToolExecutionChunk,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
@@ -111,11 +112,30 @@ interface AgentThreadViewProps {
   composerDraft?: ComposerDraft
 }
 
-/** Paths the agent has edited this thread, newest last, for `@file` mentions. */
 function plainSubmission(text: string): ComposerSubmission {
   return { text, images: [], replies: [] }
 }
 
+/** Completed file edits in a thread, including those an `eval` call's code made. */
+function completedEdits(messages: Array<Message>): number {
+  const count = (calls: Array<ToolExecutionChunk>): number =>
+    calls.reduce(
+      (total, call) =>
+        total +
+        (call.toolKind === "edit" && call.status === "completed" ? 1 : 0) +
+        count(call.calls ?? []),
+      0
+    )
+  return count(
+    messages.flatMap((message) =>
+      message.chunks.filter(
+        (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution"
+      )
+    )
+  )
+}
+
+/** Paths the agent has edited this thread, newest last, for `@file` mentions. */
 function editedPaths(messages: Array<Message>): Array<string> {
   const paths = new Set<string>()
   for (const message of messages) {
@@ -659,6 +679,44 @@ export function AgentThreadView({
     },
     [handlePanelCollapsedChange]
   )
+  // Show the Changes panel when the thread settles after editing files in view.
+  // Edits are counted from when streaming started, not from the last user
+  // message, so steered messages and queued follow-ups don't hide them. The
+  // baseline keeps moving until the transcript has hydrated, so earlier runs'
+  // edits never count toward a run that was already live when the view opened.
+  const autoShowChanges = session.data?.auto_show_changes ?? true
+  const lastSeenRun = useRef({
+    threadId: thread.id,
+    streaming: isStreaming,
+    hydrating: true,
+    editsAtStart: 0,
+  })
+  const hydrating = source.isHydrating
+  useEffect(() => {
+    const previous = lastSeenRun.current
+    const edits = completedEdits(baseMessages)
+    const tracking =
+      previous.threadId === thread.id &&
+      previous.streaming &&
+      !previous.hydrating
+    lastSeenRun.current = {
+      threadId: thread.id,
+      streaming: isStreaming,
+      hydrating,
+      editsAtStart: tracking ? previous.editsAtStart : edits,
+    }
+    const finished = tracking && !isStreaming
+    if (!finished || !autoShowChanges || edits <= previous.editsAtStart) return
+    setRevealChangesKey((key) => key + 1)
+    handlePanelCollapsedChange(false)
+  }, [
+    autoShowChanges,
+    baseMessages,
+    handlePanelCollapsedChange,
+    hydrating,
+    isStreaming,
+    thread.id,
+  ])
 
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),

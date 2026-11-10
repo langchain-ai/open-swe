@@ -28,6 +28,7 @@ import type {
   ThreadVisibility,
   UserPreferences,
 } from "@/lib/api"
+import { sessionQueryOptions } from "@/lib/session"
 import { useTheme } from "@/lib/theme"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
 
@@ -88,6 +89,7 @@ export function GeneralSettings() {
     onMutate: () => qc.cancelQueries({ queryKey: PREFERENCES_KEY }),
     onSuccess: (data) => {
       qc.setQueryData(PREFERENCES_KEY, data)
+      void qc.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
     },
     onSettled: () =>
       qc.isMutating({ mutationKey: SAVE_PREFERENCES_KEY }) > 1
@@ -202,6 +204,18 @@ export function GeneralSettings() {
               }
               disabled={preferences.isLoading}
               triggerClassName="w-40"
+            />
+          }
+        />
+        <SettingsRow
+          label="Show changes when a run finishes"
+          description="Open the Changes panel when a run that edited files finishes."
+          control={
+            <Switch
+              aria-label="Show changes when a run finishes"
+              checked={preferences.data?.auto_show_changes ?? true}
+              onChange={(v) => savePreferences.mutate({ auto_show_changes: v })}
+              disabled={preferences.isLoading}
             />
           }
         />
