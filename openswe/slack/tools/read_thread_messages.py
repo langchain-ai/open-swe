@@ -67,7 +67,7 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
     }
 
 
-@tool_access.access(tool_access.Policy(trusted="thread_history"))
+@tool_access.access(tool_access.Policy(trusted="anywhere"))
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Implement the `slack_read_thread_messages` tool."""
     if not channel_id or not channel_id.strip():

@@ -665,13 +665,13 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     ("thread_scope", "source", "channel_reads", "thread_reads"),
     [
         ("private", "slack", True, True),
-        ("public", "slack", False, True),
+        ("public", "slack", True, True),
         ("bot", "slack", True, True),
         ("private", "dashboard", True, True),
-        ("public", "dashboard", False, False),
+        ("public", "dashboard", True, True),
     ],
 )
-async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
+async def test_slack_reads_are_always_bound_and_refuse_at_call_time(
     thread_scope: str,
     source: str,
     channel_reads: bool,
@@ -704,7 +704,6 @@ async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
 
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert ("slack_read_channel_messages" in tool_names) is channel_reads
-    # A run started from Slack reads threads with the bot's own reach; a web one as channel history.
     assert ("slack_read_thread_messages" in tool_names) is thread_reads
 
     gp = next(item for item in subagents if item.name == "general-purpose")

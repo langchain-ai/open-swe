@@ -474,3 +474,15 @@ async def test_channel_context_distinguishes_transient_and_definitive_failures(
     assert not context.allows_operations
     assert context.lookup_retry_after == delay
     assert "lookup_retry_after" not in context.dump()
+
+
+async def test_read_thread_tool_in_shared_thread_explains_refusal(slack_api, grant_tool_access):  # noqa: ANN001
+    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+
+    grant_tool_access(private=False)
+
+    refused = await slack_read_thread_messages("C1", "1.0")
+    assert refused["success"] is False
+    assert "other people can read it" in refused["error"]
+    assert "paste" in refused["error"]
+    assert not slack_api.calls

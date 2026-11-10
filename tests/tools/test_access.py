@@ -222,7 +222,7 @@ async def test_bot_channel_history_is_scoped_and_revocable(
     assert (await slack_read_channel_messages("C1"))["success"] is True
 
     metadata["source_context"] = {}
-    assert (await slack_read_channel_messages("C1"))["ok"] is False
+    assert (await slack_read_channel_messages("C1"))["success"] is False
 
 
 @pytest.mark.parametrize(
