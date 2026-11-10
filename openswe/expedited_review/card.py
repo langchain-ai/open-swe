@@ -331,9 +331,9 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = pr.label
-        return f"Expedited review: {outcome} — {pr.url}", [
-            section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
+        icon = ":merged: " if approval.state == "merged" else ""
+        return f"{icon}Expedited review: {outcome} — {pr.url}", [
+            section(f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(title)}")
         ]
     blocks: list[Block] = [
         *_header(approval, title, author),
@@ -350,9 +350,10 @@ def author_status(
 ) -> tuple[str, list[Block]]:
     """The persistent author DM record, without a diff or actions."""
     pr = approval.pull_request
-    text = f"Expedited review: {outcome} — {pr.url}"
+    icon = ":merged: " if approval.state == "merged" else ""
+    text = f"{icon}Expedited review: {outcome} — {pr.url}"
     blocks: list[Block] = [
-        section(f"*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
+        section(f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
     ]
     if origin_url:
         blocks.append(context(f"Requested from <{origin_url}|this thread>."))
