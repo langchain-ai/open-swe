@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.34",
+    "deepagents==0.7.35",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/),
     # from the vendored SDK the deployment runs (vendor/README.md).
     "managed-deepagents>=0.10.1",
@@ -18,7 +18,7 @@ dependencies = [
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
     "langgraph-sdk>=0.4.14",
-    "langchain[mcp]>=1.4.9",
+    "langchain[mcp]>=1.4.10",
     "langgraph>=1.2.20",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
@@ -27,7 +27,7 @@ dependencies = [
     "langsmith>=0.14.17",
     "langchain-openai>=1.7.4,<2.0.0",
     "openai>=3.10.0",
-    "langchain-fireworks>=1.7.2",
+    "langchain-fireworks>=1.7.3",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
     "exa-py>=2.18.1",
@@ -45,7 +45,7 @@ dependencies = [
     "githubkit[auth-app]==0.17.0",
     "githubkit-schemas[2022-11-28]==26.10.28",
     "jinja2>=3.1.6",
-    "langchain-typesafe==0.0.1",
+    "langchain-typesafe==0.0.2",
     "langchain-quickjs==0.3.12",
     "open-swe-runtime-api",
 ]
