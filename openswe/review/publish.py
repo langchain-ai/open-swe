@@ -624,6 +624,19 @@ async def clear_review_started_comment(
     await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": None})
 
 
+class ReviewCheckResult(BaseModel):
+    conclusion: CheckConclusion
+    title: str = "Review completed"
+    summary: str = ""
+
+
+class TrackedReviewCheck(BaseModel):
+    """The ``Robin Review`` check a reviewer thread's metadata tracks."""
+
+    review_check_run_id: int | None = None
+    review_check_pending_result: ReviewCheckResult | None = None
+
+
 async def settle_review_check_run(
     *,
     thread_id: str,

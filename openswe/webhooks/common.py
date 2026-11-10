@@ -41,6 +41,8 @@ from openswe.github.app import (
     get_github_app_installation_token_with_expiry,
 )
 from openswe.github.checks import (  # noqa: F401
+    REVIEW_CHECK_TIMEOUT,
+    REVIEW_CHECK_TIMEOUT_JOB,
     complete_review_check_run,
     create_review_check_run,
 )
@@ -65,6 +67,7 @@ from openswe.github.thread_token import (
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import PersonIdentity
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -1279,6 +1282,17 @@ async def track_review_check_run(
             "superseded_review_check_run_ids": unsettled,
         },
     )
+    try:
+        await queue.schedule(
+            REVIEW_CHECK_TIMEOUT_JOB,
+            {"thread_id": thread_id, "owner": owner, "repo": repo, "check_run_id": check_run_id},
+            due_at=datetime.now(UTC) + REVIEW_CHECK_TIMEOUT,
+            key=f"{REVIEW_CHECK_TIMEOUT_JOB}:{thread_id}",
+        )
+    except Exception:
+        logger.exception(
+            "Could not schedule the review check timeout", extra={"thread_id": thread_id}
+        )
 
 
 async def build_reviewer_configurable(

@@ -27,8 +27,10 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.event_claims import PURGE_JOB as EVENT_CLAIM_PURGE
 from openswe.event_claims import PURGE_SCHEDULE as EVENT_CLAIM_SCHEDULE
+from openswe.github.app import get_github_app_installation_token
 from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
 from openswe.github.branch_config import refresh_required_checks
+from openswe.github.checks import REVIEW_CHECK_TIMEOUT_JOB
 from openswe.github.quota import SAMPLE_JOB as GITHUB_QUOTA_SAMPLE
 from openswe.github.quota import SAMPLE_SCHEDULE as GITHUB_QUOTA_SCHEDULE
 from openswe.github.quota import InstallationQuota
@@ -55,6 +57,12 @@ from openswe.plugins.records import (
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
+from openswe.review.findings import get_thread_metadata
+from openswe.review.publish import (
+    ReviewCheckResult,
+    TrackedReviewCheck,
+    settle_review_check_run,
+)
 from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
@@ -218,6 +226,32 @@ async def _thread_status_reconcile(_job: Job) -> object:
         "threads_settled": await reconcile_busy_threads(),
         "stalled_runs_failed": await fail_stalled_runs(),
     }
+
+
+@WORKER.register(REVIEW_CHECK_TIMEOUT_JOB)
+async def _review_check_timeout(job: Job) -> None:
+    thread_id, owner, repo = _text(job, "thread_id"), _text(job, "owner"), _text(job, "repo")
+    check_run_id = job.payload.get("check_run_id")
+    if thread_id is None or owner is None or repo is None:
+        return
+    tracked = TrackedReviewCheck.model_validate(await get_thread_metadata(thread_id))
+    if tracked.review_check_run_id != check_run_id:
+        return
+    token = await get_github_app_installation_token()
+    if not token:
+        raise RuntimeError("No GitHub token to time out the review check")
+    # Neutral: a hung reviewer is an Open SWE problem, not the PR's.
+    result = tracked.review_check_pending_result or ReviewCheckResult(
+        conclusion="neutral",
+        title="Review timed out",
+        summary="Robin did not finish reviewing within an hour. "
+        "Push a commit or re-request a review from Robin to run it again.",
+    )
+    await settle_review_check_run(
+        thread_id=thread_id, owner=owner, repo=repo, token=token, **result.model_dump()
+    )
+    if (await get_thread_metadata(thread_id)).get("review_check_run_id") == check_run_id:
+        raise RuntimeError("Could not settle the timed-out review check")
 
 
 @WORKER.register(REVIEW_GUIDE_ARCHIVE)

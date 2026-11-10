@@ -15,11 +15,14 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.github.app import get_github_app_installation_token
-from openswe.github.checks import CheckConclusion
 from openswe.github.http import GitHubError
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.review.findings import REVIEWER_THREAD_KIND, set_reviewer_thread_metadata
-from openswe.review.publish import render_failed_status_comment, settle_review_check_run
+from openswe.review.publish import (
+    ReviewCheckResult,
+    render_failed_status_comment,
+    settle_review_check_run,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +32,6 @@ _REVIEW_RUN_KINDS: frozenset[str] = frozenset({REVIEWER_THREAD_KIND, "review-sco
 _BACKEND_ERRORS = frozenset({"BackendCallError", "BackendTimeoutError", "BackendUnavailableError"})
 _PHASE = re.compile(r"^(\w+) failed\b")
 _NOT_FOUND = 404
-
-
-class _CheckResult(BaseModel):
-    conclusion: CheckConclusion
-    title: str = "Review completed"
-    summary: str = ""
 
 
 class _PullRequestRef(BaseModel):
@@ -54,7 +51,7 @@ class _ReviewThread(BaseModel):
     last_reviewed_sha: str = ""
     current_reviewer_run_id: str | None = None
     review_check_run_id: int | None = None
-    review_check_pending_result: _CheckResult | None = None
+    review_check_pending_result: ReviewCheckResult | None = None
     status_comment_id: int | None = None
 
 
@@ -183,7 +180,7 @@ class ReviewRunFailure(BaseModel):
             or thread.last_reviewed_sha != thread.head_sha
         )
 
-    async def _settle_check(self, pending: _CheckResult | None) -> None:
+    async def _settle_check(self, pending: ReviewCheckResult | None) -> None:
         if self.thread.review_check_run_id is None:
             return
         token = await get_github_app_installation_token()
@@ -193,7 +190,7 @@ class ReviewRunFailure(BaseModel):
             )
             return
         # Neutral, not failure: a red X misreads an Open SWE outage as a problem in the code.
-        result = pending or _CheckResult(
+        result = pending or ReviewCheckResult(
             conclusion="neutral",
             title="Review couldn't run",
             summary=(
