@@ -1,8 +1,9 @@
-"""Deterministic reviewer picks: code owners and recent authors of the changed files.
+"""Deterministic reviewer picks: code owners, recent authors and review channel members.
 
 Candidates come from one CODEOWNERS area at a time, the one owning the most changed
 files first. Each scores the changed files they own plus those they changed within
-``HISTORY_WINDOW``, divided by one more than the open reviews they already have.
+``HISTORY_WINDOW`` and membership in a review channel carrying the request, divided
+by one more than the open reviews they already have.
 Only people inside their work hours are picked; when nobody is, the pick waits
 for whoever's work day starts first. Anyone already on the request, or rotated
 away from it for not accepting, is skipped.
@@ -12,12 +13,15 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
+from functools import partial
 from typing import Self
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from openswe.dashboard.profiles import PROFILES
@@ -26,9 +30,12 @@ from openswe.github.codeowners import CodeOwners
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.github.org_membership import team_members
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.availability import SlackUserInfo
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import get_slack_user_info
+from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -118,10 +125,11 @@ class Candidate:
     owned: int
     touched: int
     open_reviews: int = 0
+    channel_member: bool = False
 
     @property
     def score(self) -> float:
-        return (self.owned + self.touched) / (1 + self.open_reviews)
+        return (self.owned + self.touched + self.channel_member) / (1 + self.open_reviews)
 
     @classmethod
     def rank(cls, candidates: list[Self]) -> list[Self]:
@@ -135,6 +143,8 @@ class Candidate:
         """Why them, addressed to them."""
         files = f"{total_files} changed file{'s' if total_files != 1 else ''}"
         parts: list[str] = []
+        if self.channel_member:
+            parts.append("are a member of the review channel where this request was posted")
         if self.owned:
             parts.append(f"own {self.owned} of the {files}")
         if self.touched:
@@ -300,14 +310,95 @@ async def choose_reviewer(
         return None
 
 
+class ReviewChannelMembers(BaseModel):
+    channel_id: str
+    user_ids: frozenset[UUID]
+
+    @classmethod
+    async def load(cls, channel_id: str) -> Self:
+        members: set[UUID] = set()
+        async with SlackClient.bot() as client:
+            cursor: str | None = None
+            seen: set[str] = set()
+            while True:
+                response = await client.conversations_members(
+                    channel=channel_id, limit=200, cursor=cursor
+                )
+                ids = TypeAdapter(list[str]).validate_python(response.get("members"))
+                users = await asyncio.gather(
+                    *(User.for_identity("slack", member) for member in ids)
+                )
+                members.update(user.id for user in users if user is not None)
+                metadata = TypeAdapter(dict[str, str]).validate_python(
+                    response.get("response_metadata") or {}
+                )
+                cursor = metadata.get("next_cursor")
+                if not cursor:
+                    break
+                if cursor in seen:
+                    raise ValueError("Slack repeated a channel membership cursor")
+                seen.add(cursor)
+        return cls(channel_id=channel_id, user_ids=frozenset(members))
+
+    @classmethod
+    async def cached(cls, channel_id: str) -> Self:
+        """Postgres-backed membership, revalidated on access after eight hours."""
+        from langgraph_api.cache import swr
+
+        result = await swr(
+            f"review-channel-members:{channel_id}",
+            partial(cls.load, channel_id),
+            fresh_for=timedelta(hours=8),
+            max_age=timedelta(hours=24),
+            model=cls,
+        )
+        return result.value
+
+
 @dataclass(frozen=True, slots=True)
 class Candidates:
-    """Who could review a pull request: the code owners and recent authors of its changed files."""
+    """File-based reviewers and members of review channels carrying the request."""
 
     files: list[ChangedFile]
     coverage: Coverage
     owned: Counter[str]
     touched: Counter[str]
+    channel_members: frozenset[str] = field(default_factory=frozenset)
+
+    @classmethod
+    async def review_channel_members(
+        cls, request: HumanReviewRequest, repo: RepoClient
+    ) -> frozenset[str]:
+        """Linked GitHub users in review channels where this request is posted."""
+        posted = {request.slack_channel_id} - {""}
+        if request.slack_copy_ts and request.slack_copy_channel_id:
+            posted.add(request.slack_copy_channel_id)
+        if not posted:
+            return frozenset()
+        try:
+            settings = await RepoSettings.fetch(repo, strict=True)
+            channels: set[str] = set()
+            for configured in settings.review_channels:
+                channel = await SlackChannel.resolve(configured)
+                if channel is not None and channel.id in posted:
+                    channels.add(channel.id)
+            memberships = await asyncio.gather(
+                *(ReviewChannelMembers.cached(channel_id) for channel_id in sorted(channels))
+            )
+            user_ids = {user_id for members in memberships for user_id in members.user_ids}
+            users = await asyncio.gather(*(User.get(user_id) for user_id in user_ids))
+            return frozenset(
+                user.github_login.lower()
+                for user in users
+                if user is not None and user.github_login
+            )
+        except (RepoFileUnreadableError, HTTPException, *SLACK_REQUEST_ERRORS):
+            logger.warning(
+                "Could not read review channel members; using file-based candidates",
+                extra={"request_id": str(request.id)},
+                exc_info=True,
+            )
+            return frozenset()
 
     @classmethod
     async def gather(
@@ -320,8 +411,10 @@ class Candidates:
             logger.warning("Could not read the changed files to pick a reviewer", extra=extra)
             return None
         ref = pr.base_ref or None
-        codeowners, touched = await asyncio.gather(
-            CodeOwners.fetch(pull.repo, ref), _touched(pull.repo, ref, files)
+        codeowners, touched, channel_members = await asyncio.gather(
+            CodeOwners.fetch(pull.repo, ref),
+            _touched(pull.repo, ref, files),
+            cls.review_channel_members(request, pull.repo),
         )
         coverage = (
             await Coverage.build(codeowners, [changed.filename for changed in files])
@@ -338,13 +431,14 @@ class Candidates:
                 "has_codeowners": codeowners is not None,
                 "code_owners": dict(owned.most_common()),
                 "recent_authors": dict(touched.most_common()),
+                "channel_members": sorted(channel_members),
             },
         )
-        return cls(files, coverage, owned, touched)
+        return cls(files, coverage, owned, touched, channel_members)
 
     @property
     def logins(self) -> set[str]:
-        return set(self.owned.keys() | self.touched.keys())
+        return set(self.owned.keys() | self.touched.keys() | self.channel_members)
 
     def first_open_area(self, request: HumanReviewRequest) -> Area | None:
         """The largest code owner area nobody on the request owns yet."""
@@ -451,7 +545,13 @@ async def _choose_reviewer(
     )
     ranked = Candidate.rank(
         [
-            Candidate(login, candidates.owned[login], candidates.touched[login], loads[user.id])
+            Candidate(
+                login,
+                candidates.owned[login],
+                candidates.touched[login],
+                loads[user.id],
+                login in candidates.channel_members,
+            )
             for login, user in people.items()
         ]
     )
