@@ -20,6 +20,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
+from openswe.users.models import UserIdentity
 
 
 @pytest.mark.parametrize(
@@ -49,7 +50,7 @@ async def test_dashboard_selects_review_workflow(
     case: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     pr_ref = GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7")
-    requester = User()
+    requester = User(identities=[UserIdentity(provider="slack", external_id="U1")])
     pr = PullRequest(owner="lc", repo="repo", number=7)
     approval = HumanReviewRequest(
         pull_request_id=pr.id,
@@ -215,6 +216,7 @@ async def test_dashboard_selects_review_workflow(
         patch(
             "openswe.slack.client.get_slack_permalink", AsyncMock(return_value="https://slack/card")
         ),
+        patch("openswe.slack.dm.post_dm", AsyncMock()) as dm,
     ):
         if case in {"active_save_failed", "active_timestamp_failed", "active_cleanup_failed"}:
             with pytest.raises(RuntimeError, match="save failed"):
@@ -244,6 +246,7 @@ async def test_dashboard_selects_review_workflow(
         standard.assert_not_awaited()
         return
     assert result.success
+    dm.assert_not_awaited()
     if case in {"eligible", "custom_summary", "active_changed"}:
         assert result.channel == "C1"
         assert result.permalink == "https://slack/card"

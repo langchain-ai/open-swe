@@ -33,7 +33,6 @@ from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef, delete_slack_message
-from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -419,16 +418,6 @@ class ExpeditedReviewNomination:
             in_thread=bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),
             over_mcp=requester is not None,
         )
-        if (
-            requester is not None
-            and requester.slack_user_id
-            and await send_dm(
-                requester.slack_user_id,
-                f"Expedited review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
-                f"in <#{channel_id}>. Robin merges it once someone approves.",
-            )
-        ):
-            next_step = f"{next_step} The person was sent a Slack DM pointing to the card."
         return {
             "success": True,
             "readiness_warning": readiness_warning,
