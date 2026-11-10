@@ -40,7 +40,11 @@ from openswe.merge_queue.models import (
     MergeRequest,
     Record,
 )
-from openswe.merge_queue.validation_contract import ValidationDispatch, ValidationRequest
+from openswe.merge_queue.validation_contract import (
+    SERVICE_JOBS,
+    ValidationDispatch,
+    ValidationRequest,
+)
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 
 
@@ -286,6 +290,15 @@ class MergeQueue(Record):
                 select(Batch).where(Batch.queue_id == queue.id, Batch.state == "active")
             )
             if active is not None and active.policy.get("trust") == config.native_trust:
+                policy = QueuePolicy.model_validate(active.policy["policy"])
+                assert policy.validation is not None
+                policy = policy.model_copy(
+                    update={
+                        "validation": policy.validation.model_copy(
+                            update={"suite": approved.validation_suite}
+                        )
+                    }
+                )
                 attempts = list(
                     await session.scalars(select(Attempt).where(Attempt.batch_id == active.id))
                 )
@@ -294,6 +307,7 @@ class MergeQueue(Record):
                         attempt.state, attempt.finished_at = "cancelled", now
                 active.policy = {
                     **active.policy,
+                    "policy": policy.model_dump(mode="json"),
                     "trust": updated.native_trust,
                     "superseded_attempts": max((attempt.number for attempt in attempts), default=0),
                     "workflow_policy_refresh": True,
@@ -500,6 +514,11 @@ class MergeQueue(Record):
             await session.flush()
             request = ValidationRequest(
                 repository=snapshot.repository,
+                version=2 if validation.suite == "services" else 1,
+                expected_jobs=SERVICE_JOBS
+                if validation.suite == "services"
+                else ("candidate-smoke",),
+                base_sha=batch.base_sha if validation.suite == "services" else None,
                 batch_id=batch.id,
                 attempt_id=attempt.id,
                 candidate_sha=candidate.head_sha,

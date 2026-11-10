@@ -151,18 +151,21 @@ class ValidationEvidence:
         self, request: ValidationRequest, run_id: int
     ) -> dict[str, JsonValue]:
         jobs = await self.repo.validation_jobs(run_id)
-        if (
-            sorted(job.name for job in jobs) != sorted([*request.expected_jobs, "candidate-result"])
-            or len({job.id for job in jobs}) != len(jobs)
-            or any(
-                job.run_id != run_id
-                or job.run_attempt != 1
-                or job.status != "completed"
-                or job.conclusion != "success"
-                for job in jobs
-            )
-        ):
-            raise InvalidValidation("Required validation jobs did not all succeed")
+        required = (*request.expected_jobs, "candidate-result")
+        if any(sum(job.name == name for job in jobs) != 1 for name in required):
+            raise InvalidValidation("Required validation jobs are missing or duplicated")
+        optional_results = {"success", "skipped"} if request.version == 2 else {"skipped"}
+        for job in jobs:
+            if job.run_id != run_id or job.run_attempt != 1 or job.status != "completed":
+                raise InvalidValidation("Validation job is incomplete or belongs to another run")
+            if job.name in required:
+                if job.conclusion != "success":
+                    raise InvalidValidation("Required validation job did not succeed")
+            elif (
+                job.name != "candidate-services"
+                and not job.name.startswith("candidate-services / ")
+            ) or job.conclusion not in optional_results:
+                raise InvalidValidation("Unexpected or unsuccessful service job")
         matches = [
             artifact
             for artifact in await self.repo.validation_artifacts(run_id)

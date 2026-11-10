@@ -19,7 +19,9 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 
 import asyncio
 import base64
+import hashlib
 import io
+import json
 import logging
 import random
 import re
@@ -41,9 +43,7 @@ from openswe.github.queue import (
     CommitComparison,
     GitReference,
     NativeQueueSnapshot,
-    ValidationArtifacts,
     ValidationJob,
-    ValidationJobs,
     ValidationRun,
     ValidationRuns,
     WorkflowRun,
@@ -1121,21 +1121,83 @@ class RepoClient:
     async def validation_run(self, run_id: int) -> ValidationRun:
         return ValidationRun.model_validate(await self.get(f"actions/runs/{run_id}"))
 
+    async def validation_source_digest(self, sha: str) -> str:
+        """Fingerprint service workflow sources using Homebase's approved-policy format."""
+        payload = await self.get(f"git/trees/{quote(self.inside(sha), safe='')}")
+        if not isinstance(payload, dict) or payload.get("truncated") is not False:
+            raise ValueError("Incomplete workflow source tree")
+        expected = {
+            ".github": ("040000", "tree"),
+            "cmd": ("040000", "tree"),
+            "langdev": ("100755", "blob"),
+        }
+        sources = []
+        for entry in TypeAdapter(list[dict[str, JsonValue]]).validate_python(payload.get("tree")):
+            path = entry.get("path")
+            if not isinstance(path, str) or path not in expected:
+                continue
+            mode, kind = expected[path]
+            source_sha = entry.get("sha")
+            if (
+                (entry.get("mode"), entry.get("type")) != (mode, kind)
+                or not isinstance(source_sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", source_sha)
+            ):
+                raise ValueError("Invalid workflow source tree entry")
+            sources.append({"path": path, "mode": mode, "type": kind, "sha": source_sha})
+        if sorted(entry["path"] for entry in sources) != sorted(expected):
+            raise ValueError("Missing or duplicate workflow sources")
+        sources.sort(key=lambda entry: entry["path"])
+        return hashlib.sha256(
+            json.dumps(sources, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    async def _validation_pages(
+        self, run_id: int, key: Literal["jobs", "artifacts"]
+    ) -> list[dict[str, JsonValue]]:
+        items: list[dict[str, JsonValue]] = []
+        total: int | None = None
+        for page in range(1, 51):
+            payload = await self.get(
+                f"actions/runs/{run_id}/{key}",
+                {
+                    "per_page": "100",
+                    "page": str(page),
+                    **({"filter": "latest"} if key == "jobs" else {}),
+                },
+            )
+            if not isinstance(payload, dict):
+                raise ValueError("Validation listing is not an object")
+            count = payload.get("total_count")
+            if type(count) is not int or count < 0 or (total is not None and count != total):
+                raise ValueError("Validation listing changed during pagination")
+            total = count
+            batch = TypeAdapter(list[dict[str, JsonValue]]).validate_python(payload.get(key))
+            items.extend(batch)
+            if len(items) == total:
+                identifiers = TypeAdapter(list[int]).validate_python(
+                    [item.get("id") for item in items], strict=True
+                )
+                if any(identifier <= 0 for identifier in identifiers) or len(
+                    set(identifiers)
+                ) != len(items):
+                    raise ValueError("Validation listing contains duplicate or invalid IDs")
+                return items
+            if not batch or len(items) > total:
+                break
+        raise ValueError("Validation listing is incomplete")
+
     async def validation_jobs(self, run_id: int) -> tuple[ValidationJob, ...]:
-        result = ValidationJobs.model_validate(
-            await self.get(f"actions/runs/{run_id}/jobs", {"per_page": "100", "filter": "latest"})
+        return tuple(
+            ValidationJob.model_validate(job)
+            for job in await self._validation_pages(run_id, "jobs")
         )
-        if result.total_count != len(result.jobs):
-            raise ValueError("Validation job listing is incomplete")
-        return result.jobs
 
     async def validation_artifacts(self, run_id: int) -> tuple[Artifact, ...]:
-        result = ValidationArtifacts.model_validate(
-            await self.get(f"actions/runs/{run_id}/artifacts", {"per_page": "100"})
+        return tuple(
+            Artifact.model_validate(item)
+            for item in await self._validation_pages(run_id, "artifacts")
         )
-        if result.total_count != len(result.artifacts):
-            raise ValueError("Validation artifact listing is incomplete")
-        return result.artifacts
 
     @asynccontextmanager
     async def candidate_git(self) -> AsyncIterator[CandidateGit]:

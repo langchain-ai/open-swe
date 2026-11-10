@@ -1726,6 +1726,8 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     await save_configuration(config)
     repo = Mock(spec=RepoClient)
     repo.raw_file = AsyncMock(return_value=b"reviewed workflow")
+    service_digest = "9546f5ca226a05e2efc02fd3be6d2af71e638fad5092d15df3283382b3986515"
+    repo.validation_source_digest = AsyncMock(return_value=service_digest)
     repo.native_queue = AsyncMock(return_value=native_snapshot((1, 2, 3, 4, 5, 6)))
     repo.branch_rules = AsyncMock(
         return_value=[
@@ -1760,8 +1762,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                     "nonce": request.url.params["nonce"],
                     "repository": config.repository,
                     "repository_id": config.repository_id,
-                    "workflow_digest": config.workflow_digest,
+                    "workflow_digest": service_digest,
                     "workflow_policy_revision": policy_revision,
+                    "validation_suite": "services",
                     "dispatch_actor_id": 123,
                     "check_app_id": 456,
                 }
@@ -1869,6 +1872,15 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         assert json.loads(sent[0].content)["workflow_policy_revision"] == 2
         configured = await QueueConfiguration.load(queue.workspace_id)
         assert configured is not None and configured.workflow_policy_revision == 2
+        assert configured.policy.validation.suite == "services"
+        assert json.loads(sent[0].content)["contract"]["base_sha"] == "a" * 40
+        assert json.loads(sent[0].content)["contract"]["version"] == 2
+        count = len(sent)
+        repo.validation_source_digest.return_value = "e" * 64
+        with pytest.raises(ValueError, match="Queue workflow changed"):
+            await reconcile()
+        assert len(sent) == count
+        repo.validation_source_digest.return_value = service_digest
         policy_revision = 1
         count = len(sent)
         await reconcile()
@@ -1903,7 +1915,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                 status="completed",
                 conclusion="success",
             )
-            for index, name in enumerate(("candidate-smoke", "candidate-result"), 1)
+            for index, name in enumerate((*request.expected_jobs, "candidate-result"), 1)
         )
     )
     repo.validation_artifacts = AsyncMock(
@@ -1975,6 +1987,8 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     if fault == "policy_adoption_after_success":
         from openswe.merge_queue.dispatch import WorkflowPolicy
 
+        config = config.model_copy(update={"policy": tuned.policy})
+        await save_configuration(config)
         config = await queue.adopt_workflow_policy(
             config,
             WorkflowPolicy(
@@ -1982,9 +1996,10 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                 repository=config.repository,
                 repository_id=config.repository_id,
                 workflow_policy_revision=2,
-                workflow_digest=config.workflow_digest,
+                workflow_digest=service_digest,
                 dispatch_actor_id=123,
                 check_app_id=456,
+                validation_suite="services",
             ),
         )
         lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
@@ -2007,6 +2022,14 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         assert replacement.batch.max_attempts == history.batch.max_attempts
         assert replacement.batch.candidate == history.batch.candidate
         assert [attempt.number for attempt in replacement.attempts] == [1, 2]
+        replacement_request = next(
+            json.loads(r.content)["contract"]
+            for r in reversed(sent)
+            if r.url.path.endswith("/dispatch")
+        )
+        assert replacement_request["version"] == 2
+        assert replacement_request["base_sha"] == "e" * 40
+        assert replacement.batch.policy["policy"]["max_batch_size"] == policy.max_batch_size
         repo.native_queue.return_value = native_snapshot((), main=request.candidate_sha)
         repo.merge_base = AsyncMock(return_value=request.candidate_sha)
         await reconcile()

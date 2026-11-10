@@ -38,6 +38,79 @@ async def test_validation_listings_reject_incomplete_responses(listing: str) -> 
                 await repo.validation_artifacts(42)
 
 
+@pytest.mark.parametrize("listing", ["jobs", "artifacts"])
+@pytest.mark.parametrize("fault", [None, "duplicate", "changed_total"])
+async def test_validation_lists_all_pages_without_accepting_partial_evidence(listing, fault):
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        ids = range(1, 101) if page == 1 else [100 if fault == "duplicate" else 101]
+        items = [
+            {
+                "id": i,
+                "name": f"item-{i}",
+                "expired": False,
+                "run_id": 42,
+                "run_attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+            }
+            for i in ids
+        ]
+        return httpx2.Response(
+            200,
+            json={
+                "total_count": 102 if page == 2 and fault == "changed_total" else 101,
+                listing: items,
+            },
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        repo = GitHubClient(http).repo("acme", "widgets")
+        fetch = repo.validation_jobs if listing == "jobs" else repo.validation_artifacts
+        if fault:
+            with pytest.raises(ValueError):
+                await fetch(42)
+        else:
+            assert [item.id for item in await fetch(42)] == list(range(1, 102))
+
+
+@pytest.mark.parametrize("fault", [None, "changed", "missing", "duplicate", "truncated", "symlink"])
+async def test_service_source_fingerprint_matches_policy_format(fault):
+    entries = [
+        {"path": path, "mode": mode, "type": kind, "sha": sha * 40}
+        for path, mode, kind, sha in [
+            ("langdev", "100755", "blob", "c"),
+            ("cmd", "040000", "tree", "b"),
+            (".github", "040000", "tree", "a"),
+            ("smith-backend", "040000", "tree", "d"),
+        ]
+    ]
+    payload = {"tree": entries, "truncated": fault == "truncated"}
+    approved = "9546f5ca226a05e2efc02fd3be6d2af71e638fad5092d15df3283382b3986515"
+    if fault == "changed":
+        entries[2]["sha"] = "e" * 40
+    elif fault == "missing":
+        entries.pop(1)
+    elif fault == "duplicate":
+        entries.append(entries[0])
+    elif fault == "symlink":
+        entries[0]["mode"] = "120000"
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == f"/repos/acme/widgets/git/trees/{'f' * 40}"
+        assert not request.url.params
+        return httpx2.Response(200, json=payload)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        repo = GitHubClient(http).repo("acme", "widgets")
+        if fault in {"missing", "duplicate", "truncated", "symlink"}:
+            with pytest.raises(ValueError):
+                await repo.validation_source_digest("f" * 40)
+        else:
+            actual = await repo.validation_source_digest("f" * 40)
+            assert (actual == approved) is (fault is None)
+
+
 async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
     later_pages = asyncio.Barrier(2)
     requested: list[int] = []
