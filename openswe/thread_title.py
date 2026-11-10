@@ -114,7 +114,11 @@ async def generate_and_store_thread_title(
         HumanMessage(content=title_input),
     ]
     # Empty callbacks keep title tokens out of the thread's message stream.
-    config: RunnableConfig = {"callbacks": [], "run_name": "thread-title"}
+    config: RunnableConfig = {
+        "callbacks": [],
+        "run_name": "thread-title",
+        "metadata": {"thread_id": thread_id},
+    }
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
         try:
             structured = model.with_structured_output(_ThreadTitle)
