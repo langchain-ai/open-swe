@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -272,6 +273,7 @@ async def test_a_server_read_through_an_mda_connection_is_the_mda_runs_by_tier_p
 async def test_workspace_discovery_authentication_backoff(monkeypatch, caplog, status):
     import httpx2
 
+    caplog.set_level(logging.INFO, logger=runtime.__name__)
     attempts = 0
     now = 1000.0
 
@@ -297,8 +299,16 @@ async def test_workspace_discovery_authentication_backoff(monkeypatch, caplog, s
         await runtime.refresh_mcp_catalog(workspace, "linear")
     assert attempts == (1 if status in (401, 403) else 3)
     assert "secret-token" not in caplog.text
-    assert all(f"HTTP {status}" in log.mcp_reason for log in caplog.records)
-    assert all("secret-token" not in log.mcp_reason for log in caplog.records)
+    warnings = [
+        log
+        for log in caplog.records
+        if log.name == runtime.__name__
+        and log.levelno == logging.WARNING
+        and log.getMessage() == "MCP discovery failed"
+    ]
+    assert warnings
+    assert all(f"HTTP {status}" in log.mcp_reason for log in warnings)
+    assert all("secret-token" not in log.mcp_reason for log in warnings)
     assert all(log.exc_info is None for log in caplog.records)
 
     if status in (401, 403):
