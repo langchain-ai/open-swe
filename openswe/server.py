@@ -1936,7 +1936,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
     try:
-        if cfg.source != "incidents_agent":
+        # Most runs continue a thread whose task exists; only a new one takes the creation lock.
+        if cfg.source != "incidents_agent" and await Task.of_thread(thread_id) is None:
             indexed = await THREADS.get(thread_id)
             title = indexed.metadata.get("title") if indexed is not None else None
             await Task.for_thread(
