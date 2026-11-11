@@ -496,10 +496,14 @@ export const agentsApi = {
     }),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
-  setThreadViewed: (threadId: string, viewed: boolean) =>
+  setThreadViewed: (
+    threadId: string,
+    viewed: boolean,
+    responseId?: string | null
+  ) =>
     agentsRequest<{ viewed: boolean }>(
       `/threads/${encodeURIComponent(threadId)}/read-state`,
-      { method: "PUT", body: JSON.stringify({ viewed }) }
+      { method: "PUT", body: JSON.stringify({ viewed, responseId }) }
     ),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>

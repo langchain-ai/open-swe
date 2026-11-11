@@ -1099,6 +1099,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         namespace=[],
                         role="human",
                         text=text,
+                        sender=MessageSender.from_provenance(Provenance.of(message)),
                         reasoning="",
                         attachments=attachments or None,
                         created_at=datetime.now(UTC),
@@ -1337,8 +1338,7 @@ def _sender(human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]) ->
         or _string(metadata.get("owner_login"))
         or "unknown"
     )
-    kind = _string(ids.configurable.get("source")) or _string(metadata.get("source")) or "unknown"
-    return MessageSender(login=login, kind=kind)
+    return MessageSender.from_provenance(Provenance.of(human), login)
 
 
 def _turn_requested(

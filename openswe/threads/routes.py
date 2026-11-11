@@ -85,7 +85,12 @@ from openswe.threads.runs import (
 from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from openswe.threads.store import THREADS
-from openswe.threads.summary import _now_ms, _thread_run_id, assert_thread_readable
+from openswe.threads.summary import (
+    ThreadReadPosition,
+    _now_ms,
+    _thread_run_id,
+    assert_thread_readable,
+)
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -363,9 +368,14 @@ async def api_get_thread_pull_request_context(
 
 class ThreadReadState(BaseModel):
     viewed: bool
+    response_id: str | None = Field(default=None, alias="responseId")
 
 
-@router.put("/threads/{thread_id}/read-state", response_model=ThreadReadState)
+@router.put(
+    "/threads/{thread_id}/read-state",
+    response_model=ThreadReadState,
+    response_model_exclude_unset=True,
+)
 async def api_set_thread_read_state(
     thread_id: str,
     body: ThreadReadState,
@@ -383,14 +393,31 @@ async def api_set_thread_read_state(
         await THREADS.update(
             thread_id, {"latest_run_id": latest.run_id, "latest_run_status": latest.status}
         )
-    await THREAD_READ_STATES.set(
+    run_id = _thread_run_id(thread.metadata, latest.run_id if latest else None)
+    position = ThreadReadPosition(thread.metadata, None, session["sub"], run_id)
+    guarded = "response_id" in body.model_fields_set
+    if (
+        not body.viewed
+        or not guarded
+        or not position.review
+        or body.response_id == position.response_id
+    ):
+        await THREAD_READ_STATES.set(
+            session["sub"],
+            thread_id,
+            viewed=body.viewed,
+            run_id=run_id,
+            viewed_at_ms=_now_ms(),
+            response_id=body.response_id,
+            acknowledge_current=not guarded or position.review,
+        )
+    position = ThreadReadPosition(
+        thread.metadata,
+        await THREAD_READ_STATES.saved(session["sub"], thread_id),
         session["sub"],
-        thread_id,
-        viewed=body.viewed,
-        run_id=_thread_run_id(thread.metadata, latest.run_id if latest else None),
-        viewed_at_ms=_now_ms(),
+        run_id,
     )
-    return body
+    return ThreadReadState(viewed=position.viewed)
 
 
 @router.get("/threads/{thread_id}")

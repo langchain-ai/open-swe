@@ -89,11 +89,15 @@ export function invalidateAgentThreadLists(queryClient: QueryClient): void {
 function patchAgentThread(
   queryClient: QueryClient,
   threadId: string,
-  patch: Partial<AgentThread>
+  patch: Partial<AgentThread>,
+  responseId?: string | null
 ): void {
   const update = (thread: AgentThread): AgentThread =>
     thread.id === threadId
-      ? { ...thread, ...patch }
+      ? responseId === undefined ||
+        (thread.unreadResponseId ?? null) === responseId
+        ? { ...thread, ...patch }
+        : thread
       : thread.taskWorkers
         ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
         : thread
@@ -346,16 +350,39 @@ export function useSetAgentThreadViewed() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationKey: ["agent-thread-read-state"],
-    mutationFn: (vars: { threadId: string; viewed: boolean }) =>
-      agentsApi.setThreadViewed(vars.threadId, vars.viewed),
+    mutationFn: (vars: {
+      threadId: string
+      viewed: boolean
+      responseId?: string | null
+    }) =>
+      agentsApi.setThreadViewed(vars.threadId, vars.viewed, vars.responseId),
     meta: { errorTitle: "Couldn't update thread read state" },
     onMutate: (vars) =>
       beginAgentThreadUpdate(queryClient, vars.threadId, () =>
-        patchAgentThread(queryClient, vars.threadId, {
-          viewed: vars.viewed,
-          viewedAt: vars.viewed ? Date.now() : null,
-        })
+        patchAgentThread(
+          queryClient,
+          vars.threadId,
+          {
+            viewed: vars.viewed,
+            viewedAt: vars.viewed ? Date.now() : null,
+          },
+          vars.responseId
+        )
       ),
+    onSuccess: (result, vars) => {
+      patchAgentThread(
+        queryClient,
+        vars.threadId,
+        { viewed: result.viewed },
+        vars.responseId
+      )
+      if (vars.viewed && !result.viewed) {
+        void queryClient.invalidateQueries({
+          queryKey: agentThreadKeys.detail(vars.threadId),
+          exact: true,
+        })
+      }
+    },
     onError: (_error, _vars, context) => {
       if (context) restoreAgentThreadQueries(queryClient, context)
     },
@@ -1004,7 +1031,7 @@ export function useAgentThread(threadId: string, active = true) {
   const readVisit = useRef<{
     threadId: string
     status: string
-    runId?: string | null
+    responseId: string | null
   } | null>(null)
   useEffect(() => {
     const readVisibleThread = () => {
@@ -1018,7 +1045,7 @@ export function useAgentThread(threadId: string, active = true) {
       readVisit.current = {
         threadId,
         status: thread.status,
-        runId: thread.latestRunId,
+        responseId: thread.unreadResponseId ?? null,
       }
       const opened = previous?.threadId !== threadId
       const completed =
@@ -1026,12 +1053,15 @@ export function useAgentThread(threadId: string, active = true) {
       if (
         (opened ||
           completed ||
-          (Boolean(thread.latestRunId) &&
-            previous?.runId !== thread.latestRunId)) &&
+          previous?.responseId !== (thread.unreadResponseId ?? null)) &&
         thread.status !== "running" &&
         !thread.viewed
       ) {
-        setViewed({ threadId, viewed: true })
+        setViewed({
+          threadId,
+          viewed: true,
+          responseId: thread.unreadResponseId ?? null,
+        })
       }
     }
     readVisibleThread()

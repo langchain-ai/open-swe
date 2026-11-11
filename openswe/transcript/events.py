@@ -8,7 +8,7 @@ holds bytes — an attachment rides as its metadata only, never as base64.
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -21,6 +21,7 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from runtime_api.provenance import Provenance
 
 SCHEMA_VERSION = 1
 """``thread_event.schema_version`` written by this release."""
@@ -52,6 +53,20 @@ class MessageSender(BaseModel):
     login: str
     kind: str
     display_name: str | None = None
+
+    @classmethod
+    def from_provenance(
+        cls, provenance: Provenance | None, fallback_login: str = "unknown"
+    ) -> Self:
+        if provenance is None:
+            return cls(login=fallback_login, kind="unknown")
+        surface = provenance.surface or "unknown"
+        return cls(
+            login=provenance.sender,
+            kind=("dashboard" if surface in {"web", "app", "dashboard"} else surface)
+            if provenance.human
+            else provenance.kind,
+        )
 
 
 class MessageAttachment(BaseModel):

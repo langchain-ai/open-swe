@@ -10416,6 +10416,17 @@
       },
       "ThreadReadState": {
         "properties": {
+          "responseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responseid"
+          },
           "viewed": {
             "title": "Viewed",
             "type": "boolean"

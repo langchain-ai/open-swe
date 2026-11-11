@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from openswe.database import postgres
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.transcript import tool_output
 from openswe.transcript.engine import Command, ThreadNotTranscribed, append
 from openswe.transcript.events import (
@@ -24,6 +25,7 @@ from openswe.transcript.events import (
     TurnRequested,
 )
 from openswe.transcript.snapshot import load_snapshot
+from openswe.users.models import User, UserIdentity
 
 
 def _created(title: str = "A thread") -> ThreadCreated:
@@ -308,3 +310,141 @@ async def test_an_output_cut_at_the_cap_is_recorded_as_truncated(registry_db: No
     assert call.has_output is True
     output = await tool_output.load(thread_id, "call-1")
     assert output is not None and len(output) == tool_output.MAX_TOOL_OUTPUT_CHARS
+
+
+async def test_app_unread_tracks_requester_output_and_stale_acknowledgements(
+    registry_db: None,
+) -> None:
+    alice = User(identities=[UserIdentity(provider="github", external_id="1", login="alice")])
+    bob = User(identities=[UserIdentity(provider="github", external_id="2", login="bob")])
+    async with postgres.session() as session:
+        session.add_all([alice, bob])
+    thread_id = str(uuid7())
+    await _create(thread_id)
+    old_response: str | None = None
+    replay: Command | None = None
+    for index, (kind, login, answer, eligible) in enumerate(
+        [
+            ("slack", f"user:{alice.id}", "Slack answer", None),
+            ("dashboard", f"user:{alice.id}", "App answer", "alice"),
+            ("system", "system:background-task", "", None),
+            ("system", "system:event-subscription", "Async continuation", "alice"),
+            ("system", "system:schedule:nightly", "Unrelated automation", None),
+            ("system", "system:monitor", "Automation continuation", None),
+            ("dashboard", f"user:{alice.id}", "Another app answer", "alice"),
+            ("dashboard", "bob", "Bob answer", "bob"),
+            ("slack", f"user:{alice.id}", "Another Slack answer", None),
+        ]
+    ):
+        turn_id = uuid7()
+        await append(
+            thread_id,
+            [
+                Command(
+                    command_id=f"request-{index}",
+                    event=TurnRequested(
+                        turn_id=turn_id,
+                        message_id=f"human-{index}",
+                        text="Request",
+                        sender=MessageSender(login=login, kind=kind),
+                    ),
+                    actor_kind="user",
+                    turn_id=turn_id,
+                )
+            ],
+        )
+        if index == 1:
+            await THREAD_READ_STATES.set(
+                "alice",
+                thread_id,
+                viewed=True,
+                run_id="running",
+                viewed_at_ms=1,
+                response_id=None,
+                acknowledge_current=False,
+            )
+        if kind == "dashboard":
+            for annotation in ("dashboard-handoff", "thread-queue", "reply-guard"):
+                await append(
+                    thread_id,
+                    [
+                        Command(
+                            command_id=f"annotation-{index}-{annotation}",
+                            event=MessageCompleted(
+                                turn_id=turn_id,
+                                message_id=f"annotation-{index}-{annotation}",
+                                role="human",
+                                text="Internal run notice",
+                                sender=MessageSender(login=f"system:{annotation}", kind="system"),
+                                created_at=datetime.now(UTC),
+                            ),
+                            actor_kind="system",
+                            turn_id=turn_id,
+                        )
+                    ],
+                )
+        command = Command(
+            command_id=f"answer-{index}",
+            event=MessageCompleted(
+                turn_id=turn_id,
+                message_id=f"ai-{index}",
+                role="ai",
+                text=answer,
+                created_at=datetime.now(UTC),
+            ),
+            actor_kind="agent",
+            turn_id=turn_id,
+        )
+        await append(thread_id, [command])
+        saved = await THREAD_READ_STATES.saved("alice", thread_id) or {}
+        if index == 0:
+            assert THREAD_READ_STATES.viewed(saved) is True
+            assert THREAD_READ_STATES.response_id(saved) is None
+        if eligible == "alice":
+            current = THREAD_READ_STATES.response_id(saved)
+            assert current is not None and current != old_response
+            assert THREAD_READ_STATES.viewed(saved) is False
+            await THREAD_READ_STATES.set(
+                "alice",
+                thread_id,
+                viewed=True,
+                run_id="finished",
+                viewed_at_ms=2,
+                response_id=old_response,
+                acknowledge_current=False,
+            )
+            assert (
+                THREAD_READ_STATES.viewed(await THREAD_READ_STATES.saved("alice", thread_id) or {})
+                is False
+            )
+            await THREAD_READ_STATES.set(
+                "alice",
+                thread_id,
+                viewed=True,
+                run_id="finished",
+                viewed_at_ms=3,
+                response_id=current,
+                acknowledge_current=False,
+            )
+            assert (
+                THREAD_READ_STATES.viewed(await THREAD_READ_STATES.saved("alice", thread_id) or {})
+                is True
+            )
+            old_response = current
+            replay = command
+        if eligible != "alice":
+            assert THREAD_READ_STATES.response_id(saved) == old_response
+            assert THREAD_READ_STATES.viewed(saved) is (index != 8)
+        if eligible == "bob":
+            assert (
+                THREAD_READ_STATES.viewed(await THREAD_READ_STATES.saved("bob", thread_id) or {})
+                is False
+            )
+            await THREAD_READ_STATES.set(
+                "alice", thread_id, viewed=False, run_id=None, viewed_at_ms=4
+            )
+    assert replay is not None
+    await append(thread_id, [replay])
+    saved = await THREAD_READ_STATES.saved(f"user:{alice.id}", thread_id) or {}
+    assert THREAD_READ_STATES.response_id(saved) == old_response
+    assert THREAD_READ_STATES.viewed(saved) is False
