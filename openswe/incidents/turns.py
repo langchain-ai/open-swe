@@ -23,10 +23,12 @@ from openswe.input_messages import (
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
+    get_slack_permalink,
     post_slack_thread_reply_with_ts,
     slack_message_bot_id,
     slack_message_bot_name,
 )
+from openswe.slack.links import SlackLink
 from openswe.threads import succession
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
@@ -46,10 +48,6 @@ _INCIDENTS_SYSTEM: SystemIdentity = {
     "display_name": "Incidents",
     "platform": "open-swe",
 }
-
-
-def permalink(channel_id: str, ts: str) -> str:
-    return f"https://slack.com/archives/{channel_id}/p{ts.replace('.', '')}"
 
 
 def author_of(message: dict[str, Any]) -> str:
@@ -73,7 +71,7 @@ def message_text(message: dict[str, Any]) -> str:
     return text.strip()
 
 
-def context_block(channel_id: str, message: dict[str, Any]) -> dict[str, Any]:
+async def context_block(channel_id: str, message: dict[str, Any]) -> dict[str, Any]:
     """Queue payload for one Slack message: a citable header line plus redacted text."""
     ts = str(message.get("ts") or "")
     edited = message.get("edited")
@@ -81,7 +79,8 @@ def context_block(channel_id: str, message: dict[str, Any]) -> dict[str, Any]:
     evidence_id = f"slack:{ts}" + (f":{edited_ts}" if edited_ts else "")
     header = {
         "evidence_id": evidence_id,
-        "source_url": permalink(channel_id, ts),
+        "source_url": await get_slack_permalink(channel_id, ts)
+        or SlackLink(channel_id, ts, str(message.get("thread_ts") or "")).url,
         "author": author_of(message),
         "ts": ts,
     }
@@ -110,7 +109,7 @@ async def _move_to_live_thread(record: Incident) -> None:
 async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
     await _move_to_live_thread(record)
     return await queue_message_for_thread(
-        record.thread_id, context_block(record.channel_id, message)
+        record.thread_id, await context_block(record.channel_id, message)
     )
 
 

@@ -4,11 +4,12 @@ import hashlib
 import json
 import re
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel
 
 from openswe.incidents.models import Evidence
+from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.time import now_iso
 
 # Every repetition is bounded so a long hostile string cannot make matching
@@ -37,7 +38,26 @@ def source_url(value: str | None) -> str:
         parsed = urlsplit(value)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             return ""
-        return urlunsplit(("https", parsed.netloc, parsed.path, "", ""))[:2000]
+        query = ""
+        dashboard = urlsplit(dashboard_api_base_url())
+        if (
+            parsed.scheme == dashboard.scheme
+            and parsed.netloc == dashboard.netloc
+            and parsed.path == f"{dashboard.path.rstrip('/')}/dashboard/api/slack/open"
+        ):
+            params = parse_qs(parsed.query)
+            channel = params.get("channel", [""])[0]
+            if not re.fullmatch(r"[CGD][A-Z0-9]{2,31}", channel):
+                return ""
+            navigation = {"channel": channel}
+            for key in ("message_ts", "thread_ts"):
+                timestamp = params.get(key, [""])[0]
+                if timestamp:
+                    if not re.fullmatch(r"[0-9]{1,20}\.[0-9]{1,6}", timestamp):
+                        return ""
+                    navigation[key] = timestamp
+            query = urlencode(navigation)
+        return urlunsplit(("https", parsed.netloc, parsed.path, query, ""))[:2000]
     except ValueError:
         return ""
 

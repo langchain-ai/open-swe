@@ -14,13 +14,16 @@ from openswe.slack import breakout_links
         (
             "C2",
             None,
-            "Continued in <https://slack.com/archives/C2/p2000|the breakout thread> in <#C2>.",
+            "Continued in <https://robin.example/dashboard/api/slack/open?channel=C2&message_ts=200.0|the breakout thread> in <#C2>.",
         ),
     ],
 )
 async def test_mark_broken_out_links_breakout_from_source_thread(
     monkeypatch, target, permalink, expected
 ):
+    monkeypatch.setattr(
+        "openswe.slack.links.dashboard_api_base_url", lambda: "https://robin.example"
+    )
     reply = AsyncMock()
     monkeypatch.setattr(breakout_links, "get_slack_permalink", AsyncMock(return_value=permalink))
     monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)

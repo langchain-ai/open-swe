@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   ArrowLeftIcon,
   ArrowUpIcon,
@@ -234,7 +235,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
               </Button>
             ))}
           <ExternalLink
-            href={incident.slack_url}
+            href={
+              incident.slack_url
+                ? SlackLinks.normalize(incident.slack_url)
+                : undefined
+            }
             className="ml-auto text-xs font-medium text-secondary"
           >
             Open in Slack

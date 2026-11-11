@@ -85,4 +85,4 @@ async def test_active_review_links_to_slack_when_permalink_lookup_fails(
     ):
         result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
     assert result.active
-    assert result.permalink == "https://app.slack.com/archives/C1/p123456"
+    assert result.permalink.endswith("/dashboard/api/slack/open?channel=C1&message_ts=123.456")

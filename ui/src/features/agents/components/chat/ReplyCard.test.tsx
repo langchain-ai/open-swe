@@ -42,6 +42,32 @@ describe("ReplyCard", () => {
     }
   )
 
+  it("repairs historical workspace-ambiguous receipt links", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ReplyCard
+          chunk={{
+            kind: "tool-execution",
+            toolCallId: "old-reply",
+            title: "Reply",
+            toolKind: "slack",
+            status: "completed",
+            input: { message: "Fixed" },
+            output: JSON.stringify({
+              message_url:
+                "https://slack.com/archives/C123/p1793303440018049?thread_ts=1793303400.000001&cid=C123",
+            }),
+          }}
+        />
+      </QueryClientProvider>
+    )
+    expect(
+      screen.getByRole("link", { name: "Sent to Slack" }).getAttribute("href")
+    ).toBe(
+      "/dashboard/api/slack/open?channel=C123&message_ts=1793303440.018049&thread_ts=1793303400.000001"
+    )
+  })
+
   it.each([
     { status: "pending", output: undefined },
     { status: "error", output: undefined },

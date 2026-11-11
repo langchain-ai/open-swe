@@ -169,7 +169,7 @@ describe("Messages", () => {
       name: "View message from Alice in Slack",
     })
     expect(link.getAttribute("href")).toBe(
-      "https://slack.com/archives/C123/p1787165487000034"
+      "/dashboard/api/slack/open?channel=C123&message_ts=1787165487.000034"
     )
     expect(link.getAttribute("target")).toBe("_blank")
     expect(screen.getByRole("img", { name: "Slack" })).toBeTruthy()

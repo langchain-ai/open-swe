@@ -248,7 +248,7 @@ describe("WorkspaceSettingsPanel", () => {
     expect(repository.getAttribute("target")).toBe("_blank")
     const channel = await screen.findByRole("link", { name: "#oss-help" })
     expect(channel.getAttribute("href")).toBe(
-      "https://slack.com/app_redirect?channel=C1"
+      "/dashboard/api/slack/open?channel=C1"
     )
     expect(channel.getAttribute("target")).toBe("_blank")
   })

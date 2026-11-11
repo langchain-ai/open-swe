@@ -83,7 +83,8 @@ github_login: carol
       sender: "slack:U_ALICE",
       senderKind: "person",
       surface: "slack",
-      slackMessageUrl: "https://slack.com/archives/C123/p1787165487000034",
+      slackMessageUrl:
+        "/dashboard/api/slack/open?channel=C123&message_ts=1787165487.000034",
     })
   })
 

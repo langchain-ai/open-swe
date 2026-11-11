@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -789,7 +790,7 @@ export function AgentsSidebar({
               concierge.data?.thread_id
                 ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
-                  ? `slack://channel?id=${concierge.data.channel_id}`
+                  ? SlackLinks.open(concierge.data.channel_id)
                   : undefined
             }
             onClick={layout.closeOnMobile}

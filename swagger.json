@@ -25112,6 +25112,85 @@
         ]
       }
     },
+    "/dashboard/api/slack/open": {
+      "get": {
+        "operationId": "api_open_slack_dashboard_api_slack_open_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "channel",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "pattern": "^[CGD][A-Z0-9]{2,}$",
+              "title": "Channel",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "message_ts",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 27,
+                  "pattern": "^[0-9]{1,20}\\.[0-9]{1,6}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Message Ts"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_ts",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 27,
+                  "pattern": "^[0-9]{1,20}\\.[0-9]{1,6}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Ts"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Slack",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/users": {
       "get": {
         "operationId": "api_slack_users_dashboard_api_slack_users_get",

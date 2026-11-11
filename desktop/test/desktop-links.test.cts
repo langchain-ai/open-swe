@@ -5,7 +5,11 @@ const { DesktopLinks } = require("../build/desktop-links.cjs");
 // Lets the async handling of a link on another origin settle.
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-function desktopLinks(backendUrl, dashboardOrigins = []) {
+function desktopLinks(
+  backendUrl,
+  dashboardOrigins = [],
+  fetchBackend = async () => new Response(null, { status: 401 }),
+) {
   const browserLinks = [];
   const appLinks = [];
   const links = new DesktopLinks({
@@ -17,10 +21,13 @@ function desktopLinks(backendUrl, dashboardOrigins = []) {
       ),
     openApp: (url) => appLinks.push(url),
     openExternal: async (url) => browserLinks.push(url),
+    fetchBackend,
   });
   return {
     browserLinks,
     appLinks,
+    slackUrl: (url) => links.slackUrl(url),
+    openSlack: (url) => links.openSlack(url),
     ready: () => links.ready(),
     open: (url) => links.receive(url),
   };
@@ -60,6 +67,71 @@ test("resolves cold-start links once, including unconfigured backends", async ()
       links.appLinks,
       backend === "https://prod.example" ? ["open-swe://app/review"] : [],
     );
+  }
+});
+
+test("resolves app and same-backend Slack links without following authenticated redirects", async () => {
+  const location =
+    "https://workspace.slack.com/archives/C123/p1700000000123456?thread_ts=1700000000.000001&cid=C123";
+  const requests = [];
+  const links = desktopLinks(
+    "https://configured.example",
+    [],
+    async (url, init) => {
+      requests.push({ url, redirect: init.redirect });
+      return new Response(null, { status: 302, headers: { location } });
+    },
+  );
+  for (const origin of ["open-swe://app", "https://configured.example"]) {
+    await links.openSlack(
+      `${origin}/dashboard/api/slack/open?channel=C123&message_ts=1700000000.123456`,
+    );
+  }
+  assert.deepEqual(
+    requests,
+    Array(2).fill({
+      url: "https://configured.example/dashboard/api/slack/open?channel=C123&message_ts=1700000000.123456",
+      redirect: "manual",
+    }),
+  );
+  assert.deepEqual(links.browserLinks, [location, location]);
+  assert.deepEqual(links.appLinks, []);
+  for (const url of [
+    "https://other.example/dashboard/api/slack/open?channel=C123",
+    "https://configured.example/dashboard/api/slack/open/other",
+    "open-swe://app/dashboard/api/auth/login",
+    "open-swe://attacker@app/dashboard/api/slack/open",
+    "open-swe://app:123/dashboard/api/slack/open",
+    "not a URL",
+  ]) {
+    assert.equal(links.slackUrl(url), null);
+    await assert.rejects(links.openSlack(url), /Invalid Slack link/);
+  }
+  assert.equal(requests.length, 2);
+});
+
+test("does not open failed or unsafe Slack resolutions", async () => {
+  for (const [status, location] of [
+    [401, "https://workspace.slack.com/archives/C123"],
+    [302, "https://workspace.slack.com.evil.example/archives/C123"],
+    [302, "https://app.slack.com/archives/C123"],
+    [302, "https://workspace.slack.com/login"],
+    [302, "https://attacker@workspace.slack.com/archives/C123"],
+    [302, "https://workspace.slack.com:123/archives/C123"],
+    [302, "http://workspace.slack.com/archives/C123"],
+    [302, "file:///archives/C123"],
+    [302, "/archives/C123"],
+    [302, ""],
+  ]) {
+    const links = desktopLinks(
+      "https://configured.example",
+      [],
+      async () => new Response(null, { status, headers: { location } }),
+    );
+    await assert.rejects(
+      links.openSlack("open-swe://app/dashboard/api/slack/open?channel=C123"),
+    );
+    assert.deepEqual(links.browserLinks, []);
   }
 });
 

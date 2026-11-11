@@ -157,7 +157,7 @@ test.describe("transcript rendering", () => {
     await expect(sourceLink).toBeVisible();
     await expect(sourceLink).toHaveAttribute(
       "href",
-      /^https:\/\/slack\.com\/archives\/CDEMO01\/p\d+$/,
+      /^\/dashboard\/api\/slack\/open\?channel=CDEMO01&message_ts=\d+\.\d+$/,
     );
     await expect(sourceLink).toHaveAttribute("target", "_blank");
     await expect(slackMessage.locator("strong")).toHaveText("important");

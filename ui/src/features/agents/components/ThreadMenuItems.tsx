@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import { PushPinRegularIcon } from "@langchain/macaw-components/icons"
 import { ContextMenuSeparator } from "@langchain/macaw-components/ContextMenu"
 import { DropdownMenuSeparator } from "@langchain/macaw-components/DropdownMenu"
@@ -131,7 +132,7 @@ export function ThreadMenuItems({
       {thread.sourceUrl && (
         <Item asChild>
           <a
-            href={thread.sourceAppUrl ?? thread.sourceUrl}
+            href={SlackLinks.normalize(thread.sourceAppUrl ?? thread.sourceUrl)}
             target="_blank"
             rel="noreferrer"
           >

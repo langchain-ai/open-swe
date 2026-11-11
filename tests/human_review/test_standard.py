@@ -1256,7 +1256,9 @@ async def test_existing_request_checks_explicit_channel_before_updating_summary(
     assert result.success and result.reused
     assert result.request_id == str(request.id)
     assert result.channel == "C_CURRENT"
-    assert result.permalink == "https://app.slack.com/archives/C_CURRENT/p123456"
+    assert result.permalink.endswith(
+        "/dashboard/api/slack/open?channel=C_CURRENT&message_ts=123.456"
+    )
     assert result.channel_mismatch is mismatch
     assert result.requested_channel == ("C_NEW" if mismatch else "")
     assert result.summary_updated is not mismatch

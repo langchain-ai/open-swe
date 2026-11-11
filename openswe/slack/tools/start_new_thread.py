@@ -28,6 +28,7 @@ from openswe.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SlackRequestError
+from openswe.slack.links import SlackLink
 from openswe.slack.records import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -576,8 +577,7 @@ async def slack_breakout_thread(
         "thread_id": thread_id,
         "thread_ts": message_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
-        "slack_url": slack_url
-        or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
+        "slack_url": slack_url or SlackLink(clean_channel_id, message_ts).url,
     }
     if isinstance(current_thread_ts, str) and current_thread_ts:
         await mark_broken_out(source_channel, current_thread_ts, clean_channel_id, message_ts)

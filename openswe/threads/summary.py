@@ -21,6 +21,7 @@ from openswe.review.session import ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.links import SlackLink
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
@@ -298,7 +299,7 @@ def thread_source_url(metadata: Mapping[str, Any]) -> str | None:
 
 def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    team_id = SLACK_TEAM_ID.strip()
+    team_id = (slack_thread.team_id or SLACK_TEAM_ID).strip() if slack_thread else ""
     if (
         slack_thread is None
         or not team_id
@@ -315,10 +316,9 @@ def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
         return None
     channel_id = slack_thread.channel_id.strip()
-    team_id = SLACK_TEAM_ID.strip()
-    if not channel_id or not team_id:
+    if not channel_id:
         return None
-    return f"https://slack.com/app_redirect?{urlencode({'channel': channel_id, 'team': team_id})}"
+    return SlackLink(channel_id, team_id=slack_thread.team_id or SLACK_TEAM_ID).channel_url
 
 
 def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:

@@ -30,6 +30,7 @@ from openswe.incidents.records import (
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, required_slack_value, slack_error
+from openswe.slack.links import SlackLink
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.time import now_iso
 
@@ -299,7 +300,7 @@ def summary(record: Incident, latest: IncidentReportRecord | None) -> dict[str, 
         "reason": record.reason,
         "latest_finding": latest.report.summary if latest else "",
         "updated_at": max(record.updated_at, latest.updated_at) if latest else record.updated_at,
-        "slack_url": f"https://slack.com/archives/{record.channel_id}",
+        "slack_url": SlackLink(record.channel_id, team_id=record.workspace_id).channel_url,
     }
 
 

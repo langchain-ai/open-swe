@@ -557,6 +557,9 @@ async def test_slack_breakout_thread_success(
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", fake_store_mapping)
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
+    monkeypatch.setattr(
+        "openswe.slack.links.dashboard_api_base_url", lambda: "https://robin.example"
+    )
     get_permalink = AsyncMock(return_value=permalink)
     monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", get_permalink)
     monkeypatch.setattr(
@@ -593,7 +596,8 @@ async def test_slack_breakout_thread_success(
         "thread_id": expected_thread_id,
         "thread_ts": new_ts,
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
-        "slack_url": permalink or f"https://slack.com/archives/{target}/p1700000000111111",
+        "slack_url": permalink
+        or f"https://robin.example/dashboard/api/slack/open?channel={target}&message_ts={new_ts}",
         "next_step": "End the turn with slack_no_reply_needed; do not reply in the current thread.",
     }
     get_permalink.assert_awaited_once_with(target, new_ts)

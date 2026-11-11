@@ -1688,6 +1688,18 @@ async function completeExternalLogin(verifier, code) {
 }
 
 async function handleNavigation(window, event, url) {
+  if (desktopLinks.slackUrl(url)) {
+    event.preventDefault();
+    void desktopLinks
+      .openSlack(url)
+      .catch((error: unknown) =>
+        dialog.showErrorBox(
+          `${appRuntime.name} could not open Slack`,
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    return;
+  }
   if (isAppLoginUrl(url)) {
     event.preventDefault();
     void startExternalLogin(url);
@@ -1967,6 +1979,7 @@ const desktopLinks = new DesktopLinks({
       : Promise.resolve(false),
   openApp: openDesktopLink,
   openExternal: (url: string) => shell.openExternal(url),
+  fetchBackend: backendFetch,
 });
 
 function openDesktopLink(target: string) {
