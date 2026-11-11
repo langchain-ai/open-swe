@@ -88,6 +88,13 @@ class SlackMessage(SlackPayload):
         """A join or topic-change notice, which carries nothing a reader wants."""
         return self.subtype in NOISE_SUBTYPES
 
+    @property
+    def has_attachment(self) -> bool:
+        """Whether a person attached files or shared a message, not just a link Slack previewed."""
+        return bool((self.model_extra or {}).get("files")) or any(
+            attachment.get("is_share") is True for attachment in self.attachments
+        )
+
     def dump(self) -> JsonObject:
         """The raw-shaped mapping the prompt formatter reads.
 

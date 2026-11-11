@@ -1,33 +1,48 @@
-"""Jev's judgment of whether an untagged Ask channel message is for Robin."""
+"""Jev's judgment of whether an untagged Ask channel message needs a Robin response."""
 
 import logging
-from typing import Literal
+
+from langchain_typesafe import Choice
 
 from openswe.prompts import prompt
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
+    add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_names,
     slack_ts_time,
 )
 from openswe.slack.payloads import SlackMessage
-from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.utils.jev import JevDecision, select_jev_choices
 from openswe.webhooks import common
 from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
-type Audience = Literal["addressed_to_robin", "human_conversation"]
-
 
 class AskChannelMessage:
-    """An untagged Ask channel message, top-level or in a thread, answered only when it is for Robin."""
+    """An untagged Ask channel message, answered only when a Robin response is needed."""
 
     # Jev reads 32k tokens; the transcript gets most of them, the instructions the rest.
     _TRANSCRIPT_MAX_CHARS = 22_000 * 4
     _TRIMMED = "[earlier messages omitted to stay inside the context budget]"
     _CHANNEL_MESSAGES = 30
+    _REACTIONS = (
+        "nail_care",
+        "sparkles",
+        "crown",
+        "fire",
+        "dancer",
+        "tea",
+        "eyes",
+        "skull",
+        "face_with_rolling_eyes",
+        "rainbow",
+        "saluting_face",
+        "broken_heart",
+        "woman-tipping-hand",
+    )
 
     @classmethod
     async def for_robin(cls, *, channel_id: str, thread_ts: str, message_ts: str) -> bool:
@@ -44,7 +59,10 @@ class AskChannelMessage:
         if not ask_channel:
             return True
         try:
-            transcript = await cls._transcript(channel_id, thread_ts, message_ts)
+            messages = await cls._messages(channel_id, thread_ts, message_ts)
+            if not messages or messages[-1].has_attachment:
+                return True
+            transcript = await cls._transcript(messages)
             channel = (await common.resolve_slack_channel_context(channel_id)).model_dump_json(
                 include={"name", "topic", "purpose", "description"}
             )
@@ -58,44 +76,75 @@ class AskChannelMessage:
         if not transcript:
             return True
         decision = JevDecision()
-        choice = await cls._audience(transcript, channel, message_ts, decision)
+        reaction_decision = JevDecision()
+        choices = await cls._response(transcript, channel, message_ts, decision, reaction_decision)
+        action = choices["action"]
+        reaction = choices["reaction"]
         logger.info(
             "Ask channel message judged",
             extra={
                 "slack_channel_id": channel_id,
                 "thread_ts": thread_ts,
-                "audience": choice,
+                "ask_action": action,
+                "ask_reaction": reaction,
                 "jev_outcome": decision.outcome,
                 "jev_confidence": decision.confidence,
             },
         )
-        # An unavailable classifier answers as Ask channels did before it; an unsure one stays quiet.
-        return choice == "addressed_to_robin" or decision.outcome == "classifier_failure"
+        if action in {"react_only", "react_and_follow_up"}:
+            emoji = reaction if isinstance(reaction, str) and reaction in cls._REACTIONS else "eyes"
+            reacted = await add_slack_reaction(channel_id, message_ts, emoji)
+            if action == "react_only" and not reacted:
+                return True
+        return action in {"follow_up_only", "react_and_follow_up"} or (
+            decision.outcome == "classifier_failure"
+        )
 
-    @staticmethod
-    async def _audience(
-        transcript: str, channel: str, message_ts: str, decision: JevDecision
-    ) -> Audience | None:
-        return await select_jev_choice(
+    @classmethod
+    async def _response(
+        cls,
+        transcript: str,
+        channel: str,
+        message_ts: str,
+        decision: JevDecision,
+        reaction_decision: JevDecision,
+    ) -> dict[str, str | None]:
+        instructions = prompt(
+            "slack/ask-message-instructions",
+            about_robin=prompt("decision-models/robin"),
+            channel=channel,
+            sent_at=slack_ts_time(message_ts),
+            channel_instructions=prompt("runs/slack-ask-channel"),
+        )
+        return await select_jev_choices(
             transcript,
-            decision=decision,
-            question="audience",
-            instructions=prompt(
-                "slack/ask-message-instructions",
-                about_robin=prompt("decision-models/robin"),
-                channel=channel,
-                sent_at=slack_ts_time(message_ts),
-                channel_instructions=prompt("runs/slack-ask-channel"),
-            ),
-            criteria={
-                "addressed_to_robin": prompt("slack/ask-message-robin"),
-                "human_conversation": prompt("slack/ask-message-human"),
+            decisions={"action": decision, "reaction": reaction_decision},
+            min_confidence=0.5,
+            questions={
+                "action": Choice(
+                    instructions=instructions,
+                    criteria={
+                        "follow_up_only": prompt("slack/ask-message-robin"),
+                        "do_nothing": prompt("slack/ask-message-human"),
+                        "react_only": prompt("slack/ask-message-react-only"),
+                        "react_and_follow_up": prompt("slack/ask-message-react-follow-up"),
+                    },
+                ),
+                "reaction": Choice(
+                    instructions=instructions,
+                    criteria={
+                        emoji: prompt("slack/ask-message-reaction", emoji=emoji)
+                        for emoji in cls._REACTIONS
+                    },
+                ),
             },
         )
 
     @classmethod
-    async def _transcript(cls, channel_id: str, thread_ts: str, message_ts: str) -> str:
-        """The conversation as the Slack client shows it, up to the message being judged."""
+    async def _messages(
+        cls, channel_id: str, thread_ts: str, message_ts: str
+    ) -> list[SlackMessage]:
+        """The conversation up to the message being judged."""
         if thread_ts == message_ts:
             channel = await SlackChannel.load(channel_id)
             messages = await channel.messages(cls._CHANNEL_MESSAGES) if channel else []
@@ -104,8 +153,11 @@ class AskChannelMessage:
         else:
             messages = cls._parsed(await fetch_slack_thread_messages(channel_id, thread_ts))
         messages = [m for m in messages if float(m.ts) <= float(message_ts)]
-        if not messages or messages[-1].ts != message_ts:
-            return ""
+        return messages if messages and messages[-1].ts == message_ts else []
+
+    @classmethod
+    async def _transcript(cls, messages: list[SlackMessage]) -> str:
+        """The conversation as the Slack client shows it."""
         user_ids = [m.user for m in messages if m.user]
         names = await get_slack_user_names(user_ids) if user_ids else {}
         *earlier, judged = messages

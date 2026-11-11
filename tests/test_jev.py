@@ -49,30 +49,41 @@ def transport(
     return install
 
 
-async def classify(decision: JevDecision | None = None) -> str | None:
+async def classify(
+    decision: JevDecision | None = None, *, min_confidence: float = 0.6
+) -> str | None:
     return await select_jev_choice(
         "Fix the bug",
         question="route",
         instructions="Choose a route",
         criteria={"fast": "Small task"},
         decision=decision,
+        min_confidence=min_confidence,
     )
 
 
 @pytest.mark.parametrize(
-    ("choice", "confidence", "status", "expected"),
+    ("choice", "confidence", "status", "expected", "min_confidence"),
     [
-        ("fast", 0.95, 200, "fast"),
-        ("fast", 0.6, 200, "fast"),
-        ("fast", 0.59, 200, None),
-        ("fast", -0.1, 200, None),
-        ("fast", 1.1, 200, None),
-        ("unknown", 0.95, 200, None),
-        ("fast", 0.95, 503, None),
+        ("fast", 0.95, 200, "fast", 0.6),
+        ("fast", 0.6, 200, "fast", 0.6),
+        ("fast", 0.56, 200, "fast", 0.5),
+        ("fast", 0.5, 200, "fast", 0.5),
+        ("fast", 0.49, 200, None, 0.5),
+        ("fast", 0.59, 200, None, 0.6),
+        ("fast", -0.1, 200, None, 0.5),
+        ("fast", 1.1, 200, None, 0.5),
+        ("unknown", 0.95, 200, None, 0.5),
+        ("fast", 0.95, 503, None, 0.6),
     ],
 )
 async def test_classification_accepts_only_confident_valid_answers(
-    transport: InstallTransport, choice: str, confidence: float, status: int, expected: str | None
+    transport: InstallTransport,
+    choice: str,
+    confidence: float,
+    status: int,
+    expected: str | None,
+    min_confidence: float,
 ) -> None:
     def handle(request: httpx2.Request) -> httpx2.Response:
         assert request.url == "https://gateway.example.com/v1/systemone"
@@ -97,7 +108,7 @@ async def test_classification_accepts_only_confident_valid_answers(
 
     transport(handle)
     decision = JevDecision()
-    assert await classify(decision) == expected
+    assert await classify(decision, min_confidence=min_confidence) == expected
     valid_response = status == 200 and 0 <= confidence <= 1
     assert decision.choice == (choice if valid_response and choice == "fast" else None)
     assert decision.confidence == (confidence if valid_response else None)
@@ -105,7 +116,7 @@ async def test_classification_accepts_only_confident_valid_answers(
         "accepted"
         if expected
         else "low_confidence"
-        if valid_response and confidence < 0.6
+        if valid_response and confidence < min_confidence
         else "classifier_failure"
     )
     if not valid_response or choice == "unknown":

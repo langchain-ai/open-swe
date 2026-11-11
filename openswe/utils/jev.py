@@ -18,6 +18,7 @@ async def select_jev_choice[ChoiceT: str](
     instructions: str,
     criteria: Mapping[ChoiceT, str],
     decision: JevDecision | None = None,
+    min_confidence: float = 0.6,
 ) -> ChoiceT | None:
     return await classifier.select_jev_choice(
         task,
@@ -25,6 +26,7 @@ async def select_jev_choice[ChoiceT: str](
         instructions=instructions,
         criteria=criteria,
         decision=decision,
+        min_confidence=min_confidence,
         transport=pooled_transport(),
     )
 
@@ -34,7 +36,12 @@ async def select_jev_choices(
     *,
     questions: Mapping[str, Choice],
     decisions: Mapping[str, JevDecision | None] | None = None,
+    min_confidence: float = 0.6,
 ) -> dict[str, str | None]:
     return await classifier.select_jev_choices(
-        task, questions=questions, decisions=decisions, transport=pooled_transport()
+        task,
+        questions=questions,
+        decisions=decisions,
+        min_confidence=min_confidence,
+        transport=pooled_transport(),
     )

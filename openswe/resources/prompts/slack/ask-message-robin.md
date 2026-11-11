@@ -1,1 +1,3 @@
-The message to judge is clearly in Robin's remit: a bug report or question for Robin, a request for Robin to do or explain something, or a continuation of an exchange with Robin, such as answering a question Robin asked.
+Robin should follow up with a reply or action, without an emoji reaction.
+This includes questions, requests and actionable follow-ups, or social messages needing a short reply rather than a reaction.
+An explicit address or @mention is not required; judge using the conversation and channel instructions.
