@@ -231,6 +231,39 @@ async def test_upsert_counts_linked_and_unregistered_slack_participants(
         assert participant_ids(cast(dict, threads.thread)["metadata"]) == expected
 
 
+@pytest.mark.parametrize("trigger_kind", ["system", "slack_bot"])
+def test_github_followups_preserve_incident_lifecycle_metadata(monkeypatch, trigger_kind):
+    threads = _FakeThreadsClient(
+        thread={
+            "metadata": {
+                "source": "incidents_agent",
+                "origin": "incidents_agent",
+                "thread_category": "interactive",
+                "trigger_kind": trigger_kind,
+                "incident_id": "incident",
+                "owner_type": "system",
+                "visibility": "public",
+                "created_at_ms": 1,
+            }
+        }
+    )
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    assert asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id",
+            source="github",
+            title="Pull request",
+            source_context=SourceContext(pr_number=42),
+        )
+    )
+    metadata = threads.thread["metadata"]
+    assert (metadata["source"], metadata["origin"]) == ("incidents_agent", "incidents_agent")
+    assert metadata["thread_category"] == "interactive"
+    assert metadata["trigger_kind"] == trigger_kind
+    assert metadata["incident_id"] == "incident"
+    assert metadata["owner_type"] == "system" and metadata["visibility"] == "public"
+
+
 def test_upsert_records_a_token_scope_only_on_creation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -30,6 +30,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.links import SlackLink
 from openswe.threads import succession
+from openswe.threads.store import THREADS
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
 
@@ -180,6 +181,8 @@ def _configurable(
         # so an automatic turn that left this out would inherit the last responder question
         # and keep answering it as though someone had just asked.
         "incident_request": request,
+        "github_login": None,
+        "user_email": None,
     }
     if policy.model:
         model, effort = normalize_model_choice(policy.model, None)
@@ -250,31 +253,68 @@ async def dispatch_turn(
     an automatic turn queues behind it.
     """
     explicit = request is not None
-    await _move_to_live_thread(record)
-    run = await create_durable_run(
-        record.thread_id,
-        "agent",
-        input=_input(
-            record,
-            request=request,
-            requester=requester,
-            automatic_request=AUTOMATIC_REQUEST if explicit else await _automatic_request(record),
-        ),
-        source="incidents_agent",
-        thread_title=None,
-        config={
-            "configurable": _configurable(
-                record, policy, request=request, reply_thread_ts=reply_thread_ts
+    try:
+        await _move_to_live_thread(record)
+        saved = await service.INCIDENTS.get(record.id)
+        thread = await THREADS.get(record.thread_id)
+        if (
+            saved is None
+            or saved.thread_id != record.thread_id
+            or saved.workspace_id != policy.workspace_id
+            or thread is None
+            or thread.metadata.get("owner_type") != "system"
+            or thread.metadata.get("visibility") != "public"
+            or thread.metadata.get("incident_id") != saved.id
+        ):
+            raise PermissionError("Incident conversation binding is missing")
+        if thread.metadata.get("source") != "incidents_agent":
+            await THREADS.update(
+                record.thread_id, {"source": "incidents_agent", "origin": "incidents_agent"}
             )
-        },
-        metadata={
-            "source": "incidents_agent",
-            "incident_id": record.id,
-            "incident_turn": "explicit" if explicit else "automatic",
-        },
-        multitask_strategy=multitask_strategy or ("interrupt" if explicit else "enqueue"),
-        after_seconds=after_seconds,
-    )
+        run = await create_durable_run(
+            record.thread_id,
+            "agent",
+            input=_input(
+                record,
+                request=request,
+                requester=requester,
+                automatic_request=AUTOMATIC_REQUEST
+                if explicit
+                else await _automatic_request(record),
+            ),
+            source="incidents_agent",
+            thread_title=None,
+            config={
+                "configurable": _configurable(
+                    record, policy, request=request, reply_thread_ts=reply_thread_ts
+                )
+            },
+            metadata={
+                "source": "incidents_agent",
+                "incident_id": record.id,
+                "incident_turn": "explicit" if explicit else "automatic",
+            },
+            multitask_strategy=multitask_strategy or ("interrupt" if explicit else "enqueue"),
+            after_seconds=after_seconds,
+        )
+    except Exception:
+        logger.exception("Incident turn could not start", extra={"incident_id": record.id})
+        if explicit and not record.is_archived:
+            try:
+                await post_slack_thread_reply_with_ts(
+                    record.channel_id,
+                    reply_thread_ts or SESSION_TS,
+                    "I couldn't start the incident investigation. No findings were published. "
+                    "Please mention me again to retry.",
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
+            except Exception:
+                logger.exception(
+                    "Incident startup failure notice not delivered",
+                    extra={"incident_id": record.id},
+                )
+        raise
     await Topic.INCIDENTS.invalidate(key=record.id)
     return dict(run)
 

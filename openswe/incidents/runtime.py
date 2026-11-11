@@ -10,6 +10,7 @@ import langgraph_sdk
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
+from runtime_api.catalog import Nudge, ReplyRules
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url
@@ -23,6 +24,7 @@ from openswe.incidents.report import (
     finalize_report,
 )
 from openswe.incidents.turns import SESSION_TS
+from openswe.input_messages import system_input
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply_with_ts
@@ -96,6 +98,54 @@ class IncidentSession:
                 description=prompt("tools/read_incident"),
             ),
         ]
+
+    def reply_rules(self) -> ReplyRules:
+        sender = "system:incident-report-guard"
+        return ReplyRules(
+            tool="record_incident_report",
+            no_reply_tool="manage_incident",
+            replies=["record_incident_report"],
+            surface="slack",
+            nudge_sender=sender,
+            nudges=[
+                Nudge.of(
+                    system_input(
+                        prompt("incidents/finish-report"),
+                        {"sender_id": sender, "surface": "automation", "kind": "system"},
+                    )
+                )
+            ],
+        )
+
+    async def deliver_incomplete(self) -> None:
+        await self.check()
+        if (
+            self.explicit_request is None
+            or self.record.is_archived
+            or (self.run_id and self.record.last_failure_run_id == self.run_id)
+        ):
+            return
+        latest = await service.REPORTS.get(self.record.id)
+        if latest is not None and latest.posted_run_id == self.run_id:
+            return
+        text = (
+            "I couldn't finish a validated incident report for this request. "
+            "No new findings were published; the investigation is incomplete. "
+            "Please mention me with a focused question to continue."
+        )
+        link = dashboard_incident_url(self.record.id)
+        if link:
+            text += f" Investigation context and any earlier findings: <{link}|Open incident>."
+        await post_slack_thread_reply_with_ts(
+            self.record.channel_id,
+            self.reply_thread_ts or SESSION_TS,
+            text,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        self.record.last_failure_run_id = self.run_id or ""
+        service.note(self.record, "error", text)
+        await service.save(self.record)
 
     async def check(self) -> None:
         """Refuse to continue when the incident stopped or the policy changed underneath us."""
@@ -190,6 +240,11 @@ class IncidentSession:
         await self.check()
         draft = ReportDraft.model_validate(kwargs)
         async with self._evidence() as collector:
+            known = {item.id for item in collector.evidence}
+            references = await service.RUN_EVIDENCE.references(
+                self.record.id, draft.references() - known
+            )
+            collector.evidence.extend(references)
             report = finalize_report(draft, collector)
         record = self.record
         digest = service.fingerprint(digest_fields(report))
@@ -259,6 +314,7 @@ class IncidentSession:
         return {
             "recorded": True,
             "posted": posted,
+            "success": not (explicit and should_post and not posted and not record.is_archived),
             "omitted_claims": any("omitted" in gap for gap in report.gaps),
         }
 

@@ -719,6 +719,12 @@ class TokenRun:
         state = call_state(request, self.kind.restore)
 
         async def post() -> None:
+            if self.run.settings.source == "incidents_agent":
+                from openswe.incidents.runtime import load_incident_session
+
+                session = await load_incident_session(self._config(), run_id=request.run_id)
+                await session.deliver_incomplete()
+                return
             result = await send_slack_reply(request.text, "final", state=state)
             logger.warning(
                 "Posted the model's final message on its behalf after it ignored the reply tool",
@@ -763,8 +769,14 @@ class TokenRun:
         )
         return Done()
 
-    async def step_limit_reached(self, _request: RunRequest) -> Done:
-        await self.in_run("step_limit_reached", notify_step_limit)
+    async def step_limit_reached(self, request: RunRequest) -> Done:
+        if self.run.settings.source == "incidents_agent":
+            from openswe.incidents.runtime import load_incident_session
+
+            session = await load_incident_session(self._config(), run_id=request.run_id)
+            await session.deliver_incomplete()
+        else:
+            await self.in_run("step_limit_reached", notify_step_limit)
         return Done()
 
     async def settle_review_check(self, _request: RunRequest) -> Done:

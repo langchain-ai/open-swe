@@ -36,7 +36,14 @@ def use_config(monkeypatch, **configurable):
     monkeypatch.setattr(run_config, "get_config", lambda: config)
 
 
-async def fake_apply(record: Incident, action: str, actor, *, keep_run_id: str = "") -> Incident:
+async def fake_apply(
+    record: Incident,
+    action: str,
+    actor,
+    *,
+    keep_run_id: str = "",
+    require_notification: bool = False,
+) -> Incident:
     record.status = {"pause": "paused", "complete": "completed"}.get(action, "watching")
     await service.INCIDENTS.put(record.id, record)
     return record
@@ -62,6 +69,7 @@ async def configured(registry_db, monkeypatch):
     )
     monkeypatch.setattr(channels, "enroll_channel", AsyncMock(return_value=record))
     monkeypatch.setattr(channels, "apply_control", AsyncMock(side_effect=fake_apply))
+    monkeypatch.setattr(channels, "post_notice", AsyncMock(return_value="9.0"))
     return SimpleNamespace(record=record)
 
 
@@ -92,11 +100,14 @@ async def test_controls_change_the_current_incident_and_keep_this_run(configured
     args, kwargs = channels.apply_control.await_args
     assert args[1] == "pause"
     assert args[2] == {"id": "slack:U1", "platform": "slack"}
-    assert kwargs == {"keep_run_id": "run-now"}
+    assert kwargs == {"keep_run_id": "run-now", "require_notification": True}
 
     unchanged = await tools.manage_incident("pause")
     assert (unchanged["changed"], unchanged["status"]) == (False, "paused")
     assert channels.apply_control.await_count == 1
+    assert unchanged["success"] is True and unchanged["posted"] is False
+    assert "Reply to the requester" in unchanged["note"]
+    channels.post_notice.assert_not_awaited()
 
     completed = await tools.manage_incident("complete")
     assert completed["status"] == "completed"
@@ -107,6 +118,38 @@ async def test_controls_change_the_current_incident_and_keep_this_run(configured
         "complete",
         "reopen",
     ]
+
+
+async def test_incident_noop_acknowledges_only_the_requesting_thread(configured, monkeypatch):
+    record = configured.record
+    record.status = "paused"
+    await service.INCIDENTS.put(record.id, record)
+    use_config(
+        monkeypatch,
+        source="incidents_agent",
+        github_login=None,
+        slack_thread={"channel_id": "C7", "thread_ts": "0", "reply_thread_ts": "4.0"},
+    )
+    result = await tools.manage_incident("pause")
+    assert result["success"] is True and result["posted"] is True
+    channels.post_notice.assert_awaited_once_with(
+        record, "Incident is already paused.", reply_thread_ts="4.0"
+    )
+    channels.post_notice.return_value = None
+    failed = await tools.manage_incident("pause")
+    assert failed["success"] is False and failed["posted"] is False
+    assert "not delivered" in failed["error"]
+
+
+async def test_start_enrollment_race_leaves_ordinary_requester_reply_to_its_agent(
+    configured, monkeypatch
+):
+    channels.enroll_channel.return_value = None
+    monkeypatch.setattr(service.INCIDENTS, "get", AsyncMock(side_effect=[None, configured.record]))
+    result = await tools.manage_incident("start")
+    assert result["success"] is True and result["posted"] is False
+    assert "Reply to the requester" in result["note"]
+    channels.post_notice.assert_not_awaited()
 
 
 async def test_a_run_cannot_reopen_the_incident_it_just_completed(configured):

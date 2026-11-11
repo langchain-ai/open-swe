@@ -134,7 +134,7 @@ async def test_postmortem_failure_records_nothing(incident, monkeypatch):
         documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
     )
     with pytest.raises(RuntimeError, match="store"):
-        await session._record_incident_report(summary=[])
+        await session._record_incident_report(gaps=["Metrics access was denied."])
     assert await service.REPORTS.get("incident") is None
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
 
@@ -180,11 +180,12 @@ async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(i
     session = await load()
 
     await session.context([context_message("1.0")])
-    empty = await session._record_incident_report(
-        summary=[{"text": "Unsupported guess", "evidence_ids": ["nope"]}]
-    )
+    with pytest.raises(ValueError, match="Nothing was recorded or posted"):
+        await session._record_incident_report(
+            summary=[{"text": "Unsupported guess", "evidence_ids": ["nope"]}]
+        )
 
-    assert empty["posted"] is False
+    assert await service.REPORTS.get("incident") is None
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
 
     findings = await session._record_incident_report(
@@ -211,3 +212,73 @@ async def test_questions_are_answered_after_the_investigation_is_published(incid
 
     assert answer["posted"] is True
     assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+
+
+async def test_empty_report_can_be_repaired_with_same_incident_prior_run_evidence(incident):
+    previous = await load("previous-run")
+    await previous.context([context_message("1.0")])
+    async with service.RUN_EVIDENCE.collecting("incident", "previous-run") as collector:
+        observation = collector.record_observation(
+            source="tool", url="", summary="Error counts", query="errors", content={"errors": 12}
+        )
+    other = Incident(id="other", workspace_id="T1", channel_id="C2", thread_id="other-thread")
+    await service.INCIDENTS.put(other.id, other)
+    async with service.RUN_EVIDENCE.collecting(other.id, "foreign-run") as collector:
+        foreign = collector.record_observation(
+            source="tool", url="", summary="Unrelated", query="errors", content={"errors": 99}
+        )
+    async with service.RUN_EVIDENCE.collecting("incident", "repeated-run") as collector:
+        collector.record_observation(
+            source="tool", url="", summary="Error counts", query="errors", content={"errors": 12}
+        )
+    resolved = await service.RUN_EVIDENCE.references(
+        "incident", {observation["evidence_id"], foreign["evidence_id"], "tool:unknown"}
+    )
+    assert [item.id for item in resolved] == [observation["evidence_id"]]
+    session = await load("current-run", incident_request="What did the checks show?")
+    for draft in (
+        {},
+        {"summary": [{"text": "Unrelated", "evidence_ids": [foreign["evidence_id"]]}]},
+        {
+            "summary": [
+                {
+                    "text": "Partially unsupported",
+                    "evidence_ids": [observation["evidence_id"], "tool:unknown"],
+                }
+            ]
+        },
+    ):
+        with pytest.raises(ValueError, match="Nothing was recorded or posted"):
+            await session._record_incident_report(**draft)
+    assert await service.REPORTS.get("incident") is None
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+
+    repaired = await session._record_incident_report(
+        summary=[
+            {
+                "text": "Earlier checks counted 12 errors",
+                "evidence_ids": [observation["evidence_id"]],
+            }
+        ]
+    )
+    assert repaired["posted"] is True
+    latest = await service.REPORTS.get("incident")
+    assert observation["evidence_id"] in latest.report.summary
+    assert {item.id for item in latest.report.evidence} == {observation["evidence_id"]}
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+
+
+async def test_incomplete_explicit_turn_is_visible_once_without_publishing_uncited_prose(incident):
+    automatic = await load("automatic")
+    await automatic.deliver_incomplete()
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+    session = await load(
+        "incomplete-run", incident_request="What failed?", slack_thread={"reply_thread_ts": "4.0"}
+    )
+    await session.deliver_incomplete()
+    await session.deliver_incomplete()
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    posted = runtime.post_slack_thread_reply_with_ts.await_args.args
+    assert posted[:2] == ("C1", "4.0")
+    assert "No new findings were published" in posted[2]
+    assert await service.REPORTS.get("incident") is None

@@ -50,7 +50,14 @@ async def manage_incident(action: IncidentAction) -> dict[str, Any]:
         }
     control = _CONTROLS[action].get(record.status)
     if control is None:
-        return _result(record, action, changed=False)
+        if cfg.source != "incidents_agent":
+            return _result(record, action, changed=False, notified=None)
+        posted = await channels.post_notice(
+            record,
+            f"Incident is already {record.status}.",
+            reply_thread_ts=cfg.slack_thread.reply_thread_ts if cfg.slack_thread else "",
+        )
+        return _result(record, action, changed=False, notified=bool(posted))
     # Both sides must name a real run: a dashboard completion records no run id and
     # current_run_id() is empty outside a run, which must not read as a match.
     closed_by_this_run = (
@@ -68,7 +75,7 @@ async def manage_incident(action: IncidentAction) -> dict[str, Any]:
         }
     # The current run is the one carrying out the request, so it must keep running.
     record = await channels.apply_control(
-        record, control, _actor(cfg), keep_run_id=current_run_id()
+        record, control, _actor(cfg), keep_run_id=current_run_id(), require_notification=True
     )
     return _result(record, action, changed=True)
 
@@ -95,14 +102,14 @@ async def _start(cfg: RunConfig, policy: IncidentPolicy, channel_id: str) -> dic
         existing = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
         if existing is None:
             return {"success": False, "error": "Incident enrollment did not complete"}
-        return _result(existing, "start", changed=False)
+        return _result(existing, "start", changed=False, notified=None)
     if record.status == "needs_attention":
         return {
             "success": False,
             "error": "Channel setup failed; the incident's dashboard page has the details",
             "incident_id": record.id,
         }
-    return _result(record, "start", changed=True)
+    return _result(record, "start", changed=True, notified=bool(record.anchor_ts))
 
 
 def _actor(cfg: RunConfig) -> dict[str, Any]:
@@ -114,9 +121,12 @@ def _actor(cfg: RunConfig) -> dict[str, Any]:
     return {"id": "agent:incidents", "platform": "open-swe"}
 
 
-def _result(record: Incident, action: str, *, changed: bool) -> dict[str, Any]:
+def _result(
+    record: Incident, action: str, *, changed: bool, notified: bool | None = True
+) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "success": True,
+        "success": notified is not False,
+        "posted": notified is True,
         "action": action,
         "changed": changed,
         "status": record.status,
@@ -126,6 +136,14 @@ def _result(record: Incident, action: str, *, changed: bool) -> dict[str, Any]:
     url = dashboard_incident_url(record.id)
     if url:
         result["dashboard_url"] = url
-    if changed:
+    if notified is None:
+        result["note"] = (
+            "The incident is unchanged. Reply to the requester; no channel notice was posted."
+        )
+    elif notified:
         result["note"] = "The channel has been notified; do not post a duplicate status message."
+    else:
+        result["error"] = (
+            "The channel notification was not delivered. Retry to acknowledge the status."
+        )
     return result

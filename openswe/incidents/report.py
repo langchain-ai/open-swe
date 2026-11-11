@@ -43,6 +43,21 @@ class ReportDraft(BaseModel):
     gaps: list[str] = Field(default_factory=list, max_length=10)
     questions: list[str] = Field(default_factory=list, max_length=5)
 
+    def references(self) -> set[str]:
+        return {
+            evidence_id
+            for claim in (
+                *self.summary,
+                *self.problem,
+                *self.previous_occurrence,
+                *self.impact,
+                *self.cause,
+                *self.next_steps,
+                *self.hypotheses,
+            )
+            for evidence_id in claim.evidence_ids
+        }
+
 
 INCIDENT_PROMPT = prompt("incidents/report")
 
@@ -118,7 +133,7 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
         return [
             f"{redact(claim.text, 1200)} [{', '.join(dict.fromkeys(claim.evidence_ids))}]"
             for claim in claims
-            if valid_refs(claim.evidence_ids)
+            if claim.text.strip() and valid_refs(claim.evidence_ids)
         ]
 
     summary = " ".join(render(draft.summary))
@@ -134,17 +149,37 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
             evidence_ids=list(dict.fromkeys(hypothesis.evidence_ids)),
         )
         for hypothesis in draft.hypotheses
-        if valid_refs(hypothesis.evidence_ids)
+        if hypothesis.title.strip() and valid_refs(hypothesis.evidence_ids)
     ]
-    gaps = collector.gaps + [redact(gap, 500) for gap in draft.gaps]
+    headline = (
+        summary
+        or problem
+        or cause
+        or impact
+        or previous_occurrence
+        or (f"Suggested next step: {next_steps[0]}" if next_steps else "")
+    )
+    limitations = " ".join(
+        redact(text, 500) for text in (*draft.gaps, *draft.questions) if text.strip()
+    )
+    if not headline and not hypotheses and not limitations:
+        raise ValueError(
+            "Report has no supported findings. Nothing was recorded or posted. "
+            "Retry record_incident_report with nonempty claims citing evidence IDs returned "
+            "by this incident's tools or context. Re-read missing evidence before citing it; "
+            "if evidence is unavailable, report concrete gaps or questions instead of guesses."
+        )
+    gaps = collector.gaps + [redact(gap, 500) for gap in draft.gaps if gap.strip()]
     if dropped:
         gaps.append("Claims with missing or unknown evidence citations were omitted.")
-    # A turn that fills the sections but skips the headline has still concluded something.
-    # Falling back to the problem keeps the dashboard readable and, because the outcome is
-    # what releases the automatic post, stops a real investigation from going unpublished.
-    headline = summary or problem
+    hypothesis_headline = ""
+    if hypotheses:
+        first = hypotheses[0]
+        hypothesis_headline = (
+            f"Hypothesis ({first.assessment}): {first.title} [{', '.join(first.evidence_ids)}]"
+        )
     return IncidentReport(
-        summary=headline or "No evidence-backed conclusion was established.",
+        summary=headline or hypothesis_headline or f"Investigation incomplete: {limitations}",
         problem=problem,
         # A skipped recurrence check is worth showing: it is the section responders rely on
         # most, and an empty one would otherwise read as "this has never happened before".

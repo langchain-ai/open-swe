@@ -123,7 +123,12 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert surface.skill_sources == ("/organization-skills/", "/bundled-skills/")
     # MDA asks for the incident's context before each model call, within the policy's budget.
     assert surface.loop.incident
-    assert surface.model_call_limit == 7
+    from openswe.runtime.constants import MODEL_CALL_RECURSION_LIMIT
+
+    assert surface.model_call_limit == (MODEL_CALL_RECURSION_LIMIT if explicit else 7)
+    assert surface.loop.reply is not None
+    assert "record_incident_report" in surface.loop.reply.replies
+    assert surface.loop.reply.surface == "slack"
     dynamic = surface.dynamic
     assert dynamic is not None
     assert remote.name in dynamic.tools[0].description
@@ -182,6 +187,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     planned = await _agent_catalog(config)
     surface = cast(ToolSurface, planned["surface"])
     await surface.prepare()
+    surface.code_mode = True
     parts = AgentKind()
     starting = RunCatalog(parts, stamped, surface, config)
     run = stamped.model_copy(update={"settings": starting.settings()})
@@ -256,3 +262,9 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     assert {"record_incident_report", "search_incidents"} <= offered
     assert ("open_pull_request" in offered) is requested_action
     assert catalog.incident_evidence
+    completion_tools = {"record_incident_report", "manage_incident"} & offered
+    assert not completion_tools & set(catalog.code_only)
+    assert not completion_tools & set(catalog.also_from_code)
+    assert all(
+        spec.code_name is None for spec in catalog.operations if spec.name in completion_tools
+    )

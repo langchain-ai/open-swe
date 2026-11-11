@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import ForeignKey, ScalarSelect, delete, func, select, text, update
+from sqlalchemy import ForeignKey, ScalarSelect, delete, func, select, text, true, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
@@ -24,6 +24,7 @@ from openswe.incidents.document_models import IncidentHistory
 from openswe.incidents.evidence_tools import EvidenceCollector
 from openswe.incidents.models import (
     CommandReceipt,
+    Evidence,
     Incident,
     IncidentId,
     IncidentPolicy,
@@ -275,6 +276,31 @@ class IncidentReports:
 
 class IncidentRunEvidence:
     """The evidence each incident run collects, one row per run."""
+
+    async def references(self, incident_id: IncidentId, ids: set[str]) -> list[Evidence]:
+        if not ids:
+            return []
+        entries = (
+            func.jsonb_array_elements(IncidentRunEvidenceRow.collected["evidence"])
+            .table_valued("value")
+            .lateral()
+        )
+        value = entries.c.value.cast(JSONB)
+        evidence_id = value["id"].astext
+        query = (
+            select(value)
+            .select_from(IncidentRunEvidenceRow)
+            .join(IncidentRow, IncidentRow.id == IncidentRunEvidenceRow.incident)
+            .join(entries, true())
+            .where(
+                IncidentRow.external_id == incident_id,
+                evidence_id.in_(ids),
+            )
+            .distinct(evidence_id)
+            .order_by(evidence_id, IncidentRunEvidenceRow.updated_at.desc())
+        )
+        async with postgres.session() as session:
+            return [Evidence.model_validate(item) for item in await session.scalars(query)]
 
     @asynccontextmanager
     async def collecting(

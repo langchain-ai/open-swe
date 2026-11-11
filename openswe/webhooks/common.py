@@ -591,9 +591,12 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    if existing_meta.get("source") == "incidents_agent":
+        for key in ("source", "origin", "thread_category", "trigger_kind"):
+            metadata.pop(key, None)
     # A thread a bot started stays one, whoever speaks in its Slack thread later.
     if thread_is_bot_triggered(existing_meta):
-        metadata.pop("trigger_kind")
+        metadata.pop("trigger_kind", None)
     if (
         owner_type == "system"
         and existing_meta

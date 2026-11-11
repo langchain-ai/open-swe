@@ -1009,6 +1009,8 @@ _NOT_FROM_CODE = (
         {
             "slack_reply",
             "slack_no_reply_needed",
+            "record_incident_report",
+            "manage_incident",
             "cli_result",
             "connect_managed_tools",
             "switch_to_performance_model",
@@ -2214,7 +2216,13 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
-    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
+    initial_surface = (
+        SLACK_REPLY_SURFACE
+        if incident_session is not None
+        else _initial_reply_surface(cfg)
+        if reply_tool_offered
+        else WEB_REPLY_SURFACE
+    )
     page_tools = PageTools.of_run(cfg)
     surface.base_tools = [
         *main_tools,
@@ -2223,7 +2231,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     ]
     surface.model_call_limit = (
         incident_session.policy.max_model_calls
-        if incident_session is not None
+        if incident_session is not None and incident_session.explicit_request is None
         else MODEL_CALL_RECURSION_LIMIT
     )
     surface.delegates = task_coordination is not None and task_coordination.can_delegate
@@ -2268,6 +2276,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         incident=incident_session is not None,
         offload_conversation=cfg.offload_conversation,
     )
+    if incident_session is not None:
+        surface.loop.reply = incident_session.reply_rules()
     surface.inbox = InboxSpec(
         events=True,
         surface=initial_surface,

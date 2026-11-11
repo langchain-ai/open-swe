@@ -31,9 +31,25 @@ async def record(registry_db, policy):
 
 
 @pytest.fixture
-def platform(monkeypatch):
+def platform(monkeypatch, record):
     runs = SimpleNamespace(list=AsyncMock(return_value=[]), cancel_many=AsyncMock())
-    client = SimpleNamespace(runs=runs)
+    metadata = {
+        "source": "incidents_agent",
+        "origin": "incidents_agent",
+        "owner_type": "system",
+        "visibility": "public",
+        "incident_id": record.id,
+    }
+
+    async def update(thread_id, patch):
+        metadata.update(patch)
+        return SimpleNamespace(metadata=metadata)
+
+    monkeypatch.setattr(
+        turns.THREADS, "get", AsyncMock(return_value=SimpleNamespace(metadata=metadata))
+    )
+    monkeypatch.setattr(turns.THREADS, "update", AsyncMock(side_effect=update))
+    client = SimpleNamespace(runs=runs, metadata=metadata)
     monkeypatch.setattr(turns, "get_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
@@ -129,10 +145,68 @@ async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, p
     assert kwargs["after_seconds"] is None
     configurable = kwargs["config"]["configurable"]
     assert configurable["incident_request"] == "Why are we seeing 500s?"
+    assert configurable["github_login"] is None and configurable["user_email"] is None
     assert configurable["slack_thread"]["reply_thread_ts"] == "4.0"
     assert kwargs["metadata"]["incident_turn"] == "explicit"
     rendered = json.dumps(kwargs["input"])
     assert "Why are we seeing 500s?" in rendered and "slack:U1" in rendered
+
+
+async def test_github_followup_corruption_is_repaired_only_for_bound_system_incident(
+    record, policy, platform, monkeypatch
+):
+    from openswe.incidents import runtime
+
+    platform.metadata.update(source="github", origin="github")
+    await turns.dispatch_turn(record, policy, request="What changed?")
+    kwargs = turns.create_durable_run.await_args.kwargs
+    monkeypatch.setattr(
+        runtime.langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": platform.metadata}))
+        ),
+    )
+    inherited = {"github_login": "pr-commenter", "user_email": "human@example.com"}
+    inherited.update(kwargs["config"]["configurable"])
+    session = await runtime.load_incident_session({"configurable": inherited}, run_id="after-pr")
+    assert session.explicit_request == "What changed?"
+    assert platform.metadata["source"] == platform.metadata["origin"] == "incidents_agent"
+    with pytest.raises(PermissionError, match="personal"):
+        await runtime.load_incident_session(
+            {"configurable": {**inherited, "github_login": "forged"}}, run_id="forged"
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"owner_type": "user"}, {"visibility": "private"}, {"incident_id": "other"}],
+)
+async def test_dispatch_binding_failures_are_visible_without_promoting_threads(
+    record, policy, platform, change
+):
+    platform.metadata.update(source="github", **change)
+    with pytest.raises(PermissionError, match="binding"):
+        await turns.dispatch_turn(record, policy, request="Investigate", reply_thread_ts="4.0")
+    turns.create_durable_run.assert_not_awaited()
+    assert platform.metadata["source"] == "github"
+    notice = turns.post_slack_thread_reply_with_ts.await_args.args
+    assert notice[:2] == ("C1", "4.0")
+    assert "couldn't start" in notice[2] and "binding" not in notice[2]
+    turns.post_slack_thread_reply_with_ts.assert_awaited_once()
+
+
+async def test_explicit_startup_failure_posts_once_automatic_failure_stays_quiet(
+    record, policy, platform
+):
+    turns.create_durable_run.side_effect = RuntimeError("sensitive internal detail")
+    with pytest.raises(RuntimeError):
+        await turns.dispatch_turn(record, policy, request="Investigate")
+    turns.post_slack_thread_reply_with_ts.assert_awaited_once()
+    assert "sensitive" not in turns.post_slack_thread_reply_with_ts.await_args.args[2]
+    with pytest.raises(RuntimeError):
+        await turns.dispatch_turn(record, policy)
+    turns.post_slack_thread_reply_with_ts.assert_awaited_once()
 
 
 async def test_completion_reschedules_only_stranded_context(record, policy, platform):

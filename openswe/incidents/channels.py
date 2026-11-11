@@ -41,17 +41,15 @@ _HANDLED_EVENTS = frozenset(
     }
 )
 _MEMBERSHIP_SUBTYPES = frozenset({"channel_join", "channel_leave", "group_join", "group_leave"})
-# Bounded repetitions: the text is stripped first, and the gap between the mention and
-# the request cannot backtrack polynomially on long runs of spaces.
-_MENTION = re.compile(r"<@[A-Z0-9]{1,20}>[ \t]{0,64}(.*)", re.DOTALL)
+_MENTION = re.compile(r"<@[A-Z0-9]{1,20}>")
 
 
-def parse_mention(text: str) -> tuple[str, str]:
-    """Return ("pause", "") for a bare control word, ("ask", question) otherwise."""
-    match = _MENTION.fullmatch(text.strip())
+def parse_mention(text: str, *, bot_user: str = "") -> tuple[str, str]:
+    """Return a bare control word or the question surrounding the bot's mention."""
+    match = re.search(re.escape(f"<@{bot_user}>"), text) if bot_user else _MENTION.search(text)
     if not match:
         return "", ""
-    rest = match.group(1).strip()
+    rest = (text[: match.start()] + text[match.end() :]).strip()
     if rest.lower() in CONTROL_WORDS:
         return rest.lower(), ""
     return ("ask", rest[:8000]) if rest else ("", "")
@@ -122,15 +120,19 @@ def _introduction(record: Incident) -> str:
     )
 
 
-async def _post(
-    record: Incident, text: str, *, blocks: list[dict[str, Any]] | None = None
+async def post_notice(
+    record: Incident,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    reply_thread_ts: str = "",
 ) -> str | None:
     if record.is_archived:
         return None
     try:
         ts = await post_slack_thread_reply_with_ts(
             record.channel_id,
-            turns.SESSION_TS,
+            reply_thread_ts or turns.SESSION_TS,
             text,
             blocks=blocks,
             unfurl_links=False,
@@ -190,7 +192,7 @@ async def enroll_channel(
         await client.threads.update(
             thread_id=record.thread_id, metadata={"incident_id": incident_id}
         )
-        record.anchor_ts = await _post(record, _introduction(record))
+        record.anchor_ts = await post_notice(record, _introduction(record))
         service.note(record, "enrolled", f"Following #{record.channel_name}.")
         await service.save(record)
         history = await fetch_slack_thread_messages(channel_id, turns.SESSION_TS)
@@ -220,7 +222,12 @@ def _is_context(message: dict[str, Any], policy: IncidentPolicy) -> bool:
 
 
 async def apply_control(
-    record: Incident, action: str, actor: dict[str, Any], *, keep_run_id: str = ""
+    record: Incident,
+    action: str,
+    actor: dict[str, Any],
+    *,
+    keep_run_id: str = "",
+    require_notification: bool = False,
 ) -> Incident:
     """Pause, resume, complete, or reopen an incident and tell the channel.
 
@@ -256,9 +263,11 @@ async def apply_control(
         raise ValueError(f"unknown incident control {action!r}")
     service.note(record, "control", text.split("\n", 1)[0])
     await service.save(record, by=service.actor_login(actor))
-    await _post(record, text, blocks=blocks)
+    posted = await post_notice(record, text, blocks=blocks)
     if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
         await turns.schedule_automatic_turn(record, policy)
+    if require_notification and not posted:
+        raise RuntimeError("Incident state changed but its channel notification was not delivered")
     return record
 
 
@@ -324,7 +333,7 @@ async def handle_slack_event(
     user = message.get("user")
     mentioned = kind == "app_mention" or bool(bot_user and f"<@{bot_user}>" in text)
     if mentioned and isinstance(user, str) and user and not slack_message_bot_id(message):
-        action, question = parse_mention(text)
+        action, question = parse_mention(text, bot_user=bot_user or "")
         if action in CONTROL_WORDS:
             background_tasks.add_task(control_by_slack_user, record, action, user)
             return {"status": "accepted"}

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -612,6 +613,76 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
+@pytest.mark.parametrize("limit", [1, 2, 20])
+async def test_incident_final_prose_is_repaired_before_budget_and_empty_report_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch, limit: int
+) -> None:
+    rules = _REPLY.model_copy(
+        update={"tool": "record_incident_report", "replies": ["record_incident_report"]}
+    )
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "incident_context": IncidentContext(instructions="Investigate."),
+            "reply_on_behalf": Done(),
+        },
+        LoopRules(incident=True, reply=rules),
+    )
+    backend.run.catalog.model_call_limit = limit
+    loop = RunLoop(backend)
+    asked = HumanMessage(content="What failed?", id="human-1")
+    empty_call = AIMessage(
+        content="",
+        tool_calls=[{"id": "report", "name": "record_incident_report", "args": {}}],
+    )
+    rejected = ToolMessage(
+        content="Report has no supported findings", tool_call_id="report", status="error"
+    )
+    final = AIMessage(content="Useful findings that were not published.")
+    messages = [asked, empty_call, rejected, final]
+    state = _state(*messages, reply_surface="slack")
+    nudged = await loop.after_model(state)
+    assert nudged.jump_to == "model"
+    threshold = max(0, limit - 3)
+    if threshold:
+        before_limit = await loop.before_model({**state, "run_model_call_count": threshold - 1})
+        assert _NUDGE not in [
+            message.content for message in messages_from_dict(before_limit.messages)
+        ]
+    near_limit = await loop.before_model({**state, "run_model_call_count": threshold})
+    assert _NUDGE in [message.content for message in messages_from_dict(near_limit.messages)]
+    for used in range(threshold + 1, limit):
+        later = await loop.before_model(
+            {
+                **state,
+                "messages": [*messages, *messages_from_dict(near_limit.messages)],
+                "run_model_call_count": used,
+            }
+        )
+        assert _NUDGE not in [message.content for message in messages_from_dict(later.messages)]
+    repaired = await loop.after_model(
+        _state(
+            asked,
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "valid", "name": "record_incident_report", "args": {"summary": []}}
+                ],
+            ),
+            ToolMessage(content='{"recorded":true,"posted":true}', tool_call_id="valid"),
+            AIMessage(content=""),
+            reply_surface="slack",
+        )
+    )
+    assert repaired.jump_to is None
+    await loop.after_model(
+        _state(asked, AIMessage(content=""), reply_surface="slack", reply_nudges=rules.max_nudges)
+    )
+    assert [(name, body["text"]) for name, body in calls if name == "reply_on_behalf"] == [
+        ("reply_on_behalf", "")
+    ]
+
+
 @pytest.mark.parametrize("surface", ["slack", "web"])
 async def test_an_answer_written_for_an_unreachable_model_is_final(
     monkeypatch: pytest.MonkeyPatch, surface: str
@@ -715,6 +786,48 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         "run_ended",
     ]
     assert calls[-1][1]["invocation_id"] == "turn"
+
+
+@pytest.mark.parametrize(
+    ("incident", "tool", "result"),
+    [
+        (True, tool, result)
+        for tool in ("manage_incident", "record_incident_report")
+        for result in ("delivered", "failed", "error")
+    ]
+    + [(False, "manage_incident", "delivered")],
+)
+async def test_step_limit_notices_do_not_follow_delivered_incident_completions(
+    monkeypatch: pytest.MonkeyPatch, incident: bool, tool: str, result: str
+) -> None:
+    rules = _REPLY.model_copy(
+        update={
+            "tool": "record_incident_report",
+            "no_reply_tool": "manage_incident",
+            "replies": ["record_incident_report"],
+        }
+    )
+    backend, calls = _backend(
+        monkeypatch,
+        {"step_limit_reached": Done(), "run_ended": Done()},
+        LoopRules(incident=incident, reply=rules),
+    )
+    RunLoop(backend).after_agent(
+        _state(
+            HumanMessage(content="Finish the incident", id="human-1"),
+            AIMessage(content="", tool_calls=[{"id": "finish", "name": tool, "args": {}}]),
+            ToolMessage(
+                content=json.dumps({"success": result != "failed", "posted": result != "failed"}),
+                tool_call_id="finish",
+                status="error" if result == "error" else "success",
+            ),
+            AIMessage(content="Model call limits exceeded: run limit (20/20)"),
+        )
+    )
+    await backend.outbox.drain()
+    names = [name for name, _ in calls]
+    assert ("step_limit_reached" in names) is not (incident and result == "delivered")
+    assert names.count("run_ended") == 1
 
 
 async def test_reports_carry_what_they_report_never_the_conversation(

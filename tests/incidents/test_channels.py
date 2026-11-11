@@ -186,6 +186,30 @@ async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_ac
     assert channels.post_account_link_prompt.await_args.args[:3] == ("C1", thread_ts or "3.1", "U9")
 
 
+@pytest.mark.parametrize("kind", ["message", "app_mention"])
+@pytest.mark.parametrize(
+    ("text", "question"),
+    [
+        ("<@UBOT> why?", "why?"),
+        ("Can you check this, <@UBOT>?", "Can you check this, ?"),
+        ("What changed? <@UBOT>", "What changed?"),
+        ("<@U2> asked: <@UBOT> investigate", "<@U2> asked:  investigate"),
+    ],
+)
+async def test_human_mentions_anywhere_in_message_dispatch_the_question(
+    enrolled, kind, text, question
+):
+    response, _ = await handle(
+        {"type": kind, "channel": "C1", "user": "U1", "text": text, "ts": "6.0", "thread_ts": "4.0"}
+    )
+    assert response == {"status": "accepted"}
+    turns.dispatch_turn.assert_awaited_once()
+    kwargs = turns.dispatch_turn.await_args.kwargs
+    assert kwargs["request"] == question
+    assert kwargs["requester"]["github_login"] == "sre"
+    assert kwargs["reply_thread_ts"] == "4.0"
+
+
 async def test_pause_cancels_runs_and_tells_the_channel(enrolled):
     response, _ = await handle(
         {"type": "app_mention", "channel": "C1", "user": "U1", "text": "<@UBOT> pause", "ts": "6.0"}
@@ -230,6 +254,18 @@ async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     assert response == mention == {"status": "ignored"}
     turns.queue_context.assert_not_awaited()
     turns.dispatch_turn.assert_not_awaited()
+
+
+async def test_agent_control_cannot_claim_notification_when_slack_delivery_failed(enrolled):
+    from openswe.slack.http import SlackRequestError
+
+    channels.post_slack_thread_reply_with_ts.side_effect = SlackRequestError("channel_not_found")
+    with pytest.raises(RuntimeError, match="notification was not delivered"):
+        await channels.apply_control(
+            enrolled, "pause", {"id": "agent:incidents"}, require_notification=True
+        )
+    saved = await service.INCIDENTS.get(enrolled.id)
+    assert saved.status == "paused"
 
 
 async def test_complete_records_the_run_that_completed_it(enrolled):
