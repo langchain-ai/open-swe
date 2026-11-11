@@ -816,3 +816,58 @@ async def _check_shell(command: str) -> ShellVerdict:
         Parts(), run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
     )
     return ShellVerdict.model_validate(verdict)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin feature",
+        "git -C /repo -c x=y push --all",
+        "git status&&git push origin feature",
+        "bash -c 'git push origin feature'",
+        "git --git-dir /repo/.git --work-tree /repo push origin feature",
+        "git --namespace example push origin feature",
+        "git pu\\\nsh origin feature",
+        "git $'push' origin feature",
+        "git -c alias.publish=push publish origin feature",
+    ],
+)
+async def test_incident_pushes_require_current_explicit_request(monkeypatch, explicit, command):
+    from types import SimpleNamespace
+
+    from openswe.agent_api.agent import AgentKind
+    from openswe.incidents import runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "load_incident_session",
+        AsyncMock(
+            return_value=SimpleNamespace(explicit_request="Push the fix" if explicit else None)
+        ),
+    )
+    monkeypatch.setattr(
+        guard.WorkflowPushGuardMiddleware, "_change_for_request", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        guard.WorkflowPushGuardMiddleware,
+        "_unsupported_workflow_push",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        guard.WorkflowPushGuardMiddleware, "_chained_workflow_push", AsyncMock(return_value=False)
+    )
+    run = RemoteRun(
+        thread_id="thread-1",
+        assistant_id="agent",
+        configurable={"source": "incidents_agent"},
+        expires_at=int(time.time()) + 3600,
+    )
+    answer = await TokenRun.answer(
+        AgentKind(), run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
+    )
+    verdict = ShellVerdict.model_validate(answer)
+    assert verdict.allowed is explicit
+    if not explicit:
+        assert verdict.refusal is not None
+        assert "@mention" in verdict.refusal

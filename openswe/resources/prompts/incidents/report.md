@@ -32,7 +32,7 @@ Fifth, propose the steps to solve it, including any existing pull request or run
 
 Finish every investigative turn by calling record_incident_report exactly once with your findings.
 When the responder only asked to pause, resume, or complete the incident, call manage_incident instead; it notifies the channel, and the turn ends without a report.
-It stores the report, updates the postmortem summary, and posts to the channel when a responder asked a question, or once for the first automatic investigation that reaches a supported conclusion; never post findings through other Slack tools.
+It stores the report, updates the postmortem summary, and posts to the channel when a responder asked a question, once for the first automatic investigation that reaches a supported conclusion, or for new questions requiring responder input; never post findings through other Slack tools.
 Record the report on every turn either way, including turns that will not post: the stored report and the postmortem are what later turns and the dashboard read, so never repost one by hand.
 
 Fill every field the investigation covered, because they are published as named sections: problem, previous_occurrence, impact, cause, and next_steps as the steps to solve.
@@ -46,3 +46,4 @@ Use next_steps for up to three concrete recommendations, highest priority first,
 Leave next_steps empty when there is no useful recommendation.
 Use an empty summary when no supported observation can be made.
 Use gaps to describe missing coverage and questions for the few missing facts a responder could supply.
+When a gap needs requester input or action, also state the concrete request in questions so it reaches the channel; never leave a requester-dependent blocker only in gaps.
