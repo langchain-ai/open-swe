@@ -589,7 +589,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       onAuxClick={(event) => handleTabAuxClick(event, surface)}
                       onContextMenu={(event) => event.stopPropagation()}
                       className={cn(
-                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-space-2 pl-space-1 text-xs",
+                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-space-2 pl-space-1 text-xs select-none [-webkit-touch-callout:none]",
                         active
                           ? "bg-selected text-primary"
                           : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"

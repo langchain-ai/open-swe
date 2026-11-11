@@ -455,7 +455,7 @@ export function SidebarThreadRow({
 
       <span
         className={cn(
-          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6",
+          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 [@media(hover:none)]:pr-space-5",
           moreMenuOpen && "invisible min-w-6"
         )}
       >
@@ -528,7 +528,7 @@ export function SidebarThreadRow({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              "group/row relative mb-0.5",
+              "group/row relative mb-0.5 select-none [-webkit-touch-callout:none]",
               isDeleting && "opacity-50"
             )}
             onMouseEnter={marquee.measure}
@@ -547,7 +547,7 @@ export function SidebarThreadRow({
                   color="secondary"
                   variant="plain"
                   className={cn(
-                    "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-primary focus-visible:opacity-100",
+                    "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
                     moreMenuOpen && "opacity-100"
                   )}
                 />
