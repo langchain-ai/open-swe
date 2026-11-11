@@ -26,9 +26,15 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
   const transcript = useThreadTranscript(threadId, { runTracker })
   const stop = useCancelRun(threadId)
 
+  const state = transcript.state
+  const runningTurnId =
+    state?.turnOrder.findLast(
+      (turnId) => state.turns[turnId]?.state === "running"
+    ) ?? null
+
   const startRun = useCallback(
     async ({ message, configurable, enqueue, onAccepted }: ThreadRunInput) => {
-      runTracker.submitted()
+      runTracker.submitted({ messageId: message?.id ?? null, runningTurnId })
       await postRunStart(
         threadId,
         runStartCommand({ threadId, message, configurable, enqueue })
@@ -36,10 +42,9 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       onAccepted?.()
       runTracker.created()
     },
-    [runTracker, threadId]
+    [runTracker, runningTurnId, threadId]
   )
 
-  const state = transcript.state
   const contextUsage = state?.contextUsage ?? null
   const latestTurnId = state?.turnOrder.at(-1)
   const latestTurn = latestTurnId ? state?.turns[latestTurnId] : null
