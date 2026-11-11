@@ -14,7 +14,7 @@ from runtime_api.route_questions import TaskRoute
 from openswe.input_messages import input_message_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.jev import JEV
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class RouteSelection:
 
 
 async def _select_jev_route(task: str) -> RouteSelection:
-    route, persist = await TaskRoute.classify(task, prompt=prompt, transport=pooled_transport())
+    route, persist = await TaskRoute.classify(task, prompt=prompt, jev=JEV)
     return RouteSelection(route or "default", persist)
 
 

@@ -11,11 +11,10 @@ which work runs on Performance changes the mapping, not the questions.
 from collections.abc import Callable
 from typing import Final
 
-import httpx2
 from langchain_typesafe import Choice
 
 from runtime_api.catalog import RouteName
-from runtime_api.classifier import JevDecision, select_jev_choices
+from runtime_api.classifier import DEFAULT_JEV, Jev, JevDecision
 
 
 class TaskRoute:
@@ -84,16 +83,13 @@ class TaskRoute:
         task: str,
         *,
         prompt: Callable[[str], str],
-        transport: httpx2.AsyncBaseTransport | None = None,
+        jev: Jev = DEFAULT_JEV,
     ) -> tuple[RouteName | None, bool]:
         """The route ``task`` takes, and whether the thread keeps it: a route an unsure
         answer decided holds for this run alone."""
         decisions = {"task_type": JevDecision(), "complexity": JevDecision()}
-        answers = await select_jev_choices(
-            cls.excerpt(task),
-            questions=cls.questions(prompt),
-            decisions=decisions,
-            transport=transport,
+        answers = await jev.choose(
+            cls.excerpt(task), questions=cls.questions(prompt), decisions=decisions
         )
         route = cls.route_for(answers["task_type"], answers["complexity"])
         sure = decisions["task_type"].outcome == "accepted" and (

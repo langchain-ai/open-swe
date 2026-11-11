@@ -2,6 +2,7 @@ from collections import Counter
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -132,7 +133,9 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     from openswe.human_review import picking
     from openswe.slack import availability
 
-    monkeypatch.setattr(availability, "select_jev_choice", AsyncMock(return_value=classification))
+    monkeypatch.setattr(
+        availability, "JEV", SimpleNamespace(choose_one=AsyncMock(return_value=classification))
+    )
     ada = User(
         identities=[
             UserIdentity(provider="github", external_id="1", login="ada"),

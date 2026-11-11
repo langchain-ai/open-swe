@@ -11,7 +11,7 @@ from openswe.agent_api.run_state import as_messages
 from openswe.dashboard.options import available_requested_models
 from openswe.input_messages import human_input
 from openswe.model_request import ModelRequestIntent, infer_requested_model
-from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.utils.jev import JEV, JevDecision
 
 type ResponseHandler = (
     Callable[[httpx2.Request], httpx2.Response]
@@ -52,7 +52,7 @@ def transport(
 async def classify(
     decision: JevDecision | None = None, *, min_confidence: float = 0.6
 ) -> str | None:
-    return await select_jev_choice(
+    return await JEV.choose_one(
         "Fix the bug",
         question="route",
         instructions="Choose a route",

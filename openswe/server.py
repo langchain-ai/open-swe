@@ -290,7 +290,7 @@ from openswe.utils.authorship import (
 )
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.jev import SystemOneGateway
+from openswe.utils.jev import Jev
 from openswe.utils.json_types import as_json_object, thread_metadata
 from openswe.utils.startup_trace import aphase
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
@@ -2080,11 +2080,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" else (worktree_handoff,)),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
-        *(
-            ()
-            if sender_preferences.experimental_classify and SystemOneGateway.configured()
-            else (classify,)
-        ),
+        *(() if sender_preferences.experimental_classify and Jev.configured() else (classify,)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)

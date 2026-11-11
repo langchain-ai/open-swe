@@ -1,6 +1,9 @@
 """Jev's judgment of whether an untagged Ask channel message needs a Robin response."""
 
 import logging
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import ClassVar
 
 from langchain_typesafe import Choice
 
@@ -13,12 +16,48 @@ from openswe.slack.client import (
     get_slack_user_names,
     slack_ts_time,
 )
-from openswe.slack.payloads import SlackMessage
-from openswe.utils.jev import JevDecision, select_jev_choices
+from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.utils.jev import JEV, JevUnavailable
 from openswe.webhooks import common
 from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AskResponse:
+    """What Jev says Robin should do with an Ask channel message."""
+
+    ACTIONS: ClassVar[frozenset[str]] = frozenset(
+        {"follow_up_only", "do_nothing", "react_only", "react_and_follow_up"}
+    )
+    FOLLOW_UPS: ClassVar[frozenset[str]] = frozenset({"follow_up_only", "react_and_follow_up"})
+    REACTIONS: ClassVar[frozenset[str]] = frozenset({"react_only", "react_and_follow_up"})
+    # A missed request costs more than a needless reply, so Robin replies well short of certainty:
+    # on the eval this halves missed replies at the cost of about three times the needless ones.
+    FOLLOW_UP_AT: ClassVar[float] = 0.4
+    # A reaction needs Jev's confident pick.
+    CONFIDENT_AT: ClassVar[float] = 0.5
+
+    probabilities: Mapping[str, float] = field(default_factory=dict)
+    action: str | None = None
+    confidence: float | None = None
+    reaction: str | None = None
+    unavailable: bool = False
+
+    @property
+    def follow_up(self) -> float:
+        """How likely Jev finds it that Robin should reply or act, across both follow-up options."""
+        return sum(self.probabilities.get(option, 0.0) for option in self.FOLLOW_UPS)
+
+    @property
+    def follows_up(self) -> bool:
+        # An unavailable classifier answers as Ask channels did before it.
+        return self.unavailable or round(self.follow_up, 4) >= self.FOLLOW_UP_AT
+
+    @property
+    def reacts(self) -> bool:
+        return self.action in self.REACTIONS and (self.confidence or 0.0) >= self.CONFIDENT_AT
 
 
 class AskChannelMessage:
@@ -62,10 +101,9 @@ class AskChannelMessage:
             messages = await cls._messages(channel_id, thread_ts, message_ts)
             if not messages or messages[-1].has_attachment:
                 return True
-            transcript = await cls._transcript(messages)
-            channel = (await common.resolve_slack_channel_context(channel_id)).model_dump_json(
-                include={"name", "topic", "purpose", "description"}
-            )
+            channel = await common.resolve_slack_channel_context(channel_id)
+            user_ids = [m.user for m in messages if m.user]
+            names = await get_slack_user_names(user_ids) if user_ids else {}
         except Exception:
             logger.warning(
                 "Ask channel message check failed; answering the message as usual",
@@ -73,71 +111,77 @@ class AskChannelMessage:
                 exc_info=True,
             )
             return True
-        if not transcript:
-            return True
-        decision = JevDecision()
-        reaction_decision = JevDecision()
-        choices = await cls._response(transcript, channel, message_ts, decision, reaction_decision)
-        action = choices["action"]
-        reaction = choices["reaction"]
+        response = await cls.judge(messages, names, channel)
         logger.info(
             "Ask channel message judged",
             extra={
                 "slack_channel_id": channel_id,
                 "thread_ts": thread_ts,
-                "ask_action": action,
-                "ask_reaction": reaction,
-                "jev_outcome": decision.outcome,
-                "jev_confidence": decision.confidence,
+                "ask_action": response.action,
+                "ask_follow_up": response.follow_up,
+                "ask_reaction": response.reaction,
+                "jev_confidence": response.confidence,
+                "jev_unavailable": response.unavailable,
             },
         )
-        if action in {"react_only", "react_and_follow_up"}:
-            emoji = reaction if isinstance(reaction, str) and reaction in cls._REACTIONS else "eyes"
-            reacted = await add_slack_reaction(channel_id, message_ts, emoji)
-            if action == "react_only" and not reacted:
+        if response.reacts:
+            reacted = await add_slack_reaction(channel_id, message_ts, response.reaction or "eyes")
+            # A reaction meant as the whole answer that cannot be posted becomes a reply.
+            if not reacted and not response.follows_up:
                 return True
-        return action in {"follow_up_only", "react_and_follow_up"} or (
-            decision.outcome == "classifier_failure"
-        )
+        return response.follows_up
 
     @classmethod
-    async def _response(
-        cls,
-        transcript: str,
-        channel: str,
-        message_ts: str,
-        decision: JevDecision,
-        reaction_decision: JevDecision,
-    ) -> dict[str, str | None]:
+    async def judge(
+        cls, messages: list[SlackMessage], names: Mapping[str, str], channel: SlackChannelContext
+    ) -> AskResponse:
+        """What Robin should do with the last of `messages`, the one being judged."""
         instructions = prompt(
             "slack/ask-message-instructions",
             about_robin=prompt("decision-models/robin"),
-            channel=channel,
-            sent_at=slack_ts_time(message_ts),
+            channel=channel.model_dump_json(include={"name", "topic", "purpose", "description"}),
+            sent_at=slack_ts_time(messages[-1].ts),
             channel_instructions=prompt("runs/slack-ask-channel"),
         )
-        return await select_jev_choices(
-            transcript,
-            decisions={"action": decision, "reaction": reaction_decision},
-            min_confidence=0.5,
-            questions={
-                "action": Choice(
-                    instructions=instructions,
-                    criteria={
-                        "follow_up_only": prompt("slack/ask-message-robin"),
-                        "do_nothing": prompt("slack/ask-message-human"),
-                        "react_only": prompt("slack/ask-message-react-only"),
-                        "react_and_follow_up": prompt("slack/ask-message-react-follow-up"),
-                    },
-                ),
-                "reaction": Choice(
-                    instructions=instructions,
-                    criteria={
-                        emoji: prompt("slack/ask-message-reaction", emoji=emoji)
-                        for emoji in cls._REACTIONS
-                    },
-                ),
-            },
+        try:
+            response = await JEV.ask(
+                cls._transcript(messages, names),
+                questions={
+                    "action": Choice(
+                        instructions=instructions,
+                        criteria={
+                            "follow_up_only": prompt("slack/ask-message-robin"),
+                            "do_nothing": prompt("slack/ask-message-human"),
+                            "react_only": prompt("slack/ask-message-react-only"),
+                            "react_and_follow_up": prompt("slack/ask-message-react-follow-up"),
+                        },
+                    ),
+                    "reaction": Choice(
+                        instructions=instructions,
+                        criteria={
+                            emoji: prompt("slack/ask-message-reaction", emoji=emoji)
+                            for emoji in cls._REACTIONS
+                        },
+                    ),
+                },
+            )
+        except JevUnavailable:
+            return AskResponse(unavailable=True)
+        action = response.choices.get("action")
+        if action is None or action.choice not in AskResponse.ACTIONS:
+            logger.error(
+                "Jev gave no valid action",
+                extra={"jev_action": action.choice if action else None},
+            )
+            return AskResponse(unavailable=True)
+        reaction = response.choices.get("reaction")
+        return AskResponse(
+            probabilities=action.probabilities,
+            action=action.choice,
+            confidence=action.confidence,
+            reaction=reaction.choice
+            if reaction is not None and reaction.choice in cls._REACTIONS
+            else None,
         )
 
     @classmethod
@@ -156,10 +200,8 @@ class AskChannelMessage:
         return messages if messages and messages[-1].ts == message_ts else []
 
     @classmethod
-    async def _transcript(cls, messages: list[SlackMessage]) -> str:
+    def _transcript(cls, messages: list[SlackMessage], names: Mapping[str, str]) -> str:
         """The conversation as the Slack client shows it."""
-        user_ids = [m.user for m in messages if m.user]
-        names = await get_slack_user_names(user_ids) if user_ids else {}
         *earlier, judged = messages
         context = (
             cls._render(earlier, names)
@@ -173,10 +215,10 @@ class AskChannelMessage:
         )
 
     @staticmethod
-    def _render(messages: list[SlackMessage], names: dict[str, str]) -> str:
+    def _render(messages: list[SlackMessage], names: Mapping[str, str]) -> str:
         return format_slack_messages_for_prompt(
             [m.dump() for m in messages],
-            names,
+            dict(names),
             common.SLACK_BOT_USER_ID,
             "Robin",
             include_thread_replies=True,

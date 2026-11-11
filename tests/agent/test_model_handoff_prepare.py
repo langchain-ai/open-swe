@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -342,8 +343,12 @@ async def test_performance_handoff_uses_tier_effort_unless_overridden(
     model = "anthropic:claude-opus-5-5"
     handoff.middleware._routing_defaults["performance"] = (model, "low")
     monkeypatch.setattr(
-        "openswe.model_request.select_jev_choices",
-        AsyncMock(return_value={"runtime_model": "performance", "runtime_effort": effort}),
+        "openswe.model_request.JEV",
+        SimpleNamespace(
+            choose=AsyncMock(
+                return_value={"runtime_model": "performance", "runtime_effort": effort}
+            )
+        ),
     )
     state: PrepareRunState = {
         "messages": [

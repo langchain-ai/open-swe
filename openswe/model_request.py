@@ -14,7 +14,7 @@ from runtime_api.provenance import Provenance
 from openswe.dashboard.options import ModelOption
 from openswe.input_messages import input_message_text, input_message_timestamps
 from openswe.prompts import prompt
-from openswe.utils.jev import JevDecision, select_jev_choices
+from openswe.utils.jev import JEV, JevDecision
 
 MAX_MODEL_REQUEST_CHARS = 8_000
 
@@ -109,7 +109,7 @@ async def infer_requested_model(
         unavailable=prompt("model-request/effort-unavailable"),
     )
     choices = await asyncio.create_task(
-        select_jev_choices(
+        JEV.choose(
             task[:MAX_MODEL_REQUEST_CHARS],
             questions={
                 "runtime_model": Choice(
