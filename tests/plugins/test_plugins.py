@@ -5,24 +5,28 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 from fastapi import HTTPException, Request
-from sqlalchemy import text
+from sqlalchemy import text, update
 from starlette.types import Message
 
 from openswe.dashboard import repo_access
+from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
 from openswe.database import postgres
 from openswe.github import repos as github_repos
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import records as records_module
 from openswe.plugins import routes as plugin_routes
+from openswe.plugins.featured import FeaturedApps
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import (
     INLINE_ATTACHMENT_BYTES,
     AppNotFound,
+    AppVersion,
     AttachmentObjects,
     Cursor,
     DocumentQuery,
@@ -413,6 +417,184 @@ async def test_only_listed_apps_reach_other_people_and_a_name_is_added_once() ->
     assert [app.name for app in await PluginApps.available_to(bob)] == ["docs"]
     with pytest.raises(PluginNameTaken):
         await _install(bob)
+
+
+class _Admin:
+    """What an instance admin turns on under Apps for everyone."""
+
+    @staticmethod
+    async def feature(*entries: tuple[AppVersion, list[str]]) -> None:
+        await upsert_instance_settings(
+            WorkspaceSettingsUpdate.model_validate(
+                {
+                    "featured_apps": [
+                        {"app": str(v.app), "release": str(v.id), "repositories": names}
+                        for v, names in entries
+                    ]
+                }
+            )
+        )
+
+
+async def _people(monkeypatch: pytest.MonkeyPatch) -> tuple[User, User]:
+    """Ada and Bob, who can read acme/web and acme/mine on GitHub and nothing else."""
+
+    async def reads(self: User, name: str) -> bool:
+        return name in {"acme/web", "acme/mine"}
+
+    monkeypatch.setattr(User, "can_read_repository", reads)
+    ada = await User.get(await _person("ada", "1"))
+    bob = await User.get(await _person("bob", "2"))
+    assert ada is not None and bob is not None
+    return ada, bob
+
+
+async def test_an_app_featured_for_everyone_follows_the_admins_approvals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    first = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(first.app, ada.id, True)
+    await PluginInstallations.install(first, user_id=ada.id)
+    assert not await PluginInstallations.robin_added(bob.id)
+    await _Admin.feature((first, []))
+
+    for _ in range(2):
+        await FeaturedApps.add_for(bob)
+    [added] = await PluginInstallations.visible_to(bob.id)
+    assert (added.version.id, added.added_by_robin) == (first.id, True)
+    with pytest.raises(HTTPException) as refused:
+        await plugin_routes.api_uninstall_plugin(await _installed(added, bob.id), bob)
+    assert refused.value.status_code == 409
+
+    # An admin approves the next release: the install nobody changed follows it, and the
+    # one its owner made stays where she put it.
+    second = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await _Admin.feature((second, []))
+    for person in (ada, bob):
+        await FeaturedApps.add_for(person)
+    assert [i.version.id for i in await PluginInstallations.visible_to(bob.id)] == [second.id]
+    assert [i.version.id for i in await PluginInstallations.visible_to(ada.id)] == [first.id]
+
+    # Featuring another publisher's app of the same name instead replaces it in one load.
+    namesake = await PluginApps.publish(bob.id, _bundle(), origin={})
+    await PluginApps.set_listed(namesake.app, bob.id, True)
+    await _Admin.feature((namesake, []))
+    await FeaturedApps.add_for(bob)
+    assert [i.plugin for i in await PluginInstallations.visible_to(bob.id)] == [namesake.app]
+
+    # Turned off, it leaves the web UIs that never changed it.
+    await _Admin.feature()
+    await FeaturedApps.add_for(bob)
+    assert await PluginInstallations.visible_to(bob.id) == []
+    assert not await PluginInstallations.robin_added(bob.id)
+
+
+async def test_the_apps_list_loads_when_featuring_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    ada, _ = await _people(monkeypatch)
+    app = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(app.app, ada.id, True)
+    await PluginInstallations.install(app, user_id=ada.id)
+    await _Admin.feature((app, []))
+    monkeypatch.setattr(FeaturedApps, "add_for", AsyncMock(side_effect=RuntimeError("down")))
+
+    listed = await plugin_routes.api_list_plugins(ada)
+
+    # Still marked featured, as removing it is still refused.
+    assert [(summary.name, summary.featured) for summary in listed] == [("docs", True)]
+
+
+async def test_an_unreadable_featured_release_breaks_no_ones_apps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    first = await PluginApps.publish(ada.id, _bundle(name="broken"), origin={})
+    good = await PluginApps.publish(ada.id, _bundle(name="good"), origin={})
+    for release in (first, good):
+        await PluginApps.set_listed(release.app, ada.id, True)
+    await _install(bob.id)
+    await _Admin.feature((first, ["acme/web"]), (good, []))
+    await FeaturedApps.add_for(bob)
+    # The admin approves a newer release, whose manifest then stops reading.
+    second = await PluginApps.publish(ada.id, _bundle(name="broken"), origin={})
+    await _Admin.feature((second, ["acme/web"]), (good, []))
+    async with postgres.session() as session:
+        await session.execute(
+            update(records_module.PluginVersionRow)
+            .where(records_module.PluginVersionRow.id == second.id)
+            .values(manifest={})
+        )
+
+    listed = await plugin_routes.api_list_plugins(bob)
+
+    # Bob keeps the release he had, with its share, still featured; his other apps load.
+    assert sorted(
+        (summary.name, summary.featured, summary.version.number, tuple(summary.repositories))
+        for summary in listed
+    ) == [("broken", True, 1, ("acme/web",)), ("docs", False, 1, ()), ("good", True, 1, ())]
+
+
+async def test_a_featured_app_reads_the_admins_repositories_for_everyone_who_can(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    app = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(app.app, ada.id, True)
+    # Ada added it herself and shared one repository of her own.
+    adas = await PluginInstallations.install(app, user_id=ada.id)
+    await PluginInstallations.share(adas, ada.id, ["acme/mine"])
+    await _Admin.feature((app, ["acme/web", "acme/secret"]))
+    checked: list[str] = []
+
+    async def reads(self: User, name: str) -> bool:
+        checked.append(f"{self.github_login}:{name}")
+        return name in {"acme/web", "acme/mine"}
+
+    monkeypatch.setattr(User, "can_read_repository", reads)
+
+    for _ in range(2):
+        for person in (ada, bob):
+            await FeaturedApps.add_for(person)
+    # Asked GitHub once each, though nobody can read acme/secret and two loads ran.
+    assert sorted(checked) == ["ada:acme/secret", "ada:acme/web", "bob:acme/secret", "bob:acme/web"]
+    [bobs] = await PluginInstallations.visible_to(bob.id)
+    [hers] = await PluginInstallations.visible_to(ada.id)
+    # Only what each can read on GitHub, on Robin's install and on her own alike.
+    assert bobs.repositories == ("acme/web",)
+    assert hers.repositories == ("acme/mine", "acme/web")
+    with pytest.raises(HTTPException) as refused:
+        await plugin_routes.api_unshare_plugin_repository(
+            "acme", "web", await _installed(bobs, bob.id), bob
+        )
+    assert refused.value.status_code == 409
+
+    # Ada shares acme/web herself too, so it's hers now.
+    await PluginInstallations.share(hers.id, ada.id, ["acme/web"])
+
+    # The admin drops it: Robin stops sharing it, and Ada keeps what she shared.
+    await _Admin.feature((app, []))
+    for person in (ada, bob):
+        await FeaturedApps.add_for(person)
+    assert [i.repositories for i in await PluginInstallations.visible_to(bob.id)] == [()]
+    assert [i.repositories for i in await PluginInstallations.visible_to(ada.id)] == [
+        ("acme/mine", "acme/web")
+    ]
+
+
+async def test_a_featured_release_outlives_cleanup_until_everyone_has_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    pinned = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(pinned.app, ada.id, True)
+    await _Admin.feature((pinned, []))
+    for _ in range(6):
+        await PluginApps.publish(ada.id, _bundle(), origin={})
+    # Removing an install cleans up the app's versions.
+    await PluginInstallations.remove(await _install(ada.id), ada.id)
+
+    await FeaturedApps.add_for(bob)
+    assert [i.version.id for i in await PluginInstallations.visible_to(bob.id)] == [pinned.id]
 
 
 async def _installed(installation: Installation, user_id: UUID) -> InstalledPlugin:

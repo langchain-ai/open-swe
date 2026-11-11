@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
-from deepagents.backends.protocol import FileDownloadResponse, FileUploadResponse
+from deepagents.backends.protocol import FileDownloadResponse
 from langchain_core.tools import BaseTool, StructuredTool
 from PIL import Image
 from pydantic import ValidationError
@@ -82,7 +82,6 @@ class _Sandbox:
         self.files = dict(files)
         backend = Mock()
         backend.adownload_files = AsyncMock(side_effect=self._download)
-        backend.aupload_files = AsyncMock(side_effect=self._upload)
         monkeypatch.setattr(
             review_apps_module, "get_sandbox_backend", AsyncMock(return_value=backend)
         )
@@ -94,10 +93,6 @@ class _Sandbox:
             else FileDownloadResponse(path=path, error="file_not_found")
             for path in paths
         ]
-
-    async def _upload(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        self.files.update(files)
-        return [FileUploadResponse(path=path) for path, _ in files]
 
 
 def test_a_review_step_writes_only_app_written_collections_and_stays_in_its_block() -> None:
@@ -207,37 +202,6 @@ def test_a_file_webp_would_change_is_kept_as_it_is(content: bytes) -> None:
     file = SandboxFile.of("/workspace/a", content)
 
     assert file.kept() == file
-
-
-async def test_compare_images_saves_the_difference_beside_the_screenshots(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(RunConfig, "from_runtime", lambda: _review())
-    sandbox = _Sandbox(
-        monkeypatch,
-        {
-            "/workspace/shots/a.png": _png((40, 30)),
-            "/workspace/shots/b.png": _png((40, 30), (0, 0, 0)),
-            "/workspace/shots/tall.png": _png((40, 60)),
-        },
-    )
-
-    result = await review_app_tools.compare_images(
-        "/workspace/shots/a.png", "/workspace/shots/b.png"
-    )
-
-    assert result["success"] is True, result
-    assert result["metrics"] == {
-        "changed_pixels": 1200,
-        "total_pixels": 1200,
-        "changed_ratio": 1.0,
-        "threshold": 0,
-    }
-    assert {"/workspace/shots/b-diff.png", "/workspace/shots/b-mask.png"} <= sandbox.files.keys()
-    mismatched = await review_app_tools.compare_images(
-        "/workspace/shots/a.png", "/workspace/shots/tall.png"
-    )
-    assert mismatched["success"] is False and "differ in size" in str(mismatched["error"])
 
 
 @pytest.mark.parametrize(
@@ -504,14 +468,13 @@ async def test_only_a_review_that_works_for_apps_gets_their_tools_and_browser(
 
     names = {getattr(tool, "name", "") for tool in surface.base_tools}
     assert (surface.browser is not None) is works
-    assert ({"save_app_document", "compare_images"} <= names) is works
+    assert ("save_app_document" in names) is works
     assert "ops__query" not in names
     expected = [{"mint_session": "hub__mint_session"}] if works else []
     assert [server.tools for server in surface.mcp_servers] == expected
     # The run's calls find the tools its catalog offered, and no other tool of that server.
     kind = ReviewerKind()
-    for name in ("save_app_document", "compare_images"):
-        assert (await kind.tool(config, name) is not None) is works
+    assert (await kind.tool(config, "save_app_document") is not None) is works
     assert await kind.tool(config, "ops__query") is None
     assert await kind.tool(config, "add_finding") is not None
 

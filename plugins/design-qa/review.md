@@ -9,8 +9,7 @@ Otherwise do nothing for Design QA, and don't mention it.
 1. Pick the pages and interaction states the diff changes, at most ten.
    For each, open the same route on the base and on the preview at one viewport size, such as 1440×900, reach the same state, let the page settle, and save a viewport screenshot of each with run code, such as `await page.screenshot({ path: 'design-qa/settings-before.png' })`, which saves `/workspace/design-qa/settings-before.png`.
    Don't take full-page screenshots: pages of different heights can't be compared.
-1. Compare each pair with `compare_images`, which returns its `width`, `height`, `metrics` and `regions`.
-   It also saves `<after>-diff.png` beside the after screenshot, for you to look at; Design QA doesn't keep it.
+1. Look at each pair with `read_file` for what changed and anything that looks wrong; Design QA measures how many pixels differ itself.
 1. Save the capture once, with `save_app_document`: collection `captures`, key `pulls/<number>/`, the document below, and `files` naming every screenshot you refer to.
 
 ```json
@@ -32,8 +31,6 @@ Otherwise do nothing for Design QA, and don't mention it.
         "after_url": "settings-after.png",
         "width": 1440,
         "height": 900,
-        "metrics": "<compare_images metrics>",
-        "regions": "<compare_images regions>",
         "actions": ["Open the account menu"],
         "annotations": [
           { "x": 120, "y": 64, "width": 300, "height": 40, "title": "Label clipped", "body": "The new label is cut off at this width." }
@@ -49,10 +46,10 @@ with `files` such as `{"settings-before.png": "/workspace/design-qa/settings-bef
 - `auth_mode` is `"dummy"` when you signed in, `"none"` otherwise.
 - Each `*_url` is a name in `files`, of letters, digits, `.`, `_` and `-`.
   Give each scenario a distinct `id` of the same characters.
-- Put `compare_images`'s `metrics` and `regions` in as it returned them.
+- `width` and `height` are the viewport size you took both screenshots at.
 - `actions` are the steps that reached an interaction state, such as opening a menu; leave them out for a page as it loads.
 - `annotations` are at most three areas of the after screenshot a reviewer should look at, in its pixels, each with a short `title` and a `body`; leave them out when nothing stands out.
-- When `compare_images` can't compare a pair, leave out its `metrics` and `regions`, and add `"layout_warnings": ["<why>"]`.
+- When the two sides of a pair can't reach the same state or size, add `"layout_warnings": ["<why>"]`.
 - When the preview or the base won't load, or wants a sign-in you can't do, save a capture with `"status": "blocked"`, an `"error"` saying why, and no scenarios.
 
 Say something about the capture in your review only when it shows a visual problem, and then say that Design QA has the screenshots.

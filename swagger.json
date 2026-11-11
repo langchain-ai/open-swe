@@ -547,6 +547,25 @@
         "title": "AppNotification",
         "type": "object"
       },
+      "AppRelease": {
+        "description": "An app pinned to the release an admin approved, so its owner's later releases change\nnothing until an admin picks them up.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "release": {
+            "title": "Release",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "release"
+        ],
+        "title": "AppRelease",
+        "type": "object"
+      },
       "AppUser": {
         "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
         "properties": {
@@ -2948,6 +2967,32 @@
           "requested"
         ],
         "title": "ExpeditedExclusions",
+        "type": "object"
+      },
+      "FeaturedApp": {
+        "description": "An app in everyone's web UI, and the repositories it reads for each person who can.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "release": {
+            "title": "Release",
+            "type": "string"
+          },
+          "repositories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "app",
+          "release"
+        ],
+        "title": "FeaturedApp",
         "type": "object"
       },
       "FeedbackResponse": {
@@ -5668,6 +5713,11 @@
       },
       "PluginSummary": {
         "properties": {
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -7889,25 +7939,6 @@
           "cancelled"
         ],
         "type": "string"
-      },
-      "ReviewAppRelease": {
-        "description": "An app reviews follow, pinned to the release an admin approved, so its owner's later\nreleases change no review until an admin picks them up.",
-        "properties": {
-          "app": {
-            "title": "App",
-            "type": "string"
-          },
-          "release": {
-            "title": "Release",
-            "type": "string"
-          }
-        },
-        "required": [
-          "app",
-          "release"
-        ],
-        "title": "ReviewAppRelease",
-        "type": "object"
       },
       "ReviewChat": {
         "properties": {
@@ -11436,6 +11467,21 @@
             ],
             "title": "Fable Enabled"
           },
+          "featured_apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FeaturedApp"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Featured Apps"
+          },
           "gateway_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -11534,7 +11580,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/ReviewAppRelease"
+                  "$ref": "#/components/schemas/AppRelease"
                 },
                 "maxItems": 20,
                 "type": "array"
@@ -16631,6 +16677,7 @@
     },
     "/dashboard/api/plugins": {
       "get": {
+        "description": "The viewer's apps, kept in line with the ones an admin added for everyone.",
         "operationId": "api_list_plugins_dashboard_api_plugins_get",
         "responses": {
           "200": {
@@ -16821,6 +16868,56 @@
           }
         ],
         "summary": "Api Publish App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/apps/versions/{version_id}": {
+      "get": {
+        "description": "A release the viewer may add, of their own app or a listed one, with its manifest.",
+        "operationId": "api_get_app_version_dashboard_api_plugins_apps_versions__version_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppVersionModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get App Version",
         "tags": [
           "dashboard",
           "plugins"

@@ -56,7 +56,11 @@ Past it, requests fail with status 429.
   Open SWE keeps every version someone runs, the newest five releases besides, and each thread's newest preview.
 - **An install** is one person adding an app to their sidebar, pinned to a version.
   It moves only when they press **Update**, and a version asking for more permissions waits for them to approve them.
-  Nobody installs for anyone else.
+  An instance admin can add a listed app to everyone's sidebar instead, under **Defaults → Apps for everyone**, approving its permissions for them and naming repositories it reads for each person who can read them on GitHub.
+  Such an install follows the release the admin approves until the person updates it themselves, and they can't remove it while it stays featured.
+  Every install of a featured app, one a person added themselves included, reads the repositories the admin names, and nobody stops sharing those while it's featured.
+  Turned off, or unlisted by its owner, it leaves the sidebars of everyone who never changed it, and Robin stops sharing what it shared; what a person shared stays.
+  The admin approves the permissions it asks for, for everyone, when turning it on and when updating to a release that asks for more.
 - **A preview** is the build an agent runs beside its thread.
   Each preview replaces the one before; it never reaches the sidebar until someone keeps it.
 
@@ -348,7 +352,7 @@ An app can have pull request reviews do work for it, such as screenshotting a fr
   A save keeps its document only once every file is attached.
   A PNG is kept as a lossless WebP, under the name the review gave it, whenever that is smaller and changes no pixel, so take a file's type from its Blob, not its name.
   When the pull request closes, merged or not, Robin deletes what reviews saved under its `pulls/<number>/` in these collections, with the files; a document a person created or changed stays, as does anything in the app's other collections.
-- `browser` gives the review the thread's LangSmith browser and `compare_images`, which diffs two screenshots pixel by pixel.
+- `browser` gives the review the thread's LangSmith browser.
   The browser never reaches the review's sandbox, and signs in only to the domains an instance admin lists under **Defaults → Review browser**, with the one MCP tool named there; sessions install only on LangSmith sites.
 
 A workspace admin adds apps to reviews in **Settings → Review → Apps in reviews**, or with `manage_review_apps`.

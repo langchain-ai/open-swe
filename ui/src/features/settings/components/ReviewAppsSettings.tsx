@@ -7,7 +7,7 @@ import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import type { App } from "@/features/plugins/lib/api"
 import { useApps } from "@/features/plugins/lib/queries"
 import type { ScopedSettings } from "@/features/settings/lib/settingsScope"
-import type { ReviewAppRelease } from "@/lib/api"
+import type { AppRelease } from "@/lib/api"
 import { TierRow } from "./WorkspaceSettingsSections"
 
 /** What an app's newest release has a review do, in a few words. */
@@ -45,8 +45,7 @@ export function ReviewAppsSettings({
     (entry) => !offered.some((app) => app.id === entry.app)
   )
 
-  const save = (next: Array<ReviewAppRelease>) =>
-    settings.save({ review_apps: next })
+  const save = (next: Array<AppRelease>) => settings.save({ review_apps: next })
   const without = (id: string) => chosen.filter((entry) => entry.app !== id)
   const pin = (app: App) => {
     if (app.latest)

@@ -14,8 +14,10 @@ import {
   capturePrefix,
   type CaptureKey,
   type FrontendReviewRun,
+  type FrontendScenario,
   StoredCapture,
 } from "./capture"
+import { PixelChange } from "./pixelChange"
 import { repositoryOf, type PullRequestRef } from "./pullRequest"
 
 export type InboxScope = "review-requested" | "mine"
@@ -56,6 +58,15 @@ export const keys = {
     ["run", pr.owner, pr.repo, pr.number, id] as const,
   media: (target: RunMedia, name: string) =>
     ["media", target.repository, target.pull, target.run, name] as const,
+  change: (target: RunMedia, before: string, after: string) =>
+    [
+      "media",
+      target.repository,
+      target.pull,
+      target.run,
+      before,
+      after,
+    ] as const,
 }
 
 export const isForbidden = (error: unknown) =>
@@ -273,6 +284,41 @@ export function useMedia(
     queryKey: keys.media(target, name ?? ""),
     queryFn: () => qa.media(target, name ?? ""),
     enabled: enabled && name !== null,
+    staleTime: Infinity,
+    gcTime: 60_000,
+  })
+}
+
+/**
+ * How much of a scenario's screenshots changed, compared in the page once
+ * `enabled`; nothing for a scenario missing one, and null for a pair that
+ * can't be compared.
+ */
+export function usePixelChange(
+  target: RunMedia,
+  scenario: FrontendScenario,
+  enabled = true
+) {
+  const qa = useDesignQa()
+  const queryClient = useQueryClient()
+  const { before_url: before, after_url: after } = scenario
+  return useQuery({
+    queryKey: keys.change(target, before ?? "", after ?? ""),
+    queryFn: async () => {
+      if (!before || !after) return null
+      // The same cache the screenshots show from, so each downloads once.
+      const [first, second] = await Promise.all(
+        [before, after].map((name) =>
+          queryClient.fetchQuery({
+            queryKey: keys.media(target, name),
+            queryFn: () => qa.media(target, name),
+            staleTime: Infinity,
+          })
+        )
+      )
+      return first && second ? PixelChange.between(first, second) : null
+    },
+    enabled: enabled && before !== null && after !== null,
     staleTime: Infinity,
     gcTime: 60_000,
   })

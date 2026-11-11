@@ -8,6 +8,7 @@ import {
 } from "./pullRequest"
 
 import type { FrontendReviewRun, FrontendScenario } from "./capture"
+import type { PixelChange } from "./pixelChange"
 
 /**
  * The dock's chat about one pull request. Chat names take only letters,
@@ -108,6 +109,7 @@ export function askDraft({
   currentHeadSha,
   attached,
   tooLarge,
+  change,
 }: {
   pr: PullRequestRef
   run: FrontendReviewRun
@@ -115,6 +117,8 @@ export function askDraft({
   currentHeadSha: string | null | undefined
   attached: readonly Attachment[]
   tooLarge: readonly Attachment[]
+  /** The share of the pair's pixels that differ, when both screenshots compare. */
+  change: PixelChange | null
 }): string {
   const steps = scenario.actions
   const megabytes = (blob: Blob) => (blob.size / 1_000_000).toFixed(1)
@@ -154,8 +158,8 @@ export function askDraft({
     ...scenario.layout_warnings.map(
       (warning) => `Potential layout issue: ${clip(warning, 500)}`
     ),
-    scenario.metrics
-      ? `Recorded pixel change: ${(scenario.metrics.changed_ratio * 100).toFixed(2)}% (${scenario.metrics.changed_pixels} pixels; threshold ${scenario.metrics.threshold}).`
+    change
+      ? `Pixel change: ${(change.ratio * 100).toFixed(2)}% (${change.changedPixels} of ${change.totalPixels} pixels differ).`
       : null,
     ...scenario.annotations.map(
       (note) => `Review note: ${note.title}: ${clip(note.body, 1_000)}`

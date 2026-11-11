@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest"
 
 import type { App } from "@/features/plugins/lib/api"
 import type { ScopedSettings } from "@/features/settings/lib/settingsScope"
-import type { ReviewAppRelease } from "@/lib/api"
+import type { AppRelease } from "@/lib/api"
 import { ReviewAppsSettings, ReviewBrowserSettings } from "./ReviewAppsSettings"
 
 const apps = vi.hoisted(() => ({ data: [] as Array<App> }))
@@ -47,7 +47,7 @@ const app = (
 })
 
 const scoped = (
-  reviewApps: Array<ReviewAppRelease>,
+  reviewApps: Array<AppRelease>,
   save = vi.fn()
 ): ScopedSettings => ({
   scope: { kind: "instance" },

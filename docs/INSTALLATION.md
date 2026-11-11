@@ -720,9 +720,10 @@ An hourly job deletes the objects no attachment names any longer, once they are 
 <details id="review-apps">
 <summary><strong>Apps in reviews, such as Design QA screenshots</strong></summary>
 
-An app's [review step](PLUGINS.md#review-steps) has pull request reviews do work for it; Design QA's screenshots a frontend pull request's preview beside its base ([reference](reference/frontend-reviewer.md)).
+An app's [review step](PLUGINS.md#review-steps) has pull request reviews do work for it; Design QA's screenshots a frontend pull request's preview beside its base ([reference](../plugins/design-qa/README.md)).
 
 1. Publish the app in **Settings → Apps** (for Design QA, build `plugins/design-qa` with `pnpm --filter openswe-plugin-design-qa build` and upload `plugins/design-qa/bundle/index.html`), and mark it listed so others can add it.
+   To put it in everyone's sidebar, an instance admin turns it on under **Defaults → Apps for everyone**, and names the repositories it reads for everyone, such as the one its reviews capture.
 1. For apps whose review step uses the browser, an instance admin fills in **Defaults → Review browser**.
    List the domains, each with its subdomains, the review's browser may sign in to: your previews' and their base site's, never production.
    Optionally, name the instance or workspace MCP tool that returns a browser session, as `<connection>/<tool>`.

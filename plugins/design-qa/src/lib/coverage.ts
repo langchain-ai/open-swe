@@ -1,35 +1,16 @@
 import type { FrontendReviewRun, FrontendScenario } from "./capture"
 
-/** How much of the largest paired state changed: an extent, never a severity. */
-export type Extent = "none" | "small" | "moderate" | "large"
-
-export const EXTENT_LABELS: Record<Extent, string> = {
-  none: "No changes above threshold",
-  small: "Small visual change",
-  moderate: "Moderate visual change",
-  large: "Large visual change",
-}
-
-export function visualExtent(changedRatio: number): Extent {
-  if (changedRatio <= 0) return "none"
-  if (changedRatio < 0.02) return "small"
-  if (changedRatio < 0.15) return "moderate"
-  return "large"
-}
-
-type Measured = FrontendScenario & {
-  metrics: NonNullable<FrontendScenario["metrics"]>
-}
-
-/** Paired states, compared pixel for pixel: both sides captured, with saved metrics. */
+/**
+ * Paired states: both sides captured. Whether a pair compares shows only on its
+ * pull request's page, once its screenshots load.
+ */
 export function pairedScenarios(
   scenarios: readonly FrontendScenario[]
-): Measured[] {
+): FrontendScenario[] {
   return scenarios.filter(
-    (scenario): scenario is Measured =>
+    (scenario) =>
       scenario.status === "complete" &&
-      Boolean(scenario.before_url && scenario.after_url) &&
-      scenario.metrics !== null
+      Boolean(scenario.before_url && scenario.after_url)
   )
 }
 
@@ -37,26 +18,17 @@ export interface RunOverview {
   total: number
   paired: number
   interactions: number
-  /** The paired state that changed most, for the card's thumbnail. */
-  largest: Measured | undefined
-  extent: Extent | null
+  /** The first paired state, for the card's thumbnail. */
+  cover: FrontendScenario | undefined
 }
 
 export function runOverview(run: FrontendReviewRun): RunOverview {
   const scenarios = run.report?.scenarios ?? []
-  const measured = pairedScenarios(scenarios)
-  const largest = measured.reduce<Measured | undefined>(
-    (found, scenario) =>
-      !found || scenario.metrics.changed_ratio > found.metrics.changed_ratio
-        ? scenario
-        : found,
-    undefined
-  )
+  const paired = pairedScenarios(scenarios)
   return {
     total: scenarios.length,
-    paired: measured.length,
-    interactions: measured.filter((scenario) => scenario.interaction).length,
-    largest,
-    extent: largest ? visualExtent(largest.metrics.changed_ratio) : null,
+    paired: paired.length,
+    interactions: paired.filter((scenario) => scenario.interaction).length,
+    cover: paired[0],
   }
 }

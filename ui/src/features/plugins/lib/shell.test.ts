@@ -52,6 +52,19 @@ describe("CAPNWEB_RUNTIME", () => {
     expect(html.indexOf(RUNTIME_GLOBAL)).toBeLessThan(
       html.indexOf("<script>start()</script>")
     )
+
+    // As the document runs them: one script, WebRTC removal then the runtime.
+    const injected = html.slice(
+      html.indexOf("<script>") + "<script>".length,
+      html.indexOf("</script>")
+    )
+    const page: Record<string, unknown> = { RTCPeerConnection: class {} }
+    new Function("globalThis", injected)(page)
+    expect(page.RTCPeerConnection).toBeUndefined()
+    expect(
+      typeof (page[RUNTIME_GLOBAL] as Record<string, unknown>)
+        .newMessagePortRpcSession
+    ).toBe("function")
   })
 })
 

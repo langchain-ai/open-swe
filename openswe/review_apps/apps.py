@@ -86,15 +86,6 @@ class SandboxFile:
             found[path] = cls.of(path, download.content)
         return found
 
-    @classmethod
-    async def write(cls, thread_id: str, files: Mapping[str, bytes]) -> None:
-        """Saves ``files`` by path in the thread's sandbox, beside files already there."""
-        paths = [cls.checked_path(path) for path in files]
-        backend = await get_sandbox_backend(thread_id)
-        for result in await backend.aupload_files([(path, files[path]) for path in paths]):
-            if result.error:
-                raise ValueError(f"could not save {result.path}: {result.error}")
-
     def kept(self) -> Self:
         """This file as an app keeps it: a PNG becomes a lossless WebP, often a quarter of the
         size with every pixel unchanged, unless that is no smaller or would lose something."""

@@ -69,7 +69,6 @@ _TOOL_MODULES = {
     "save_organization_skill": ".organization_skills",
     "preview_app": ".apps",
     "save_app_document": ".review_apps",
-    "compare_images": ".review_apps",
     "publish_app": ".apps",
     "publish_artifact": ".publish_artifact",
     "save_user_instructions": ".save_user_instructions",
@@ -163,7 +162,6 @@ __all__ = [
     "delete_organization_skill",
     "preview_app",
     "save_app_document",
-    "compare_images",
     "publish_app",
     "publish_artifact",
     "save_user_instructions",
@@ -277,7 +275,7 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
-    from openswe.tools.review_apps import compare_images, save_app_document
+    from openswe.tools.review_apps import save_app_document
     from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup

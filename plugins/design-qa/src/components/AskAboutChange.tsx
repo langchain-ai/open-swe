@@ -10,6 +10,7 @@ import {
   type Attachment,
 } from "../lib/ask"
 import type { FrontendReviewRun, FrontendScenario } from "../lib/capture"
+import { PixelChange } from "../lib/pixelChange"
 import { repositoryOf, type PullRequestRef } from "../lib/pullRequest"
 import { errorMessage, isForbidden, keys, useDesignQa } from "../lib/queries"
 
@@ -66,12 +67,32 @@ export function AskAboutChange({
                   .then((blob) => ({
                     side,
                     blob,
-                    name: `design-qa-${run.id}-${scenario.id}-${side.toLowerCase()}.png`,
+                    // Robin may keep a PNG as a WebP, so the name follows the file's type.
+                    name: `design-qa-${run.id}-${scenario.id}-${side.toLowerCase()}.${blob.type.split("/")[1] || "png"}`,
                   })),
               ]
             : []
         )
       )
+      const [base, head] = [
+        screenshots.find(({ side }) => side === "Base")?.blob,
+        screenshots.find(({ side }) => side === "PR")?.blob,
+      ]
+      const change =
+        base && head && scenario.before_url && scenario.after_url
+          ? await queryClient
+              .fetchQuery({
+                queryKey: keys.change(
+                  media,
+                  scenario.before_url,
+                  scenario.after_url
+                ),
+                queryFn: () => PixelChange.between(base, head),
+                staleTime: Infinity,
+              })
+              // A pair the page can't decode still goes to the agent.
+              .catch(() => null)
+          : null
       if (!mounted.current) return
       const attached = screenshots.filter(
         ({ blob }) => blob.size <= MAX_IMAGE_BYTES
@@ -90,6 +111,7 @@ export function AskAboutChange({
           currentHeadSha,
           attached,
           tooLarge,
+          change,
         }),
         images: attached.map(({ name, blob }) => ({ name, blob })),
       })

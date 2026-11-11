@@ -405,9 +405,14 @@ export interface AllowedSlackBotEntry {
 }
 
 /** An app reviews follow, by id, pinned to the release (an app version id) an admin approved. */
-export interface ReviewAppRelease {
+export interface AppRelease {
   app: string
   release: string
+}
+
+/** An app in everyone's web UI, and the repositories it reads for each person who can. */
+export interface FeaturedApp extends AppRelease {
+  repositories?: Array<string>
 }
 
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
@@ -416,7 +421,9 @@ export interface WorkspaceSettings {
   pr_summaries: boolean
   review_trace_links: boolean
   /** The apps whose review step reviews of private repositories follow, each at the release an admin approved. */
-  review_apps?: Array<ReviewAppRelease> | null
+  review_apps?: Array<AppRelease> | null
+  /** Instance only: listed apps added to everyone's web UI, each at the release an admin approved. */
+  featured_apps?: Array<FeaturedApp> | null
   /** Instance only: the domains, each with its subdomains, a review's browser may sign in to. */
   review_browser_domains?: Array<string> | null
   /** Instance only: the `<connection>/<tool>` that signs a review's browser in. */

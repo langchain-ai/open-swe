@@ -6,7 +6,7 @@ import pytest
 
 from openswe.dashboard.settings_records import WORKSPACE_SETTINGS
 from openswe.dashboard.workspace_settings import (
-    ReviewAppRelease,
+    AppRelease,
     WorkspaceSettingsUpdate,
     get_workspace_settings,
     upsert_instance_settings,
@@ -45,8 +45,8 @@ async def _release(name: str, *, review: bool, browser: bool = False) -> AppVers
     return await PluginApps.publish(owner.id, html, origin={})
 
 
-def _pinned(release: AppVersion) -> ReviewAppRelease:
-    return ReviewAppRelease(app=str(release.app), release=str(release.id))
+def _pinned(release: AppVersion) -> AppRelease:
+    return AppRelease(app=str(release.app), release=str(release.id))
 
 
 def _described(release: AppVersion) -> dict[str, object]:

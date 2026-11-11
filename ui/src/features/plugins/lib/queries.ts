@@ -50,6 +50,16 @@ export function useApps(enabled = true) {
   })
 }
 
+/** One release of an app, as the admin approving it for everyone sees it. */
+export function useAppVersion(id: string | undefined) {
+  return useQuery({
+    queryKey: [...pluginKeys.apps, "version", id ?? ""],
+    queryFn: () => pluginsApi.appVersion(id ?? ""),
+    enabled: id !== undefined,
+    staleTime: Infinity,
+  })
+}
+
 /** The app the agent builds in ``threadId``, reloaded whenever it previews another build. */
 export function useAppPreview(threadId: string) {
   return useQuery({

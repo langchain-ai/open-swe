@@ -63,8 +63,6 @@ describe("StoredCapture.read", () => {
               path: "/",
               before_url: "home-before.png",
               after_url: "home-after.png",
-              metrics: { changed_pixels: 3, total_pixels: 12 },
-              regions: [{ x: 0, y: 0, width: 2, height: 2, pixels: 3 }, "junk"],
               actions: ["Open the menu"],
             },
           ],
@@ -86,13 +84,8 @@ describe("StoredCapture.read", () => {
     expect(capture.report?.scenarios[0]).toMatchObject({
       title: "/",
       status: "complete",
-      metrics: {
-        changed_pixels: 3,
-        total_pixels: 12,
-        changed_ratio: 0.25,
-        threshold: 0,
-      },
-      regions: [{ x: 0, y: 0, width: 2, height: 2, pixels: 3 }],
+      before_url: "home-before.png",
+      after_url: "home-after.png",
       interaction: true,
       layout_warnings: [],
     })

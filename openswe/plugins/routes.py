@@ -49,6 +49,7 @@ from openswe.github.http import (
 )
 from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_requests
 from openswe.github.repo_names import normalize_repo_full_name
+from openswe.plugins.featured import FeaturedApps
 from openswe.plugins.installed import (
     CollectionWrittenByApp,
     InstalledPlugin,
@@ -208,9 +209,11 @@ class PluginSummary(BaseModel):
     repositories: list[str]
     """The repositories the viewer shared with it."""
     installed_at: datetime | None
+    featured: bool = False
+    """Whether an admin added the app for everyone, so the viewer can't remove it."""
 
     @classmethod
-    def of(cls, installation: Installation) -> PluginSummary:
+    def of(cls, installation: Installation, *, featured: bool = False) -> PluginSummary:
         return cls(
             id=installation.id,
             plugin_id=installation.plugin,
@@ -220,13 +223,15 @@ class PluginSummary(BaseModel):
             mine=installation.owner == installation.user_id,
             repositories=list(installation.repositories),
             installed_at=installation.created_at,
+            featured=featured,
         )
 
     @classmethod
     async def get(cls, installation_id: UUID, user_id: UUID) -> PluginSummary:
         """The person's install as it is now."""
         with _as_http():
-            return cls.of(await PluginInstallations.get(installation_id, user_id))
+            installation = await PluginInstallations.get(installation_id, user_id)
+        return cls.of(installation, featured=installation.plugin in await FeaturedApps.active())
 
 
 class PreviewModel(BaseModel):
@@ -274,7 +279,28 @@ class RepositoriesBody(BaseModel):
 
 @router.get("")
 async def api_list_plugins(viewer: ViewerDep) -> list[PluginSummary]:
-    return [PluginSummary.of(i) for i in await PluginInstallations.visible_to(viewer.id)]
+    """The viewer's apps, kept in line with the ones an admin added for everyone."""
+    try:
+        await FeaturedApps.add_for(viewer)
+    except Exception:  # noqa: BLE001
+        # The person's apps still load; what's featured catches up on a later load.
+        logger.exception(
+            "Could not bring featured apps into a person's web UI",
+            extra={"user_id": str(viewer.id)},
+        )
+    try:
+        # As uninstalling reads it, so an app shown as featured is one that can't be removed.
+        featured = await FeaturedApps.active()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Could not read the featured apps for a person's web UI",
+            extra={"user_id": str(viewer.id)},
+        )
+        featured = frozenset()
+    return [
+        PluginSummary.of(i, featured=i.plugin in featured)
+        for i in await PluginInstallations.visible_to(viewer.id)
+    ]
 
 
 @router.get("/apps")
@@ -290,6 +316,13 @@ async def api_list_apps(viewer: ViewerDep) -> list[AppModel]:
         )
         for app in await PluginApps.available_to(viewer.id)
     ]
+
+
+@router.get("/apps/versions/{version_id}")
+async def api_get_app_version(version_id: UUID, viewer: ViewerDep) -> AppVersionModel:
+    """A release the viewer may add, of their own app or a listed one, with its manifest."""
+    with _as_http():
+        return AppVersionModel.of(await PluginApps.version(version_id, viewer.id))
 
 
 @router.post("/apps", status_code=201)
@@ -438,6 +471,10 @@ async def api_share_plugin_repositories(
 async def api_unshare_plugin_repository(
     owner: str, repo: str, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
+    if await FeaturedApps.shares(plugin.installation.plugin, f"{owner}/{repo}"):
+        raise HTTPException(
+            409, "An admin shares this repository with the app for everyone, so it stays shared"
+        )
     await PluginInstallations.unshare(plugin.installation.id, viewer.id, f"{owner}/{repo}".lower())
     return await PluginSummary.get(plugin.installation.id, viewer.id)
 
@@ -445,6 +482,8 @@ async def api_unshare_plugin_repository(
 @router.delete("/{installation_id}", status_code=204)
 @audit_endpoint
 async def api_uninstall_plugin(plugin: PluginDep, viewer: ViewerDep) -> Response:
+    if plugin.installation.plugin in await FeaturedApps.active():
+        raise HTTPException(409, "An admin added this app for everyone, so it can't be removed")
     await PluginInstallations.remove(plugin.installation.id, viewer.id)
     return Response(status_code=204)
 

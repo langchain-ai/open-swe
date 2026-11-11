@@ -5,7 +5,7 @@ from uuid import UUID
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import (
-    ReviewAppRelease,
+    AppRelease,
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
     get_instance_settings,
@@ -61,8 +61,7 @@ async def manage_review_apps(
         else:
             current = {found: pinned for found, pinned in current.items() if found != chosen}
         apps = [
-            ReviewAppRelease(app=str(found), release=str(pinned))
-            for found, pinned in current.items()
+            AppRelease(app=str(found), release=str(pinned)) for found, pinned in current.items()
         ]
         if slug is not None:
             await upsert_workspace_overrides(

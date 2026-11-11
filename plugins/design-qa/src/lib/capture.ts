@@ -54,13 +54,6 @@ export interface FrontendScenario {
   after_video_url: string | null
   width: number | null
   height: number | null
-  metrics: {
-    changed_pixels: number
-    total_pixels: number
-    changed_ratio: number
-    threshold: number
-  } | null
-  regions: Array<PixelRect & { pixels: number }>
   annotations: FrontendAnnotation[]
   mask_rects: PixelRect[]
   tile_size: number
@@ -272,13 +265,6 @@ export class StoredCapture {
       after_video_url: found.text("after_video_url"),
       width: found.count("width"),
       height: found.count("height"),
-      metrics: StoredCapture.metrics(found.fields("metrics")),
-      regions: found.list("regions").flatMap((region) => {
-        const box = Fields.of(region)
-        const rect = box.rect()
-        const pixels = box.count("pixels")
-        return rect && pixels !== null ? [{ ...rect, pixels }] : []
-      }),
       annotations: found.list("annotations").flatMap((note) => {
         const box = Fields.of(note)
         const rect = box.rect()
@@ -298,18 +284,6 @@ export class StoredCapture {
       after_error: found.text("after_error"),
       layout_warnings: found.texts("layout_warnings"),
       error: found.text("error"),
-    }
-  }
-
-  private static metrics(found: Fields): FrontendScenario["metrics"] {
-    const changed = found.count("changed_pixels")
-    const total = found.count("total_pixels")
-    if (changed === null || total === null || total <= 0) return null
-    return {
-      changed_pixels: changed,
-      total_pixels: total,
-      changed_ratio: found.count("changed_ratio") ?? changed / total,
-      threshold: found.count("threshold") ?? 0,
     }
   }
 }

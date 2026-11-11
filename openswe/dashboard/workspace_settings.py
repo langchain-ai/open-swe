@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Iterator, Mapping
-from typing import Any, Literal, NamedTuple, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -36,6 +36,7 @@ from openswe.dashboard.options import (
     provider_fallback_pair,
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.run_config import RunConfig
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso
@@ -57,12 +58,18 @@ _DOMAIN = re.compile(rf"(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+")
 _SESSION_TOOL = re.compile(r"[a-z][a-z0-9_-]{0,31}/[A-Za-z0-9_.-]{1,128}")
 
 
-class ReviewAppRelease(TypedDict):
-    """An app reviews follow, pinned to the release an admin approved, so its owner's later
-    releases change no review until an admin picks them up."""
+class AppRelease(TypedDict):
+    """An app pinned to the release an admin approved, so its owner's later releases change
+    nothing until an admin picks them up."""
 
     app: str
     release: str
+
+
+class FeaturedApp(AppRelease):
+    """An app in everyone's web UI, and the repositories it reads for each person who can."""
+
+    repositories: NotRequired[list[str]]
 
 
 class WorkspaceSettingsUpdate(BaseModel):
@@ -82,7 +89,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_trace_links: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    review_apps: list[ReviewAppRelease] | None = Field(default=None, max_length=20)
+    review_apps: list[AppRelease] | None = Field(default=None, max_length=20)
     """The apps whose review step reviews follow, each at the release an admin approved;
     managed with ``manage_review_apps``."""
     # Where the browser of a review that works for apps may sign in, each domain with its
@@ -91,6 +98,10 @@ class WorkspaceSettingsUpdate(BaseModel):
     # reviews sign in, and as whom.
     review_browser_domains: list[str] | None = Field(default=None, max_length=20)
     review_browser_session_tool: str | None = None
+    featured_apps: list[FeaturedApp] | None = Field(default=None, max_length=20)
+    """Listed apps added to everyone's web UI, their permissions approved for them, each at
+    the release an instance admin approved and sharing its ``repositories`` with each person
+    who can read them. Only the instance record's value is read."""
     # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
@@ -144,7 +155,7 @@ class WorkspaceSettingsUpdate(BaseModel):
 
     @field_validator("review_apps")
     @classmethod
-    def _app_releases(cls, v: list[ReviewAppRelease] | None) -> list[ReviewAppRelease] | None:
+    def _app_releases(cls, v: list[AppRelease] | None) -> list[AppRelease] | None:
         if v is None:
             return None
         chosen: dict[str, str] = {}
@@ -152,8 +163,36 @@ class WorkspaceSettingsUpdate(BaseModel):
             for entry in v:
                 chosen[str(UUID(entry["app"].strip()))] = str(UUID(entry["release"].strip()))
         except ValueError:
-            raise ValueError("a review app is an app id and the id of its release") from None
-        return [ReviewAppRelease(app=app, release=release) for app, release in chosen.items()]
+            raise ValueError("an app is an app id and the id of its release") from None
+        return [AppRelease(app=app, release=release) for app, release in chosen.items()]
+
+    @field_validator("featured_apps")
+    @classmethod
+    def _featured_apps(cls, v: list[FeaturedApp] | None) -> list[FeaturedApp] | None:
+        if v is None:
+            return None
+        chosen: dict[str, FeaturedApp] = {}
+        try:
+            for entry in v:
+                repositories = list(
+                    dict.fromkeys(
+                        normalize_repo_full_name(name).lower()
+                        for name in entry.get("repositories", [])
+                    )
+                )
+                if len(repositories) > 10:
+                    raise ValueError("an app shares at most 10 repositories for everyone")
+                app = str(UUID(entry["app"].strip()))
+                chosen[app] = FeaturedApp(
+                    app=app,
+                    release=str(UUID(entry["release"].strip())),
+                    repositories=repositories,
+                )
+        except ValueError as exc:
+            raise ValueError(
+                f"an app is an app id, the id of its release, and owner/repo names: {exc}"
+            ) from None
+        return list(chosen.values())
 
     @field_validator("review_browser_domains")
     @classmethod
@@ -322,6 +361,7 @@ def _default_settings() -> dict[str, Any]:
         "review_apps": [],
         "review_browser_domains": [],
         "review_browser_session_tool": None,
+        "featured_apps": [],
         "model_routing_enabled": None,
         "gateway_enabled": None,
         "fable_enabled": False,
@@ -737,7 +777,29 @@ class WorkspaceSettings(Mapping[str, Any]):
     def review_app_releases(self) -> dict[UUID, UUID]:
         """Each app whose review step reviews follow, by id, to the release an admin approved,
         in the order they were added."""
-        value = self.get("review_apps")
+        return self._releases("review_apps")
+
+    @property
+    def featured_app_releases(self) -> dict[UUID, UUID]:
+        """Each app added to everyone's web UI, by id, to the release an admin approved."""
+        return self._releases("featured_apps")
+
+    @property
+    def featured_app_repositories(self) -> dict[UUID, tuple[str, ...]]:
+        """Each app added to everyone's web UI, by id, to the repositories it reads for each
+        person who can."""
+        value = self.get("featured_apps")
+        found: dict[UUID, tuple[str, ...]] = {}
+        for entry in value if isinstance(value, list) else []:
+            try:
+                names = entry.get("repositories") or []
+                found[UUID(str(entry["app"]))] = tuple(str(name) for name in names)
+            except AttributeError, KeyError, TypeError, ValueError:
+                continue
+        return found
+
+    def _releases(self, field: str) -> dict[UUID, UUID]:
+        value = self.get(field)
         found: dict[UUID, UUID] = {}
         for entry in value if isinstance(value, list) else []:
             try:

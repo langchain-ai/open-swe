@@ -5,7 +5,6 @@ import { runOverview } from "./coverage"
 
 const scenario = (
   id: string,
-  changedRatio: number,
   overrides: Partial<FrontendScenario> = {}
 ): FrontendScenario => ({
   id,
@@ -18,13 +17,6 @@ const scenario = (
   after_video_url: null,
   width: 100,
   height: 100,
-  metrics: {
-    changed_pixels: changedRatio * 10_000,
-    total_pixels: 10_000,
-    changed_ratio: changedRatio,
-    threshold: 0,
-  },
-  regions: [],
   annotations: [],
   mask_rects: [],
   tile_size: 32,
@@ -43,32 +35,25 @@ const run = (scenarios: FrontendScenario[]) =>
     report: { scenarios },
   }) as FrontendReviewRun
 
-it("takes the extent from the largest paired state and counts paired interactions", () => {
+it("counts paired states and interactions, and covers the card with the first pair", () => {
   const overview = runOverview(
     run([
-      scenario("route", 0.01),
-      scenario("hover", 0.2, { interaction: true }),
-      scenario("dialog", 0.5, { interaction: true, after_url: null }),
+      scenario("route"),
+      scenario("hover", { interaction: true }),
+      scenario("dialog", { interaction: true, after_url: null }),
     ])
   )
-  expect(overview).toMatchObject({
-    total: 3,
-    paired: 2,
-    interactions: 1,
-    extent: "large",
-  })
-  expect(overview.largest?.id).toBe("hover")
+  expect(overview).toMatchObject({ total: 3, paired: 2, interactions: 1 })
+  expect(overview.cover?.id).toBe("route")
 })
 
-it("gives blocked or unpaired captures no extent", () => {
+it("pairs neither blocked nor one-sided captures", () => {
   expect(
     runOverview(
       run([
-        scenario("blocked", 0.3, { status: "blocked" }),
-        scenario("missing", 0, { before_url: null }),
-        scenario("unmeasured", 0.1, { metrics: null }),
+        scenario("blocked", { status: "blocked" }),
+        scenario("missing", { before_url: null }),
       ])
     )
-  ).toMatchObject({ total: 3, paired: 0, interactions: 0, extent: null })
-  expect(runOverview(run([scenario("same", 0)])).extent).toBe("none")
+  ).toMatchObject({ total: 2, paired: 0, interactions: 0, cover: undefined })
 })

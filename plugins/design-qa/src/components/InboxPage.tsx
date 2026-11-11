@@ -10,7 +10,7 @@ import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { useState } from "react"
 
 import type { FrontendReviewRun } from "../lib/capture"
-import { EXTENT_LABELS, runOverview } from "../lib/coverage"
+import { runOverview } from "../lib/coverage"
 import { useImage, useNearViewport } from "../lib/media"
 import { splitRepository } from "../lib/pullRequest"
 import {
@@ -240,7 +240,6 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
   const stale = Boolean(pr.headSha && run.head_sha !== pr.headSha)
   const status = reviewStatus(run, stale)
   const overview = runOverview(run)
-  const maxRatio = overview.largest?.metrics.changed_ratio
   const requested = [
     ...(pr.requestedReviewers.some(
       (reviewer) => reviewer.toLowerCase() === login.toLowerCase()
@@ -272,7 +271,7 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
               pull: pr.number,
               run: run.id,
             }}
-            name={overview.largest?.after_url ?? null}
+            name={overview.cover?.after_url ?? null}
           />
         </div>
         <div className="flex flex-1 flex-col gap-space-2 p-space-4">
@@ -305,25 +304,9 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
               Requested: {requested.join(", ")}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
-            {overview.extent && (
-              <Badge
-                color="secondary"
-                size="sm"
-                title="Based on the largest changed-pixel percentage in a paired capture. Extent of change, not issue severity."
-              >
-                {EXTENT_LABELS[overview.extent]}
-              </Badge>
-            )}
-            {maxRatio !== undefined && (
-              <span title="Largest changed-pixel percentage across paired states">
-                {(maxRatio * 100).toFixed(2)}% pixels changed
-              </span>
-            )}
-          </div>
           <p className="text-xs text-secondary">
             {overview.total
-              ? `${overview.paired}/${overview.total} states compared · ${overview.interactions} interaction${overview.interactions === 1 ? "" : "s"}`
+              ? `${overview.paired}/${overview.total} states captured on both sides · ${overview.interactions} interaction${overview.interactions === 1 ? "" : "s"}`
               : "No states captured"}
           </p>
           <p className="line-clamp-3 text-xs leading-relaxed text-secondary">
