@@ -312,10 +312,14 @@ class LoopRules(BaseModel):
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
 
     @property
+    def routing_arm(self) -> Literal["active", "inactive"]:
+        """Whether the classifier routes the run's model calls."""
+        return "active" if self.routing is not None and self.routing.mode == "auto" else "inactive"
+
+    @property
     def trace_tags(self) -> list[str]:
         """The tags the run's trace carries: whether the classifier routes its model calls."""
-        active = self.routing is not None and self.routing.mode == "auto"
-        return [f"model_routing:{'active' if active else 'inactive'}"]
+        return [f"model_routing:{self.routing_arm}"]
 
 
 class BrowserSpec(BaseModel):

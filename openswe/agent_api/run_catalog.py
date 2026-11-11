@@ -257,6 +257,8 @@ class RunCatalog:
                     **trace_actor(self.config),
                     **agent_version_metadata(),
                     **{key: metadata[key] for key in _ROUTING_TRACE_KEYS if key in metadata},
+                    # The tag's value again, so traces group by it too.
+                    "model_routing": catalog.loop.routing_arm,
                 },
                 "trace_tags": catalog.loop.trace_tags,
                 "sandbox": spec,

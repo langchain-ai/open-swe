@@ -1224,6 +1224,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "high",
     )
     assert catalog["trace_tags"] == ["model_routing:inactive"]
+    assert metadata["model_routing"] == "inactive"
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
