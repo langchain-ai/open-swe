@@ -235,7 +235,9 @@ class you declare is kept and is available in your next `{tool_name}` call
 (each is hoisted to global scope). So if a later step needs something an
 earlier eval produced or bound, **reference that variable by name** — do not
 write a new literal that re-types data a previous eval already returned or
-computed.
+computed. Reference or reassign existing bindings instead of declaring them
+again. Repeated top-level `let` identifier declarations update existing bindings;
+top-level `const` is treated as `var`. Nested scopes keep normal JavaScript semantics.
 
 If you catch yourself pasting a big array or object of values you produced in
 an earlier call, that is the tell: the variable is still in scope, so use it.

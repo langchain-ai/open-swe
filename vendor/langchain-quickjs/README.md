@@ -74,7 +74,9 @@ The middleware:
 
 ### Persistence
 
-The REPL is module-flavoured: top-level `let`/`const`/`function` persist across `eval` calls in the same thread. The `mode` setting controls how far that persistence reaches:
+Top-level `let`/`const`/`function` persist across `eval` calls in the same thread.
+Repeated top-level `let` identifier declarations update existing bindings; top-level `const` is treated as `var`.
+Block and function scopes keep normal JavaScript semantics. The `mode` setting controls how far that persistence reaches:
 
 - `mode="thread"` (default) — state persists across calls **and** across turns in the same LangGraph `thread_id`.
 - `mode="turn"` — state persists across calls within a turn only.

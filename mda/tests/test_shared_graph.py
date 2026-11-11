@@ -1940,3 +1940,83 @@ async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_
         assert (await repl.eval_async("kept")).result == "1"
     finally:
         await registry.aevict("nest")
+
+
+async def test_repeated_eval_bindings_persist_through_snapshot_restore() -> None:
+    registry = _Registry(
+        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
+    )
+    repl = registry.get("bindings")
+    try:
+        for _ in range(2):
+            result = await repl.eval_async("let h = await Promise.resolve(1); h")
+            assert result.error_type is None
+            assert result.result == "1"
+        assert (await repl.eval_async("let j = 2; let h = 3; [h, j]")).result == "[3, 2]"
+        assert (
+            await repl.eval_async(
+                "let h = 4, j = 5; { let h = 6; } "
+                "const f = () => { let h = 7; return h; }; [h, j, f()]"
+            )
+        ).result == "[4, 5, 7]"
+        payload = await repl.acreate_snapshot()
+        await registry.aevict("bindings")
+        repl = registry.get("bindings")
+        result = await repl.eval_async("let h = 8; [h, j, f()]", snapshot_payload=payload)
+        assert result.error_type is None
+        assert result.result == "[8, 5, 7]"
+    finally:
+        await registry.aevict("bindings")
+
+
+async def test_eval_syntax_errors_never_replay_tool_calls() -> None:
+    calls: list[str] = []
+
+    @tool
+    async def record() -> int:
+        """Record a tool invocation."""
+        calls.append("called")
+        return len(calls)
+
+    registry = _Registry(
+        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
+    )
+    repl = registry.get("syntax")
+    repl.install_tools([record])
+    try:
+        malformed = await repl.eval_async("await tools.record({}); let h = ;")
+        assert malformed.error_type == "SyntaxError"
+        assert calls == []
+        for source in (
+            "let duplicate; let duplicate;",
+            "let duplicate; { var duplicate; }",
+        ):
+            duplicate = await repl.eval_async(source)
+            assert duplicate.error_type == "SyntaxError"
+        assert (await repl.eval_async("'use strict'; 'kept'")).result == "kept"
+        for source in (
+            "let runtimeH = 1; await tools.record({}); "
+            "throw new SyntaxError(\"redeclaration of 'runtimeH'\")",
+            "let nestedH = 1; await tools.record({}); eval('let nestedH; let nestedH;')",
+        ):
+            before = len(calls)
+            failed = await repl.eval_async(source)
+            assert failed.error_type == "SyntaxError"
+            assert len(calls) == before + 1
+        assert (await repl.eval_async("let h = 0; h")).result == "0"
+        failed = await repl.eval_async("let h = 1; await tools.record({}); throw Error('failed')")
+        assert failed.error_message == "failed"
+        assert (await repl.eval_async("h")).result == "1"
+        assert len(calls) == 3
+        await repl.eval_async("const savedRecord = tools.record; undefined")
+        payload = await repl.acreate_snapshot()
+        await registry.aevict("syntax")
+        repl = registry.get("syntax")
+        restored = await repl.eval_async(
+            "await savedRecord({})", snapshot_payload=payload, tools=[record]
+        )
+        assert restored.error_type is None
+        assert restored.result == "4"
+        assert len(calls) == 4
+    finally:
+        await registry.aevict("syntax")
