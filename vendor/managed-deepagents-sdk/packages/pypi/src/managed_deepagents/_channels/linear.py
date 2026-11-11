@@ -162,8 +162,8 @@ def linear_channel(
             Experimental: sessions use Linear's Agents API, a Developer
             Preview, so they may change as Linear changes it.
         ignore_bots: Ignore changes made by other apps and integrations (a
-            delivery whose actor isn't a person, or the creation of an issue
-            or comment with a ``botActor``), so automations don't trigger each
+            delivery whose actor isn't a person or is no longer known, or the
+            creation of an issue or comment with a ``botActor``), so automations don't trigger each
             other. The app's own changes are always ignored.
         on_received: A delivery of a handled event reached its thread, once,
             with the event and its thread, before MDA reads the thread or asks
@@ -380,7 +380,19 @@ async def _parse(
         handlers.get(key) is None and not (filters.sessions and key in SESSION_EVENT_KEYS)
     ):
         return {"type": "ignore", "response": response}
-    event = _linear_event(key, record, delivery_id)
+    receipt_log = json.dumps(
+        {"event": logger.log_identifier(key), "deliveryId": logger.log_identifier(delivery_id)}
+    )
+    reason = _starts_nothing(key, cast("Mapping[str, object]", record), filters)
+    if reason is not None:
+        logger.info("linear event ignored: %s %s", reason, receipt_log)
+        return {"type": "ignore", "response": response}
+    try:
+        event = _linear_event(key, record, delivery_id)
+    except ValidationError as error:
+        # Name the fields, never their values.
+        logger.warning("linear payload rejected: %s %s", _invalid_fields(error), receipt_log)
+        raise
 
     if await _ignored(event, filters):
         return {"type": "ignore", "response": response}
@@ -425,6 +437,44 @@ async def _parse(
     if event.actor is not None:
         result["actor"] = event.actor
     return result
+
+
+_MAX_LOGGED_FIELDS = 8
+"""How many of a rejected payload's fields its log line names."""
+
+
+def _starts_nothing(key: str, record: Mapping[str, object], filters: _Filters) -> str | None:
+    """Why a delivery starts nothing whatever else it says, when it does."""
+    # Linear delivers comments on documents and project updates too. Only an
+    # issue's comment has a thread to answer in.
+    if key == "Comment.create" and not _on_issue(record.get("data")):
+        return "its comment is not on an issue"
+    # Linear sends a null actor once the user or integration that made the
+    # change is deleted, so nothing says a person made it.
+    if (
+        filters.ignore_bots
+        and key not in SESSION_EVENT_KEYS
+        and "actor" in record
+        and record["actor"] is None
+    ):
+        return "Linear no longer knows who made the change"
+    return None
+
+
+def _on_issue(comment: object) -> bool:
+    if not isinstance(comment, Mapping):
+        # Not a comment at all: its schema says what is wrong with it.
+        return True
+    return bool(comment.get("issueId"))
+
+
+def _invalid_fields(error: ValidationError) -> str:
+    """The fields a payload failed on and why, such as ``data.title: missing``."""
+    fields = [
+        logger.log_identifier(f"{'.'.join(str(part) for part in issue['loc'])}: {issue['type']}")
+        for issue in error.errors(include_input=False, include_context=False, include_url=False)
+    ]
+    return ", ".join(fields[:_MAX_LOGGED_FIELDS])
 
 
 def _by_bot(

@@ -1,6 +1,6 @@
 """Receipt and dispatch schemas for handwritten Linear webhook payload subsets."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated, Literal, NotRequired, overload
 
 from pydantic import BeforeValidator, ConfigDict, TypeAdapter, with_config
@@ -273,7 +273,26 @@ def validate_payload(
 ) -> LinearSessionPromptedPayload: ...
 def validate_payload(key: LinearEventKey, payload: object) -> LinearPayload:
     """Validate a delivery's payload against the schema of its event key."""
-    return _PAYLOAD_ADAPTERS[key].validate_python(payload, strict=True)
+    return _PAYLOAD_ADAPTERS[key].validate_python(_without_nulls(payload), strict=True)
+
+
+def _without_nulls(payload: object) -> object:
+    """Read the objects Linear sends as ``null`` when it has none as absent.
+
+    The actor is ``null`` once the user or integration that made the change is
+    deleted.
+    """
+    if not isinstance(payload, Mapping):
+        return payload
+    record = _drop_nulls(payload, ("actor", "updatedFrom"))
+    data = record.get("data")
+    if isinstance(data, Mapping):
+        record["data"] = _drop_nulls(data, ("issue", "team"))
+    return record
+
+
+def _drop_nulls(record: Mapping[str, object], keys: tuple[str, ...]) -> dict[str, object]:
+    return {name: value for name, value in record.items() if not (value is None and name in keys)}
 
 
 def is_event_key(value: object) -> TypeIs[LinearEventKey]:
