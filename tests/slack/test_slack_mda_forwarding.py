@@ -5,7 +5,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -16,7 +16,6 @@ from pydantic import JsonValue
 from runtime_api.slack import (
     SLACK_MOVE_MARKER,
     ActOnSlackMessage,
-    SlackTurnDeclined,
     SlackTurnPrompt,
 )
 from standardwebhooks import Webhook
@@ -883,7 +882,7 @@ def _start_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr(event_claims, "claim", claims.claim)
     monkeypatch.setattr(event_claims, "held", claims.is_held)
     monkeypatch.setattr(
-        slack_channel.LangSmithLogin,
+        slack_service.LangSmithLogin,
         "slack_onboarding_url",
         lambda: "https://openswe.test/settings",
     )
@@ -959,7 +958,6 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
     )
     assert repo is None
     assert prepare.await_args.kwargs == {
-        "declines": True,
         "read": slack_service.SlackTurnRead(
             clean_text="@openswe help",
             context_user_ids=["U2", "U1"],
@@ -1014,15 +1012,15 @@ async def test_a_new_conversation_is_claimed_once_its_sender_passed_the_gate(
     )
 
 
-@pytest.mark.parametrize(
-    ("needed", "reason"), [("unlinked", "sign_in"), ("revoked", "sign_in_again")]
-)
-async def test_a_person_who_cant_run_is_declined_before_anything_is_claimed_once_per_call(
-    monkeypatch: pytest.MonkeyPatch, needed: str, reason: str
+@pytest.mark.parametrize("needed", ["unlinked", "revoked"])
+async def test_a_person_who_cant_run_is_prompted_privately_before_anything_is_claimed_once_per_call(
+    monkeypatch: pytest.MonkeyPatch, needed: str
 ) -> None:
     gate = slack_service.AccountLinkNeeded(
         "U1", None, cast(webhook_common.AccountLinkReason, needed)
     )
+    prompt = AsyncMock()
+    monkeypatch.setattr(slack_service.AccountLinkNeeded, "prompt", prompt)
     monkeypatch.setattr(slack_service, "account_link_needed", AsyncMock(return_value=gate))
     prepare = _prepared(monkeypatch)
     app = _start_app(monkeypatch)
@@ -1031,37 +1029,14 @@ async def test_a_person_who_cant_run_is_declined_before_anything_is_claimed_once
     again = await _start(app)
     other_call = await _start(app, msg_id="msg_delivery-2")
 
-    declined = {
-        "reason": reason,
-        "settings_url": "https://openswe.test/settings",
-        "message": None,
-    }
-    assert first == _NO_RUN | {"declined": declined}
+    assert first == _NO_RUN
+    prompt.assert_awaited_once_with("C1", "1.2")
     # MDA sends a call again under its webhook ID: the decline was answered already.
     assert again == _NO_RUN
     # Another event of the same message, as Slack sends a mention twice, answers nothing.
     assert other_call == _NO_RUN
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
     prepare.assert_not_awaited()
-
-
-@pytest.mark.parametrize("reason", ["sign_in", "sign_in_again"])
-async def test_a_turn_the_backend_declines_is_declined_once_per_call(
-    monkeypatch: pytest.MonkeyPatch, reason: Literal["sign_in", "sign_in_again"]
-) -> None:
-    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
-    prepare = _prepared(monkeypatch)
-    declined = SlackTurnDeclined(reason=reason, settings_url="https://openswe.test/settings")
-    prepare.return_value = (declined, None)
-    app = _start_app(monkeypatch)
-
-    first = await _start(app)
-    again = await _start(app)
-    other_call = await _start(app, msg_id="msg_delivery-2")
-
-    assert first == _NO_RUN | {"declined": declined.model_dump(mode="json")}
-    assert again == _NO_RUN
-    assert other_call == _NO_RUN
 
 
 async def test_a_message_slack_sends_twice_starts_one_turn(

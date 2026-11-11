@@ -105,7 +105,7 @@ from openswe.slack.client import (
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     parse_slack_ts,  # noqa: F401
-    post_slack_ephemeral_message,
+    post_slack_ephemeral_message,  # noqa: F401
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     remove_slack_reaction,
@@ -1005,8 +1005,6 @@ async def post_account_link_prompt(
     user_id: str,
     user_email: str | None,
     reason: AccountLinkReason = "unlinked",
-    agent_thread_id: str | None = None,
-    ephemeral: bool = False,
     langsmith: bool = False,
 ) -> None:
     """Prompt a Slack user with a token-free, verified account-onboarding link."""
@@ -1039,12 +1037,12 @@ async def post_account_link_prompt(
             "again."
         )
     try:
-        if ephemeral:
-            await post_slack_ephemeral_message(channel_id, user_id, text)
-        else:
-            await post_slack_thread_reply(
-                channel_id, thread_ts, text, agent_thread_id=agent_thread_id
-            )
+        await post_slack_ephemeral_message(
+            channel_id,
+            user_id,
+            text,
+            thread_ts="" if thread_ts == CODE_CHANNEL_SESSION_TS else thread_ts,
+        )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 

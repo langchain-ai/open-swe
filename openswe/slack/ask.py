@@ -251,7 +251,6 @@ async def _process_slack_ask(
             request.user_id,
             user_email or None,
             reason=needed.reason,
-            ephemeral=True,
             langsmith=True,
         )
         if request.response_url:

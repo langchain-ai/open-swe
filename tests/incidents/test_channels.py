@@ -159,13 +159,23 @@ async def test_paused_channels_keep_context_without_scheduling(enrolled):
     turns.schedule_automatic_turn.assert_not_awaited()
 
 
-async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_account(enrolled):
+@pytest.mark.parametrize("thread_ts", ["", "3.0"])
+async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_account(
+    enrolled, thread_ts
+):
     channels.User.login_for_slack.return_value = None
     paused, _ = await handle(
         {"type": "app_mention", "channel": "C1", "user": "U9", "text": "<@UBOT> pause", "ts": "3.0"}
     )
     asked, _ = await handle(
-        {"type": "app_mention", "channel": "C1", "user": "U9", "text": "<@UBOT> why?", "ts": "3.1"},
+        {
+            "type": "app_mention",
+            "channel": "C1",
+            "user": "U9",
+            "text": "<@UBOT> why?",
+            "ts": "3.1",
+            "thread_ts": thread_ts,
+        },
         event_id="E2",
     )
 
@@ -173,7 +183,7 @@ async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_ac
     assert (await service.INCIDENTS.get(enrolled.id)).status == "paused"
     turns.dispatch_turn.assert_not_awaited()
     channels.post_account_link_prompt.assert_awaited_once()
-    assert channels.post_account_link_prompt.await_args.args[:3] == ("C1", "3.1", "U9")
+    assert channels.post_account_link_prompt.await_args.args[:3] == ("C1", thread_ts or "3.1", "U9")
 
 
 async def test_pause_cancels_runs_and_tells_the_channel(enrolled):

@@ -15,7 +15,7 @@ import httpx2
 from fastapi import HTTPException
 from langchain_core.messages.content import create_text_block
 from pydantic import JsonValue
-from runtime_api.slack import SlackNotice, SlackTurnDeclined, SlackTurnPrompt
+from runtime_api.slack import SlackNotice, SlackTurnPrompt
 
 from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -622,7 +622,7 @@ class AccountLinkNeeded:
     reason: common.AccountLinkReason
 
     async def prompt(self, channel_id: str, thread_ts: str) -> None:
-        """Ask them in the Slack thread to connect it."""
+        """Prompt them ephemerally to connect their account."""
         await common.post_account_link_prompt(
             channel_id, thread_ts, self.user_id, self.user_email, reason=self.reason, langsmith=True
         )
@@ -885,10 +885,6 @@ class SlackTurnRead:
 @dataclass
 class _ChannelRunCapture:
     run: SlackChannelRun | None = None
-    # Whether MDA's Slack channel tells the person why nothing starts: the gates
-    # record why (``declined``) instead of posting it.
-    declines: bool = False
-    declined: SlackTurnDeclined | None = None
     # A turn whose prompt MDA's channel builds from what it read: the run's input
     # stays empty, and ``prompt`` holds what the prompt needs from Open SWE's records.
     read: SlackTurnRead | None = None
@@ -899,24 +895,22 @@ async def prepare_slack_channel_run(
     request: SlackRequest,
     repo: common.SlackRepoResolution | None,
     *,
-    declines: bool = False,
     read: SlackTurnRead | None = None,
-) -> tuple[SlackChannelRun | SlackTurnDeclined | None, SlackTurnPrompt | None]:
+) -> tuple[SlackChannelRun | None, SlackTurnPrompt | None]:
     """The run a message in an MDA-owned Slack conversation starts, without starting it.
 
     Everything else happens as for the backend's own Slack runs (the gates, the
     account-link prompt, the thread's metadata, files staged in the sandbox);
     MDA's Slack channel starts the run and shows its status (``openswe.slack.channel``).
-    With ``declines``, the account-link prompt isn't posted: the decline says why
-    nothing starts, and the channel's handler replies with it. With ``read``, the
+    Account-link prompts are ephemeral replies. With ``read``, the
     channel read Slack and builds the prompt itself: Slack isn't read here, and the
     prompt's facts come back with the run.
     """
-    capture = _ChannelRunCapture(declines=declines, read=read)
+    capture = _ChannelRunCapture(read=read)
     await _process_slack_mention_impl(
         request, repo, inherited_workspace=request.inherited_workspace, channel_run=capture
     )
-    return capture.declined or capture.run, capture.prompt
+    return capture.run, capture.prompt
 
 
 async def _process_slack_mention_impl(
@@ -1014,13 +1008,7 @@ async def _process_slack_mention_impl(
     )
     user_email, user_name, user_timezone = sender.email, sender.name, sender.timezone
     if authorization is not None and (needed := authorization.needed) is not None:
-        if channel_run is not None and channel_run.declines:
-            channel_run.declined = SlackTurnDeclined(
-                reason="sign_in_again" if needed.reason == "revoked" else "sign_in",
-                settings_url=LangSmithLogin.slack_onboarding_url(),
-            )
-        else:
-            await needed.prompt(channel_id, thread_ts)
+        await needed.prompt(channel_id, reply_thread_ts or thread_ts)
         return False
     identity = authorization.identity if authorization else None
     mapped_login = authorization.github_login if authorization else None

@@ -104,10 +104,8 @@ async def control_by_slack_user(record: Incident, action: str, user_id: str) -> 
     return await apply_control(record, action, dict(await slack_person(user_id)))
 
 
-async def prompt_to_connect(channel_id: str, thread_ts: str, user_id: str, thread_id: str) -> None:
-    await post_account_link_prompt(
-        channel_id, thread_ts, user_id, None, reason="unlinked", agent_thread_id=thread_id
-    )
+async def prompt_to_connect(channel_id: str, thread_ts: str, user_id: str) -> None:
+    await post_account_link_prompt(channel_id, thread_ts, user_id, None, reason="unlinked")
 
 
 def _introduction(record: Incident) -> str:
@@ -337,7 +335,7 @@ async def handle_slack_event(
             if actor is None:
                 # A question unlocks the agent's tools, so it needs a connected account.
                 background_tasks.add_task(
-                    prompt_to_connect, record.channel_id, ts, user, record.thread_id
+                    prompt_to_connect, record.channel_id, thread_ts or ts, user
                 )
                 return {"status": "accepted"}
             background_tasks.add_task(

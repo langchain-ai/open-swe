@@ -359,13 +359,30 @@ test("records every message the model is handed as people come and go", async ({
     thread_ts: opened.thread_ts,
   });
   await expect
-    .poll(async () => (await botTexts(page)).join("\n"), {
-      timeout: 30_000,
-      intervals: [500],
-    })
+    .poll(
+      async () => {
+        const res = await page.request.get("/mock/slack/ephemerals");
+        expect(res.ok(), await res.text()).toBeTruthy();
+        const messages = (await res.json()) as Array<{
+          user: string;
+          text: string;
+        }>;
+        return messages
+          .filter((message) => message.user === CAROL_SLACK)
+          .map((message) => message.text)
+          .join("\n");
+      },
+      {
+        timeout: 30_000,
+        intervals: [500],
+      },
+    )
     .toContain(
       "/dashboard/api/auth/langsmith/login?connect_slack=true|Sign in with LangSmith",
     );
+  expect((await botTexts(page)).join("\n")).not.toContain(
+    "/dashboard/api/auth/langsmith/login?connect_slack=true",
+  );
   const sixth = await thread.record({
     title: "Turn 6: Carol, with no Robin account, chimes in",
     given:

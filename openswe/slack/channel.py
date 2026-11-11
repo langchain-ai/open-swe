@@ -6,9 +6,8 @@ records (``runtime_api.slack``): the facts deciding a message needs
 (``slack_message_facts``), then the turn (``start_slack_turn``). The backend gates
 the turn, makes a new conversation MDA's, records the thread, signs the run, and
 says whether the message redirects the thread's work in progress or waits its turn,
-or why it starts nothing, which the channel's handler replies with: a person who
-must sign in first. ``plan_slack_click`` does the same for a click on the agent's
-buttons.
+or why it starts nothing. Sign-in prompts are ephemeral replies visible only to the requester.
+``plan_slack_click`` does the same for a click on the agent's buttons.
 """
 
 import json
@@ -40,7 +39,6 @@ from runtime_api.slack import (
 )
 
 from openswe import event_claims
-from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
@@ -354,7 +352,7 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
             )
     run_thread = request.thread_id or conversation
     try:
-        start = await _prepare_run(run_thread, request, repo, declines=True, read=read)
+        start = await _prepare_run(run_thread, request, repo, read=read)
     except Exception as exc:  # noqa: BLE001 - the person hears about it instead
         await service.notify_slack_processing_error(request, repo.repo if repo else None, exc)
         _no_run("building the run failed", **fields)
@@ -389,12 +387,8 @@ async def _account_gate(
         _no_run("declined already", **fields)
         return SlackTurnStarted()
     _no_run("declined: sign in", **fields)
-    return SlackTurnStarted(
-        declined=SlackTurnDeclined(
-            reason="sign_in_again" if needed.reason == "revoked" else "sign_in",
-            settings_url=LangSmithLogin.slack_onboarding_url(),
-        )
-    )
+    await needed.prompt(turn.channel_id, turn.thread_ts)
+    return SlackTurnStarted()
 
 
 async def _first_decline(webhook_id: str, turn: StartSlackTurn) -> bool:
@@ -673,20 +667,15 @@ async def _prepare_run(
     request: SlackRequest,
     repo: common.SlackRepoResolution | None,
     *,
-    declines: bool = False,
     read: SlackTurnRead | None = None,
 ) -> SlackTurnStarted:
     prompt = None
     if request.by_the_way is not None:
         prepared = await _prepare_by_the_way(request)
     else:
-        prepared, prompt = await service.prepare_slack_channel_run(
-            request, repo, declines=declines, read=read
-        )
+        prepared, prompt = await service.prepare_slack_channel_run(request, repo, read=read)
     if prepared is None:
         return SlackTurnStarted()
-    if isinstance(prepared, SlackTurnDeclined):
-        return SlackTurnStarted(declined=prepared)
     if request.move_thread:
         _mark_move(prepared.input, request.move_channel_id)
 
