@@ -26,7 +26,6 @@ from typing import Any, Self
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
-from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.users import User
@@ -177,20 +176,15 @@ class PullRequestApproval:
 
     @classmethod
     async def evaluate(cls, owner: str, repo: str, number: int) -> None:
-        """Post ``Robin Approves`` on the pull request's head where its base requires it."""
+        """Post ``Robin Approves`` on an open pull request's head, required by its base or not."""
         async with PullRequestClient.as_app(owner, repo, number) as pull:
             payload = await pull.pull()
-            base = str((payload.get("base") or {}).get("ref") or "")
             if payload.get("state") != "open":
                 return
-            required = await Repository.requires_approval_check(owner, repo, base)
-            if required is False:
-                return
-            blocked = "Robin could not read this branch's rules." if required is None else ""
             approval = await cls.read(pull, payload)
             if not approval.head_sha:
                 return
-            passed, summary = (False, blocked) if blocked else approval.verdict()
+            passed, summary = approval.verdict()
             await pull.repo.create_check_run(
                 {
                     "name": APPROVAL_CHECK_RUN_NAME,
