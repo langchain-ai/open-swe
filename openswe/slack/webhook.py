@@ -1368,6 +1368,7 @@ async def _process_slack_mention_impl(
         "source": "slack",
         "slack_kickoff_eligible": False,
         "slack_action_token": request.action_token,
+        "slack_search_message_ts": request.original_message_ts,
     }
     if review_guide:
         # The thread keeps the last run's configurable, which may be a click's.
@@ -1409,6 +1410,7 @@ async def _process_slack_mention_impl(
         configurable.pop("slack_thread", None)
         configurable.pop("slack_breakout", None)
         configurable.pop("slack_action_token", None)
+        configurable.pop("slack_search_message_ts", None)
         configurable.pop("admin_thread", None)
         configurable["source"] = "web"
     source_context = (

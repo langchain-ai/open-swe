@@ -1,10 +1,12 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from cryptography.fernet import Fernet
 
 from openswe import tools
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
+from openswe.slack.tools.search import SlackSearchGrant
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
@@ -258,7 +260,14 @@ async def test_post_channel_message_refuses_missing_origin_link(
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
 
 
-def _search_run(monkeypatch: pytest.MonkeyPatch, *, shared: bool, token: str) -> None:
+def _search_run(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    shared: bool,
+    token: str,
+    message_ts: str = "",
+    started_by_message: bool = True,
+) -> None:
     channel = {"id": "C123", "is_ext_shared": shared, "is_pending_ext_shared": False}
     monkeypatch.setattr(
         RunConfig,
@@ -268,10 +277,12 @@ def _search_run(monkeypatch: pytest.MonkeyPatch, *, shared: bool, token: str) ->
                 "slack_thread": {
                     "channel_id": "C123",
                     "thread_ts": "1.0",
+                    "triggering_event_ts": message_ts,
                     "channel_context": channel,
                 },
                 "source": "slack",
                 "slack_action_token": token,
+                "slack_search_message_ts": message_ts if started_by_message else None,
             }
         ),
     )
@@ -319,6 +330,25 @@ async def test_slack_search_searches_public_channels_with_the_runs_grant(
     assert payload["channel_types"] == ["public_channel"]
     assert payload["include_bots"] is False
     assert payload["limit"] == 20
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_slack_search_uses_the_grant_kept_for_the_runs_message(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The mention's `message` event started the run; its `app_mention` brought the grant.
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    await SlackSearchGrant.keep("C123", "1.5", "grant")
+    await SlackSearchGrant.keep("C123", "1.6", "another message's grant")
+    # A later run that only copied the thread's `slack_thread` gets no grant.
+    _search_run(monkeypatch, shared=False, token="", message_ts="1.5", started_by_message=False)
+    assert (await tools.slack_search("launch plan"))["success"] is False
+    assert slack_api.calls == []
+    _search_run(monkeypatch, shared=False, token="", message_ts="1.5")
+    slack_api.respond({"ok": True, "results": {"messages": []}})
+    assert (await tools.slack_search("launch plan"))["success"] is True
+    _, payload = slack_api.calls[0]
+    assert payload["action_token"] == "grant"
 
 
 @pytest.mark.usefixtures("registry_db")

@@ -75,6 +75,9 @@ from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.slack.mda_forwarding import RETIRED_SWEEP_JOB as SLACK_LOST_REQUESTS
+from openswe.slack.tools.search import PURGE_JOB as SLACK_SEARCH_GRANT_PURGE
+from openswe.slack.tools.search import PURGE_SCHEDULE as SLACK_SEARCH_GRANT_SCHEDULE
+from openswe.slack.tools.search import SlackSearchGrant
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
@@ -282,6 +285,11 @@ async def _tool_sets_purge(_job: Job) -> None:
 WORKER.register(EVENT_CLAIM_PURGE)(event_claims.purge_lapsed)
 
 
+@WORKER.register(SLACK_SEARCH_GRANT_PURGE)
+async def _slack_search_grant_purge(_job: Job) -> None:
+    logger.info("Slack search grants purged", extra={"purged": await SlackSearchGrant.purge()})
+
+
 @WORKER.register(ATTACHMENT_SWEEP_JOB)
 async def _plugin_attachment_sweep(_job: Job) -> None:
     await AttachmentObjects.sweep_configured()
@@ -329,6 +337,11 @@ async def start_jobs() -> None:
         ),
         lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
         lambda: queue.schedule(EVENT_CLAIM_PURGE, cron=EVENT_CLAIM_SCHEDULE, key=EVENT_CLAIM_PURGE),
+        lambda: queue.schedule(
+            SLACK_SEARCH_GRANT_PURGE,
+            cron=SLACK_SEARCH_GRANT_SCHEDULE,
+            key=SLACK_SEARCH_GRANT_PURGE,
+        ),
         lambda: queue.schedule(
             GITHUB_QUOTA_SAMPLE, cron=GITHUB_QUOTA_SCHEDULE, key=GITHUB_QUOTA_SAMPLE
         ),

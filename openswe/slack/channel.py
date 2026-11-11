@@ -59,6 +59,7 @@ from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
 from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
+from openswe.slack.tools.search import SlackSearchGrant
 from openswe.slack.webhook import SlackTurnRead
 from openswe.threads import index
 from openswe.threads.router import channel_run_metadata, channel_run_starting
@@ -219,6 +220,9 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     """
     webhook_id = call.request.headers.get("webhook-id", "")
     fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
+    if turn.action_token:
+        # Kept before the claim: the event that starts the turn may be the one without it.
+        await SlackSearchGrant.keep(turn.channel_id, turn.message_ts, turn.action_token)
     # An edit keeps its message's timestamp, and a message may be edited more than once.
     if turn.kind != "edit" and not await _claim_once(
         (_TURN_SCOPE, _TURN_TTL),

@@ -193,6 +193,9 @@ class RunConfig(BaseModel):
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
     slack_action_token: str | None = None
+    # The Slack message whose kept search grant this run may use. Only the turn that
+    # message starts sets it; runs that copy `slack_thread` later don't.
+    slack_search_message_ts: str | None = None
     # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None

@@ -1,13 +1,21 @@
 import hashlib
 import logging
 import uuid
-from datetime import timedelta
-from typing import Literal
+from datetime import datetime, timedelta
+from typing import Final, Literal
+from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import ForeignKey, delete, func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe import event_claims
+from openswe.database import postgres
+from openswe.database.orm import NOW, Base
+from openswe.encryption import decrypt_token, encrypt_token
 from openswe.run_config import RunConfig
+from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from openswe.tools import access as tool_access
 from openswe.tools.admin_gate import configurable
@@ -17,10 +25,13 @@ logger = logging.getLogger(__name__)
 MAX_SEARCH_RESULTS = 20
 SEARCHES_PER_GRANT = 6
 _GRANT_WINDOW = timedelta(hours=1)
+PURGE_JOB: Final = "slack_search_grant_purge"
+PURGE_SCHEDULE: Final = "17 * * * *"
 
 _NO_ACTION_TOKEN = (
-    "Slack grants search only for a message that @mentions Open SWE or is sent to it in a "
-    "DM, and this run's message did neither. Ask the person to @mention Open SWE to search."
+    "Slack attached no search grant to the message that started this run. Slack grants "
+    "search only for a message that @mentions Robin or is sent to it in a DM. Ask the "
+    "person to @mention Robin in a new message to search."
 )
 _SHARED_CHANNEL = (
     "Search is unavailable in a channel shared with another organization, because its "
@@ -72,6 +83,68 @@ class SlackSearchRefused(Exception):
     """This run may not search Slack."""
 
 
+class SlackSearchGrant(Base):
+    """The search grant Slack attached to one message, kept for the run that message starts.
+
+    Slack sends a channel mention as both ``message`` and ``app_mention``, only the
+    ``app_mention`` carries the grant, and whichever arrives first starts the run.
+    """
+
+    __tablename__ = "slack_search_grant"
+
+    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
+    message_ts: Mapped[str]
+    # Encrypted under TOKEN_ENCRYPTION_KEY.
+    action_token: Mapped[str]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+    @classmethod
+    async def keep(cls, channel_id: str, message_ts: str, action_token: str) -> None:
+        """Keep the grant a message's event carried; the first one kept stands."""
+        async with postgres.session() as session:
+            await SlackChannel.ensure(session, channel_id)
+            await session.execute(
+                insert(cls)
+                .values(
+                    id=uuid7(),
+                    channel_id=channel_id,
+                    message_ts=message_ts,
+                    action_token=encrypt_token(action_token),
+                )
+                .on_conflict_do_nothing(index_elements=[cls.channel_id, cls.message_ts])
+            )
+
+    @classmethod
+    async def find(cls, channel_id: str, message_ts: str) -> str:
+        """The grant kept for a message, or ``""`` once it lapsed or when none was."""
+        async with postgres.session() as session:
+            sealed = await session.scalar(
+                select(cls.action_token).where(
+                    cls.channel_id == channel_id,
+                    cls.message_ts == message_ts,
+                    cls.created_at > func.now() - _GRANT_WINDOW,
+                )
+            )
+        return decrypt_token(sealed) if sealed else ""
+
+    @classmethod
+    async def purge(cls) -> int:
+        """Forget the grants that lapsed."""
+        async with postgres.transaction() as conn:
+            result = await conn.execute(
+                delete(cls).where(cls.created_at <= func.now() - _GRANT_WINDOW)
+            )
+        return result.rowcount
+
+
 class SlackSearch:
     """Public-channel message search under the grant Slack attached to this run's message."""
 
@@ -80,15 +153,20 @@ class SlackSearch:
         self.channel_id = channel_id
 
     @classmethod
-    def for_run(cls, cfg: RunConfig) -> SlackSearch:
+    async def for_run(cls, cfg: RunConfig) -> SlackSearch:
         slack = cfg.slack_thread
         if slack is None:
             raise SlackSearchRefused(_NO_ACTION_TOKEN)
         if slack.channel_context is None or not slack.channel_context.allows_operations:
             raise SlackSearchRefused(_SHARED_CHANNEL)
-        if not cfg.slack_action_token:
+        action_token = cfg.slack_action_token or ""
+        if not action_token and slack.channel_id and cfg.slack_search_message_ts:
+            action_token = await SlackSearchGrant.find(
+                slack.channel_id, cfg.slack_search_message_ts
+            )
+        if not action_token:
             raise SlackSearchRefused(_NO_ACTION_TOKEN)
-        return cls(cfg.slack_action_token, slack.channel_id)
+        return cls(action_token, slack.channel_id)
 
     async def spend(self) -> None:
         """Take one of the grant's searches, shared by every run and subagent holding it."""
@@ -142,7 +220,7 @@ async def slack_search(
     if not query or not query.strip():
         return {"success": False, "error": "query is required"}
     try:
-        return await SlackSearch.for_run(configurable()).messages(
+        return await (await SlackSearch.for_run(configurable())).messages(
             query.strip(),
             limit=min(max(limit, 1), MAX_SEARCH_RESULTS),
             cursor=cursor.strip(),
