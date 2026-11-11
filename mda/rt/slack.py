@@ -93,21 +93,21 @@ def decline_text(declined: SlackTurnDeclined) -> str:
         return EXTERNAL_CHANNEL
     if declined.reason == "breakout":
         return declined.message or "Could not break out this thread; try again."
-    # Without a dashboard URL the text names the settings page, since the person
-    # must still be told why nothing started.
     settings = (
-        f"<{declined.settings_url}|your Robin settings>"
+        f"<{declined.settings_url}|Sign in with LangSmith>"
         if declined.settings_url
-        else "your Robin settings"
+        else "Sign in with LangSmith in Robin"
     )
     if declined.reason == "sign_in_again":
         return (
-            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
-            f"account. Re-connect it in {settings}, then tag me again."
+            "🔐 Your LangSmith sign-in needs to be renewed. "
+            f"{settings} and follow the prompts to link Slack, then tag me again. "
+            "GitHub is optional and only needed for coding features."
         )
     return (
-        "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-        f"connect your Slack account in {settings}, then tag me again."
+        "👋 Sign in with LangSmith to chat with Robin. "
+        f"{settings} and follow the prompts to link Slack, then tag me again. "
+        "GitHub is optional and only needed for coding features."
     )
 
 
@@ -424,7 +424,7 @@ async def _start_turn(
     elif facts.concierge:
         state = await thread.get_state()
     visible, dispatched = slack_prompt.dispatched_context(state)
-    described = {message.user_id} if prompt.first_turn else set(prompt.logins)
+    described = {message.user_id} if prompt.first_turn else set(prompt.person_ids)
     run_input = slack_prompt.build_input(
         context,
         names,

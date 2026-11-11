@@ -278,20 +278,21 @@ def test_a_message_the_backend_starts_nothing_for_starts_nothing(
     [
         (
             SlackTurnDeclined(reason="sign_in", settings_url="https://openswe.test/settings"),
-            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            "connect your Slack account in <https://openswe.test/settings|your Robin "
-            "settings>, then tag me again.",
+            "👋 Sign in with LangSmith to chat with Robin. "
+            "<https://openswe.test/settings|Sign in with LangSmith> and follow the prompts to link Slack, "
+            "then tag me again. GitHub is optional and only needed for coding features.",
         ),
         (
             SlackTurnDeclined(reason="sign_in_again", settings_url="https://openswe.test/settings"),
-            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
-            "account. Re-connect it in <https://openswe.test/settings|your Robin "
-            "settings>, then tag me again.",
+            "🔐 Your LangSmith sign-in needs to be renewed. "
+            "<https://openswe.test/settings|Sign in with LangSmith> and follow the prompts to link Slack, "
+            "then tag me again. GitHub is optional and only needed for coding features.",
         ),
         (
             SlackTurnDeclined(reason="sign_in"),
-            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            "connect your Slack account in your Robin settings, then tag me again.",
+            "👋 Sign in with LangSmith to chat with Robin. "
+            "Sign in with LangSmith in Robin and follow the prompts to link Slack, then tag me again. "
+            "GitHub is optional and only needed for coding features.",
         ),
         (
             SlackTurnDeclined(

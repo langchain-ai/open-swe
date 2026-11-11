@@ -1078,14 +1078,14 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
 
 @pytest.mark.parametrize("worker", [False, True])
 async def test_langsmith_runtime_tokens_and_worker_grants_recheck_live_access(
-    monkeypatch: pytest.MonkeyPatch, worker: bool
+    monkeypatch: pytest.MonkeyPatch, worker: bool, langsmith_users
 ) -> None:
-    from unittest.mock import AsyncMock
+    from uuid import UUID
 
-    from openswe.dashboard.langsmith_login import LangSmithLogin
-
-    grant = AsyncMock(return_value="langsmith-token")
-    monkeypatch.setattr(LangSmithLogin, "access_token", grant)
+    langsmith_users.add(
+        "user:019abcde-0000-7000-8000-000000000001",
+        user_id=UUID("019abcde-0000-7000-8000-000000000001"),
+    )
     run = RUN.model_copy(
         update={
             "configurable": {
@@ -1100,7 +1100,7 @@ async def test_langsmith_runtime_tokens_and_worker_grants_recheck_live_access(
         else sign_runtime_token(run)
     )
     assert (await _status(f"Bearer {token}"))[0] == 200
-    grant.return_value = None
+    langsmith_users.revoked.update(langsmith_users.people)
     assert await _status(f"Bearer {token}") == (401, None)
 
 

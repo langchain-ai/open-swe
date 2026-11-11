@@ -78,8 +78,8 @@ async def _process_agent_session_stopped(
         from openswe.slack.client import post_slack_thread_reply
         from openswe.slack.http import SlackClient, slack_identity
         from openswe.slack.thinking import release_slack_location_status
+        from openswe.slack.webhook import SlackAuthorization
         from openswe.threads.handlers import cancel_dashboard_thread
-        from openswe.users.models import User
 
         user_id = event.get("user")
         if not event_id or not team_id:
@@ -94,8 +94,8 @@ async def _process_agent_session_stopped(
             return
         if not isinstance(user_id, str) or not user_id:
             return
-        user = await User.for_identity("slack", user_id)
-        if user is None or not user.github_login:
+        authorization = await SlackAuthorization.resolve(user_id)
+        if authorization.identity is None:
             logger.warning("Ignoring session stop from an unlinked Slack user")
             return
         if not await claim_slack_event(event_id):
@@ -103,8 +103,7 @@ async def _process_agent_session_stopped(
         try:
             await cancel_dashboard_thread(
                 thread_id,
-                user.github_login,
-                email=user.email,
+                authorization.subject_for(_thread_metadata(thread)),
                 on_interrupted=partial(release_slack_location_status, channel_id, thread_ts),
             )
         except Exception as exc:

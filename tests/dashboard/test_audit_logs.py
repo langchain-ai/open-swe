@@ -19,6 +19,13 @@ from openswe.dashboard import deps, oauth, workspace_settings
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.threads.principals import PrincipalDep
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import LangSmithUsers
+
+
+@pytest.fixture(autouse=True)
+def authorized_people(langsmith_users: LangSmithUsers) -> None:
+    for login in ("alice", "admin", "ordinary", "user-0", "user-1", "user-2"):
+        langsmith_users.add(login)
 
 
 class Settings(BaseModel):

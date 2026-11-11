@@ -418,14 +418,29 @@ test.describe("threads workspace", () => {
     const row = page.getByRole("link", { name: TITLES.shared }).first();
     await expect(row).toBeVisible();
     await row.click({ button: "right" });
+    const pinResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/dashboard/api/threads/${THREAD_IDS.shared}/pin` &&
+        response.request().method() === "POST",
+    );
     await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
+    expect((await pinResponse).ok()).toBeTruthy();
+    await page.reload();
 
     const pinned = sidebarSection(page.locator("aside"), "Pinned");
     const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
     await expect(pinnedRow).toBeVisible();
 
     await pinnedRow.press("Shift+F10");
+    const unpinResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/dashboard/api/threads/${THREAD_IDS.shared}/pin` &&
+        response.request().method() === "DELETE",
+    );
     await page.getByRole("menuitem", { name: "Unpin", exact: true }).click();
+    expect((await unpinResponse).ok()).toBeTruthy();
     await expect(pinned).toHaveCount(0);
   });
 

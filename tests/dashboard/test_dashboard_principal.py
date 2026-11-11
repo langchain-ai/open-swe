@@ -5,9 +5,11 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard.deps import session_is_admin
+from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.threads.principals import Principal
 from openswe.users import User
+from openswe.users.models import UserIdentity
 
 
 @pytest.mark.asyncio
@@ -75,3 +77,55 @@ def test_langsmith_session_is_admin_only_through_its_linked_github_login(
     }
 
     assert session_is_admin(session) is admin
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["github", "langsmith"])
+async def test_every_dashboard_session_requires_langsmith(monkeypatch, provider):
+    user = User()
+    monkeypatch.setattr(DashboardPrincipal, "user", AsyncMock(return_value=user))
+    authorize = AsyncMock(side_effect=HTTPException(401, "Sign in with LangSmith"))
+    monkeypatch.setattr(LangSmithLogin, "authorize_user", authorize)
+    principal = DashboardPrincipal(provider, "alice", None)
+    with pytest.raises(HTTPException) as exc:
+        await principal.authorize()
+    assert exc.value.status_code == 401
+    authorize.assert_awaited_once_with(user)
+
+
+@pytest.mark.parametrize(
+    "route",
+    ["slack/login", "slack/callback", "slack/desktop/exchange", "notifications/receipt/delivered"],
+)
+def test_langsmith_only_person_can_use_personal_routes(route):
+    principal = DashboardPrincipal("langsmith", "user:00000000-0000-0000-0000-000000000001", None)
+    principal.authorize_path(f"/dashboard/api/{route}", "POST")
+
+
+def test_langsmith_only_person_can_list_apps_but_not_access_github_app_routes():
+    principal = DashboardPrincipal("langsmith", "user:00000000-0000-0000-0000-000000000001", None)
+    principal.authorize_path("/dashboard/api/plugins", "GET")
+    with pytest.raises(HTTPException):
+        principal.authorize_path("/dashboard/api/plugins/install/github/owner/repo", "GET")
+
+
+@pytest.mark.asyncio
+async def test_github_identity_alone_is_not_langsmith_authentication():
+    user = User(identities=[UserIdentity(provider="github", external_id="42", login="alice")])
+    with pytest.raises(HTTPException) as exc:
+        await LangSmithLogin().authorize_user(user)
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_linked_langsmith_identity_still_requires_valid_authorization(monkeypatch, status):
+    user = User(identities=[UserIdentity(provider="langsmith", external_id="ls-alice")])
+    authorize = AsyncMock(side_effect=HTTPException(status, "Invalid LangSmith authorization"))
+    monkeypatch.setattr(LangSmithLogin, "authorize_session", authorize)
+    with pytest.raises(HTTPException) as exc:
+        await LangSmithLogin().authorize_user(user)
+    assert exc.value.status_code == status
+    authorize.assert_awaited_once_with(
+        DashboardPrincipal("langsmith", f"user:{user.id}", user.id, "ls-alice")
+    )

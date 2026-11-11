@@ -10,7 +10,7 @@ test("email-match recovery verifies GitHub and survives the next login", async (
   await page.request.post("/control/login", {
     data: { login: thread.login, email: thread.email },
   });
-  const original = await (await page.request.get("/dashboard/api/me")).json();
+  expect((await page.request.get("/dashboard/api/me")).status()).toBe(401);
   await page.request.post("/dashboard/api/auth/logout", {
     headers: SAME_ORIGIN_HEADERS,
   });
@@ -21,20 +21,30 @@ test("email-match recovery verifies GitHub and survives the next login", async (
     .getByRole("textbox", { name: "Email" })
     .fill(thread.email.toUpperCase());
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Return to your existing account" }),
-  ).toBeVisible();
-  await expect(page.getByTestId("composer-editor")).toHaveCount(0);
+  await expect(page.getByTestId("composer-editor")).toBeVisible();
+  const unlinked = await (await page.request.get("/dashboard/api/me")).json();
+  expect(unlinked.user_id).not.toBe(thread.user_id);
+  expect(unlinked.github_login).toBeNull();
+  expect(
+    (
+      await page.request.get(`/dashboard/api/threads/${thread.thread_id}`)
+    ).status(),
+  ).toBe(404);
   const blocked = await page.request.post("/dashboard/api/threads", {
     headers: SAME_ORIGIN_HEADERS,
-    data: { prompt: "Must not create a duplicate history", start: false },
+    data: {
+      prompt: "Must not access a repository before linking GitHub",
+      repo: "fakeorg/demo",
+      start: false,
+    },
   });
   expect(blocked.status()).toBe(403);
 
   await page.evaluate(() =>
     localStorage.setItem("open-swe.repos.cache.v2", "stale"),
   );
-  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.getByRole("button", { name: unlinked.login, exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   expect((await page.request.get("/dashboard/api/me")).status()).toBe(401);
   expect(
@@ -46,12 +56,15 @@ test("email-match recovery verifies GitHub and survives the next login", async (
     .fill(thread.email.toUpperCase());
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
+  await page
+    .getByRole("button", { name: "Select repository", exact: true })
+    .click();
   await page.getByRole("button", { name: "Link GitHub", exact: true }).click();
   await page.getByRole("textbox", { name: "GitHub user" }).fill(thread.login);
   await page.getByRole("button", { name: "Authorize GitHub" }).click();
   await expect(page.getByTestId("composer-editor")).toBeVisible();
   const restored = await (await page.request.get("/dashboard/api/me")).json();
-  expect(restored.user_id).toBe(original.user_id);
+  expect(restored.user_id).toBe(thread.user_id);
   expect(
     (await page.request.get(`/dashboard/api/threads/${thread.thread_id}`)).ok(),
   ).toBeTruthy();
@@ -67,5 +80,5 @@ test("email-match recovery verifies GitHub and survives the next login", async (
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByTestId("composer-editor")).toBeVisible();
   const returning = await (await page.request.get("/dashboard/api/me")).json();
-  expect(returning.user_id).toBe(original.user_id);
+  expect(returning.user_id).toBe(thread.user_id);
 });

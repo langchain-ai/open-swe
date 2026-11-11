@@ -69,12 +69,16 @@ class DashboardPrincipal:
             "projects",
             "bridges",
             "skills",
+            "notifications",
             "github/login",
             "github/desktop/exchange",
+            "slack/login",
+            "slack/callback",
+            "slack/desktop/exchange",
         )
         if any(relative == group or relative.startswith(group + "/") for group in personal):
             return
-        if relative == "my-credentials/langsmith" and method in {"GET", "DELETE"}:
+        if relative == "plugins" and method == "GET":
             return
         if relative in {
             "options",
@@ -120,20 +124,9 @@ class DashboardPrincipal:
         return user
 
     async def authorize(self, *, path: str | None = None) -> None:
-        if self.provider == "github":
-            return
         from openswe.dashboard.langsmith_login import LangSmithLogin
 
         user = await self.user()
-        await LangSmithLogin().authorize_session(self)
-        if user is not None and await user.requires_github_link():
-            relative = (path or "").removeprefix("/dashboard/api/").rstrip("/")
-            if relative not in {
-                "me",
-                "github/login",
-                "github/desktop/exchange",
-                "auth/callback",
-                "auth/desktop/exchange",
-                "auth/logout",
-            }:
-                raise HTTPException(403, "Link GitHub to return to your existing Robin account")
+        if user is None:
+            raise HTTPException(401, "Sign in with LangSmith to use Robin")
+        await LangSmithLogin().authorize_user(user)

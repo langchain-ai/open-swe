@@ -602,7 +602,7 @@ class User(Base):
         email: str = "",
         team_id: str = "",
     ) -> Self:
-        """Attach another provider account to this person, taking it over if needed."""
+        """Attach a provider account without moving another person's Slack identity."""
         if provider == "langsmith" or (
             provider == "github" and any(i.provider == "langsmith" for i in self.identities)
         ):
@@ -617,7 +617,7 @@ class User(Base):
                 email=email,
                 team_id=team_id,
             )
-            await session.execute(
+            result = await session.execute(
                 upsert.on_conflict_do_update(
                     index_elements=[UserIdentity.provider, UserIdentity.external_id],
                     set_={
@@ -625,8 +625,13 @@ class User(Base):
                         "last_seen_at": func.clock_timestamp(),
                         **_known(login=login, email=email, team_id=team_id),
                     },
-                )
+                    where=UserIdentity.user_id == self.id if provider == "slack" else None,
+                ).returning(UserIdentity.user_id)
             )
+            if result.scalar_one_or_none() is None:
+                raise AccountConflict(
+                    "This Slack account is already linked to another Robin account"
+                )
             await session.flush()
             stored = await cls._load(session, self.id)
         if stored is None:

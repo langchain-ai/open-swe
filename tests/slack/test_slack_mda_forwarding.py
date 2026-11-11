@@ -52,7 +52,6 @@ _OWNED_THREAD = mda_forwarding.owned_thread
 _STARTABLE_THREAD = mda_forwarding.startable_thread
 _STARTABLE_CONCIERGE = mda_forwarding.startable_concierge
 _JOIN_CONCIERGE = mda_forwarding.join_concierge
-_ACCOUNT_LINK_NEEDED = slack_service.account_link_needed
 
 
 class _FakeBackgroundTasks:
@@ -884,7 +883,9 @@ def _start_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr(event_claims, "claim", claims.claim)
     monkeypatch.setattr(event_claims, "held", claims.is_held)
     monkeypatch.setattr(
-        slack_channel, "build_settings_url", lambda: "https://openswe.test/settings"
+        slack_channel.LangSmithLogin,
+        "slack_onboarding_url",
+        lambda: "https://openswe.test/settings",
     )
     return _api(monkeypatch)
 
@@ -967,8 +968,7 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
             review_card=True,
         ),
     }
-    # A conversation the channel holds is neither gated again nor claimed again.
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
 
 
@@ -1346,7 +1346,7 @@ async def test_a_breakout_opens_its_new_thread_and_runs_its_first_turn_there(
     assert source.thread_id == (owner or backend_thread)
     assert cast(slack_channel.BreakoutCommand, command).instruction == "fix the flaky test"
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     assert prepare.await_args.args[0] is opening
     assert start["thread_id"] == side
 
@@ -1433,37 +1433,9 @@ async def test_a_move_outside_an_mda_conversation_starts_nothing(
     assert start == _NO_RUN
     prepare.assert_not_awaited()
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
     assert record.no_run_reason == "move outside an MDA conversation"
-
-
-@pytest.mark.parametrize(
-    ("token", "record", "needed"),
-    [
-        ("gho_valid", False, None),
-        (None, True, "revoked"),
-        (None, False, "unlinked"),
-    ],
-)
-async def test_the_account_gate_runs_without_a_thread(
-    monkeypatch: pytest.MonkeyPatch, token: str | None, record: bool, needed: str | None
-) -> None:
-    monkeypatch.setattr(
-        webhook_common,
-        "get_slack_user_info",
-        AsyncMock(return_value={"profile": {"email": "ada@example.com"}}),
-    )
-    monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value="ada"))
-    monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=token))
-    monkeypatch.setattr(webhook_common, "has_access_token_record", AsyncMock(return_value=record))
-
-    gate = await _ACCOUNT_LINK_NEEDED("U1")
-
-    if needed is None:
-        assert gate is None
-    else:
-        assert gate == slack_service.AccountLinkNeeded("U1", "ada@example.com", needed)
 
 
 async def test_a_kitchen_channels_untagged_message_goes_to_mda(

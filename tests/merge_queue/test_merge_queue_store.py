@@ -1190,7 +1190,7 @@ async def test_queue_startup_rejects_multiple_configured_workspaces(
 
 
 async def test_queue_dashboard_authorization(
-    queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch
+    queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch, langsmith_users
 ) -> None:
     import httpx
     from fastapi import Depends, FastAPI
@@ -1222,6 +1222,11 @@ async def test_queue_dashboard_authorization(
                 1,
             )
         ]
+        for person in people:
+            person.identities.append(
+                UserIdentity(provider="langsmith", external_id=f"ls-{person.github_login}")
+            )
+            langsmith_users.people[person.id] = person
         session.add_all(people)
     author, coworker, operator = people
     permission, available = "write", True

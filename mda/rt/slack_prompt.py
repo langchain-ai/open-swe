@@ -629,7 +629,7 @@ def slack_person(
 ) -> PersonIdentity:
     person: PersonIdentity = {
         "id": person_id or f"slack:{user_id}",
-        "open_swe_account": "linked" if github_login else "unlinked",
+        "open_swe_account": "linked" if person_id or github_login else "unlinked",
     }
     if name:
         person["display_name"] = name

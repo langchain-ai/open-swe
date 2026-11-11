@@ -45,7 +45,8 @@ def _cookie(login: str = "test-user") -> str:
     return f"{oauth.COOKIE_NAME}={token}"
 
 
-async def test_the_session_cookie_names_the_caller() -> None:
+async def test_the_session_cookie_names_the_caller(langsmith_users) -> None:
+    langsmith_users.add("test-user")
     assert (await oauth.require_session(_request(cookie=_cookie())))["sub"] == "test-user"
 
 

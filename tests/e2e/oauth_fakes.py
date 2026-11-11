@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.oauth import GithubUser, pkce_s256_challenge
 from openswe.users import User
 
@@ -16,6 +17,22 @@ class OAuthProviders:
         self.issuer = base_url + "/fake-gh/langsmith"
         self.codes: dict[str, tuple[str, str, str]] = {}
         self.tokens: dict[str, str] = {}
+
+    async def provision(self, user: User, email: str) -> User:
+        token = secrets.token_urlsafe()
+        self.tokens[token] = email
+        login = LangSmithLogin()
+        account = await login.account(token)
+        signed_in = await User.sign_in("langsmith", account.sub, email=email, authorization=account)
+        github = next(identity for identity in user.identities if identity.provider == "github")
+        user = await signed_in.join_github(github.external_id, login=user.github_login, email=email)
+        await login.save(
+            f"user:{user.id}",
+            {"access_token": token, "expires_in": 3600},
+            self.issuer + "/token",
+            email=email,
+        )
+        return user
 
     def install(self, app: FastAPI) -> None:
         app.add_api_route(self.issuer_path + "/.well-known/openid-configuration", self.metadata)

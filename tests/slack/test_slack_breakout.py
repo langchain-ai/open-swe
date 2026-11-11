@@ -9,6 +9,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.users import User
+from openswe.users.models import UserIdentity
 from openswe.workspaces import routing
 
 Command = breakout.BreakoutCommand
@@ -28,7 +29,10 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
 
 
 @pytest.fixture(autouse=True)
-def public_channels(monkeypatch):
+def public_channels(monkeypatch, langsmith_users):
+    alice = langsmith_users.add("alice")
+    alice.identities.append(UserIdentity(provider="slack", external_id="U_ALICE"))
+    monkeypatch.setattr(breakout.common, "account_link_reason", AsyncMock(return_value=None))
     load = AsyncMock(side_effect=lambda channel_id, **_: _channel(channel_id, private=False))
     monkeypatch.setattr(SlackChannel, "load", load)
     monkeypatch.setattr(
@@ -94,7 +98,7 @@ def test_breakout_command_from_message(text, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("explicit", "expected", "email_only", "private_channel"),
+    ("explicit", "expected", "without_thread", "private_channel"),
     [
         ("", "C1", False, False),
         ("C3", "C3", False, False),
@@ -104,7 +108,7 @@ def test_breakout_command_from_message(text, expected):
     ],
 )
 async def test_breakout_with_text_starts_new_thread_with_old_transcript(
-    monkeypatch, explicit, expected, email_only, private_channel, public_channels
+    monkeypatch, explicit, expected, without_thread, private_channel, public_channels
 ):
     public_channels.side_effect = lambda channel_id, **_: _channel(
         channel_id, private=private_channel
@@ -128,20 +132,9 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
 
     request = _request()
     command = Command("fix it", channel_id=explicit, options="/workspace:other", workspace="other")
-    if email_only:
+    if without_thread:
         request = request.model_copy(update={"thread_id": None})
         command = Command("fix it", channel_id=explicit)
-        monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
-        monkeypatch.setattr(
-            breakout.common,
-            "get_slack_user_info",
-            AsyncMock(return_value={"profile": {"email": "alice@example.com"}}),
-        )
-        monkeypatch.setattr(
-            User,
-            "login_for_email",
-            AsyncMock(side_effect=lambda email: "alice" if email == "alice@example.com" else None),
-        )
         monkeypatch.setattr(
             routing.WORKSPACES, "owner_of_slack_channel", AsyncMock(return_value=None)
         )

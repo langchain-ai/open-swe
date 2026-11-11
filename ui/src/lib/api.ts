@@ -256,7 +256,6 @@ export interface SessionUser {
   login: string
   auth_provider?: "github" | "langsmith"
   github_login?: string | null
-  requires_github_link?: boolean
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null

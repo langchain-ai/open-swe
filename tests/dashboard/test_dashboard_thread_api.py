@@ -56,7 +56,9 @@ def _threads_kept_by_the_fake_client(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _empty_thread_pins(monkeypatch) -> None:
+def _empty_thread_pins(monkeypatch, langsmith_users) -> None:
+    langsmith_users.add("octocat")
+
     async def empty_pins(login: str) -> list[str]:
         return []
 
@@ -270,7 +272,11 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
 
     patch_thread_module(monkeypatch, "get_profile", fake_profile)
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
+    monkeypatch.setattr("openswe.webhooks.common.account_link_reason", AsyncMock(return_value=None))
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="token")
+    )
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
 
@@ -329,6 +335,7 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     registry_db: None,
     langsmith: bool,
     local: bool,
+    langsmith_users,
 ) -> None:
     monkeypatch.setattr(
         thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
@@ -338,6 +345,8 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
     subject = f"user:{uuid7()}" if langsmith else "octocat"
+    if langsmith:
+        langsmith_users.add(subject, user_id=UUID(subject.removeprefix("user:")))
     bridge = await BridgeStore.register(
         owner_id=subject if langsmith else "github:octocat",
         hostname="laptop.local",
@@ -487,6 +496,9 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
 
     patch_thread_module(monkeypatch, "get_profile", fake_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="token")
+    )
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
 
@@ -577,23 +589,29 @@ async def test_private_threads_created_by_admins_get_admin_permissions(
     assert (configurable.get("admin_thread") is True) is expected_admin
 
 
+@pytest.mark.parametrize("langsmith_only", [False, True])
 async def test_dashboard_run_stamps_sender_not_original_slack_user(
     monkeypatch: pytest.MonkeyPatch,
+    langsmith_users,
+    langsmith_only: bool,
 ) -> None:
     first = uuid7()
     second = uuid7()
+    login = f"user:{second}" if langsmith_only else "second-gh"
+    sender = langsmith_users.add(login, user_id=second)
 
     async def by_login(provider: str, login: str) -> User | None:
         return (
             User(
                 id=second,
                 identities=[
+                    sender.identities[0],
                     UserIdentity(
                         provider="github",
                         external_id="second",
                         login=login,
                         email="second@example.com",
-                    )
+                    ),
                 ],
             )
             if (provider, login) == ("github", "second-gh")
@@ -628,19 +646,42 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     }
     enriched = await thread_runs._enrich_run_start_command(
         "existing-tid",
-        "second-gh",
+        login,
         command,
         metadata={
             "source": "slack",
+            "visibility": "public",
+            "owner_login": "first-gh",
             "source_context": {"slack_thread": {"triggering_user_id": "U123"}},
         },
     )
     assert enriched["params"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
-    assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
-    assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
-    assert enriched["params"]["metadata"]["user_email"] == "second@example.com"
-    assert enriched["params"]["config"]["metadata"]["user_email"] == "second@example.com"
+    if langsmith_only:
+        assert "ls_attribution_identifier" not in enriched["params"]["metadata"]
+        assert "ls_attribution_identifier" not in enriched["params"]["config"]["metadata"]
+        configurable = enriched["params"]["config"]["configurable"]
+        assert configurable["github_linked"] is False
+        assert "github_login" not in configurable
+        assert "repo" not in configurable
+        for source, visibility in [("dashboard", "public"), ("slack", "private")]:
+            with pytest.raises(HTTPException) as blocked:
+                await thread_runs._enrich_run_start_command(
+                    "existing-tid",
+                    login,
+                    command,
+                    metadata={
+                        "source": source,
+                        "visibility": visibility,
+                        "owner_login": "first-gh",
+                    },
+                )
+            assert blocked.value.status_code == 403
+    else:
+        assert enriched["params"]["metadata"]["ls_attribution_identifier"] == login
+        assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == login
+        assert enriched["params"]["metadata"]["user_email"] == "second@example.com"
+        assert enriched["params"]["config"]["metadata"]["user_email"] == "second@example.com"
 
 
 @pytest.mark.parametrize("relayed", [False, True])
@@ -855,6 +896,9 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="token")
+    )
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
@@ -973,6 +1017,9 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="token")
+    )
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     recorded = uuid7()

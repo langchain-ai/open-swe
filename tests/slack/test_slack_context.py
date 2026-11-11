@@ -2,9 +2,11 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock
+from uuid import NAMESPACE_URL, uuid5
 from xml.etree import ElementTree
 
 import pytest
+from fastapi import HTTPException
 from runtime_api.slack import SlackTurnDeclined
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
@@ -20,6 +22,7 @@ from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
 from openswe.slack.request import SlackRequest
 from openswe.source_context import SourceContext
 from openswe.users import User
+from openswe.users.models import UserIdentity
 from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
@@ -406,6 +409,25 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common.User, "login_for_email", fake_login_for_email)
 
+    async def fake_slack_user(provider: str, user_id: str) -> User | None:
+        login = await webhook_common.User.login_for_slack(user_id)
+        return (
+            User(
+                id=uuid5(NAMESPACE_URL, f"slack-test:{login}"),
+                identities=[
+                    UserIdentity(provider="github", external_id=login, login=login),
+                    UserIdentity(provider="langsmith", external_id=f"ls-{login}"),
+                ],
+            )
+            if login
+            else None
+        )
+
+    monkeypatch.setattr(User, "for_identity", fake_slack_user)
+    monkeypatch.setattr(
+        slack_webhooks.LangSmithLogin, "authorize_session", AsyncMock(return_value="ls_token")
+    )
+
     async def fake_slack_accounts(user_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
         # Follows whatever login_for_slack the test installs, as the per-user lookup did.
         logins: dict[str, str] = {}
@@ -640,9 +662,10 @@ async def test_slack_files_wait_only_for_an_account_and_a_persisted_thread(
 ):
     request, threads, captured = slack_file_mention
     if failure == "account":
-        monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=None))
         monkeypatch.setattr(
-            webhook_common, "has_access_token_record", AsyncMock(return_value=False)
+            slack_webhooks.LangSmithLogin,
+            "authorize_user",
+            AsyncMock(side_effect=HTTPException(401)),
         )
     else:
         monkeypatch.setattr(
@@ -774,12 +797,12 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     assert "run_create" not in captured
     assert captured["prompt"] == {
         "user_id": "U123",
-        "user_email": "mason@example.com",
+        "user_email": None,
         "reason": "unlinked",
     }
 
 
-def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
+def test_process_slack_mention_mapped_user_without_langsmith_prompts_revoked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A user who signed in before but whose token is now unusable is told to re-auth."""
@@ -792,12 +815,6 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
     async def fake_login_for_slack_id(slack_user_id):
         return "mason-gh" if slack_user_id == "U123" else None
 
-    async def fake_get_valid_access_token(login):
-        return None
-
-    async def fake_has_token_record(login):
-        return True
-
     async def fake_post_prompt(
         channel_id, thread_ts, user_id, user_email, reason="unlinked", **kwargs
     ):
@@ -805,8 +822,9 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
-    monkeypatch.setattr(webhook_common, "has_access_token_record", fake_has_token_record)
+    monkeypatch.setattr(
+        slack_webhooks.LangSmithLogin, "authorize_user", AsyncMock(side_effect=HTTPException(401))
+    )
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
     asyncio.run(
@@ -856,7 +874,12 @@ def test_a_turn_built_for_mdas_slack_channel_says_why_instead_of_prompting(
     )
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", prompt)
     monkeypatch.setattr(
-        slack_webhooks, "build_settings_url", lambda: "https://openswe.test/settings"
+        slack_webhooks.LangSmithLogin, "authorize_user", AsyncMock(side_effect=HTTPException(401))
+    )
+    monkeypatch.setattr(
+        slack_webhooks.LangSmithLogin,
+        "slack_onboarding_url",
+        lambda: "https://openswe.test/settings",
     )
 
     prepared, _ = asyncio.run(

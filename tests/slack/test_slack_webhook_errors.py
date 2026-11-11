@@ -8,6 +8,7 @@ from openswe.slack import failures as slack_failures
 from openswe.slack import webhook as slack_webhook
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
+from openswe.users.models import UserIdentity
 from openswe.webhooks import common as webhook_common
 
 
@@ -110,9 +111,16 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
 
 
 @pytest.mark.asyncio
-async def test_errored_dm_owner_falls_back_to_email_mapping(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("linked", [True, False])
+async def test_errored_dm_owner_requires_explicit_slack_identity(
+    monkeypatch: pytest.MonkeyPatch, langsmith_users, linked: bool
 ) -> None:
+    alice = langsmith_users.add("alice")
+    if linked:
+        alice.identities.append(UserIdentity(provider="slack", external_id="U1"))
+    else:
+        monkeypatch.setattr(slack_webhook.User, "for_identity", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.common, "account_link_reason", AsyncMock(return_value=None))
     upsert = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", upsert)
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
@@ -125,18 +133,16 @@ async def test_errored_dm_owner_falls_back_to_email_mapping(
         "get_slack_user_info",
         AsyncMock(return_value={"profile": {"email": "alice@example.com"}}),
     )
-    monkeypatch.setattr(slack_webhook.User, "login_for_email", AsyncMock(return_value="alice"))
+    email_lookup = AsyncMock(return_value="alice")
+    monkeypatch.setattr(slack_webhook.User, "login_for_email", email_lookup)
 
     request = _event_data().model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
     await slack_webhook._mark_slack_thread_errored("t1", request, None)
 
-    kwargs = upsert.await_args.kwargs
-    assert kwargs["visibility"] == "private"
-    assert kwargs["owner_login"] == "alice"
-
-    # An unlinked DM sender never reaches thread creation, so the error path
-    # must not leave a private thread nobody owns.
-    upsert.reset_mock()
-    monkeypatch.setattr(slack_webhook.User, "login_for_email", AsyncMock(return_value=None))
-    await slack_webhook._mark_slack_thread_errored("t1", request, None)
-    upsert.assert_not_awaited()
+    if linked:
+        kwargs = upsert.await_args.kwargs
+        assert kwargs["visibility"] == "private"
+        assert kwargs["owner_login"] == "alice"
+    else:
+        upsert.assert_not_awaited()
+    email_lookup.assert_not_awaited()

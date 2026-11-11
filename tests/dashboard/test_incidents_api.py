@@ -17,7 +17,9 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch, langsmith_users) -> TestClient:
+    langsmith_users.add("sre")
+    langsmith_users.add("admin")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "incidents-test-signing-secret-32-bytes")
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")

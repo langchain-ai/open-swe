@@ -153,10 +153,12 @@ def thread_is_readable(
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
-    if login and ThreadIdentity(login).user_id is not None:
-        return thread_is_private(metadata) and thread_is_owner(metadata, login)
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
         return review.owned_by(login)
+    if login and ThreadIdentity(login).user_id is not None:
+        return (thread_is_private(metadata) and thread_is_owner(metadata, login)) or (
+            not thread_is_private(metadata) and thread_source(metadata) == "slack"
+        )
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
@@ -176,7 +178,14 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     Claude Code session here: it runs in Claude Code.
     """
     if login and ThreadIdentity(login).user_id is not None:
-        return thread_is_readable(metadata, login)
+        return (
+            thread_is_readable(metadata, login)
+            and thread_source(metadata) != CLAUDE_CODE_SOURCE
+            and (
+                not SandboxBridgeBinding.reaches_a_machine(metadata)
+                or thread_is_owner(metadata, login)
+            )
+        )
     source = thread_source(metadata)
     return (
         source in _SURFACED_SOURCES

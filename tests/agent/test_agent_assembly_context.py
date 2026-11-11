@@ -827,8 +827,9 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 
 @pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
 async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
-    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, langsmith_users
 ) -> None:
+    langsmith_users.add("octocat")
     from openswe.threads.runs import _build_dashboard_configurable
 
     monkeypatch.setattr("openswe.threads.runs.resolve_run_email", AsyncMock(return_value=None))

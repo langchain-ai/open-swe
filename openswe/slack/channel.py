@@ -40,7 +40,7 @@ from runtime_api.slack import (
 )
 
 from openswe import event_claims
-from openswe.dashboard.oauth import build_settings_url
+from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
@@ -234,6 +234,9 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         return SlackTurnStarted()
     channel_context = await common.resolve_slack_channel_context(turn.channel_id)
     key_ts = CONCIERGE_TS if turn.concierge else turn.thread_ts
+    declined = await _account_gate(turn, webhook_id, fields)
+    if declined is not None:
+        return declined
     owner_login = None if turn.bot_id else await service.slack_login(turn.user_id)
     parsed = ParsedSlackMessage.parse(
         turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
@@ -263,9 +266,6 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         _no_run(f"{turn.kind} outside an MDA conversation", **fields)
         return SlackTurnStarted()
     else:
-        declined = await _account_gate(turn, webhook_id, fields)
-        if declined is not None:
-            return declined
         conversation = await _claim(turn, owner_login)
     if turn.concierge:
         # Each Slack thread of a concierge DM joins the DM's one conversation.
@@ -392,7 +392,7 @@ async def _account_gate(
     return SlackTurnStarted(
         declined=SlackTurnDeclined(
             reason="sign_in_again" if needed.reason == "revoked" else "sign_in",
-            settings_url=build_settings_url(),
+            settings_url=LangSmithLogin.slack_onboarding_url(),
         )
     )
 
@@ -425,7 +425,12 @@ async def _branches(source: object, turn: StartSlackTurn, owner_login: str | Non
     return (
         source is not None
         and str(source) == str(turn.thread_id)
-        and await forks.branches_from(str(source), login=owner_login)
+        and await forks.branches_from(
+            str(source),
+            login=await service.slack_login(turn.user_id, thread_id=str(source))
+            if not turn.bot_id
+            else owner_login,
+        )
     )
 
 

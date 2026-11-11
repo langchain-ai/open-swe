@@ -221,9 +221,14 @@ async def test_single_comment_run_rejects_a_comment_from_another_pull_request(se
     pr_fixes.dispatch_agent_run.assert_not_awaited()
 
 
-async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypatch):
+async def test_new_thread_supplies_pr_context_to_first_user_run(
+    setup, monkeypatch, langsmith_users
+):
+    from openswe.dashboard import profiles
     from openswe.threads import runs
 
+    langsmith_users.add("alice")
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="github-token"))
     FakeRegistry.thread_ids = []
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
     metadata = setup.client.threads.update.await_args.kwargs["metadata"]

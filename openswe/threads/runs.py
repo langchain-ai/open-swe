@@ -85,6 +85,7 @@ from openswe.threads.summary import (
     _parse_repo,
     chats_beside_plugin,
     repo_config_from_metadata,
+    thread_is_promptable,
     thread_source,
 )
 from openswe.transcript.attachments import PendingAttachment
@@ -487,8 +488,26 @@ async def _build_dashboard_configurable(
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
+    if ThreadIdentity(login).github_login:
+        from openswe.dashboard.profiles import get_valid_access_token
+
+        try:
+            github_token = await get_valid_access_token(login)
+        except Exception:
+            logger.warning(
+                "GitHub token unavailable; continuing without repository access", exc_info=True
+            )
+            github_token = None
+        if not github_token:
+            user = await ThreadIdentity(login).user()
+            if user is None:
+                raise HTTPException(401, "Sign in with LangSmith to use Robin")
+            configurable.pop("github_login", None)
+            configurable.update(user_id=str(user.id), github_linked=False)
     repo_config = repo_config_from_metadata(metadata)
-    if repo_config:
+    if configurable.get("github_linked") is False:
+        configurable["repo_explicitly_none"] = True
+    elif repo_config:
         configurable["repo"] = repo_config
     elif metadata.get("repo_explicitly_none") is True:
         configurable["repo_explicitly_none"] = True
@@ -549,6 +568,11 @@ async def create_dashboard_session(
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
         repo = profile.repository(workspace)
+    if body.repo is None and identity.github_login:
+        from openswe.webhooks.common import account_link_reason
+
+        if await account_link_reason(identity.github_login) is not None:
+            repo = None
     repo_config = _parse_repo(repo) or {}
     if repo:
         if not repo_config:
@@ -1028,8 +1052,8 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
     if not creating and ThreadIdentity(login).user_id is not None:
-        if metadata.get("visibility") != "private":
-            raise HTTPException(403, "LangSmith accounts require private tasks")
+        if not thread_is_promptable(metadata, login):
+            raise HTTPException(403, "This account cannot prompt this task")
 
     params = command.get("params")
     if not isinstance(params, dict):

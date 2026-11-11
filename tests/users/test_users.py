@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy import func, select, update
 
 from openswe.database import postgres
-from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
+from openswe.users import (
+    AccountConflict,
+    UnauthorizedUser,
+    User,
+    UserPreferences,
+    UserPreferencesPatch,
+)
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -77,18 +83,19 @@ async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:
     assert await _user_count() == 1
 
 
-async def test_linking_a_claimed_identity_moves_it_to_the_new_owner() -> None:
+async def test_linking_a_claimed_slack_identity_preserves_its_owner() -> None:
     first = await User.sign_in("github", "2002", login="ada")
     await first.link("slack", "U0123", team_id="T9")
+    await first.link("slack", "U0123", team_id="T9")
     second = await User.sign_in("github", "1001", login="OctoCat")
-    moved = await second.link("slack", "U0123")
+    with pytest.raises(AccountConflict):
+        await second.link("slack", "U0123")
 
-    assert [i.provider for i in moved.identities] == ["github", "slack"]
     owner = await User.for_identity("slack", "U0123")
-    assert owner is not None and owner.id == second.id
-    reloaded_first = await User.get(first.id)
-    assert reloaded_first is not None
-    assert [i.provider for i in reloaded_first.identities] == ["github"]
+    assert owner is not None and owner.id == first.id
+    reloaded_second = await User.get(second.id)
+    assert reloaded_second is not None
+    assert [i.provider for i in reloaded_second.identities] == ["github"]
 
 
 async def test_a_session_follows_its_github_login_after_the_identity_moves() -> None:
