@@ -79,6 +79,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
             author=author,
             draft=head.draft,
             human_input=(await Walkthrough.human_input_for(pr.id) or "") if author else "",
+            concise_walkthrough=await pr.concise_walkthrough(),
         )
         if await checkout.pin(
             full_name=pr.repo_full_name,

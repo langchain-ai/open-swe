@@ -84,7 +84,13 @@ async def walkthrough_plan_chunk(
     try:
         workspace = await _workspace(pr_url) if pr_url is not None else await _workspace()
         if show is None:
-            return await _planned(workspace, guidance=prompt("walkthrough/planning"))
+            return await _planned(
+                workspace,
+                guidance=prompt(
+                    "walkthrough/planning",
+                    concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
+                ),
+            )
         number = await workspace.plan_chunk(
             title=title,
             show=show,

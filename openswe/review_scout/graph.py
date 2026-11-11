@@ -193,6 +193,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
+            concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
         )
         run_context = prompt(
             "review-scout/run-context",

@@ -55,3 +55,13 @@ Never hide a real behavior change in Other: a new condition, a different call, a
 When the pull request moved since the plan was made, chunks kept every line git left unchanged, and a new line in a hunk a chunk already holds joined that chunk.
 Only hunks no chunk holds are unplanned.
 Place those with `after` so each lands next to the chunk it belongs with, rather than at the end.
+{% if concise_walkthrough %}
+
+## Concise style
+
+This workspace prefers terse walkthroughs; this overrides the length and sentence guidance above.
+
+- Titles: 2-6 words.
+- Explanations: one to three Markdown bullets, each a short fragment rather than a full sentence: what changed, why, and anything worth a second look.
+  No preamble, no restating the title, no filler words.
+{% endif %}

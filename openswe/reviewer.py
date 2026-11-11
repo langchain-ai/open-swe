@@ -51,6 +51,7 @@ from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
+from openswe.github.pull_requests import PullRequest
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -149,6 +150,7 @@ def _reviewer_system_prompt(
     api_standards_skill: str | None = None,
     skills_prompt: str | None = None,
     review_apps: ReviewApps | None = None,
+    concise_findings: bool = False,
 ) -> SystemPrompt:
     """The reviewer's system prompt: what every review shares, then what its repository's
     do, then what depends on the pull request's changed files and checkout, such as the
@@ -169,6 +171,7 @@ def _reviewer_system_prompt(
             repo_style_prompt=repo_style_prompt or "",
             agents_md_content=agents_md_content or "",
             api_standards_skill=api_standards_skill or "",
+            concise_findings=concise_findings,
         ),
         thread="\n\n".join(
             part
@@ -948,6 +951,8 @@ async def prepare_reviewer_run(
         api_standards_skill=api_standards_skill,
         skills_prompt=checkout.skills_prompt,
         review_apps=await ReviewApps.of(cfg),
+        concise_findings=bool(repo_owner and repo_name)
+        and await PullRequest.concise_for_repo(repo_owner, repo_name),
     )
     run_context = prompt(
         "reviewer/run-context",

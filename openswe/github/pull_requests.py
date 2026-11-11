@@ -352,6 +352,20 @@ class PullRequest(Base):
         repository = self.repo if self.owner.lower() in orgs else self.repo_full_name
         return f"{repository}#{self.number}"
 
+    async def concise_walkthrough(self) -> bool:
+        """Whether the owning workspace opted into terse walkthrough plans."""
+        return await self.concise_for_repo(self.owner, self.repo)
+
+    @staticmethod
+    async def concise_for_repo(owner: str, repo: str) -> bool:
+        """Whether the workspace owning ``owner/repo`` opted into terse walkthroughs and findings."""
+        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+        from openswe.workspaces.routing import workspace_for_repo
+
+        workspace = await workspace_for_repo(owner, repo)
+        settings = await cached_workspace_settings(workspace)
+        return settings.get("concise_walkthrough_enabled") is True
+
     @property
     def url(self) -> str:
         return f"https://github.com/{self.owner}/{self.repo}/pull/{self.number}"

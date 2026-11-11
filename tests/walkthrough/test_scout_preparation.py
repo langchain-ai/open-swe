@@ -49,7 +49,10 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
     monkeypatch.setattr(graph.asyncio, "sleep", sleep)
     workspace = AsyncMock(
         side_effect=graph.PlanMovedError("newer head") if expected == "moved" else None,
-        return_value=MagicMock(complete=expected != "planned"),
+        return_value=MagicMock(
+            complete=expected != "planned",
+            pull_request=MagicMock(concise_walkthrough=AsyncMock(return_value=False)),
+        ),
     )
     monkeypatch.setattr(graph, "_workspace", workspace)
     monkeypatch.setattr(graph, "prompt", lambda *args, **kwargs: "scout instructions")

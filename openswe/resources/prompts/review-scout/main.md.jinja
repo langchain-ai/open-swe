@@ -14,7 +14,7 @@ The code compiles and its tests pass; they are not hunting for nil checks or sty
 They want to understand the change: which concepts it introduces, where data comes from and where it goes, what new control flow or behavior appears.
 Your job is to plan the walkthrough they read it through.
 
-{% include "walkthrough/planning.md" %}
+{% include "walkthrough/planning.md.jinja" %}
 
 Almost always place imports, includes, requires and `use` declarations in Other changes, even when they support a concept explained in a chunk.
 Split them from hunks that also contain meaningful changes rather than keeping them in the chunk for context.
