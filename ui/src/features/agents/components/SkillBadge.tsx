@@ -1,3 +1,5 @@
+import { TextWithLinks } from "@langchain/macaw-components/TextWithLinks"
+
 import { SlackUserMention } from "./messages/SlackMrkdwn"
 import { splitPromptIntoSegments } from "./composer/composerMentions"
 
@@ -19,10 +21,10 @@ export function SkillPromptText({ text }: { text: string }) {
       <span key={index} className="font-medium" title={segment.channelId}>
         #{segment.name}
       </span>
+    ) : segment.type === "text" ? (
+      <TextWithLinks key={index} text={segment.text} fullLength useRawSpan />
     ) : (
-      <span key={index}>
-        {segment.type === "text" ? segment.text : segment.source}
-      </span>
+      <span key={index}>{segment.source}</span>
     )
   )
 }

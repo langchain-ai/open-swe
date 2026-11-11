@@ -81,6 +81,20 @@ describe("ComposerPromptEditor", () => {
     expect(screen.getByText("check /workspace")).toBeTruthy()
   })
 
+  it("makes submitted URLs clickable without changing surrounding text", () => {
+    const url = "https://dev.smith.langchain.com/o/example/a/robin/evaluators"
+    const text = `check /workspace\n${url}`
+    const { container } = render(<SkillPromptText text={text} />)
+
+    expect(container.textContent).toBe(text)
+    expect(screen.getByRole("link", { name: url }).getAttribute("href")).toBe(
+      url
+    )
+    expect(screen.getByRole("link", { name: url }).getAttribute("target")).toBe(
+      "_blank"
+    )
+  })
+
   it("renders a file link as a chip whose text content is the original source", () => {
     render(<Harness initialValue="fix [app.tsx](ui/src/app.tsx) now" />)
 
