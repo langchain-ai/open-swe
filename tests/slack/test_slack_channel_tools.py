@@ -260,6 +260,60 @@ async def test_post_channel_message_refuses_missing_origin_link(
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
 
 
+@pytest.fixture
+def automation_post(slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.slack.tools import channels
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setattr(
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig.parse({"thread_id": "agent-thread", "schedule_id": "sched"}),
+    )
+    monkeypatch.setattr(channels, "run_slack_location", AsyncMock(return_value=("", "")))
+    slack_api.respond(
+        {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
+    )
+
+
+async def test_automation_channel_post_refuses_a_wall_of_text(
+    slack_api: SlackAPI, automation_post: None
+) -> None:
+    result = await tools.slack_post_message("C123", "x" * 401)
+    assert result["success"] is False
+    assert "details" in result["error"]
+    assert [method for method, _ in slack_api.calls] == ["users.conversations"]
+
+
+async def test_channel_post_refuses_oversized_rendered_details_before_posting(
+    slack_api: SlackAPI, automation_post: None
+) -> None:
+    result = await tools.slack_post_message("C123", "Report", details="&" * 38_000)
+    assert result == {"success": False, "error": "msg_too_long"}
+    assert not any(method == "chat.postMessage" for method, _ in slack_api.calls)
+
+
+async def test_channel_post_threads_its_details_under_the_headline(
+    slack_api: SlackAPI, automation_post: None
+) -> None:
+    slack_api.respond({"ok": True, "ts": "1700000000.000123"})
+    slack_api.respond({"ok": True, "ts": "1700000000.000456"})
+    details = "- **Adopt** the cache API\n" * 100
+    result = await tools.slack_post_message("C123", "3 MDA changes matter", details=details)
+    assert result == {
+        "success": True,
+        "channel_id": "C123",
+        "message_ts": "1700000000.000123",
+        "details_ts": "1700000000.000456",
+    }
+    (_, headline), (_, reply) = slack_api.calls[-2:]
+    assert "thread_ts" not in headline
+    assert "cache API" not in headline["text"]
+    assert reply["thread_ts"] == "1700000000.000123"
+    assert "cache API" in reply["text"]
+    assert reply["unfurl_links"] is False
+
+
 def _search_run(
     monkeypatch: pytest.MonkeyPatch,
     *,

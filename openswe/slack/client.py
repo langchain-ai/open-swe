@@ -918,10 +918,22 @@ async def post_slack_ephemeral_reply(
 
 
 async def post_slack_thread_message_with_ts(
-    channel_id: str, thread_ts: str, text: str, *, blocks: list[dict[str, Any]] | None = None
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    unfurl: bool = True,
 ) -> str:
     """Post a plain bot message in a Slack thread, without a reply's dashboard footer."""
-    return await _post_slack_message_with_ts(channel_id, text, thread_ts=thread_ts, blocks=blocks)
+    return await _post_slack_message_with_ts(
+        channel_id,
+        text,
+        thread_ts=thread_ts,
+        blocks=blocks,
+        unfurl_links=unfurl,
+        unfurl_media=unfurl,
+    )
 
 
 async def post_slack_top_level_message_with_ts(
