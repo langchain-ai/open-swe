@@ -1,3 +1,8 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@langchain/macaw-components/Dialog"
 import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
@@ -54,12 +59,16 @@ function useImageSource(chunk: AnyImageChunk): {
 export function MessageImage({
   chunk,
   className,
+  fill = false,
 }: {
   chunk: AnyImageChunk
   className?: string
+  fill?: boolean
 }) {
   if (!chunk.mimeType || chunk.mimeType.startsWith("image/"))
-    return <MessageImageContent chunk={chunk} className={className} />
+    return (
+      <MessageImageContent chunk={chunk} className={className} fill={fill} />
+    )
   return <AttachedFile name={chunk.fileName || "file"} />
 }
 
@@ -76,11 +85,14 @@ export function AttachedFile({ name }: { name: string }) {
 function MessageImageContent({
   chunk,
   className,
+  fill,
 }: {
   chunk: AnyImageChunk
   className?: string
+  fill: boolean
 }) {
   const { src, failed } = useImageSource(chunk)
+  const [expanded, setExpanded] = useState(false)
   const label = chunk.fileName || "image"
 
   if (failed || !src)
@@ -97,10 +109,35 @@ function MessageImageContent({
       </div>
     )
   return (
-    <img
-      src={src}
-      alt={label}
-      className={cn(className, "duration-slow animate-in fade-in")}
-    />
+    <>
+      <button
+        type="button"
+        aria-label={`Expand ${label}`}
+        onClick={() => setExpanded(true)}
+        className={cn(
+          "block cursor-zoom-in border-0 bg-transparent p-0 text-left",
+          fill ? "w-full" : "w-fit max-w-full"
+        )}
+      >
+        <img
+          src={src}
+          alt={label}
+          className={cn(className, "duration-slow animate-in fade-in")}
+        />
+      </button>
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent
+          className="h-[calc(100dvh-2rem)] w-[95vw] max-w-[95vw]"
+          childrenClassName="flex-1 items-center justify-center"
+        >
+          <DialogTitle className="sr-only">{label}</DialogTitle>
+          <img
+            src={src}
+            alt={label}
+            className="h-full min-h-0 w-full object-contain"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

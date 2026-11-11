@@ -125,6 +125,7 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
                 >
                   <MessageImage
                     chunk={img}
+                    fill
                     className="block h-auto max-h-[220px] w-full object-cover"
                   />
                 </div>
