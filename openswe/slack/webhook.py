@@ -352,7 +352,6 @@ def _slack_context_input(
     request_text: str,
     request_blocks: list[dict[str, Any]],
     prior_message_text: str = "",
-    is_breakout: bool = False,
     turn_context: str = "",
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
@@ -501,17 +500,11 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    if is_breakout or not str(current_message.get("text") or "").strip():
-        rendered_request = _slack_message_text(
-            {**current_message, "text": ""}, bot_user_id, user_names_by_id, channel_names
-        )
-        _, _, forwarded_context = rendered_request.partition("\n")
-    else:
-        forwarded_context = _label_slack_mentions(
-            slack_utils.format_forwarded_slack_attachments(current_message.get("attachments")),
-            user_names_by_id,
-            channel_names,
-        )
+    forwarded_context = _label_slack_mentions(
+        slack_utils.format_forwarded_slack_attachments(current_message.get("attachments")),
+        user_names_by_id,
+        channel_names,
+    )
     if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
@@ -1585,7 +1578,6 @@ async def _process_slack_mention_impl(
         request_text=clean_text,
         request_blocks=content_blocks,
         prior_message_text=request.prior_message_text,
-        is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
         constant_context="" if request.web_only else constant_context,
         web_only=request.web_only,

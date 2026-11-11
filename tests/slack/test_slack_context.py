@@ -974,6 +974,32 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     assert not captured["run_create"]["kwargs"]["config"]["configurable"].get("github_login")
 
 
+async def test_an_alert_bots_attachment_is_its_whole_request(monkeypatch, bot_run):
+    """Its text is empty: the request is its card, once, from the first line."""
+    request, _, captured = bot_run
+    alert = {"title": "CPU is high", "text": "<@UBOT> investigate this alert"}
+    monkeypatch.setattr(
+        webhook_common,
+        "fetch_slack_thread_messages",
+        AsyncMock(
+            return_value=[
+                {"ts": request.event_ts, "text": "", "bot_id": "B123", "attachments": [alert]}
+            ]
+        ),
+    )
+    request = request.model_copy(
+        update={"text": "CPU is high\n<@UBOT> investigate this alert", "attachments": [alert]}
+    )
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    kwargs = captured.pop("run_create")["kwargs"]
+    message = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
+    assert (message.text or "").strip() == (
+        f"CPU is high\n@{webhook_common.SLACK_BOT_USERNAME} investigate this alert"
+    )
+
+
 async def test_bot_started_thread_stays_marked_after_a_person_replies(bot_run):
     request, threads, _ = bot_run
     await slack_webhooks._process_slack_mention_impl(request, None)
@@ -1270,7 +1296,6 @@ def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
         request_text="fix it",
         request_blocks=[{"type": "text", "text": "fix it"}],
         prior_message_text="Context for this task.\nMore details",
-        is_breakout=True,
     )
     inputs = [
         message["content"]

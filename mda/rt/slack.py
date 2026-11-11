@@ -137,6 +137,19 @@ async def start_turn(
     grant_holder = nested if isinstance(nested, dict) else {}
     app_id = thread.source_thread_key.split(":")[2:3]
     bot_user_id, bot_username = await _bot_identity()
+    bot_id = _text(raw.get("bot_id"))
+    mention = f"<@{bot_user_id}>"
+    # As the backend's ``SlackPost.text_for``: an alert bot posts a summary line as text and
+    # its message, mention and all, as an attachment, so its own card follows the text.
+    card = (
+        slack_prompt.card_text(raw) if bot_id and bot_user_id and mention not in event.text else ""
+    )
+    card_mention = mention in card
+    text = (
+        "\n".join(part for part in (event.text.strip(), card) if part)
+        if card_mention
+        else event.text
+    )
     message = SlackMessage(
         thread_id=thread.id,
         app_id=app_id[0] if app_id else "",
@@ -148,16 +161,16 @@ async def start_turn(
         reply_thread_ts=_text(raw.get("thread_ts")),
         subtype=_text(raw.get("subtype")),
         user_id=event.user_id or "",
-        bot_id=_text(raw.get("bot_id")),
+        bot_id=bot_id,
         bot_app_id=_text(raw.get("app_id")),
-        text=event.text,
+        text=text,
         attachments=_attachments(raw.get("attachments")),
-        explicit_mention=event.key == "mention",
+        explicit_mention=event.key == "mention" or card_mention,
         action_token=_text(raw.get("action_token")) or _text(grant_holder.get("action_token")),
     )
     if not message.team_id or not message.app_id:
         return None
-    parsed = ParsedSlackMessage.parse(event.text, bot_user_id, bot_username)
+    parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
     facts = await ask_backend(
         SLACK_MESSAGE_FACTS,
         SlackMessageFactsRequest(**message.model_dump(), workspace_tag=parsed.workspace or ""),

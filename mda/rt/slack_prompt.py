@@ -339,11 +339,19 @@ def _attachment_texts(attachment: dict[str, object]) -> list[str]:
     return texts or _non_empty_strings([attachment.get("fallback")])
 
 
-def _card_text(message: Mapping[str, object]) -> str:
-    """Readable text of an app message built from blocks or attachments instead of ``text``."""
+def card_text(message: Mapping[str, object]) -> str:
+    """Readable text of an app message built from blocks or attachments instead of ``text``.
+
+    Another message forwarded into it and a preview of a link, which carries the URL it
+    came from, are someone else's words, so they are left out.
+    """
     texts = _block_texts(message.get("blocks"))
     for attachment in _list_of_dicts(message.get("attachments")):
-        if not _is_forwarded_attachment(attachment):
+        if not (
+            _is_forwarded_attachment(attachment)
+            or attachment.get("is_app_unfurl") is True
+            or attachment.get("from_url")
+        ):
             texts += _attachment_texts(attachment)
     return "\n".join(texts)[:_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS]
 
@@ -438,7 +446,7 @@ def format_messages_for_prompt(
                 bot_username=bot_username,
             ),
             user_names_by_id or {},
-        ).strip() or _card_text(message)
+        ).strip() or card_text(message)
         text = text or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_message(message, bot_user_id):
@@ -706,7 +714,6 @@ def build_input(
     request_text: str,
     request_blocks: list[dict[str, Any]],
     prior_message_text: str = "",
-    is_breakout: bool = False,
     turn_context: str = "",
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
@@ -863,21 +870,11 @@ def build_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    if is_breakout or not str(current_message.get("text") or "").strip():
-        rendered_request = message_text(
-            {**current_message, "text": ""},
-            bot_user_id,
-            user_names_by_id,
-            channel_names,
-            bot_username,
-        )
-        _, _, forwarded_context = rendered_request.partition("\n")
-    else:
-        forwarded_context = label_mentions(
-            format_forwarded_attachments(current_message.get("attachments")),
-            user_names_by_id,
-            channel_names,
-        )
+    forwarded_context = label_mentions(
+        format_forwarded_attachments(current_message.get("attachments")),
+        user_names_by_id,
+        channel_names,
+    )
     if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
