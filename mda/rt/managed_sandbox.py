@@ -184,6 +184,7 @@ class SandboxProxyWriter:
         # The backend refused to hand its part over, so it writes the config itself.
         self._refused = False
         self._due_at = 0.0
+        self._required = False
 
     def config(self, github: ConnectionRef) -> dict[str, object] | None:
         """All of it, GitHub's rules reading ``github``; None until the backend's part is known."""
@@ -196,21 +197,15 @@ class SandboxProxyWriter:
         }
 
     def replaced(self) -> None:
-        """The sandbox was replaced, so the backend's part, which follows the thread's rules the
-        replacement may change, is asked for again.
-
-        Until then MDA writes none of it, and the new sandbox keeps the config it was created
-        with: never the old sandbox's workspace rules.
-        """
+        """Discard the old sandbox's config and require restoration before further work."""
         self._backend_config = None
+        self._due_at = 0.0
+        self._required = True
 
-    async def write(self, runtime: object, sandbox_id: str | None = None) -> None:
-        """Have MDA write it on sandbox ``sandbox_id`` (the run's) now; raises when it could not.
-
-        Once the backend refuses to hand its part over, MDA writes none of it.
-        """
+    async def write(self, runtime: object, sandbox_id: str | None = None) -> bool:
+        """Write the config now; False when the backend owns it, raising on failure."""
         if self._refused:
-            return
+            return False
         self._due_at = time.monotonic() + _PROXY_RETRY_SECONDS
         if self._backend_config is None:
             name = sandbox_id or await open_sandbox(getattr(runtime, "backend", None))
@@ -223,21 +218,34 @@ class SandboxProxyWriter:
                 )
                 self._refused = True
                 self._backend_config = None
-                return
+                self._required = False
+                return False
             self._backend_config = answer.config
         await _rebound(runtime).aexecute(_NO_OP, timeout=_NO_OP_TIMEOUT_SECONDS)
+        self._required = False
         self._due_at = time.monotonic() + _PROXY_REWRITE_SECONDS
+        return True
 
     async def keep_fresh(self, runtime: object) -> None:
         """Write it again when due; a failure is tried again later, the sandbox keeping the last."""
+        if self._required:
+            await self.write(runtime)
+            return
         if self._refused or time.monotonic() < self._due_at:
             return
+        sandbox_id: str | None = None
+        self._due_at = time.monotonic() + _PROXY_RETRY_SECONDS
         try:
-            await self.write(runtime)
+            sandbox_id = await open_sandbox(getattr(runtime, "backend", None))
+            await self.write(runtime, sandbox_id)
         except GraphBubbleUp:
             raise
         except Exception:
-            logger.warning("Could not write the sandbox's proxy config", exc_info=True)
+            logger.warning(
+                "Could not write the sandbox's proxy config",
+                extra={"sandbox_id": sandbox_id},
+                exc_info=True,
+            )
 
 
 # Each run's own, never the shared graph's.
@@ -481,14 +489,7 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         else:
             if proxy is not None:
                 proxy.replaced()
-                try:
-                    await proxy.write(request.runtime, replacement.new_name)
-                except GraphBubbleUp:
-                    raise
-                except Exception:
-                    logger.warning(
-                        "Could not write the replaced sandbox's proxy config", exc_info=True
-                    )
+                await proxy.write(request.runtime, replacement.new_name)
             # Readied through a handle that writes the new sandbox's own proxy config, never
             # the one this hook's handle resolved for the old sandbox.
             sandbox_setup(self._backend.run).start(

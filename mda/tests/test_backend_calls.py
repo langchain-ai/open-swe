@@ -1673,6 +1673,84 @@ async def test_a_command_github_refused_gets_the_sandbox_a_fresh_token(
     assert ("fresh GitHub token" in result.text) is refreshed
 
 
+@pytest.mark.parametrize("owner", ["mda", "backend", "refused"])
+@pytest.mark.parametrize(
+    "exit_code,banner,fails",
+    [(4, True, False), (4, True, True), (1, True, False), (4, False, False)],
+)
+async def test_github_cli_missing_auth_restores_proxy_without_replaying_command(
+    monkeypatch: pytest.MonkeyPatch, owner: str, exit_code: int, banner: bool, fails: bool
+) -> None:
+    """The sandbox's token is replaced and the model told to retry; the command runs once."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(
+        catalog=Catalog(loop=LoopRules(refresh_github_proxy=True), sandbox=_IN_SANDBOX)
+    )
+    command = "touch completed; gh run view"
+    output = (
+        "To get started with GitHub CLI, please run:  gh auth login" if banner else "unrelated"
+    ) + f"\n[Command failed with exit code {exit_code}]"
+    recover = banner and exit_code == 4
+    calls: list[str] = []
+    proxy = MagicMock()
+    proxy.write = AsyncMock(
+        return_value=owner != "refused", side_effect=RuntimeError("write failed") if fails else None
+    )
+    monkeypatch.setattr(
+        "rt.file_tools._written_proxy", lambda runtime: proxy if owner != "backend" else None
+    )
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        calls.append(name)
+        if name == "check_shell":
+            return ShellVerdict(allowed=True)
+        if name == "refresh_github_proxy":
+            assert body["force_refresh"] is True
+            if fails:
+                raise RuntimeError("write failed")
+        return GitHubProxyRefreshed(expires_at=datetime.now(UTC) + timedelta(hours=1))
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": command},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    in_sandbox = AsyncMock(return_value=ToolMessage(content=output, tool_call_id="call-1"))
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    result = await files.awrap_tool_call(request, in_sandbox)
+    await backend.outbox.drain()
+
+    in_sandbox.assert_awaited_once()
+    assert calls.count("refresh_github_proxy") == int(
+        recover and owner != "mda" and not (owner == "refused" and fails)
+    )
+    assert proxy.write.await_count == int(recover and owner != "backend")
+    assert isinstance(result, ToolMessage)
+    assert result.text.startswith(output)
+    assert ("recovery succeeded" in result.text) is (recover and not fails)
+    assert ("recovery failed" in result.text) is (recover and fails)
+
+
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
 async def test_execute_searches_through_the_shell_where_grep_and_glob_are_excluded(
     monkeypatch: pytest.MonkeyPatch, excluded: list[str]

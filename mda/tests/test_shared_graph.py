@@ -64,7 +64,12 @@ from pydantic import BaseModel, JsonValue
 from rt import backend as rt_backend
 from rt import search_tools
 from rt.backend import Run, current_run
-from rt.managed_sandbox import PROXY_WRITE_BACKOFF_SECONDS, definition, opened_sandbox
+from rt.managed_sandbox import (
+    PROXY_WRITE_BACKOFF_SECONDS,
+    SandboxProxyWriter,
+    definition,
+    opened_sandbox,
+)
 from rt.outbox import Outbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
 from rt.sandbox_setup import SandboxUnavailableError
@@ -773,6 +778,8 @@ def proxy_writes(
 
         async def execute(command: str, **kwargs: object) -> ExecuteResponse:
             sandbox_commands.append(command)
+            if command == "ls":
+                backend_calls.append(("sandbox_command", command, None))
             return ExecuteResponse(output="ok", exit_code=0)
 
         fake = MagicMock(spec=StateBackend)
@@ -992,11 +999,12 @@ async def test_a_replacement_sandbox_is_created_with_the_backends_rules_then_wri
     proxy_writes: list[tuple[str, object]],
     replacements: list[SandboxDefinition],
 ) -> None:
-    """recreate_sandbox's replacement is created from the backend's create fields, its
-    cloud identity rule among them, which applies only at create: never with the proxy
-    config MDA last wrote, which would take their place. MDA then writes its whole config
-    on the new sandbox, the backend's part asked for again."""
-    await _run(InMemoryStore(), "thread-1", _replacing_run(monkeypatch))
+    """A replacement gets its complete proxy configuration before the next command."""
+    await _run(
+        InMemoryStore(),
+        "thread-1",
+        _replacing_run(monkeypatch, ToolCall(name="execute", args={"command": "ls"}, id="ls")),
+    )
 
     [replacement] = replacements
     assert "proxy_config" not in replacement.options
@@ -1005,7 +1013,13 @@ async def test_a_replacement_sandbox_is_created_with_the_backends_rules_then_wri
         "proxy_config": {"rules": [_CLOUD_RULE]}
     }
     assert replacement.options["snapshot_id"] == "b"
-    proxy_hooks = {"prepare", "sandbox_replaced", "sandbox_proxy", "proxy_config"}
+    proxy_hooks = {
+        "prepare",
+        "sandbox_replaced",
+        "sandbox_proxy",
+        "proxy_config",
+        "sandbox_command",
+    }
     assert [hook for hook, _, _ in backend_calls if hook in proxy_hooks] == [
         "sandbox_proxy",
         "proxy_config",
@@ -1013,21 +1027,20 @@ async def test_a_replacement_sandbox_is_created_with_the_backends_rules_then_wri
         "sandbox_replaced",
         "sandbox_proxy",
         "proxy_config",
+        "sandbox_command",
     ]
     assert [name for name, _ in proxy_writes] == ["sandbox-thread-1", "sandbox-thread-1"]
     assert proxy_writes[1][1] == proxy_writes[0][1]
 
 
-async def test_a_replacement_mda_cannot_write_on_keeps_the_config_it_was_created_with(
+async def test_a_replacement_mda_cannot_write_on_never_runs_commands(
     monkeypatch: pytest.MonkeyPatch,
     backend_calls: BackendCalls,
     proxy_writes: list[tuple[str, object]],
     sandbox_commands: list[str],
     replacements: list[SandboxDefinition],
 ) -> None:
-    """The backend's part follows the thread's rules, which the replacement may change, so
-    where MDA cannot ask for it again, the new sandbox's commands get none of the old sandbox's
-    part: the sandbox keeps the config it was created with until a later write lands."""
+    """A replacement without the complete proxy configuration cannot run commands."""
     # The fixture's client, whose post answers every call.
     sent = cast("AsyncMock", rt_backend.httpx2.AsyncClient().post)
     answer = sent.side_effect
@@ -1044,15 +1057,16 @@ async def test_a_replacement_mda_cannot_write_on_keeps_the_config_it_was_created
 
     sent.side_effect = post
 
-    await _run(
-        InMemoryStore(),
-        "thread-1",
-        _replacing_run(monkeypatch, ToolCall(name="execute", args={"command": "ls"}, id="ls")),
-    )
+    with pytest.raises(Exception, match="The workspace is gone"):
+        await _run(
+            InMemoryStore(),
+            "thread-1",
+            _replacing_run(monkeypatch, ToolCall(name="execute", args={"command": "ls"}, id="ls")),
+        )
 
     assert len(replacements) == 1
     assert len(asked) == 2
-    assert "ls" in sandbox_commands
+    assert "ls" not in sandbox_commands
     # Only the write before the run prepared, on the old sandbox.
     assert [name for name, _ in proxy_writes] == ["sandbox-thread-1"]
 
@@ -1940,3 +1954,45 @@ async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_
         assert (await repl.eval_async("kept")).result == "1"
     finally:
         await registry.aevict("nest")
+
+
+async def test_proxy_refresh_preserves_its_deadline_and_logs_recoverable_failures(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    proxy = SandboxProxyWriter()
+    runtime = MagicMock()
+    backend = MagicMock()
+    backend.aexecute = AsyncMock()
+    monkeypatch.setattr("rt.managed_sandbox._rebound", lambda runtime: backend)
+    monkeypatch.setattr("rt.managed_sandbox._run_of", lambda runtime: MagicMock())
+    monkeypatch.setattr("rt.managed_sandbox.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.managed_sandbox.open_sandbox", AsyncMock(return_value="sandbox-1"))
+    monkeypatch.setattr("rt.managed_sandbox.call", AsyncMock(return_value=MagicMock(config={})))
+    now = [0.0]
+    monkeypatch.setattr("rt.managed_sandbox.time.monotonic", lambda: now[0])
+
+    await proxy.write(runtime)
+    await proxy.keep_fresh(runtime)
+    assert backend.aexecute.await_count == 1
+    now[0] = 301.0
+    backend.aexecute.side_effect = RuntimeError("write failed")
+    await proxy.keep_fresh(runtime)
+    assert backend.aexecute.await_count == 2
+    assert any(
+        record.message == "Could not write the sandbox's proxy config"
+        and record.sandbox_id == "sandbox-1"
+        for record in caplog.records
+    )
+    await proxy.keep_fresh(runtime)
+    assert backend.aexecute.await_count == 2
+
+    proxy.replaced()
+    with pytest.raises(RuntimeError, match="write failed"):
+        await proxy.keep_fresh(runtime)
+    with pytest.raises(RuntimeError, match="write failed"):
+        await proxy.keep_fresh(runtime)
+    backend.aexecute.side_effect = None
+    await proxy.keep_fresh(runtime)
+    writes = backend.aexecute.await_count
+    await proxy.keep_fresh(runtime)
+    assert backend.aexecute.await_count == writes
