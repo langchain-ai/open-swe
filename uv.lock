@@ -1795,7 +1795,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-cli"
-version = "0.4.40"
+version = "0.4.42"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1804,9 +1804,9 @@ dependencies = [
     { name = "pathspec" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/93/31/e7d40afcf50f45c9ae9f8dcacad534d7c756cdd8ebadf1d1ee2e2781841b/langgraph_cli-0.4.40.tar.gz", hash = "sha256:c0a75dc9816021e156362730286c926f5bdac478c85f3cceb441a425f80838af", size = 1102197, upload-time = "2026-10-26T16:45:39.913Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/72/98e9c5bbaa67ee20ab5f9d9b20b2560b7c5d3dad20c250cc6b443b7f7c0c/langgraph_cli-0.4.42.tar.gz", hash = "sha256:a985378e8a508825a272f899b5d6f34f3bade05324068be85011bb46af0e7dfe", size = 1112806, upload-time = "2026-11-06T03:04:01.905Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/4d/985a2dca1423ef5ecf79c35084577df4e964a54d1f52fbcd7aa61fa1482a/langgraph_cli-0.4.40-py3-none-any.whl", hash = "sha256:3a3fc9e435019d15df97e73c079ef12ba2960b1355b84ccc4b5e44cf151e999c", size = 94298, upload-time = "2026-10-26T16:45:38.643Z" },
+    { url = "https://files.pythonhosted.org/packages/46/66/5633928d6396a99b88ae0d697a8c4cea9875f14ee2a49c13ee20cf114cfa/langgraph_cli-0.4.42-py3-none-any.whl", hash = "sha256:bb52731170aabc5f388a097cffce45ea21048133ba07caed4c99d27729bc268c", size = 97917, upload-time = "2026-11-06T03:03:59.939Z" },
 ]
 
 [package.optional-dependencies]
@@ -2295,7 +2295,7 @@ requires-dist = [
     { name = "langchain-quickjs", specifier = "==0.3.12" },
     { name = "langchain-typesafe", specifier = "==0.0.2" },
     { name = "langgraph", specifier = ">=1.2.20" },
-    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.40,<0.4.41" },
+    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.40,<0.4.43" },
     { name = "langgraph-sdk", specifier = ">=0.4.14" },
     { name = "langsmith", specifier = ">=0.14.17" },
     { name = "managed-deepagents", editable = "vendor/managed-deepagents-sdk/packages/pypi" },
