@@ -286,7 +286,7 @@ def test_a_message_the_backend_starts_nothing_for_starts_nothing(
             SlackTurnDeclined(reason="sign_in_again", settings_url="https://openswe.test/settings"),
             "🔐 Your LangSmith sign-in needs to be renewed. "
             "<https://openswe.test/settings|Sign in with LangSmith> and follow the prompts to link Slack, "
-            "then tag me again. GitHub is optional and only needed for coding features.",
+            "then tag me again.",
         ),
         (
             SlackTurnDeclined(reason="sign_in"),

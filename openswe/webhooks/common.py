@@ -1017,13 +1017,15 @@ async def post_account_link_prompt(
         )
         return
     if langsmith:
-        text = (
-            "🔐 Your LangSmith sign-in needs to be renewed. "
-            if reason == "revoked"
-            else "👋 Sign in with LangSmith to chat with Robin. "
-        ) + (
+        sign_in = (
             f"<{settings_url}|Sign in with LangSmith> and follow the prompts to link Slack, "
-            "then tag me again. GitHub is optional and only needed for coding features."
+            "then tag me again."
+        )
+        text = (
+            f"🔐 Your LangSmith sign-in needs to be renewed. {sign_in}"
+            if reason == "revoked"
+            else f"👋 Sign in with LangSmith to chat with Robin. {sign_in} "
+            "GitHub is optional and only needed for coding features."
         )
     elif reason == "revoked":
         text = (

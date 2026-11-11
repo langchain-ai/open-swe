@@ -101,8 +101,7 @@ def decline_text(declined: SlackTurnDeclined) -> str:
     if declined.reason == "sign_in_again":
         return (
             "🔐 Your LangSmith sign-in needs to be renewed. "
-            f"{settings} and follow the prompts to link Slack, then tag me again. "
-            "GitHub is optional and only needed for coding features."
+            f"{settings} and follow the prompts to link Slack, then tag me again."
         )
     return (
         "👋 Sign in with LangSmith to chat with Robin. "
