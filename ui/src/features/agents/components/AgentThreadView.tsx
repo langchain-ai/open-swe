@@ -1099,9 +1099,11 @@ export function AgentThreadView({
                         : mirroredSession
                           ? "Mirrored from Claude Code. Continue this session there"
                           : canPost
-                            ? hasConversation
-                              ? "Work with Robin"
-                              : "Send the first message"
+                            ? reviewChat
+                              ? "Review with Robin"
+                              : hasConversation
+                                ? "Work with Robin"
+                                : "Send the first message"
                             : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
