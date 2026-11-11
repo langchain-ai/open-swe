@@ -119,7 +119,7 @@ async def test_repository_filter_cannot_change_query_or_path(repo):
     ("merge_state", "runs", "missing", "required_passing"),
     [
         ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], False),
-        ("blocked", [{"name": "unit", "status": "in_progress"}], ["lint"], False),
+        ("blocked", [{"name": "unit", "status": "in_progress"}], [], False),
         ("clean", [{"name": "unit", "status": "completed"}], [], True),
     ],
 )

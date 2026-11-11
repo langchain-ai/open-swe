@@ -1124,7 +1124,8 @@ class PullRequestClient:
             result.required_checks_passing = all(
                 check.reported_by(passing_runs, passing_statuses) for check in required
             )
-            result.missing_checks = unreported_required_checks(required, runs, statuses)
+            if not pending:
+                result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 
 
