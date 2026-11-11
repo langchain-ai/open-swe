@@ -57,6 +57,29 @@ def _entry(name: str, url: str) -> staged_files.SlackFileEntry:
     return staged_files.SlackFileEntry(name=name, url=url)
 
 
+def test_earlier_images_do_not_crowd_out_the_latest_attachment() -> None:
+    screenshots = [
+        {
+            "files": [
+                {
+                    "name": f"shot-{i}.png",
+                    "mimetype": "image/png",
+                    "url_private": f"https://files.slack.com/{i}.png",
+                }
+            ]
+        }
+        for i in range(10)
+    ]
+    latest = {
+        "files": [{"name": "results.csv", "url_private": "https://files.slack.com/results.csv"}]
+    }
+
+    entries = staged_files.slack_file_entries([*screenshots, latest])
+
+    assert len(entries) == 10
+    assert entries[0] == _entry("results.csv", "https://files.slack.com/results.csv")
+
+
 @pytest.mark.asyncio
 async def test_download_slack_file_skips_redirect_body_and_drops_token(download_http) -> None:
     responses, requests = download_http

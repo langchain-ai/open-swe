@@ -1,9 +1,11 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from openswe.input_messages import RunInput
 from openswe.run_config import RunConfig
+from openswe.slack import staged_files
 from openswe.slack import webhook as slack_webhook
 from openswe.slack.request import SlackRequest
 from openswe.utils.thread_settings import THREAD_SETTINGS_KEY, ThreadSettings
@@ -81,6 +83,11 @@ async def test_slack_followup_uses_the_threads_model_for_image_capability(
         ),
     )
     monkeypatch.setattr(webhook_common, "fetch_image_block", AsyncMock(return_value=image_block))
+    monkeypatch.setattr("openswe.sandboxes.state.get_sandbox_metadata", AsyncMock(return_value={}))
+    queued = AsyncMock()
+    monkeypatch.setattr(
+        staged_files, "get_client", lambda: SimpleNamespace(threads=SimpleNamespace(update=queued))
+    )
     dispatch = AsyncMock(return_value={})
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
 
@@ -104,3 +111,13 @@ async def test_slack_followup_uses_the_threads_model_for_image_capability(
             isinstance(content := message["content"], list) and image_block in content
             for message in run_input["messages"]
         )
+        sandbox_path = "/workspace/.open-swe/slack-files/screenshot.png"
+        assert sandbox_path in str(run_input["messages"])
+        queued.assert_awaited_once_with(
+            thread_id="mapped-thread",
+            metadata={
+                staged_files.PENDING_SLACK_FILES_KEY: [{"url": image_url, "path": sandbox_path}]
+            },
+        )
+    else:
+        queued.assert_not_awaited()

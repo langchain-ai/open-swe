@@ -1,6 +1,6 @@
 Break out a separate task using the same feature as `/breakout`, with a headline root and self-contained instructions as the first reply.
 The breakout has a separate sandbox: parent `/workspace` paths are available only when their files are transferred.
-Source-thread non-image Slack attachments are staged best-effort and listed under `Slack File Attachments` on success.
+Source-thread Slack attachments, images included, are staged best-effort and listed under `Slack File Attachments` on success.
 Pass a requested model ID through `model` and reasoning effort through `effort`, not only in `instructions`.
 A model without effort uses its default; effort alone applies to the parent's current model; omitting both preserves inheritance.
 Invalid selections return `available_models` with valid IDs and efforts without creating a thread.

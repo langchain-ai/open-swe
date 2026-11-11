@@ -166,6 +166,7 @@ async def test_breakout_queues_source_thread_files_best_effort(
     monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
     sandbox_path = "/workspace/.open-swe/slack-files/recording.mov"
+    image_path = "/workspace/.open-swe/slack-files/logo.svg"
     source_thread = {"channel_id": "C_MOVED", "thread_ts": "1700000001.000001"}
     fetch = AsyncMock(
         return_value=[
@@ -177,9 +178,9 @@ async def test_breakout_queues_source_thread_files_best_effort(
                         "url_private": "https://files.slack.com/recording.mov",
                     },
                     {
-                        "name": "screenshot.png",
-                        "mimetype": "image/png",
-                        "url_private": "https://files.slack.com/screenshot.png",
+                        "name": "logo.svg",
+                        "mimetype": "image/svg+xml",
+                        "url_private": "https://files.slack.com/logo.svg",
                     },
                 ]
             }
@@ -231,10 +232,12 @@ async def test_breakout_queues_source_thread_files_best_effort(
     if failure is None:
         assert "## Slack File Attachments" in content
         assert sandbox_path in content
+        assert image_path in content
         assert pending == {
             result["thread_id"]: {
                 staged_files.PENDING_SLACK_FILES_KEY: [
-                    {"url": "https://files.slack.com/recording.mov", "path": sandbox_path}
+                    {"url": "https://files.slack.com/recording.mov", "path": sandbox_path},
+                    {"url": "https://files.slack.com/logo.svg", "path": image_path},
                 ]
             }
         }

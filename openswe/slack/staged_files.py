@@ -33,7 +33,7 @@ _MAX_SLACK_FILE_ATTACHMENTS = 10
 
 @dataclass(frozen=True)
 class SlackFileEntry:
-    """A non-image file a message brought: served by Slack, or stored as a thread attachment."""
+    """A file a message brought, images included: served by Slack, or stored as a thread attachment."""
 
     name: str
     url: str = ""
@@ -49,18 +49,18 @@ class StagedSlackFile:
 
 
 def slack_file_entries(messages: Sequence[Mapping[str, object]]) -> list[SlackFileEntry]:
-    """Non-image files attached to the given messages, in first-seen order."""
+    """Files attached to the given messages, images included, newest message first.
+
+    Newest first so earlier uploads in a long thread cannot crowd the latest ones out of the cap.
+    """
     entries: list[SlackFileEntry] = []
     seen: set[str] = set()
-    for message in messages:
+    for message in reversed(messages):
         files = message.get("files")
         if not isinstance(files, list):
             continue
         for file_info in files:
             if not isinstance(file_info, dict) or file_info.get("url_private") in (None, ""):
-                continue
-            mimetype = file_info.get("mimetype")
-            if isinstance(mimetype, str) and mimetype.startswith("image/"):
                 continue
             url = str(file_info["url_private"])
             if url in seen:
