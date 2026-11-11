@@ -153,6 +153,11 @@ def _bot_payload(*, event_type: str = "message", with_user: bool = True) -> dict
         {"app_id": "AOWN"},
         {"text": "A status update"},
         {"subtype": "message_deleted"},
+        {"bot_id": "BOTHER", "text": "", "attachments": [{"text": "<@BOT> fix this"}]},
+        # Another message it forwarded or another app's preview is someone else's words.
+        {"text": "", "attachments": [{"is_share": True, "text": "<@BOT> fix this"}]},
+        {"text": "", "attachments": [{"is_app_unfurl": True, "text": "<@BOT> fix this"}]},
+        {"text": "", "attachments": [{"from_url": "https://example.com", "text": "<@BOT> fix"}]},
     ],
 )
 async def test_bot_must_be_allowed_and_explicitly_mention_us(
@@ -185,6 +190,25 @@ async def test_bot_authorization_is_workspace_owned(
     tasks = _FakeBackgroundTasks()
     assert (await _post(_bot_payload(), tasks))["status"] == "accepted"
     assert len(tasks.tasks) == 1
+
+
+@pytest.mark.parametrize("text", ["", "Monitor triggered"])
+async def test_an_allowed_bot_can_mention_us_in_its_own_attachment(
+    allowed_bot: None, text: str
+) -> None:
+    """Datadog's Slack app posts a monitor's message as an attachment."""
+    payload = _bot_payload()
+    alert = {"title": "CPU is high", "text": "<@BOT> investigate this alert"}
+    payload["event"].update({"text": text, "attachments": [alert]})
+    tasks = _FakeBackgroundTasks()
+
+    assert (await _post(payload, tasks))["status"] == "accepted"
+
+    [(_process, (request, _repo))] = tasks.tasks
+    assert request.text == "\n".join(
+        part for part in (text, "CPU is high", "<@BOT> investigate this alert") if part
+    )
+    assert request.explicit_mention
 
 
 async def test_retry_header_alone_does_not_drop_an_unseen_event() -> None:
@@ -301,17 +325,23 @@ async def test_transient_lookup_does_not_retry_irrelevant_events(
     assert (await _post(payload, tasks))["status"] == "ignored"
 
 
+@pytest.mark.parametrize(
+    "change", [{}, {"text": "", "attachments": [{"text": "<@BOT> investigate"}]}]
+)
 async def test_transient_lookup_retries_an_allowlisted_bot_mention(
     monkeypatch: pytest.MonkeyPatch,
     allowed_bot: None,
+    change: dict[str, object],
 ) -> None:
     monkeypatch.setattr(
         webhook_common,
         "resolve_slack_channel_context",
         AsyncMock(return_value=SlackChannelContext(lookup_retry_after=17)),
     )
+    payload = _bot_payload()
+    payload["event"].update(change)
     with pytest.raises(HTTPException) as error:
-        await _post(_bot_payload(), _FakeBackgroundTasks())
+        await _post(payload, _FakeBackgroundTasks())
     assert error.value.status_code == 503
     assert error.value.headers == {"Retry-After": "17"}
 

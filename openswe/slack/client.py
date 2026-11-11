@@ -31,6 +31,7 @@ from openswe.slack.http import (
     slack_error_details,
     slack_retry_after,
 )
+from openswe.slack.payloads import SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS, SlackPost
 from openswe.slack.review_links import pr_review_links
 from openswe.source_context import SourceContext
 from openswe.utils import ttl_cache
@@ -56,7 +57,6 @@ _SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
-SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 _SLACK_THREAD_MUTATION_LOCK_SCOPE = "slack-thread-lock"
 _SLACK_THREAD_MUTATION_LOCK_TTL = timedelta(minutes=1)
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
@@ -325,49 +325,6 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
-def _is_forwarded_attachment(attachment: Mapping[str, object]) -> bool:
-    return any(
-        attachment.get(flag) is True for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
-    )
-
-
-def _non_empty_strings(values: Iterable[object]) -> list[str]:
-    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
-
-
-def _list_of_dicts(value: object) -> list[dict[str, object]]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _slack_block_texts(blocks: object) -> list[str]:
-    """Text of Block Kit blocks, skipping action buttons."""
-    texts: list[str] = []
-    for block in _list_of_dicts(blocks):
-        if block.get("type") == "actions":
-            continue
-        items = [block.get("text"), *_list_of_dicts(block.get("fields"))]
-        items += _list_of_dicts(block.get("elements"))
-        texts += _non_empty_strings(item.get("text") for item in items if isinstance(item, dict))
-    return texts
-
-
-def _slack_attachment_texts(attachment: dict[str, object]) -> list[str]:
-    values = [attachment.get(key) for key in ("pretext", "title", "title_link", "text")]
-    for field in _list_of_dicts(attachment.get("fields")):
-        values += [field.get("title"), field.get("value")]
-    texts = _non_empty_strings(values) + _slack_block_texts(attachment.get("blocks"))
-    return texts or _non_empty_strings([attachment.get("fallback")])
-
-
-def _slack_card_text(message: Mapping[str, object]) -> str:
-    """Readable text of an app message built from blocks or attachments instead of ``text``."""
-    texts = _slack_block_texts(message.get("blocks"))
-    for attachment in _list_of_dicts(message.get("attachments")):
-        if not _is_forwarded_attachment(attachment):
-            texts += _slack_attachment_texts(attachment)
-    return "\n".join(texts)[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS]
-
-
 def format_forwarded_slack_attachments(attachments: Any) -> str:
     forwarded: list[str] = []
     rendered_count = 0
@@ -388,7 +345,7 @@ def format_forwarded_slack_attachments(attachments: Any) -> str:
             if not isinstance(attachment, dict):
                 continue
 
-            if _is_forwarded_attachment(attachment):
+            if SlackPost.is_forwarded(attachment):
                 author = attachment.get("author_name")
                 author = author.strip() if isinstance(author, str) else ""
                 content = attachment.get("text")
@@ -467,7 +424,7 @@ def format_slack_messages_for_prompt(
                 bot_username=bot_username,
             ),
             user_names_by_id or {},
-        ).strip() or _slack_card_text(message)
+        ).strip() or SlackPost.card_text_of(message)
         text = text or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):

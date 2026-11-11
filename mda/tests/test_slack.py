@@ -158,6 +158,45 @@ def _texts(run_input: Mapping[str, Any]) -> str:
     return "\n".join(str(message["content"]) for message in run_input["messages"])
 
 
+def _bot_event(text: str, attachment: Mapping[str, object]) -> SlackMessageEvent:
+    """A new post by bot ``B9``, which Slack keys a plain message: ``text`` doesn't mention us."""
+    payload = {"type": "message", "bot_id": "B9", "app_id": "A9", "text": text}
+    return _event(
+        text,
+        key="message",
+        user_id=None,
+        message_ts="171.3",
+        payload={**payload, "attachments": [attachment]},
+    )
+
+
+@pytest.mark.parametrize("text", ["", "Monitor triggered"])
+@pytest.mark.usefixtures("slack_reads")
+def test_an_allowed_bot_can_mention_the_agent_in_its_own_attachment(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    """Datadog's Slack app posts a monitor's message as an attachment."""
+    backend = _backend(
+        monkeypatch,
+        SlackTurnStarted(run=_RUN, prompt=_PROMPT),
+        SlackMessageFacts(allowed_bot=True, bot_name="Datadog", conversation="mda"),
+    )
+    alert = {"title": "CPU is high", "text": "<@UBOT> investigate this alert"}
+
+    [run] = cast(
+        list[ChannelRun], asyncio.run(slack.start_turn(_bot_event(text, alert), _thread()))
+    )
+
+    [turn] = backend.turns
+    assert turn.explicit_mention
+    assert turn.clean_text == "\n".join(
+        part for part in (text, "CPU is high", "@openswe investigate this alert") if part
+    )
+    prompt = _texts(cast(Mapping[str, Any], run["input"]))
+    assert "@openswe investigate this alert" in prompt
+    assert "(no text in mention)" not in prompt
+
+
 @pytest.mark.parametrize("ask", [True, False])
 @pytest.mark.parametrize(("interrupts", "strategy"), [(True, "interrupt"), (False, "enqueue")])
 @pytest.mark.usefixtures("slack_reads")
@@ -486,6 +525,16 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
             _event(user_id=None, payload={"type": "message", "bot_id": "B1", "app_id": "A9"}),
             SlackMessageFacts(conversation="mda"),
         ),
+        # An allowed bot whose only mention is in a message it forwarded or a link's preview:
+        # someone else's words.
+        (
+            _bot_event("", {"is_share": True, "text": "<@UBOT> fix this"}),
+            SlackMessageFacts(allowed_bot=True, conversation="mda"),
+        ),
+        (
+            _bot_event("", {"from_url": "https://example.com", "text": "<@UBOT> fix this"}),
+            SlackMessageFacts(allowed_bot=True, conversation="mda"),
+        ),
         # A channel Slack can't confirm has no external participants.
         (_event(), SlackMessageFacts(channel="unverified")),
     ],
@@ -495,6 +544,8 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
         "backend-untagged",
         "mda-broadcast",
         "unlisted-bot",
+        "forwarded-bot-mention",
+        "link-preview-bot-mention",
         "unverified",
     ],
 )

@@ -115,8 +115,7 @@
      "text": "fix it"
     }
    ],
-   "prior_message_text": "Context.\nMore",
-   "is_breakout": true
+   "prior_message_text": "Context.\nMore"
   },
   "system_trigger_dispatched": {
    "messages": [

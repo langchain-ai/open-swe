@@ -378,21 +378,22 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
         return False
     if event.subtype not in {"", "file_share", "thread_broadcast", "bot_message"}:
         return False
+    bot_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+    text = event.text_for(bot_id)
     if (
         not isinstance(event.user, str)
         or not (event.user or event.bot_id)
-        or event.text is None
+        or text is None
         or not event.ts
     ):
         return False
-    bot_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
-    leading = re.match(r"\s*<@([^>]+)>", event.text)
+    leading = re.match(r"\s*<@([^>]+)>", event.text or "")
     if event.user == bot_id or (leading and leading.group(1) != bot_id):
         return False
     if event.is_from_bot:
         if (
             not bot_id
-            or f"<@{bot_id}>" not in event.text
+            or f"<@{bot_id}>" not in text
             or (event.app_id and event.app_id == envelope.api_app_id)
         ):
             return False
@@ -405,7 +406,7 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
             )
             is not None
         )
-    if event.type == "app_mention" or (bot_id and f"<@{bot_id}>" in event.text):
+    if event.type == "app_mention" or (bot_id and f"<@{bot_id}>" in text):
         return True
     channel_id = event.resolve_channel_id()
     if event.channel_type == "im" or await common.is_code_channel(channel_id):
@@ -524,6 +525,7 @@ class SlackEventsDelivery:
         bot_user_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
         is_message_update = event.type == "message" and event.subtype == "message_changed"
         updated_message = event.message if is_message_update else event
+        text = updated_message.text_for(bot_user_id) if updated_message is not None else None
         allowed_bot = None
         rejected_bot = False
         if updated_message is not None and (
@@ -531,14 +533,13 @@ class SlackEventsDelivery:
             or updated_message.is_from_bot
             or (bot_user_id and updated_message.user == bot_user_id)
         ):
-            bot_text = updated_message.text
             rejected_bot = (
                 is_message_update
                 or event.type not in {"message", "app_mention"}
                 or event.subtype not in {"", "bot_message"}
-                or bot_text is None
+                or text is None
                 or not bot_user_id
-                or f"<@{bot_user_id}>" not in bot_text
+                or f"<@{bot_user_id}>" not in text
                 or updated_message.user == bot_user_id
                 or bool(event.app_id and event.app_id == envelope.api_app_id)
             )
@@ -686,7 +687,6 @@ class SlackEventsDelivery:
         reply_thread_ts = updated_message.thread_ts
         thread_ts = reply_thread_ts or original_message_ts
         user_id = updated_message.user if isinstance(updated_message.user, str) else ""
-        text = updated_message.text
         attachments = updated_message.attachments
         if rejected_bot:
             return ignored("Event from a bot")
