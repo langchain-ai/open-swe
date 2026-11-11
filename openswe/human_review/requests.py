@@ -537,6 +537,28 @@ class HumanReviewRequest(Base):
             "state": self.state,
             "head_sha": self.head_sha,
             "detail": self.detail,
+            "tldr": self.tldr,
+            "diff_fingerprint": self.diff_fingerprint,
+            "excluded_hunks": [
+                {
+                    "path": hunk["path"],
+                    "digest": hunk["digest"],
+                    "header": hunk["header"],
+                    "additions": hunk["additions"],
+                    "deletions": hunk["deletions"],
+                    "guideline": hunk["guideline"],
+                    "reason": hunk["reason"],
+                    "approval_condition": hunk.get("approval_condition", False),
+                }
+                for hunk in self.excluded_hunks
+            ],
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "slack_thread_ts": self.slack_thread_ts,
+            "slack_diff_file_id": self.slack_diff_file_id,
+            "slack_channel_choices": [
+                {"id": choice["id"], "name": choice["name"]}
+                for choice in self.slack_channel_choices
+            ],
             "auto_merge": self.auto_merge,
             "awaiting_ready": self.awaiting_ready,
             "slack_channel_id": self.slack_channel_id,
@@ -571,6 +593,7 @@ class HumanReviewRequest(Base):
                     "assigned_by_agent": p.assigned_by_agent,
                     "joined_at": p.joined_at.isoformat() if p.joined_at else None,
                     "github_review_id": p.github_review_id,
+                    "github_review_sha": p.github_review_sha,
                     "dm_channel_id": p.dm_channel_id,
                     "dm_ts": p.dm_ts,
                 }

@@ -144,6 +144,7 @@ async def test_dashboard_selects_review_workflow(
     )
     monkeypatch.setattr(HumanReviewRequest, "transition", AsyncMock(return_value=ready_approval))
     monkeypatch.setattr(SlackChannel, "name_for", AsyncMock(return_value="reviews"))
+    monkeypatch.setattr(HumanReviewRequest, "log_event", AsyncMock())
 
     async def save_request(row: HumanReviewRequest) -> HumanReviewRequest:
         if case == "active_save_failed" or (
