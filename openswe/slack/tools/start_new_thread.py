@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 import uuid
@@ -20,14 +19,19 @@ from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
 from openswe.slack.client import (
     append_slack_web_link_footer,
+    delete_slack_message,
     fetch_slack_thread_messages,
     get_active_slack_thread,
     get_slack_permalink,
-    post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SlackRequestError
-from openswe.slack.records import bind_slack_thread_id, store_slack_run_mapping
+from openswe.slack.links import SlackLink
+from openswe.slack.records import (
+    bind_slack_thread_id,
+    delete_slack_thread_associations,
+    store_slack_run_mapping,
+)
 from openswe.slack.request import SlackRequest
 from openswe.slack.solo_threads import allow_solo_thread_followup
 from openswe.slack.staged_files import queue_slack_files, slack_file_entries, slack_files_section
@@ -48,7 +52,7 @@ from openswe.webhooks.common import (
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
-_VISIBLE_INSTRUCTIONS_MAX_CHARS = 2800
+_VISIBLE_INSTRUCTIONS_MAX_CHARS = 2700
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _CHANNEL_ID_PATTERN = r"^[CGD][A-Z0-9]+$"
 logger = logging.getLogger(__name__)
@@ -69,19 +73,6 @@ def _failure_hint(slack_error: str | None) -> str:
     if slack_error and slack_error.startswith("http_error:"):
         return "Slack posting hit an HTTP error; retry once."
     return "Slack post failed; retry once with concise instructions."
-
-
-def _rate_limit_delay(slack_error: str | None) -> float | None:
-    if slack_error == "rate_limited":
-        return 1
-    prefix = "rate_limited: "
-    if not slack_error or not slack_error.startswith(prefix):
-        return None
-    try:
-        delay = float(slack_error.removeprefix(prefix))
-    except ValueError:
-        return None
-    return delay if 0 <= delay <= 60 else None
 
 
 def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str, Any]:
@@ -177,6 +168,15 @@ def _new_slack_thread_context(
         "triggering_user_name": original.get("triggering_user_name", ""),
         "triggering_user_email": original.get("triggering_user_email", ""),
         "triggering_event_ts": thread_ts,
+    }
+
+
+def _stranded_breakout(message_ts: str) -> dict[str, object]:
+    return {
+        "success": False,
+        "error": "The new Slack thread was posted but its agent could not start, and the post "
+        "could not be removed. Do not retry; ask the requester to delete it.",
+        "slack_thread_ts": message_ts,
     }
 
 
@@ -394,11 +394,16 @@ async def slack_breakout_thread(
         f"<@{requester}>" if requester else "",
     )
     root_text = " · ".join(part for part in root_parts if part)
+    details = _thread_details(clean_instructions, repo)
     try:
         message_ts = await post_slack_top_level_message_with_ts(
             clean_channel_id,
-            append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),
-            blocks=block_payload(breakout_root_blocks(root_text, dashboard_thread_url(thread_id))),
+            append_slack_web_link_footer(
+                f"{root_text}\n\n{details}", dashboard_thread_url(thread_id)
+            ),
+            blocks=block_payload(
+                breakout_root_blocks(root_text, dashboard_thread_url(thread_id), details)
+            ),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -410,28 +415,6 @@ async def slack_breakout_thread(
             "hint": _failure_hint(exc.code),
         }
 
-    for attempt in range(2):
-        try:
-            await post_slack_thread_reply_with_ts(
-                clean_channel_id,
-                message_ts,
-                _thread_details(clean_instructions, repo),
-                agent_thread_id=thread_id,
-                unfurl_links=False,
-                unfurl_media=False,
-            )
-            break
-        except SlackRequestError as exc:
-            delay = _rate_limit_delay(exc.code)
-            if attempt or delay is None:
-                return {
-                    "success": False,
-                    "error": exc.code,
-                    "slack_error": exc.code,
-                    "hint": _failure_hint(exc.code),
-                }
-            await asyncio.sleep(delay)
-
     await bind_slack_thread_id(clean_channel_id, message_ts, thread_id)
     if via_mda:
         try:
@@ -441,6 +424,11 @@ async def slack_breakout_thread(
                 "Could not open a breakout on MDA's Slack channel",
                 extra={"agent_thread_id": thread_id},
                 exc_info=True,
+            )
+            if not await delete_slack_message(clean_channel_id, message_ts):
+                return _stranded_breakout(message_ts)
+            await delete_slack_thread_associations(
+                clean_channel_id, message_ts, expected_thread_id=thread_id
             )
             return {"success": False, "error": "Could not open the new thread; try again."}
     if requester:
@@ -552,8 +540,7 @@ async def slack_breakout_thread(
         "thread_id": thread_id,
         "thread_ts": message_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
-        "slack_url": slack_url
-        or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
+        "slack_url": slack_url or SlackLink(clean_channel_id, message_ts).url,
     }
     if isinstance(current_thread_ts, str) and current_thread_ts:
         await mark_broken_out(source_channel, current_thread_ts, clean_channel_id, message_ts)

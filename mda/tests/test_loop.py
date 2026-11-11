@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents import create_agent
@@ -17,7 +18,9 @@ from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
 from rt.routing import Route, RouteClassifier
+from rt.run_tools import RunTools
 from rt.tools import STATE_KEY
+from rt.tracing import TurnTrace
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
     JOINED_TASK_CONTEXT,
@@ -29,18 +32,14 @@ from runtime_api.catalog import (
     RoutingRules,
     RunModels,
     TaskContext,
-    WorkStateRules,
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
     GitHubProxyRefreshed,
-    Goal,
     IncidentContext,
-    PersonMessage,
     PhaseResult,
     Prepared,
-    Reminders,
     Routed,
 )
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY
@@ -184,36 +183,6 @@ async def test_the_framing_of_the_clients_tools_follows_the_system_prompt(
 
     assert planned.call is not None
     assert planned.call.system_prompt.endswith("The Docs plugin is open beside you.")
-
-
-async def test_a_persons_message_is_read_for_reminders_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    note = HumanMessage(
-        content='<input-message sender="system:reminder" surface="automation" kind="system">'
-        "Save a memory.</input-message>",
-        id="reminder-1",
-    )
-    backend, calls = _backend(
-        monkeypatch,
-        {"reminders": Reminders(messages=[{"type": "human", "data": note.model_dump()}])},
-        LoopRules(reminders=True),
-    )
-    loop = RunLoop(backend)
-    person = HumanMessage(
-        content='<input-message sender="user:1" surface="slack" kind="human">'
-        "You ignored me again.</input-message>",
-        id="human-1",
-    )
-
-    first = await loop.before_model(_state(person))
-    again = await loop.before_model(_state(person, **first.update))
-
-    assert [m.content for m in messages_from_dict(first.messages)] == [note.content]
-    assert again.messages == []
-    [(name, body)] = calls
-    assert name == "reminders"
-    assert messages_from_dict([PersonMessage.model_validate(body).message]) == [person]
 
 
 async def test_a_refresh_asked_for_a_call_that_is_not_made_is_stopped(
@@ -502,6 +471,14 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
 
     monkeypatch.setattr("rt.middleware.build_model", build)
     monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _event: None)
+    traced: list[Mapping[str, JsonValue]] = []
+    update = TurnTrace.update
+
+    def record(trace: TurnTrace, metadata: Mapping[str, JsonValue]) -> None:
+        traced.append(dict(metadata))
+        update(trace, metadata)
+
+    monkeypatch.setattr(TurnTrace, "update", record)
     backend.run.invocation_id = "turn"
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
@@ -511,6 +488,8 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
     await graph.ainvoke({"messages": [("user", "Rename the flag")]})
 
     assert classified == ["Rename the flag"]
+    # The trace records the route the classifier chose.
+    assert {"model_route": "fast"} in traced
     started = next(body for name, body in calls if name == "run_started")
     assert (started["model_route"], started["model_id"], started["effort"]) == (
         "fast",
@@ -536,6 +515,53 @@ async def test_a_thread_with_a_kept_route_is_not_classified_again(
     held = state[STATE_KEY]
     assert isinstance(held, dict)
     assert await loop.routed(held, [], None) == {"model_route": "balanced"}
+    # The run's subagents follow the route it took.
+    assert backend.run.route == "balanced"
+
+
+async def test_a_thread_that_kept_default_before_routing_is_classified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        return Route("performance")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _event: None)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    state = _state(HumanMessage(content="Design it", id="human-1"), model_route="default")
+    held = state[STATE_KEY]
+    assert isinstance(held, dict)
+
+    classifying = loop.classify_ahead(state)
+
+    assert classifying is not None
+    assert (await loop.routed(held, [], classifying))["model_route"] == "performance"
+    assert backend.run.route == "performance"
+
+
+async def test_a_route_kept_for_one_run_still_reaches_its_subagents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    # An unsure answer routed this run to Balanced without keeping it for the thread.
+    backend.run.route = "balanced"
+
+    await loop.before_model(_state(HumanMessage(content="Add a flag", id="human-1")))
+
+    assert backend.run.route == "balanced"
+
+
+def test_a_subagent_call_takes_the_runs_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("rt.run_tools.build_model", lambda spec, **_: spec.model_id)
+    tools = RunTools(Catalog(models=_MODELS), MagicMock(), MagicMock())
+
+    assert tools.subagent_model_for("fast") == _FAST.model_id
+    assert tools.subagent_model_for("default") == _MAIN.model_id
+    assert tools.subagent_model_for(None) == _MAIN.model_id
+    # A route the catalog has no model for keeps the run's subagent model.
+    assert tools.subagent_model_for("performance") == _MAIN.model_id
 
 
 @pytest.mark.parametrize(
@@ -606,210 +632,6 @@ async def test_an_answer_written_for_an_unreachable_model_is_final(
     assert result.jump_to is None and not result.messages
     expected = [("reply_on_behalf", "The providers are down.")] if surface == "slack" else []
     assert [(name, body["text"]) for name, body in calls] == expected
-
-
-_WORK_GUARD = "system:work-state-guard"
-_WORK_NUDGE = (
-    f'<input-message sender="{_WORK_GUARD}" surface="automation" kind="system">'
-    "Keep working.</input-message>"
-)
-_GOAL_RULES = LoopRules(
-    reply=_REPLY,
-    work_state=WorkStateRules(
-        tool="goal_set_state",
-        nudge=[_WORK_NUDGE],
-        nudge_sender=_WORK_GUARD,
-        max_nudges=3,
-        reminder="Still waiting on them.",
-    ),
-)
-
-
-def _turn(kind: str) -> list[BaseMessage]:
-    """A turn the guard sent the model back for: idle, running a command that failed, or
-    one that succeeded; or the person's own request, answered with nothing."""
-    if kind == "asked":
-        return [HumanMessage(content="Fix it", id="human-1"), AIMessage(content="", id="ai-1")]
-    nudged: list[BaseMessage] = [
-        HumanMessage(content="Fix it", id="human-1"),
-        AIMessage(content="", id="ai-0"),
-        HumanMessage(content=_WORK_NUDGE, id="nudge-1"),
-    ]
-    if kind == "idle":
-        return [*nudged, AIMessage(content="", id="ai-1")]
-    if kind == "talking":
-        return [*nudged, AIMessage(content="Waiting for CI to finish.", id="ai-1")]
-    exit_code = 1 if kind == "failing" else 0
-    status = "failed" if exit_code else "succeeded"
-    return [
-        *nudged,
-        AIMessage(
-            content="",
-            id="ai-1",
-            tool_calls=[{"id": "c1", "name": "execute", "args": {"command": "make test"}}],
-        ),
-        ToolMessage(
-            content=f"boom\n[Command {status} with exit code {exit_code}]",
-            tool_call_id="c1",
-            name="execute",
-        ),
-        AIMessage(content="", id="ai-2"),
-    ]
-
-
-@pytest.mark.parametrize(
-    ("goal", "turn", "held", "sent_back", "moved"),
-    [
-        (Goal(state="working"), "asked", {}, True, None),
-        (Goal(state="working", waits=["wakeup"]), "asked", {}, False, ("waiting", None)),
-        (Goal(state="working"), "idle", {"goal_empty_turns": 2}, False, ("paused", "no_progress")),
-        (
-            Goal(state="working"),
-            "talking",
-            {"goal_empty_turns": 2},
-            False,
-            ("paused", "no_progress"),
-        ),
-        (
-            Goal(state="working"),
-            "failing",
-            {"goal_failing_turns": 2},
-            False,
-            ("paused", "failing_commands"),
-        ),
-        (Goal(state="working"), "working", {"goal_failing_turns": 2}, True, None),
-        (Goal(state="waiting_on_user", reason="ready"), "asked", {}, False, None),
-        (Goal(state="complete"), "asked", {}, False, None),
-        (Goal(), "asked", {}, False, None),
-        (BackendCallError("down"), "asked", {}, False, None),
-    ],
-)
-async def test_goal_mode_work_is_sent_back_until_its_goal_rests_or_stalls(
-    monkeypatch: pytest.MonkeyPatch,
-    goal: Goal | BackendCallError,
-    turn: str,
-    held: dict[str, JsonValue],
-    sent_back: bool,
-    moved: tuple[str, str | None] | None,
-) -> None:
-    answers: dict[str, BaseModel | BackendCallError] = {"goal": goal, "set_goal": Done()}
-    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
-
-    ended = await RunLoop(backend).after_model(_state(*_turn(turn), reply_surface="web", **held))
-
-    assert (ended.jump_to == "model") is sent_back
-    assert [(body["state"], body["reason"]) for name, body in calls if name == "set_goal"] == (
-        [] if moved is None else [moved]
-    )
-    if sent_back:
-        assert [message.content for message in messages_from_dict(ended.messages)] == [_WORK_NUDGE]
-
-
-async def test_only_consecutive_failing_turns_count_toward_pausing_the_goal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, calls = _backend(
-        monkeypatch, {"goal": Goal(state="working"), "set_goal": Done()}, _GOAL_RULES
-    )
-
-    quiet = await RunLoop(backend).after_model(
-        _state(*_turn("talking"), reply_surface="web", goal_failing_turns=2)
-    )
-
-    assert quiet.jump_to == "model"
-    assert quiet.update["goal_failing_turns"] == 0
-    assert [name for name, _body in calls if name == "set_goal"] == []
-
-
-@pytest.mark.parametrize(
-    ("goal", "came_in", "runs", "moved"),
-    [
-        (Goal(state="waiting"), "system", True, "working"),
-        (Goal(state="paused", reason="stopped"), "system", False, None),
-        (Goal(state="paused", reason="error"), "system", True, "working"),
-        (Goal(state="paused", reason="stopped"), "human", True, "working"),
-        (Goal(state="waiting_on_user", reason="blocked"), "human", True, "working"),
-        (Goal(state="complete"), "system", True, None),
-        (Goal(state="complete"), "human", True, "working"),
-        (Goal(), "human", True, "working"),
-    ],
-)
-async def test_what_comes_in_moves_the_goal_before_the_model_answers_it(
-    monkeypatch: pytest.MonkeyPatch, goal: Goal, came_in: str, runs: bool, moved: str | None
-) -> None:
-    backend, calls = _backend(monkeypatch, {"goal": goal, "set_goal": Done()}, _GOAL_RULES)
-    message = HumanMessage(
-        content=f'<input-message sender="x" surface="web" kind="{came_in}">Go.</input-message>',
-        id="in-1",
-    )
-
-    planned = await RunLoop(backend).before_model(_state(message))
-
-    assert (planned.jump_to != "end") is runs
-    assert [body["state"] for name, body in calls if name == "set_goal"] == (
-        [] if moved is None else [moved]
-    )
-
-
-async def test_a_request_after_the_goal_completed_starts_it_over_from_that_request(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    answers: dict[str, BaseModel | BackendCallError] = {
-        "goal": Goal(state="complete"),
-        "set_goal": Done(),
-    }
-    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
-    asked = HumanMessage(
-        content='<input-message sender="u" surface="web" kind="human">Fix the logout</input-message>',
-        id="in-1",
-    )
-
-    await RunLoop(backend).before_model(_state(asked))
-
-    assert [(body["state"], body["request"]) for name, body in calls if name == "set_goal"] == [
-        ("working", "Fix the logout")
-    ]
-
-
-async def test_a_goal_starts_from_the_request_and_its_objective_stays_in_view(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    objective = '<dynamic-context kind="run" id="goal"><![CDATA[\nFix it\n]]></dynamic-context>'
-    answers: dict[str, BaseModel | BackendCallError] = {"goal": Goal(), "set_goal": Done()}
-    backend, calls = _backend(monkeypatch, answers, _GOAL_RULES)
-    loop = RunLoop(backend)
-    asked = HumanMessage(
-        content='<input-message sender="u" surface="web" kind="human">Fix it'
-        '<pull-request repo="o/r" head="abc123" /></input-message>',
-        id="in-1",
-    )
-
-    await loop.before_model(_state(asked))
-    answers["goal"] = Goal(state="working", objective=objective)
-    shown = await loop.before_model(_state(asked))
-    seen = await loop.before_model(
-        _state(asked, *messages_from_dict(shown.messages), AIMessage(content="", id="ai-1"))
-    )
-
-    assert [body["request"] for name, body in calls if name == "set_goal"] == ["Fix it"]
-    assert [m.content for m in messages_from_dict(shown.messages)] == [objective]
-    assert messages_from_dict(seen.messages) == []
-
-
-async def test_a_goal_waiting_on_its_person_is_reminded_after_the_report_not_with_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    waiting = Goal(state="waiting_on_user", reason="blocked", ask="Which channel?", updated_at_ms=5)
-    backend, _calls = _backend(monkeypatch, {"goal": waiting}, _GOAL_RULES)
-    loop = RunLoop(backend)
-    result = ToolMessage(content='{"success": true}', tool_call_id="c1")
-
-    with_report = await loop.before_model(_state(result))
-    after = await loop.before_model(_state(result, **with_report.update))
-
-    assert with_report.call is not None and with_report.call.reminder is None
-    assert after.call is not None
-    assert after.call.reminder == "Still waiting on them.\n\nWhich channel?"
 
 
 @pytest.mark.parametrize(

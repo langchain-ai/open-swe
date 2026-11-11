@@ -30,7 +30,7 @@ Args:
   The authenticated user's dashboard preference overrides this value for newly created PRs; existing PRs are returned unchanged.
 - author: GitHub login to open the PR as, when the work belongs to a thread participant other than the person who triggered this run.
   Leave empty to use the triggering person.
-- retitle_thread: Retitle this thread to the new PR's title by default.
+- retitle_thread: Retitle this thread to the new PR's title by default, unless a person has renamed it.
   Set False to preserve its title; returning an existing PR does not retitle the thread.
 - resolves_thread: Set True when merging or closing this PR finishes the thread's work, so the thread auto-resolves once every PR it opened is merged or closed.
   Prefer True.

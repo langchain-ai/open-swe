@@ -353,9 +353,6 @@ test("records every message the model is handed as people come and go", async ({
   expect(fifth.run[0]).toContain("standing_instructions:");
   expect(fifth.run[0]).toContain("Never use ripgrep.");
 
-  // Open SWE commits and opens pull requests as the person who asked, so a
-  // Slack account it cannot resolve to a GitHub one never reaches the model at
-  // all: the webhook answers in the Slack thread instead.
   await sendSlack(page, {
     text: "<@U0BOT> can it handle unicode?",
     user: CAROL_SLACK,
@@ -366,11 +363,13 @@ test("records every message the model is handed as people come and go", async ({
       timeout: 30_000,
       intervals: [500],
     })
-    .toContain("I couldn't resolve your GitHub account from Slack");
+    .toContain(
+      "/dashboard/api/auth/langsmith/login?connect_slack=true|Sign in with LangSmith",
+    );
   const sixth = await thread.record({
-    title: "Turn 6: Carol, with no Open SWE account, chimes in",
+    title: "Turn 6: Carol, with no Robin account, chimes in",
     given:
-      "Carol never signed in to Open SWE, so nothing links her Slack account to a GitHub one",
+      "Carol never signed in to Robin, so her Slack account has no authorized LangSmith identity",
     when: "she replies: can it handle unicode?",
     outcome:
       "no run starts and the thread is untouched; Slack gets an account-link prompt instead",

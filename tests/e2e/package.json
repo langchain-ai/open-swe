@@ -7,7 +7,8 @@
     "test:auth": "playwright test --config playwright.auth.config.ts",
     "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:headed": "playwright test --headed",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "test:lab": "playwright test --config playwright.lab.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

@@ -1,6 +1,11 @@
 /** @vitest-environment jsdom */
 import { Collection, PluginHost } from "@openswe/plugin-sdk"
-import type { CollectionApi, HostApi, HostContext } from "@openswe/plugin-sdk"
+import type {
+  CollectionApi,
+  DraftImage,
+  HostApi,
+  HostContext,
+} from "@openswe/plugin-sdk"
 import { newMessagePortRpcSession } from "capnweb"
 import type { RpcStub } from "capnweb"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -17,7 +22,7 @@ const host = {
   plugin: {
     id: "install-1",
     repositories: ["acme/app"],
-    manifest: { permissions: ["storage", "agent"] },
+    manifest: { permissions: ["storage", "agent", "github:read"] },
   } as unknown as InstalledPlugin,
 } as BridgeHost
 
@@ -61,11 +66,56 @@ describe("PluginHostApi", () => {
         api.joinRoom({ room: "../../install-2" }, () => {}, 0),
     ],
     ["a dot repository", (api: PluginHostApi) => api.github("../..")],
+    [
+      "an attachment name that climbs out",
+      async (api: PluginHostApi) =>
+        (await api.collection("runs", {})).attachment("r1", "../secret.png"),
+    ],
+    [
+      "a pull request number that is not one",
+      async (api: PluginHostApi) => (await api.github("acme/app")).pull(0),
+    ],
   ])("refuses %s before sending anything", async (_name, call) => {
     const fetch = vi.fn()
     vi.stubGlobal("fetch", fetch)
     await expect(call(hostApi())).rejects.toMatchObject({ status: 400 })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("puts draft images in the composer, and refuses what the composer would not take", async () => {
+    const openChat = vi.fn()
+    const api = new PluginHostApi(
+      () => ({ ...host, openChat }) as BridgeHost,
+      new SessionBudget()
+    )
+    const png: DraftImage = {
+      name: "after.png",
+      mimeType: "image/png",
+      base64: "iVBORw0KGgo=",
+    }
+    await api.openChat("What changed?", [png])
+    expect(openChat).toHaveBeenLastCalledWith("What changed?", [
+      {
+        kind: "image",
+        base64: png.base64,
+        mimeType: "image/png",
+        fileName: "after.png",
+      },
+    ])
+    // Plugins built before draft images send none.
+    await api.openChat("Hi", undefined)
+    expect(openChat).toHaveBeenLastCalledWith("Hi", [])
+    await expect(
+      api.openChat(
+        null,
+        Array.from({ length: 6 }, () => png)
+      )
+    ).rejects.toMatchObject({ status: 400 })
+    const svg = { ...png, mimeType: "image/svg+xml" } as unknown as DraftImage
+    await expect(api.openChat(null, [svg])).rejects.toMatchObject({
+      status: 400,
+    })
+    expect(openChat).toHaveBeenCalledTimes(2)
   })
 
   it("refuses capabilities past the session's allowance", async () => {

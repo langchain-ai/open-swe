@@ -12,8 +12,6 @@ from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
-from openswe.bridge.worktree_branch import BRANCH_PREFIX
-from openswe.database import postgres
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
@@ -23,7 +21,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequestPayload
 from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import settle_pull_request, settle_repository
+from openswe.human_review.settling import SettleTarget
 from openswe.input_messages import (
     EnvelopeData,
     PersonIdentity,
@@ -47,7 +45,6 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
-from openswe.review.goal_review import GOAL_REVIEW_KEY, GoalReview
 from openswe.review.reconcile import reconcile_linked_findings
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import Repo, RunConfig
@@ -59,7 +56,6 @@ from openswe.thread_ids import (
     thread_id_from_branch,
 )
 from openswe.threads import index, succession
-from openswe.threads.creation import create_thread
 from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
@@ -161,12 +157,8 @@ async def trigger_pr_review_from_ref(
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
     allow_draft: bool = False,
-    goal_review: GoalReview | None = None,
 ) -> dict[str, Any]:
-    """Review a PR on request. A ``goal_review`` reviews a Goal mode agent's draft and
-    sends the findings back to it instead of publishing them."""
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
-    allow_draft = allow_draft or goal_review is not None
     if not common.is_repo_allowed(repo_config):
         return {
             "success": False,
@@ -239,50 +231,16 @@ async def trigger_pr_review_from_ref(
             "channel_id": slack_channel_id,
             "thread_ts": slack_thread_ts,
         }
-    last_reviewed_sha = ""
-    if goal_review is not None:
-        metadata = await common.get_thread_metadata_safe(thread_id) or {}
-        kept = GoalReview.of(metadata)
-        if not pr_metadata.get("draft") and (kept is None or not kept.handoff):
-            goal_review = None
-        elif kept is not None:
-            goal_review = kept.model_copy(update={"thread_id": goal_review.thread_id})
-            if isinstance(reviewed := metadata.get("last_reviewed_sha"), str):
-                last_reviewed_sha = reviewed
     await common.set_reviewer_thread_metadata(
-        thread_id,
-        pr=pr_meta,
-        watch=True,
-        slack_thread=slack_thread_meta,
-        head_sha=head_sha,
-        extra={
-            GOAL_REVIEW_KEY: None if goal_review is None else goal_review.model_dump(mode="json")
-        },
+        thread_id, pr=pr_meta, watch=True, slack_thread=slack_thread_meta, head_sha=head_sha
     )
-    if goal_review is None:
-        await common.post_review_started_comment(
-            thread_id=thread_id,
-            owner=pr_ref.owner,
-            repo=pr_ref.repo,
-            pr_number=pr_ref.number,
-            token=app_token,
-        )
-    else:
-        check_run_id = await common.create_review_check_run(
-            owner=pr_ref.owner,
-            repo=pr_ref.repo,
-            head_sha=head_sha,
-            token=app_token,
-            details_url=common.dashboard_thread_url(thread_id),
-        )
-        if check_run_id is not None:
-            await common.track_review_check_run(
-                thread_id,
-                owner=pr_ref.owner,
-                repo=pr_ref.repo,
-                token=app_token,
-                check_run_id=check_run_id,
-            )
+    await common.post_review_started_comment(
+        thread_id=thread_id,
+        owner=pr_ref.owner,
+        repo=pr_ref.repo,
+        pr_number=pr_ref.number,
+        token=app_token,
+    )
 
     review_prompt = build_github_pr_review_prompt(
         repo_config, pr_ref.number, pr_url, base_sha, head_sha
@@ -298,8 +256,6 @@ async def trigger_pr_review_from_ref(
         head_sha=head_sha,
         branch_name=branch_name,
         repo_private=repo_private,
-        re_review=bool(last_reviewed_sha),
-        last_reviewed_sha=last_reviewed_sha,
         slack_channel_id=slack_channel_id,
         slack_thread_ts=slack_thread_ts,
     )
@@ -334,13 +290,7 @@ async def trigger_pr_review_from_ref(
     await ReviewShadow.follow(
         RunConfig.parse(configurable), kickoff=review_prompt, pr_title=pr_title
     )
-    return {
-        "success": True,
-        "queued": False,
-        "thread_id": thread_id,
-        "pr_url": pr_url,
-        "goal_review": goal_review is not None,
-    }
+    return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
 
 
 async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, source: str) -> None:
@@ -385,29 +335,30 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     if payload.get("action") == "ready_for_review":
         metadata = await common.get_thread_metadata_safe(thread_id)
         if metadata is not None and metadata.get("kind") == common.REVIEWER_THREAD_KIND:
-            goal_review = GoalReview.of(metadata)
-            if goal_review is not None and await goal_review.ready(
-                reviewer_thread_id=thread_id,
-                owner=repo_config.get("owner", ""),
-                repo=repo_config.get("name", ""),
-                pr_number=pr_number,
-                head_sha=head_sha,
-            ):
-                await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
-                return
             existing_last_reviewed_sha = metadata.get("last_reviewed_sha")
             if isinstance(existing_last_reviewed_sha, str) and existing_last_reviewed_sha:
-                if existing_last_reviewed_sha == head_sha and goal_review is None:
+                if existing_last_reviewed_sha == head_sha:
                     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True)
-                    common.logger.info(
-                        "Skipping ready_for_review auto-review for %s/%s#%s: "
-                        "head_sha unchanged from last_reviewed_sha",
-                        repo_config.get("owner"),
-                        repo_config.get("name"),
-                        pr_number,
+                    assessment = await PublishedAssessment.withheld(
+                        repo_config["owner"], repo_config["name"], pr_number, head_sha
                     )
-                    return
-                last_reviewed_sha = existing_last_reviewed_sha
+                    if assessment is None:
+                        common.logger.info(
+                            "Skipping ready_for_review auto-review for %s/%s#%s: "
+                            "head_sha unchanged from last_reviewed_sha",
+                            repo_config.get("owner"),
+                            repo_config.get("name"),
+                            pr_number,
+                        )
+                        return
+                    if review_id := await assessment.approve(reviewer_thread_id=thread_id):
+                        await common.set_reviewer_thread_metadata(
+                            thread_id, extra={"review_assessment_id": review_id}
+                        )
+                        return
+                    # The draft's verdict may no longer hold; review the whole PR again.
+                else:
+                    last_reviewed_sha = existing_last_reviewed_sha
 
     app_token, app_token_expires_at = await common.reviewer_token_for_repo(
         repo_config,
@@ -498,7 +449,7 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     from openswe.workspaces.store import WORKSPACES
 
     event = PullRequestEvent.parse(payload)
-    if event is None or event.identity is None or not postgres.configured():
+    if event is None or event.identity is None:
         return
     owner, repo, number = event.identity
     pull = event.pull_request
@@ -565,17 +516,6 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
                 author_login or "<unknown>",
             )
             return
-        head_ref = (pull_request.get("head") or {}).get("ref", "")
-        if (
-            author_login
-            and head_ref.startswith(f"{BRANCH_PREFIX}/")
-            and (await User.preferences_for_login(author_login)).goal_mode
-        ):
-            common.logger.info(
-                "Skipping auto-review of draft PR by %s: Goal mode reviews it on request",
-                author_login,
-            )
-            return
     # Use source="github" so the reviewer resolver can use the GitHub App token;
     # "github_auto" would fall through to the email-based path, which has no
     # user_email to route on for webhook-triggered runs.
@@ -586,7 +526,7 @@ async def settle_human_review_on_close(payload: dict[str, Any]) -> None:
     """Mark a closed PR's open review card merged or closed, whoever closed the PR."""
     event = PullRequestEvent.parse(payload)
     identity = event.identity if event is not None else None
-    if identity is None or not postgres.configured():
+    if identity is None:
         return
     await close_for_pull_request(*identity)
 
@@ -842,8 +782,6 @@ async def _process_github_head_update(
 
     if pull_request.state == "closed":
         return
-    if GoalReview.of(metadata) is not None:
-        return
     if pull_request.draft and not await common.draft_review_enabled_for_author(
         pull_request.author, repo_config
     ):
@@ -855,11 +793,7 @@ async def _process_github_head_update(
             "Push to %s ignored: head_sha unchanged from last_reviewed_sha", head_ref
         )
         return
-    previous_assessment = (
-        await PublishedAssessment.latest(context.owner, context.name, pr_number)
-        if postgres.configured()
-        else None
-    )
+    previous_assessment = await PublishedAssessment.latest(context.owner, context.name, pr_number)
     previous_base_sha = metadata.get("last_reviewed_base_sha")
     if (
         isinstance(last_reviewed_sha, str)
@@ -893,21 +827,20 @@ async def _process_github_head_update(
         await common.set_reviewer_thread_metadata(
             thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
         )
-        if postgres.configured():
-            try:
-                await Walkthrough.carry_forward(
-                    repo_config["owner"],
-                    repo_config["name"],
-                    pr_number,
-                    from_sha=last_reviewed_sha,
-                    to_sha=head_sha,
-                )
-            except Exception:
-                common.logger.warning(
-                    "Could not carry the review walkthrough forward",
-                    exc_info=True,
-                    extra={"pr_number": pr_number, "scout_head_sha": head_sha},
-                )
+        try:
+            await Walkthrough.carry_forward(
+                repo_config["owner"],
+                repo_config["name"],
+                pr_number,
+                from_sha=last_reviewed_sha,
+                to_sha=head_sha,
+            )
+        except Exception:
+            common.logger.warning(
+                "Could not carry the review walkthrough forward",
+                exc_info=True,
+                extra={"pr_number": pr_number, "scout_head_sha": head_sha},
+            )
         # The old head's check disappears once the head moves (GitHub only
         # shows checks on the current head), so even though no re-review runs,
         # surface a settled check on the new head.
@@ -1265,6 +1198,7 @@ async def process_github_pr_comment(
         )
         return
     thread_id = await index.live_thread_id(derived_thread_id)
+    current_thread_id = await index.current_thread_id(derived_thread_id)
     pr_thread_id = (
         pr_comment_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
         if pr_number
@@ -1272,77 +1206,8 @@ async def process_github_pr_comment(
     )
     on_channel = thread_id == pr_thread_id and await _channel_takes(channel, thread_id)
     new_on_channel = on_channel and await index.get(thread_id) is None
-    if on_channel and channel is not None:
-        await channel.adopt(thread_id, {"branch_name": branch_name})
-    # The agent's own thread exists; a PR thread or a successor may not yet.
-    elif thread_id != own_thread_id:
-        common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
-        langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-        try:
-            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
-        except Exception as exc:  # noqa: BLE001
-            if common.is_not_found_error(exc):
-                await create_thread(
-                    langgraph_client,
-                    thread_id,
-                    title=f"PR #{pr_number}",
-                    if_exists="do_nothing",
-                    metadata={"branch_name": branch_name},
-                )
-            else:
-                common.logger.warning(
-                    "Failed to persist branch_name metadata for thread %s", thread_id
-                )
-
-    # A channel (Linear, GitHub issues) starts the runs on its own threads, so
-    # feedback on a PR its conversation opened continues on the PR's own thread.
-    channel_metadata = None if on_channel else await common.get_thread_metadata_safe(thread_id)
-    continues_thread: str | None = None
-    if channel_metadata is not None and channel_of(channel_metadata):
-        if not pr_number:
-            return
-        # The PR thread starts with the conversation's history, so only who may prompt
-        # the conversation continues it, as when its own thread took the feedback.
-        if common.thread_is_private(channel_metadata) and not common.thread_is_promptable(
-            channel_metadata, github_login
-        ):
-            return
-        continues_thread = thread_id
-        thread_id = pr_comment_thread_id(
-            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
-        )
-        # It also keeps the conversation's visibility and owner, so a private
-        # conversation's history stays as private on the PR's thread.
-        inherited = {
-            key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
-        }
-        metadata: dict[str, JsonValue] = {
-            "branch_name": branch_name,
-            CONTINUES_THREAD_KEY: continues_thread,
-            **inherited,
-        }
-        on_channel = await _channel_takes(channel, thread_id)
-        if on_channel and channel is not None:
-            new_on_channel = await index.get(thread_id) is None
-            await channel.adopt(thread_id, metadata)
-        else:
-            await THREADS.create(thread_id, title=f"PR #{pr_number}", metadata=metadata)
-
-    repo = Repo.parse(repo_config)
-    if pr_number and repo is not None and repo.owner and repo.name:
-        try:
-            await PullRequest(owner=repo.owner, repo=repo.name, number=pr_number).link_thread(
-                thread_id, source="github_pr_comment"
-            )
-        except Exception:  # noqa: BLE001
-            common.logger.warning(
-                "Failed to link PR comment thread to its pull request",
-                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
-                exc_info=True,
-            )
-
     if agent_thread_id is not None:
-        agent_metadata = await common.get_thread_metadata_safe(thread_id)
+        agent_metadata = await common.get_thread_metadata_safe(current_thread_id)
         if agent_metadata is None:
             common.logger.info(
                 "Ignoring untagged PR comment for a missing agent thread",
@@ -1355,7 +1220,7 @@ async def process_github_pr_comment(
             return
     email = await User.email_for_login(github_login) or ""
     if email:
-        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
+        thread_metadata = await common.authorize_github_thread(current_thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
@@ -1395,7 +1260,6 @@ async def process_github_pr_comment(
         and payload.get("action") == "submitted"
         and str(event.get("state") or "").lower() == "approved"
         and event_body.startswith(REVIEW_BODY_PREFIX)
-        and postgres.configured()
         and await HumanReviewRequest.is_expedited_approver(
             repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
         )
@@ -1444,11 +1308,71 @@ async def process_github_pr_comment(
     ):
         return
 
+    thread_id = await succession.succeed(derived_thread_id)
+    if on_channel and channel is not None:
+        await channel.adopt(thread_id, {"branch_name": branch_name})
+    # The agent's own thread exists; a PR thread or a successor may not yet.
+    elif thread_id != own_thread_id:
+        common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
+        if await THREADS.get(thread_id) is None:
+            await THREADS.create(
+                thread_id, title=f"PR #{pr_number}", metadata={"branch_name": branch_name}
+            )
+        else:
+            await THREADS.update(thread_id, {"branch_name": branch_name})
+
+    # A channel (Linear, GitHub issues) starts the runs on its own threads, so
+    # feedback on a PR its conversation opened continues on the PR's own thread.
+    channel_metadata = None if on_channel else await common.get_thread_metadata_safe(thread_id)
+    continues_thread: str | None = None
+    if channel_metadata is not None and channel_of(channel_metadata):
+        if not pr_number:
+            return
+        # The PR thread starts with the conversation's history, so only who may prompt
+        # the conversation continues it, as when its own thread took the feedback.
+        if common.thread_is_private(channel_metadata) and not common.thread_is_promptable(
+            channel_metadata, github_login
+        ):
+            return
+        continues_thread = thread_id
+        thread_id = pr_comment_thread_id(
+            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+        )
+        # It also keeps the conversation's visibility and owner, so a private
+        # conversation's history stays as private on the PR's thread.
+        inherited = {
+            key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
+        }
+        metadata: dict[str, JsonValue] = {
+            "branch_name": branch_name,
+            CONTINUES_THREAD_KEY: continues_thread,
+            **inherited,
+        }
+        on_channel = await _channel_takes(channel, thread_id)
+        if on_channel and channel is not None:
+            new_on_channel = await index.get(thread_id) is None
+            await channel.adopt(thread_id, metadata)
+        else:
+            await THREADS.create(thread_id, title=f"PR #{pr_number}", metadata=metadata)
+
+    repo = Repo.parse(repo_config)
+    if pr_number and repo is not None and repo.owner and repo.name:
+        try:
+            await PullRequest(owner=repo.owner, repo=repo.name, number=pr_number).link_thread(
+                thread_id, source="github_pr_comment"
+            )
+        except Exception:  # noqa: BLE001
+            common.logger.warning(
+                "Failed to link PR comment thread to its pull request",
+                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
+                exc_info=True,
+            )
+
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     pr_author = _PrAuthorEvent.author_of(payload)
     author_logins: set[str] = set()
-    if postgres.configured() and repo is not None:
+    if repo is not None:
         try:
             stored = await PullRequest.get(repo.owner, repo.name, pr_number)
             pull_request = (
@@ -1822,8 +1746,6 @@ class _HumanReviewEvent(BaseModel):
 
 async def settle_human_reviews(payload: dict[str, Any]) -> None:
     """Re-check the open standard review requests of the pull requests an event names."""
-    if not postgres.configured():
-        return
     try:
         event = _HumanReviewEvent.model_validate(payload)
     except ValidationError:
@@ -1831,7 +1753,7 @@ async def settle_human_reviews(payload: dict[str, Any]) -> None:
         return
     owner, repo = event.repository.owner.login, event.repository.name
     for number in event.numbers:
-        await settle_pull_request(owner, repo, number)
+        await SettleTarget.queue(owner, repo, number)
 
 
 class _StatusEvent(BaseModel):
@@ -1841,8 +1763,6 @@ class _StatusEvent(BaseModel):
 
 async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
     """A finished commit status names only a SHA, so re-check the repository's open requests."""
-    if not postgres.configured():
-        return
     try:
         event = _StatusEvent.model_validate(payload)
     except ValidationError:
@@ -1850,4 +1770,4 @@ async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
         return
     if event.state == "pending":
         return
-    await settle_repository(event.repository.owner.login, event.repository.name)
+    await SettleTarget.queue(event.repository.owner.login, event.repository.name)

@@ -98,6 +98,16 @@ class RunTools:
             if models is None
             else build_model(models.subagent_model, use_gateway=models.use_gateway)
         )
+        self._route_models: dict[str, BaseChatModel] = {}
+
+    def subagent_model_for(self, route: str | None) -> BaseChatModel | None:
+        """The model a subagent call goes to: the run's route's, or else the run's subagent model."""
+        models = self.catalog.models
+        if models is None or route is None or (spec := models.routes.get(route)) is None:
+            return self.subagent_model
+        if route not in self._route_models:
+            self._route_models[route] = build_model(spec, use_gateway=models.use_gateway)
+        return self._route_models[route]
 
     def _offer(self, mcp: McpTools) -> None:
         """Offer the run's operations and ``mcp``'s tools: to each model call, or from code.
@@ -345,8 +355,8 @@ class RunSubagentMiddleware(AgentMiddleware):
                 subagent_prompt(self._name), spec.system_prompt
             )
             request = request.override(system_message=SystemMessage(content=text))
-        if tools.subagent_model is not None:
-            request = request.override(model=tools.subagent_model)
+        if (model := tools.subagent_model_for(current_run().route)) is not None:
+            request = request.override(model=model)
         return await handler(request)
 
 

@@ -315,7 +315,7 @@ class ReviewAssessment(BaseModel):
         if self.decision == "would_approve":
             return "Would approve"
         if self.decision == "would_approve_conditionally":
-            return "Would approve subject to human approval of the stated condition"
+            return "Would approve once a person approves the change below"
         return "Needs human review"
 
     def settled(self, findings: list[Finding]) -> ReviewAssessment:
@@ -457,11 +457,9 @@ def render_review_body(
         suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
         if assessment.approval_condition:
-            parts.append(f"**Approval condition:** {escape(assessment.approval_condition)}")
+            parts.append(f"**Needs a person to approve:** {escape(assessment.approval_condition)}")
         if assessment.auto_approved:
-            parts.append(
-                f"**Already covered by auto-approval:** {escape(assessment.auto_approved)}"
-            )
+            parts.append(f"**Covered by auto-approve:** {escape(assessment.auto_approved)}")
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
@@ -624,6 +622,19 @@ async def clear_review_started_comment(
         return
     await delete_status_comment(owner=owner, repo=repo, comment_id=comment_id, token=token)
     await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": None})
+
+
+class ReviewCheckResult(BaseModel):
+    conclusion: CheckConclusion
+    title: str = "Review completed"
+    summary: str = ""
+
+
+class TrackedReviewCheck(BaseModel):
+    """The ``Robin Review`` check a reviewer thread's metadata tracks."""
+
+    review_check_run_id: int | None = None
+    review_check_pending_result: ReviewCheckResult | None = None
 
 
 async def settle_review_check_run(

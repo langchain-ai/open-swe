@@ -109,8 +109,13 @@ class NativeQueueRuntime:
             else config.policy
         )
         timeout = await self._timeout(repo, policy)
-        workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", snapshot.main_sha)
-        if workflow is None or hashlib.sha256(workflow).hexdigest() != config.workflow_digest:
+        assert policy.validation is not None
+        if policy.validation.suite == "services":
+            actual_digest = await repo.validation_source_digest(snapshot.main_sha)
+        else:
+            workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", snapshot.main_sha)
+            actual_digest = hashlib.sha256(workflow).hexdigest() if workflow is not None else None
+        if actual_digest != config.workflow_digest:
             raise ValueError("Queue workflow changed")
         work = await queue.prepare_native_validation(
             snapshot, timeout, lease, policy=config.policy, trust=trust

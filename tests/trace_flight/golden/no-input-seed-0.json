@@ -1,0 +1,8 @@
+{
+  "rulesVersion": 1,
+  "seed": 0,
+  "endTick": 155,
+  "endReason": "death",
+  "flapDeltas": [0],
+  "expected": {"score":0,"passed":0,"lives":0,"checkpoints":[{"tick":155,"stateHash":3125327126}]}
+}

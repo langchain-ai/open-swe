@@ -30,6 +30,7 @@ from openswe.github import webhook as github_webhooks
 from openswe.mda_channels import api, github_deliveries
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
+from openswe.webhooks import event_log
 from tests.conftest import register_github_logins
 from tests.github_channel import (
     ISSUE_RUN_INPUT,
@@ -40,6 +41,9 @@ from tests.github_channel import (
     forward_as_mda,
 )
 from tests.mda_helpers import mda_starts, stub_mda_runtime
+
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 THREAD = uuid.UUID("00000000-0000-4000-8000-0000000000aa")
 
@@ -116,6 +120,7 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         AsyncMock(
             return_value={
                 "ls_repo_provider": "github",
+                "billing_bucket": "user",
                 "user_id": "user-1",
                 "ls_attribution_identifier": "ada",
             }
@@ -404,7 +409,7 @@ async def test_an_installation_change_drops_the_cached_repository_listings(
     forget = AsyncMock()
     monkeypatch.setattr(channel, "forget_cached_repos", forget)
     forget_installations = AsyncMock()
-    monkeypatch.setattr(channel.REPO_INSTALLATIONS, "forget_all", forget_installations)
+    monkeypatch.setattr(channel.INSTALLATIONS, "forget_all", forget_installations)
     payload: dict[str, JsonValue] = {
         "action": action,
         "installation": {"id": 1, "account": {"id": 3, "login": "acme"}},
@@ -670,3 +675,22 @@ async def test_an_issue_thread_mda_never_ran_has_not_started(
     else:
         with pytest.raises(httpx.HTTPStatusError):
             await github_webhooks.conversation_started("t1")
+
+
+@pytest.mark.parametrize("event", ["check_run", "check_suite", "workflow_run", "status"])
+async def test_dropped_events_skip_the_event_log(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, event: str
+) -> None:
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset({f"github:{event}"}))
+    monkeypatch.setattr(webhook_common, "is_repo_allowed", lambda _repo: True)
+    record = AsyncMock()
+    monkeypatch.setattr(channel.EventLog, "record_once", record)
+    work = AsyncMock()
+    monkeypatch.setattr(channel, "_work_after_answer", work)
+    payload = {"repository": {"owner": {"login": "acme"}, "name": "repo"}}
+
+    delivered = await deliver_as_mda(app, event, payload, secret=SERVICE_SECRET)
+
+    assert delivered.work == ()
+    record.assert_not_awaited()
+    work.assert_not_awaited()

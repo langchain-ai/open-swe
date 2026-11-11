@@ -28,6 +28,7 @@ from openswe.dispatch import channel_of
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite
+from openswe.transcript.mirror import mirror_thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,15 @@ class ThreadStore:
         if updated is not None and metadata:
             self.copies.start(updated, metadata)
         return updated
+
+    async def retitle(self, thread_id: str, title: str) -> None:
+        """Give the thread a title of the system's choosing, unless a person renamed it."""
+        metadata: dict[str, JsonValue] = {"title": title, "title_seed": None}
+        updated = await index.update(thread_id, metadata, unless_title_locked=True)
+        if updated is None:
+            return
+        self.copies.start(updated, metadata)
+        await mirror_thread_metadata(thread_id, metadata)
 
     async def update_if_current(
         self,

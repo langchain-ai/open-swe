@@ -56,7 +56,11 @@ Past it, requests fail with status 429.
   Open SWE keeps every version someone runs, the newest five releases besides, and each thread's newest preview.
 - **An install** is one person adding an app to their sidebar, pinned to a version.
   It moves only when they press **Update**, and a version asking for more permissions waits for them to approve them.
-  Nobody installs for anyone else.
+  An instance admin can add a listed app to everyone's sidebar instead, under **Defaults → Apps for everyone**, approving its permissions for them and naming repositories it reads for each person who can read them on GitHub.
+  Such an install follows the release the admin approves until the person updates it themselves, and they can't remove it while it stays featured.
+  Every install of a featured app, one a person added themselves included, reads the repositories the admin names, and nobody stops sharing those while it's featured.
+  Turned off, or unlisted by its owner, it leaves the sidebars of everyone who never changed it, and Robin stops sharing what it shared; what a person shared stays.
+  The admin approves the permissions it asks for, for everyone, when turning it on and when updating to a release that asks for more.
 - **A preview** is the build an agent runs beside its thread.
   Each preview replaces the one before; it never reaches the sidebar until someone keeps it.
 
@@ -100,15 +104,17 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `sidebar.label` | At most 24 characters. |
 | `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`. |
 | `permissions` | What the plugin may ask for; see below. |
+| `collections` | Optional rules for storage collections, by name: `{ "captures": { "write": "app" } }`; see [Who writes a collection](#who-writes-a-collection). |
+| `review` | Optional work pull request reviews do for the app: `{ "instructions": "…", "writes": ["captures"], "browser": true }`; see [Review steps](#review-steps). |
 
 ### Permissions
 
 | Permission | Lets the plugin |
 | --- | --- |
 | *(none needed)* | navigate, show toasts, open links, look up people, and list or pick repositories |
-| `storage` | keep JSON documents, private to the person or shared per repository |
+| `storage` | keep JSON documents and files attached to them, private to the person or shared per repository |
 | `realtime` | join live rooms: an ordered update log plus presence, for editing together |
-| `github:read` | read repository info, refs, trees, files, history and pull requests |
+| `github:read` | read repository info, refs, trees, files, history and pull requests, and search pull requests |
 | `github:write` | create branches, commit files and open pull requests (also allows reads) |
 | `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
 
@@ -293,14 +299,64 @@ const stop = comments.watch(() => queryClient.invalidateQueries({ queryKey: ["co
 stop() // when you no longer show them
 ```
 
+#### Attachments
+
+A document can carry files, such as screenshots, that are too big or too binary for JSON.
+They are read and written by whoever may read and write the document, and deleted with it; rewriting the document keeps them.
+
+```ts
+await captures.put(key, capture)                       // the document must exist first
+await captures.attach(key, "home-after.png", blob)     // replaces any file of that name
+const shot = await captures.attachment(key, "home-after.png") // Blob for URL.createObjectURL, or null
+await captures.detach(key, "home-after.png")
+```
+
+Attaching or detaching a file counts as a change for `watch`.
+Name the files your documents need in the documents themselves.
+
 #### Limits
 
 - **Collection names:** a lowercase letter, then up to 63 more lowercase letters, digits, `_` or `-`.
 - **Keys:** up to 200 of `A–Z a–z 0–9 . _ : @ / -`, with no empty, `.` or `..` path segment.
 - **Size:** a document is at most 256 KB as JSON.
+- **Attachments:** a PNG, JPEG, WebP or GIF image, or a WebM or MP4 video, of at most 8 MiB, named with up to 120 of `A–Z a–z 0–9 . _ -` and starting with a letter or digit.
 
 Data belongs to the app, across its versions and everyone's installs of it.
 Another owner's app of the same name never sees it.
+
+#### Who writes a collection
+
+Anyone using the app who may read a scope may change it: write, create and delete its documents, and attach and detach their files.
+A collection the manifest marks `"write": "app"` is written only by the app's own server-side work; people read it, and every change they make, from the frame or straight over HTTP, fails with status 403.
+Today that work is the app's [review step](#review-steps): reviews write the collections it names.
+
+A rule binds the app's data as soon as the version that declares it runs: an install still pinned to an older version, or a preview, can't change a collection the newest release marks `app`.
+
+#### Review steps
+
+An app can have pull request reviews do work for it, such as screenshotting a frontend change, by declaring a review step:
+
+```json
+"review": {
+  "instructions": "Screenshot the routes the diff changes on the preview and on the base…",
+  "writes": ["captures"],
+  "browser": true
+}
+```
+
+- `instructions`, at most 8,000 characters, are what the review does for the app, after reviewing the code.
+  Reviews read them inside the app's own block; they can't change the review's rules, add tools, or widen where it writes.
+- `writes` names collections the manifest marks `"write": "app"`, so what a review saves can't be forged or deleted by people.
+  The review saves with `save_app_document`: a document and files from its sandbox as attachments, in the reviewed repository's scope, only under keys starting `pulls/<number>/` of that pull request.
+  A key ending in `/` gets a time-ordered id, so the newest of a prefix reads first.
+  A save keeps its document only once every file is attached.
+  A PNG is kept as a lossless WebP, under the name the review gave it, whenever that is smaller and changes no pixel, so take a file's type from its Blob, not its name.
+  When the pull request closes, merged or not, Robin deletes what reviews saved under its `pulls/<number>/` in these collections, with the files; a document a person created or changed stays, as does anything in the app's other collections.
+- `browser` gives the review the thread's LangSmith browser.
+  The browser never reaches the review's sandbox, and signs in only to the domains an instance admin lists under **Defaults → Review browser**, with the one MCP tool named there; sessions install only on LangSmith sites.
+
+A workspace admin adds apps to reviews in **Settings → Review → Apps in reviews**, or with `manage_review_apps`.
+Reviews follow the release that was newest when the admin added the app, so a later release changes no review until an admin updates it, and only on private repositories, whose previews run only code the organization's members pushed.
 
 ### GitHub
 
@@ -326,6 +382,26 @@ const sha = await repo.commit({
 })
 const pull = (await repo.findPull("docs/intro")) ?? (await repo.openPull({ head: "docs/intro", base: info.defaultBranch, title: "Update the intro" }))
 ```
+
+Read a pull request by its number, as GitHub has it now, or `null` when it has none by that number:
+
+```ts
+const pr = await repo.pull(12)
+// { number, title, url, state, merged, draft, head, base, headSha, baseSha, author,
+//   createdAt, updatedAt, requestedReviewers, requestedTeams }
+```
+
+`requestedTeams` are `org/slug`; GitHub drops a request once it is answered with a review.
+
+Search the open pull requests of every repository the person shared and can still read, by their part in them:
+
+```ts
+const { pulls, incomplete } = await host.pulls.search({ role: "review-requested" }) // or "author"
+// pulls: [{ repository, number, title, url, draft, author, createdAt, updatedAt }]
+```
+
+`review-requested` includes requests to the person's teams.
+`incomplete` says GitHub left some out: past its first page of results, or because its search timed out.
 
 A commit carries at most 100 files and 100 deletions.
 `openPull` also takes `body` and `draft`.
@@ -407,6 +483,9 @@ await host.agent.share(
 )
 
 await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the person presses Send
+
+// Images go in the composer beside the draft, for the person to check before sending.
+await host.agent.open({ draft: "What changed here?", images: [{ name: "after.png", blob }] })
 ```
 
 - **Chats** are yours to scope.
@@ -428,6 +507,8 @@ await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the
   After 20 runs your results started since the person last wrote, the agent waits for them, and their next message brings it what you returned.
 - **Results are data.**
   The agent treats them, and your instructions and context, as your plugin's, not as instructions from the person, so a document can't steer it.
+- **Images** in a draft are PNG, JPEG, WebP or GIF Blobs: at most 5, of 10 MB each, as the composer takes them itself.
+  Nothing is sent until the person presses Send, and they can remove any image first.
 
 ### Errors
 

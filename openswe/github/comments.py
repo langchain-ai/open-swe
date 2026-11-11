@@ -46,6 +46,7 @@ def _load_open_swe_tags() -> tuple[str, ...]:
 
 
 OPEN_SWE_TAGS = _load_open_swe_tags()
+ROBIN_NOTIFICATION_MARKER = "<!-- robin-notification -->"
 
 PrState = Literal["open", "draft", "merged", "closed"]
 
@@ -246,7 +247,7 @@ async def post_github_comment(
         try:
             response = await client.post(
                 url,
-                json={"body": body},
+                json={"body": f"{body}\n\n{ROBIN_NOTIFICATION_MARKER}"},
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/vnd.github+json",

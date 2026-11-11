@@ -7,7 +7,6 @@ from datetime import timedelta
 
 from openswe import event_claims
 from openswe.config import ENV
-from openswe.database import postgres
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +53,10 @@ async def slack_event_already_seen(event_id: str) -> bool:
         return False
     if event_id in _claimed_keys:
         return True
-    if postgres.configured():
-        try:
-            return await event_claims.held(_CLAIM_SCOPE, event_id)
-        except Exception:
-            logger.warning("Checking Slack event claim failed", exc_info=True)
+    try:
+        return await event_claims.held(_CLAIM_SCOPE, event_id)
+    except Exception:
+        logger.warning("Checking Slack event claim failed", exc_info=True)
     return False
 
 

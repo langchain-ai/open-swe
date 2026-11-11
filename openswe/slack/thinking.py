@@ -169,7 +169,7 @@ class SlackThinkingStream:
 
     async def start(self) -> bool:
         initial = Step(
-            _step_id(self.run_id, (), "startup"), "Preparing the agent workspace", "in_progress"
+            _step_id(self.run_id, (), "startup"), "Preparing the workspace", "in_progress"
         )
         try:
             self.message_ts = await start_slack_stream(

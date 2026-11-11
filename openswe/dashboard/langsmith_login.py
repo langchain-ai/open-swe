@@ -26,10 +26,12 @@ from openswe.dashboard.oauth_credentials import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users.authorization import UnauthorizedUser
+from openswe.utils.dashboard_links import PublicOrigin
 from openswe.utils.http_pool import pooled_transport
 
 if TYPE_CHECKING:
     from openswe.dashboard.principal import DashboardPrincipal
+    from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,11 @@ LANGSMITH_ORG_DISCOVERY = LangSmithOrgDiscovery()
 
 
 class LangSmithLogin:
+    @staticmethod
+    def slack_onboarding_url() -> str | None:
+        base = PublicOrigin.dashboard_api_base_url()
+        return f"{base}/dashboard/api/auth/langsmith/login?connect_slack=true" if base else None
+
     def __init__(self) -> None:
         self.issuer = langsmith_issuer()
         self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
@@ -189,6 +196,7 @@ class LangSmithLogin:
         nonce: str,
         handoff_challenge: str | None,
         handoff_port: int | None,
+        connect_slack: bool = False,
     ) -> str:
         endpoints = await self.metadata()
         verifier = secrets.token_urlsafe(32)
@@ -200,6 +208,7 @@ class LangSmithLogin:
             provider="langsmith",
             encrypted_code_verifier=encrypt_token(verifier),
             redirect_uri=redirect_uri,
+            connect_slack=connect_slack,
         )
         params = {
             "response_type": "code",
@@ -313,16 +322,25 @@ class LangSmithLogin:
         )
 
     async def access_token(self, key: str) -> str | None:
-        from openswe.dashboard.principal import DashboardPrincipal
         from openswe.users import User
 
         user = await User.for_login("github", key)
         if user is None:
             return None
+        if not any(item.provider == "langsmith" for item in user.identities):
+            return None
+        return await self.authorize_user(user)
+
+    async def authorize_user(self, user: User) -> str:
+        """Authorize a Robin person through their own linked LangSmith login."""
+        from openswe.dashboard.principal import DashboardPrincipal
+
         identity = next((item for item in user.identities if item.provider == "langsmith"), None)
         if identity is None:
-            return None
-        principal = DashboardPrincipal("langsmith", key, user.id, identity.external_id)
+            raise HTTPException(401, "Sign in with LangSmith to use Robin")
+        principal = DashboardPrincipal(
+            "langsmith", f"user:{user.id}", user.id, identity.external_id
+        )
         return await self.authorize_session(principal)
 
     async def credential(self, key: str) -> OAuthCredential:

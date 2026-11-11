@@ -82,6 +82,50 @@ def test_missing_github_authorization_returns_direct_reconnect_without_clearing_
         assert "set-cookie" not in response.headers
 
 
+@pytest.mark.parametrize(
+    ("status", "message", "headers", "expected"),
+    [
+        (403, "API rate limit exceeded", {}, 429),
+        (403, "secondary rate limit", {}, 429),
+        (403, "Forbidden", {"X-RateLimit-Remaining": "0"}, 429),
+        (403, "Forbidden", {"Retry-After": "60"}, 429),
+        (429, "Too many requests", {"Retry-After": "30"}, 429),
+        (429, "Too many requests", {"Retry-After": "invalid"}, 429),
+        (403, "Resource not accessible", {}, 403),
+        (401, "Bad credentials", {}, 401),
+        (404, "Not found", {}, 404),
+        (200, "", {}, 200),
+    ],
+)
+def test_repo_access_distinguishes_rate_limits_from_permission_denials(
+    status: int, message: str, headers: dict[str, str], expected: int
+) -> None:
+    app = FastAPI()
+
+    @app.get("/protected")
+    async def protected() -> None:
+        repo_access.RepoAccessResponse.require(
+            httpx2.Response(
+                status,
+                json={"message": message},
+                headers=headers,
+                request=httpx2.Request("GET", "https://api.github.com/repos/acme/api"),
+            )
+        )
+
+    with TestClient(app) as client:
+        response = client.get("/protected")
+    assert response.status_code == expected
+    if expected == 429:
+        assert "rate limit" in response.json()["detail"]
+        retry_after = headers.get("Retry-After", "")
+        assert response.headers.get("Retry-After") == (
+            retry_after if retry_after.isascii() and retry_after.isdecimal() else None
+        )
+    elif expected == 403:
+        assert response.json()["detail"] == "no access to this private repository"
+
+
 async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -404,7 +404,7 @@ class _ThreadREPL:
         worker: ThreadWorker,
         runtime: Runtime,
         *,
-        timeout: float,
+        timeout: float | None,
         capture_console: bool,
         max_stdout_chars: int,
         max_ptc_calls: int | None = 256,
@@ -419,7 +419,7 @@ class _ThreadREPL:
         # for sync evals. Async evals pass `timeout=` per call so each
         # call gets a fresh budget — matches what a REPL user expects,
         # and what we describe in the system prompt.
-        self._per_call_timeout = timeout
+        self._per_call_timeout = float("inf") if timeout is None else timeout
         self._capture_console = capture_console
         # Static budget config; mutable counters live in `_ptc_state`.
         self._max_ptc_calls = max_ptc_calls
@@ -1081,7 +1081,7 @@ class _Registry:
     """
 
     memory_limit: int
-    timeout: float
+    timeout: float | None
     capture_console: bool
     max_stdout_chars: int
     max_ptc_calls: int | None = 256
@@ -1167,9 +1167,8 @@ class _Registry:
         return _Slot(worker=worker, runtime=runtime, repl=repl)
 
     def _close_slot(self, slot: _Slot) -> None:
-        # Close the context on its owning worker thread before closing the
-        # runtime. This avoids unsendable handle wrappers being finalized on
-        # a non-owner thread during later GC.
+        # Close the context and runtime on the owning worker thread, which
+        # runs all of the slot's QuickJS work, before stopping the worker.
         with contextlib.suppress(Exception):
             slot.repl.close()
         # Best-effort; never block shutdown on a misbehaving runtime.

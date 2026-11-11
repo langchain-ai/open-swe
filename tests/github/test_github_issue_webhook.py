@@ -13,6 +13,7 @@ from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun
 
 from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
+from openswe.github.comments import ROBIN_NOTIFICATION_MARKER
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.review.findings import get_thread_slack_ref
 from openswe.review.reviews import trigger_re_review
@@ -316,6 +317,13 @@ def _untagged_pr_event(
         ("issue_comment", "", {"login": "stranger"}, None, False),
         ("issue_comment", "", {"login": "octocat"}, "!keep-open", False),
         ("issue_comment", "", {"login": "octocat"}, "@open-swe !keep-open", True),
+        (
+            "issue_comment",
+            "",
+            {"login": "octocat"},
+            f"Sandbox unreachable.\n\n{ROBIN_NOTIFICATION_MARKER}",
+            False,
+        ),
         ("pull_request_review", "", {"login": "octocat"}, None, True),
         ("pull_request_review", "edited", {"login": "octocat"}, None, True),
         ("pull_request_review", "", {"login": "octocat"}, "!keep-open", True),
@@ -366,7 +374,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     expected_thread_id = None if webhook_common.mentions_open_swe(body) else "agent-thread"
     assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
     if body is not None and not accepted:
-        # An untagged workflow command reaches the backend as no work at all.
+        # An untagged workflow command or a Robin notification reaches the backend as no work.
         assert not delivered.comment
 
 
@@ -498,10 +506,9 @@ def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
     assert ref.url in result["error"]
 
 
-@pytest.mark.parametrize("review_source", ["slack", "dashboard", "goal"])
+@pytest.mark.parametrize("review_source", ["slack", "dashboard"])
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_source: str) -> None:
     dashboard_draft = review_source == "dashboard"
-    goal_mode = review_source == "goal"
     captured: dict[str, object] = {}
     metadata: dict[str, object] = {
         "slack_thread": {"channel_id": "COLD", "thread_ts": "1700000000.000001"}
@@ -525,7 +532,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
         captured["metadata_token"] = token
         return {
             "html_url": pr_ref.url,
-            "draft": dashboard_draft or goal_mode,
+            "draft": dashboard_draft,
             "base": {"sha": "base-sha"},
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
@@ -592,9 +599,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
                 url="https://github.com/langchain-ai/open-swe/pull/1244",
             ),
             source="slack",
-            slack_channel_id="" if goal_mode else "C123",
-            slack_thread_ts="" if goal_mode else "1700000000.000100",
-            allow_draft=goal_mode,
+            slack_channel_id="C123",
+            slack_thread_ts="1700000000.000100",
         )
     )
 
@@ -617,7 +623,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
-    if dashboard_draft or goal_mode:
+    if dashboard_draft:
         assert "slack_thread" not in config
         assert get_thread_slack_ref(metadata) is None
     else:
@@ -636,6 +642,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("thread_kind", ["agent", "channel", "legacy"])
 @pytest.mark.parametrize(
     ("state", "body", "inline_feedback", "tagged", "should_dispatch"),
     [
@@ -656,8 +663,29 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
     inline_feedback: bool,
     tagged: bool,
     should_dispatch: bool,
+    thread_kind: str,
 ) -> None:
+    channel_owned = thread_kind == "channel"
     thread_id = "00000000-0000-0000-0000-000000000001"
+    pr_thread_id = github_webhooks.pr_comment_thread_id("langchain-ai", "open-swe", 3127)
+    successor_id = "00000000-0000-0000-0000-000000000002"
+    legacy = thread_kind == "legacy"
+    if legacy:
+        monkeypatch.setattr(
+            github_webhooks.index, "live_thread_id", AsyncMock(return_value=successor_id)
+        )
+        monkeypatch.setattr(
+            github_webhooks.index, "current_thread_id", AsyncMock(return_value=thread_id)
+        )
+    succeed = AsyncMock(return_value=successor_id if legacy else thread_id)
+    monkeypatch.setattr(github_webhooks.succession, "succeed", succeed)
+    monkeypatch.setattr(github_webhooks.THREADS, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(github_webhooks.THREADS, "create", AsyncMock())
+    channel = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "_channel_takes", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_webhooks, "_channel_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_webhooks.index, "get", AsyncMock(return_value=None))
+    metadata = {"channel": "slack"} if channel_owned else {}
     comments: list[dict[str, object]] = [
         {
             "type": "review",
@@ -698,8 +726,13 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
             )
         ),
     )
-    monkeypatch.setattr(PullRequest, "link_thread", AsyncMock())
-    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", AsyncMock(return_value={}))
+    link = AsyncMock()
+    monkeypatch.setattr(PullRequest, "link_thread", link)
+    monkeypatch.setattr(
+        webhook_common,
+        "get_thread_metadata_safe",
+        AsyncMock(side_effect=lambda tid: None if legacy and tid == successor_id else metadata),
+    )
     monkeypatch.setattr(webhook_common, "authorize_github_thread", AsyncMock(return_value={}))
     monkeypatch.setattr(
         webhook_common, "get_or_resolve_thread_github_token", AsyncMock(return_value="token")
@@ -710,7 +743,6 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
     monkeypatch.setattr(webhook_common, "trigger_or_queue_run", dispatch)
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="octocat@example.com"))
     monkeypatch.setattr(User, "known_logins", AsyncMock(return_value=frozenset({"octocat"})))
-    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: False)
 
     await github_webhooks.process_github_pr_comment(
         {
@@ -727,16 +759,25 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
         },
         "pull_request_review",
         agent_thread_id=None if tagged else thread_id,
+        channel=channel,
     )
 
     fetch_comments.assert_awaited_once()
     if should_dispatch:
         react.assert_awaited_once()
         dispatch.assert_awaited_once()
-        assert dispatch.call_args.args[0] == thread_id
+        expected_thread = pr_thread_id if channel_owned else successor_id if legacy else thread_id
+        assert dispatch.call_args.args[0] == expected_thread
+        if legacy:
+            succeed.assert_awaited_once_with(thread_id)
+        if channel_owned:
+            channel.adopt.assert_awaited_once()
     else:
         react.assert_not_awaited()
         dispatch.assert_not_awaited()
+        channel.adopt.assert_not_awaited()
+        succeed.assert_not_awaited()
+        link.assert_not_awaited()
 
 
 @pytest.mark.parametrize(("workspace", "runs_in"), [("core", "core"), (None, "oss")])

@@ -23,7 +23,8 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from uuid import UUID
 
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
@@ -33,6 +34,9 @@ from openswe.invocation import resolve_invocation_id
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.page_commands.offers import PageSession
 from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
+
+if TYPE_CHECKING:
+    from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +126,8 @@ class RunConfig(BaseModel):
 
     # Actor
     user_id: str | None = None
-    auth_provider: Literal["github", "langsmith"] = "github"
+    # False when the person has no linked GitHub account, so the run gets no GitHub access.
+    github_linked: bool = True
     github_login: str | None = None
     github_user_id: str | None = None
     user_email: str | None = None
@@ -183,13 +188,14 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     slack_ask: bool | None = None
     slack_kickoff_eligible: bool | None = None
-    # The run keeps a live activity message in its Slack thread, which its final reply replaces.
-    slack_live_activity: bool | None = None
     # First run of a thread broken out from another Slack thread.
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
     slack_action_token: str | None = None
+    # The Slack message whose kept search grant this run may use. Only the turn that
+    # message starts sets it; runs that copy `slack_thread` later don't.
+    slack_search_message_ts: str | None = None
     # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None
@@ -208,9 +214,26 @@ class RunConfig(BaseModel):
     schedule_id: str | None = None
     background_task_completion: bool | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_auth_provider(cls, data: object) -> object:
+        if isinstance(data, Mapping) and "auth_provider" in data:
+            data = dict(data)
+            if data.pop("auth_provider") == "langsmith":
+                data["github_linked"] = False
+        return data
+
+    @staticmethod
+    def unlinked(configurable: Mapping[str, object]) -> bool:
+        """Whether a raw ``configurable`` is for a person with no linked GitHub account."""
+        return (
+            configurable.get("github_linked") is False
+            or configurable.get("auth_provider") == "langsmith"
+        )
+
     @model_validator(mode="after")
-    def authenticated_experience(self) -> Self:
-        if self.auth_provider == "langsmith":
+    def without_github(self) -> Self:
+        if not self.github_linked:
             self.github_login = None
             self.github_user_id = None
             self.repo = None
@@ -270,15 +293,17 @@ class RunConfig(BaseModel):
         extra can be any object; dropping it beats raising and losing the rest.
         """
         try:
-            return self.model_dump(mode="json", exclude_unset=True)
+            encoded = self.model_dump(mode="json", exclude_unset=True)
         except PydanticSerializationError:
             logger.warning("Dropping unserializable configurable keys", exc_info=True)
-        encoded: dict[str, Any] = {}
-        for key, value in self.model_dump(exclude_unset=True).items():
-            try:
-                encoded[key] = to_jsonable_python(value)
-            except PydanticSerializationError:
-                continue
+            encoded = {}
+            for key, value in self.model_dump(exclude_unset=True).items():
+                try:
+                    encoded[key] = to_jsonable_python(value)
+                except PydanticSerializationError:
+                    continue
+        if not self.github_linked:
+            encoded["auth_provider"] = "langsmith"
         return encoded
 
     def get(self, key: str) -> Any:
@@ -305,7 +330,7 @@ class RunConfig(BaseModel):
     @property
     def sender_id(self) -> str | None:
         """Who the run acts for, in the form ``Principal.sender_id`` records."""
-        if self.auth_provider == "langsmith" and self.user_id:
+        if not self.github_linked and self.user_id:
             return f"user:{self.user_id}"
         if self.github_login:
             return f"github:{self.github_login}"
@@ -358,3 +383,25 @@ class RunConfig(BaseModel):
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    async def automation_creator(self) -> User | None:
+        """Who created the automation this run executes on its own thread, to credit its spend to.
+
+        Only for attribution: an automation run never acts as, or with the credentials
+        of, its creator.
+        """
+        from openswe.schedules.store import get_agent_schedule, schedule_thread_metadata
+        from openswe.users import User
+
+        if not self.schedule_id:
+            return None
+        metadata = await schedule_thread_metadata(self)
+        if metadata is None or metadata.get("schedule_id") != self.schedule_id:
+            return None
+        if creator_id := metadata.get("automation_creator_user_id"):
+            try:
+                return await User.get(UUID(str(creator_id)))
+            except ValueError:
+                return None
+        record = await get_agent_schedule(self.schedule_id)
+        return await User.automation_creator(record) if record is not None else None

@@ -8,7 +8,6 @@ import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import type { SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { connectService, loginUrl } from "@/lib/api"
-import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -42,7 +41,7 @@ function SlackRow({ user }: { user: SessionUser }) {
       description={
         connected
           ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
-          : "Sign in with Slack so Robin resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
+          : "Connect Slack so Robin recognizes you when you tag it. Your verified email also connects Linear mentions."
       }
       control={
         <div className="flex items-center gap-space-2">
@@ -157,7 +156,7 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
     <SettingsSection title="Accounts">
       <GitHubRow user={user} />
-      {hasLinkedGitHub(user) && <SlackRow user={user} />}
+      <SlackRow user={user} />
       <LangSmithRow user={user} />
     </SettingsSection>
   )

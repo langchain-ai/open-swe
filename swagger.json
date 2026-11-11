@@ -547,6 +547,25 @@
         "title": "AppNotification",
         "type": "object"
       },
+      "AppRelease": {
+        "description": "An app pinned to the release an admin approved, so its owner's later releases change\nnothing until an admin picks them up.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "release": {
+            "title": "Release",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "release"
+        ],
+        "title": "AppRelease",
+        "type": "object"
+      },
       "AppUser": {
         "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
         "properties": {
@@ -656,6 +675,42 @@
           "updated_at"
         ],
         "title": "AssessmentFeedback",
+        "type": "object"
+      },
+      "AttachmentModel": {
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "content_type",
+          "size",
+          "updated_at"
+        ],
+        "title": "AttachmentModel",
         "type": "object"
       },
       "AttemptView": {
@@ -1107,6 +1162,42 @@
           "attempts"
         ],
         "title": "BatchView",
+        "type": "object"
+      },
+      "BestView": {
+        "properties": {
+          "endReason": {
+            "title": "Endreason",
+            "type": "string"
+          },
+          "endTick": {
+            "title": "Endtick",
+            "type": "integer"
+          },
+          "flapDeltas": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Flapdeltas",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seed",
+          "endTick",
+          "endReason",
+          "flapDeltas",
+          "score"
+        ],
+        "title": "BestView",
         "type": "object"
       },
       "BlockSuggestionResponse": {
@@ -1731,6 +1822,22 @@
           "action"
         ],
         "title": "CloseAction",
+        "type": "object"
+      },
+      "CollectionRules": {
+        "description": "Who may change one of the app's storage collections; anyone who may read it reads it.",
+        "properties": {
+          "write": {
+            "default": "people",
+            "enum": [
+              "people",
+              "app"
+            ],
+            "title": "Write",
+            "type": "string"
+          }
+        },
+        "title": "CollectionRules",
         "type": "object"
       },
       "CommentBatchIntent": {
@@ -2423,6 +2530,24 @@
       },
       "DesktopEnvironments": {
         "properties": {
+          "dashboard_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dashboard Base Url"
+          },
+          "dashboard_origins": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dashboard Origins",
+            "type": "array"
+          },
           "environments": {
             "items": {
               "$ref": "#/components/schemas/DesktopEnvironment"
@@ -2432,7 +2557,8 @@
           }
         },
         "required": [
-          "environments"
+          "environments",
+          "dashboard_origins"
         ],
         "title": "DesktopEnvironments",
         "type": "object"
@@ -2757,6 +2883,66 @@
         "title": "EventListener",
         "type": "object"
       },
+      "EventLogPage": {
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchedEvent"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "cursor"
+        ],
+        "title": "EventLogPage",
+        "type": "object"
+      },
+      "EventUser": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "logins": {
+            "title": "Logins",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "logins"
+        ],
+        "title": "EventUser",
+        "type": "object"
+      },
+      "EventVisibility": {
+        "enum": [
+          "public",
+          "private",
+          "admin"
+        ],
+        "type": "string"
+      },
       "ExcludedHunk": {
         "additionalProperties": false,
         "description": "A hunk left off the card; an empty ``header`` stands for a whole file without a text diff.",
@@ -2888,6 +3074,32 @@
           "requested"
         ],
         "title": "ExpeditedExclusions",
+        "type": "object"
+      },
+      "FeaturedApp": {
+        "description": "An app in everyone's web UI, and the repositories it reads for each person who can.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "release": {
+            "title": "Release",
+            "type": "string"
+          },
+          "repositories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "app",
+          "release"
+        ],
+        "title": "FeaturedApp",
         "type": "object"
       },
       "FeedbackResponse": {
@@ -3166,118 +3378,6 @@
           "events"
         ],
         "title": "GitHubTrigger",
-        "type": "object"
-      },
-      "Goal": {
-        "description": "What the thread's task keeps of its goal.",
-        "properties": {
-          "ask": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ask"
-          },
-          "objective": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Objective"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UserWaitReason"
-              },
-              {
-                "$ref": "#/components/schemas/PauseReason"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "state": {
-            "default": "working",
-            "enum": [
-              "working",
-              "waiting",
-              "waiting_on_user",
-              "paused",
-              "complete"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "updated_at_ms": {
-            "default": 0,
-            "title": "Updated At Ms",
-            "type": "integer"
-          },
-          "waits": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/GoalWait"
-            },
-            "title": "Waits",
-            "type": "array"
-          }
-        },
-        "title": "Goal",
-        "type": "object"
-      },
-      "GoalWait": {
-        "description": "One thing that wakes the thread again.",
-        "properties": {
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
-          },
-          "kind": {
-            "enum": [
-              "wakeup",
-              "command",
-              "monitor",
-              "event",
-              "review"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "until": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Until"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "title": "GoalWait",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -3674,6 +3774,34 @@
           "selected"
         ],
         "title": "LabelChange",
+        "type": "object"
+      },
+      "LeaderRowView": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "you": {
+            "title": "You",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rank",
+          "name",
+          "score",
+          "you"
+        ],
+        "title": "LeaderRowView",
         "type": "object"
       },
       "LineComment": {
@@ -5368,16 +5496,6 @@
         "title": "PauseChange",
         "type": "object"
       },
-      "PauseReason": {
-        "enum": [
-          "stopped",
-          "requested",
-          "no_progress",
-          "failing_commands",
-          "error"
-        ],
-        "type": "string"
-      },
       "PendingReview": {
         "description": "The viewer's unsubmitted GitHub review on a PR, with its line comments.",
         "properties": {
@@ -5652,6 +5770,16 @@
       },
       "PluginManifest": {
         "properties": {
+          "collections": {
+            "maxProperties": 64,
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]{0,63}$": {
+                "$ref": "#/components/schemas/CollectionRules"
+              }
+            },
+            "title": "Collections",
+            "type": "object"
+          },
           "description": {
             "default": "",
             "maxLength": 280,
@@ -5676,6 +5804,16 @@
             },
             "title": "Permissions",
             "type": "array"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "sidebar": {
             "$ref": "#/components/schemas/SidebarEntry"
@@ -5710,6 +5848,11 @@
       },
       "PluginSummary": {
         "properties": {
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -6123,40 +6266,6 @@
             ],
             "title": "Experimental Conditional Approval"
           },
-          "experimental_live_activity": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Live Activity"
-          },
-          "experimental_memory": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Memory"
-          },
-          "goal_mode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Goal Mode"
-          },
           "personal_kitchen_channel_id": {
             "anyOf": [
               {
@@ -6167,17 +6276,6 @@
               }
             ],
             "title": "Personal Kitchen Channel Id"
-          },
-          "pr_failure_reactions": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Failure Reactions"
           },
           "review_draft_prs": {
             "anyOf": [
@@ -6679,9 +6777,35 @@
       },
       "PullRequestModel": {
         "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
           "base": {
             "title": "Base",
             "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "draft": {
             "title": "Draft",
@@ -6691,9 +6815,31 @@
             "title": "Head",
             "type": "string"
           },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "merged": {
+            "title": "Merged",
+            "type": "boolean"
+          },
           "number": {
             "title": "Number",
             "type": "integer"
+          },
+          "requested_reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Reviewers",
+            "type": "array"
+          },
+          "requested_teams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Teams",
+            "type": "array"
           },
           "state": {
             "title": "State",
@@ -6702,6 +6848,17 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "url": {
             "title": "Url",
@@ -6713,9 +6870,17 @@
           "title",
           "url",
           "state",
+          "merged",
           "draft",
           "head",
-          "base"
+          "base",
+          "head_sha",
+          "base_sha",
+          "author",
+          "created_at",
+          "updated_at",
+          "requested_reviewers",
+          "requested_teams"
         ],
         "title": "PullRequestModel",
         "type": "object"
@@ -6910,6 +7075,27 @@
         "title": "PullRequestReviewer",
         "type": "object"
       },
+      "PullRequestSearch": {
+        "properties": {
+          "incomplete": {
+            "title": "Incomplete",
+            "type": "boolean"
+          },
+          "pulls": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestSummary"
+            },
+            "title": "Pulls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pulls",
+          "incomplete"
+        ],
+        "title": "PullRequestSearch",
+        "type": "object"
+      },
       "PullRequestSearchResult": {
         "properties": {
           "number": {
@@ -7006,6 +7192,76 @@
           "state"
         ],
         "title": "PullRequestState",
+        "type": "object"
+      },
+      "PullRequestSummary": {
+        "description": "A pull request as GitHub's search lists it, before reading it in full.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "number",
+          "title",
+          "url",
+          "draft",
+          "author",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PullRequestSummary",
         "type": "object"
       },
       "PullRequestThreadRun": {
@@ -7412,6 +7668,17 @@
             "default": "",
             "title": "Requested Channel",
             "type": "string"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
           },
           "reused": {
             "default": false,
@@ -7929,6 +8196,36 @@
           "started"
         ],
         "title": "ReviewScoutTrigger",
+        "type": "object"
+      },
+      "ReviewStep": {
+        "description": "What the app has a pull request's review do for it, once a workspace adds it to reviews.\n\nThe review follows ``instructions`` beside its own, writes only the collections in\n``writes`` (each app-written, so people cannot forge what it saves), and gets the\nthread's browser when ``browser`` asks for it.",
+        "properties": {
+          "browser": {
+            "default": false,
+            "title": "Browser",
+            "type": "boolean"
+          },
+          "instructions": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "writes": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Writes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instructions"
+        ],
+        "title": "ReviewStep",
         "type": "object"
       },
       "ReviewStyle": {
@@ -8781,6 +9078,44 @@
         "title": "RoomUpdateBody",
         "type": "object"
       },
+      "RunResultView": {
+        "properties": {
+          "board": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRowView"
+            },
+            "title": "Board",
+            "type": "array"
+          },
+          "newBest": {
+            "title": "Newbest",
+            "type": "boolean"
+          },
+          "previousBest": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousbest"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "score",
+          "previousBest",
+          "newBest",
+          "board"
+        ],
+        "title": "RunResultView",
+        "type": "object"
+      },
       "ScheduleCreateBody": {
         "properties": {
           "admin_thread": {
@@ -9015,6 +9350,186 @@
           }
         },
         "title": "ScheduleUpdateBody",
+        "type": "object"
+      },
+      "SearchedEvent": {
+        "description": "A logged row with the names of the rows it links to.",
+        "properties": {
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/JsonValue-Output"
+          },
+          "pull_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Id"
+          },
+          "pull_request_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Name"
+          },
+          "pull_request_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Title"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "repository_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Id"
+          },
+          "repository_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Name"
+          },
+          "source": {
+            "$ref": "#/components/schemas/WebhookSource"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Name"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/EventVisibility",
+            "default": "public"
+          },
+          "visible_to_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible To User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Name"
+          }
+        },
+        "required": [
+          "source",
+          "event_type",
+          "delivery_id",
+          "received_at",
+          "user_id",
+          "workspace_id",
+          "repository_id",
+          "pull_request_id",
+          "payload"
+        ],
+        "title": "SearchedEvent",
+        "type": "object"
+      },
+      "SeasonView": {
+        "properties": {
+          "rulesVersion": {
+            "title": "Rulesversion",
+            "type": "integer"
+          },
+          "seasonId": {
+            "format": "uuid",
+            "title": "Seasonid",
+            "type": "string"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seasonId",
+          "rulesVersion",
+          "seed"
+        ],
+        "title": "SeasonView",
         "type": "object"
       },
       "SessionCreateBody": {
@@ -10291,6 +10806,17 @@
       },
       "UserPreferencesUpdate": {
         "properties": {
+          "auto_show_changes": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Show Changes"
+          },
           "default_visibility": {
             "enum": [
               "public",
@@ -10331,13 +10857,6 @@
         ],
         "title": "UserPreferencesUpdate",
         "type": "object"
-      },
-      "UserWaitReason": {
-        "enum": [
-          "blocked",
-          "ready"
-        ],
-        "type": "string"
       },
       "ValidationError": {
         "properties": {
@@ -10468,6 +10987,18 @@
         ],
         "title": "WebhookResponse",
         "type": "object"
+      },
+      "WebhookSource": {
+        "enum": [
+          "github",
+          "slack",
+          "linear",
+          "deployment",
+          "workspace",
+          "human_review",
+          "reviewer"
+        ],
+        "type": "string"
       },
       "WorkerActivity": {
         "properties": {
@@ -11301,6 +11832,21 @@
             ],
             "title": "Fable Enabled"
           },
+          "featured_apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FeaturedApp"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Featured Apps"
+          },
           "gateway_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -11394,6 +11940,47 @@
               }
             ],
             "title": "Pr Summaries"
+          },
+          "review_apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AppRelease"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Apps"
+          },
+          "review_browser_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Browser Domains"
+          },
+          "review_browser_session_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Browser Session Tool"
           },
           "review_draft_prs": {
             "agent_feature_flag": true,
@@ -12052,6 +12639,266 @@
         "tags": [
           "dashboard",
           "review"
+        ]
+      }
+    },
+    "/dashboard/api/admin/event-log": {
+      "get": {
+        "operationId": "api_search_event_log_dashboard_api_admin_event_log_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start Time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End Time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/WebhookSource"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Event Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type_prefix",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Event Type Prefix",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delivery_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pull_request_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pull Request Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "pattern": "^[^|]+\\|\\(\\d+,\\d+\\)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventLogPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Search Event Log",
+        "tags": [
+          "dashboard",
+          "event-log"
+        ]
+      }
+    },
+    "/dashboard/api/admin/event-log/users": {
+      "get": {
+        "operationId": "api_event_log_users_dashboard_api_admin_event_log_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EventUser"
+                  },
+                  "title": "Response Api Event Log Users Dashboard Api Admin Event Log Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Event Log Users",
+        "tags": [
+          "dashboard",
+          "event-log"
         ]
       }
     },
@@ -13011,6 +13858,16 @@
                 }
               ],
               "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "connect_slack",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Connect Slack",
+              "type": "boolean"
             }
           },
           {
@@ -16455,6 +17312,7 @@
     },
     "/dashboard/api/plugins": {
       "get": {
+        "description": "The viewer's apps, kept in line with the ones an admin added for everyone.",
         "operationId": "api_list_plugins_dashboard_api_plugins_get",
         "responses": {
           "200": {
@@ -16645,6 +17503,56 @@
           }
         ],
         "summary": "Api Publish App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/apps/versions/{version_id}": {
+      "get": {
+        "description": "A release the viewer may add, of their own app or a listed one, with its manifest.",
+        "operationId": "api_get_app_version_dashboard_api_plugins_apps_versions__version_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppVersionModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get App Version",
         "tags": [
           "dashboard",
           "plugins"
@@ -16895,6 +17803,283 @@
           }
         ],
         "summary": "Api Uninstall Plugin",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/attachments/{collection}/{name}": {
+      "delete": {
+        "operationId": "api_delete_plugin_attachment_dashboard_api_plugins__installation_id__attachments__collection___name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Plugin Attachment",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "get": {
+        "description": "An attachment's bytes, which the dashboard hands the plugin's frame as a Blob.",
+        "operationId": "api_get_plugin_attachment_dashboard_api_plugins__installation_id__attachments__collection___name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/gif": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "video/mp4": {},
+              "video/webm": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Plugin Attachment",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "put": {
+        "description": "Keeps the request's body as ``name`` beside the document under ``key``.\n\nThe body is an image or a video, sent as its own content type.",
+        "operationId": "api_put_plugin_attachment_dashboard_api_plugins__installation_id__attachments__collection___name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Collection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repository",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Plugin Attachment",
         "tags": [
           "dashboard",
           "plugins"
@@ -17587,6 +18772,69 @@
           }
         ],
         "summary": "Api Put Plugin Document",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/pulls": {
+      "get": {
+        "description": "Open pull requests in the repositories the person shared and can read, by their role.",
+        "operationId": "api_plugin_search_pulls_dashboard_api_plugins__installation_id__github_pulls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "enum": [
+                "review-requested",
+                "author"
+              ],
+              "title": "Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestSearch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Search Pulls",
         "tags": [
           "dashboard",
           "plugins"
@@ -18320,6 +19568,84 @@
           }
         ],
         "summary": "Api Plugin Open Pull",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/pulls/{number}": {
+      "get": {
+        "operationId": "api_plugin_pull_dashboard_api_plugins__installation_id__github__owner___repo__pulls__number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Pull",
         "tags": [
           "dashboard",
           "plugins"
@@ -24245,7 +25571,7 @@
     },
     "/dashboard/api/slack/callback": {
       "get": {
-        "description": "Link the verified Slack identity to the logged-in GitHub user.\n\nThe Slack member id and email come from Slack's verified OIDC claims, so a\nuser can only ever link their own Slack account \u2014 no self-asserted values.",
+        "description": "Link the verified Slack identity to the signed-in Robin person.",
         "operationId": "slack_callback_dashboard_api_slack_callback_get",
         "parameters": [
           {
@@ -24442,7 +25768,7 @@
     },
     "/dashboard/api/slack/login": {
       "get": {
-        "description": "Start the Sign in with Slack flow to link the current GitHub account.",
+        "description": "Start the Sign in with Slack flow to link the current Robin account.",
         "operationId": "slack_login_dashboard_api_slack_login_get",
         "parameters": [
           {
@@ -24525,6 +25851,85 @@
         "tags": [
           "dashboard",
           "slack",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/open": {
+      "get": {
+        "operationId": "api_open_slack_dashboard_api_slack_open_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "channel",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "pattern": "^[CGD][A-Z0-9]{2,}$",
+              "title": "Channel",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "message_ts",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 27,
+                  "pattern": "^[0-9]{1,20}\\.[0-9]{1,6}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Message Ts"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_ts",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 27,
+                  "pattern": "^[0-9]{1,20}\\.[0-9]{1,6}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Ts"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Slack",
+        "tags": [
+          "dashboard",
           "slack"
         ]
       }
@@ -26017,64 +27422,6 @@
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/goal": {
-      "get": {
-        "description": "The thread's goal, for someone allowed to read the thread; None without Goal mode.",
-        "operationId": "api_get_thread_goal_dashboard_api_threads__thread_id__goal_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/Goal"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Api Get Thread Goal Dashboard Api Threads  Thread Id  Goal Get"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Thread Goal",
-        "tags": [
-          "dashboard",
-          "threads",
-          "threads"
-        ]
-      }
-    },
     "/dashboard/api/threads/{thread_id}/history": {
       "post": {
         "operationId": "api_thread_history_dashboard_api_threads__thread_id__history_post",
@@ -27515,6 +28862,126 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/best": {
+      "get": {
+        "operationId": "api_best_dashboard_api_trace_flight_best_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BestView"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Best Dashboard Api Trace Flight Best Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Best",
+        "tags": [
+          "dashboard",
+          "trace-flight"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/leaderboard": {
+      "get": {
+        "operationId": "api_leaderboard_dashboard_api_trace_flight_leaderboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderRowView"
+                  },
+                  "title": "Response Api Leaderboard Dashboard Api Trace Flight Leaderboard Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Leaderboard",
+        "tags": [
+          "dashboard",
+          "trace-flight"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/runs": {
+      "post": {
+        "operationId": "api_submit_run_dashboard_api_trace_flight_runs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResultView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Submit Run",
+        "tags": [
+          "dashboard",
+          "trace-flight"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/season": {
+      "get": {
+        "operationId": "api_season_dashboard_api_trace_flight_season_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeasonView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Season",
+        "tags": [
+          "dashboard",
+          "trace-flight"
         ]
       }
     },

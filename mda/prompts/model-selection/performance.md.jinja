@@ -1,2 +1,0 @@
-Use for architecture or design, requirements disambiguation, subtle semantic review, novel root-cause reasoning, conflicting evidence, cross-component or multi-repository judgment, and high-stakes decisions.
-The most capable and most expensive profile.

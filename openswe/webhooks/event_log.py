@@ -6,6 +6,7 @@ Sources in ``ADMIN_ONLY_SOURCES`` are listed and subscribable only from admin th
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
@@ -17,7 +18,7 @@ from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
 from openswe import event_claims
-from openswe.database import configured, transaction
+from openswe.database import transaction
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.slack.payloads import SlackEventEnvelope
 from openswe.slack.pr_links import event_pull_requests
@@ -37,6 +38,18 @@ _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 # Longer than any sender keeps retrying one delivery.
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
+
+# ``source:event_type`` pairs, comma-separated, logged and dropped before the event log.
+# Incident mitigation: CI deliveries overwhelm the database, so they are dropped by default.
+DROPPED_EVENTS: frozenset[str] = frozenset(
+    event.strip()
+    for event in os.getenv(
+        "DROPPED_EVENTS",
+        "github:check_run,github:check_suite,github:status,github:workflow_run",
+    ).split(",")
+    if event.strip()
+)
+
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
@@ -136,6 +149,59 @@ class EventKind(BaseModel):
     count: int
     last_received_at: datetime
     payload_shape: JsonValue = None
+
+
+class EventLogQuery(BaseModel):
+    """Filters on ``event_log``'s indexed columns; each set one must match exactly."""
+
+    start_time: datetime
+    end_time: datetime
+    source: WebhookSource | None = None
+    event_type: str = ""
+    event_type_prefix: str = ""
+    delivery_id: str = ""
+    user_id: UUID | None = None
+    workspace_id: UUID | None = None
+    repository_id: UUID | None = None
+    pull_request_id: UUID | None = None
+    limit: int = 50
+    cursor: str | None = None
+    """``received_at|ctid`` of the last row of the previous page."""
+
+
+class SearchedEvent(LoggedEvent):
+    """A logged row with the names of the rows it links to."""
+
+    user_name: str | None = None
+    workspace_name: str | None = None
+    repository_name: str | None = None
+    pull_request_name: str | None = None
+    pull_request_title: str | None = None
+
+
+class EventLogPage(BaseModel):
+    items: list[SearchedEvent]
+    cursor: str | None
+
+
+class EventUser(BaseModel):
+    id: UUID
+    display_name: str
+    logins: str
+
+
+_USER_SEARCH = text(
+    """
+    SELECT users.id, users.display_name,
+        coalesce(string_agg(DISTINCT user_identity.login, ', '), '') AS logins
+    FROM users LEFT JOIN user_identity ON user_identity.user_id = users.id
+    WHERE users.display_name ILIKE :pattern OR user_identity.login ILIKE :pattern
+       OR user_identity.email ILIKE :pattern
+    GROUP BY users.id
+    ORDER BY users.display_name
+    LIMIT 20
+    """
+)
 
 
 class EventRefs(BaseModel):
@@ -273,6 +339,32 @@ class _LinearDelivery(BaseModel):
 
 
 class EventLog:
+    @staticmethod
+    def dropped(source: str, event_type: str, delivery_id: str = "", action: str = "") -> bool:
+        """Whether ``DROPPED_EVENTS`` drops the event, by its type or its type and action,
+        with a log line when it does."""
+        names = {f"{source}:{event_type}"}
+        if action:
+            names.add(f"{source}:{event_type}.{action}")
+        if names.isdisjoint(DROPPED_EVENTS):
+            return False
+        logger.info(
+            "Dropping event of a dropped event type",
+            extra={
+                "webhook_source": source,
+                "webhook_event_type": event_type,
+                "webhook_action": action,
+                "webhook_delivery": delivery_id,
+            },
+        )
+        return True
+
+    @staticmethod
+    def _action(request: Request, body: bytes) -> str:
+        payload = EventLog._decode(request, body)
+        action = payload.get("action") if isinstance(payload, dict) else None
+        return action if isinstance(action, str) else ""
+
     @classmethod
     async def record(
         cls,
@@ -289,10 +381,11 @@ class EventLog:
         """Log, then wake subscribed threads.
 
         Never raises. False means the row was not stored, so a caller that must
-        not drop the delivery can ask the sender to retry.
+        not drop the delivery can ask the sender to retry. A dropped event is not stored
+        and counts as handled.
         """
-        if not configured():
-            return False
+        if cls.dropped(source, event_type, delivery_id, cls._action(request, body)):
+            return True
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 
@@ -340,8 +433,6 @@ class EventLog:
         """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
-        if not configured():
-            return False
         try:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
@@ -397,8 +488,8 @@ class EventLog:
         again. A delivery that was not stored gives its claim back, so its next
         try records it. Never raises; False means the row was not stored.
         """
-        if not configured():
-            return False
+        if cls.dropped(source, event_type, delivery_id, cls._action(request, body)):
+            return True
         scope = f"{_TABLE}:{source}"
         claimed = False
         try:
@@ -472,6 +563,71 @@ class EventLog:
             else kind
             for kind in kinds
         ]
+
+    @classmethod
+    async def search(cls, query: EventLogQuery) -> EventLogPage:
+        """Rows of every visibility matching ``query``, newest first, for installation admins."""
+        await cls.ensure_partitions()
+        filters = query.model_dump(exclude={"start_time", "end_time", "limit", "cursor"})
+        params: dict[str, object] = {
+            **filters,
+            "start_time": query.start_time,
+            "end_time": query.end_time,
+        }
+        prefix = filters.pop("event_type_prefix")
+        clauses = [
+            f"e.{column} = :{column}"
+            for column, value in filters.items()
+            if value is not None and value != ""
+        ]
+        if prefix:
+            params["event_type_prefix"] = prefix
+            clauses.append(
+                "(e.event_type = :event_type_prefix"
+                " OR starts_with(e.event_type, :event_type_prefix || '.'))"
+            )
+        if query.cursor:
+            cursor_at, _, cursor_ctid = query.cursor.partition("|")
+            params["cursor_at"] = datetime.fromisoformat(cursor_at)
+            params["cursor_ctid"] = cursor_ctid
+            clauses.append(
+                "(e.received_at, e.ctid) < (:cursor_at, CAST(CAST(:cursor_ctid AS text) AS tid))"
+            )
+        sql = text(
+            f"""
+            SELECT e.ctid::text AS row_ctid, e.source, e.event_type, e.delivery_id, e.received_at, e.user_id,
+                e.workspace_id, e.repository_id, e.pull_request_id, e.payload, e.visibility,
+                e.visible_to_user_id, u.display_name AS user_name, w.name AS workspace_name,
+                r.full_name AS repository_name,
+                pr.owner || '/' || pr.repo || '#' || pr.number AS pull_request_name,
+                pr.title AS pull_request_title
+            FROM {_TABLE} e
+            LEFT JOIN users u ON u.id = e.user_id
+            LEFT JOIN workspace w ON w.id = e.workspace_id
+            LEFT JOIN repository r ON r.id = e.repository_id
+            LEFT JOIN pull_request pr ON pr.id = e.pull_request_id
+            WHERE e.received_at >= :start_time AND e.received_at <= :end_time{"".join(f" AND {c}" for c in clauses)}
+            ORDER BY e.received_at DESC, e.ctid DESC
+            LIMIT {query.limit + 1}
+            """
+        )
+        async with transaction() as conn:
+            rows = (await conn.execute(sql, params)).mappings().all()
+        items = [SearchedEvent.model_validate(dict(row)) for row in rows[: query.limit]]
+        if len(rows) <= query.limit:
+            return EventLogPage(items=items, cursor=None)
+        last = rows[query.limit - 1]
+        return EventLogPage(
+            items=items, cursor=f"{last['received_at'].isoformat()}|{last['row_ctid']}"
+        )
+
+    @classmethod
+    async def users(cls, query: str) -> list[EventUser]:
+        """Up to 20 people whose name, login or email contains ``query``."""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        async with transaction() as conn:
+            rows = await conn.execute(_USER_SEARCH, {"pattern": f"%{escaped}%"})
+            return [EventUser.model_validate(dict(row)) for row in rows.mappings()]
 
     @classmethod
     def shape(cls, value: JsonValue, depth: int = 0) -> JsonValue:

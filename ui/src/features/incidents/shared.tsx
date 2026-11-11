@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
@@ -110,7 +111,7 @@ export function ExternalLink({
   return (
     <MacawLink
       variant="xs"
-      href={href}
+      href={SlackLinks.normalize(href)}
       target="_blank"
       rel="noopener noreferrer"
       rightDecorator={ArrowUpRightIcon}

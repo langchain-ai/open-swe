@@ -20,21 +20,30 @@ from openswe.agent_api.tool_sets import PURGE_JOB as TOOL_SETS_PURGE
 from openswe.agent_api.tool_sets import PURGE_SCHEDULE as TOOL_SETS_SCHEDULE
 from openswe.agent_api.tool_sets import purge_tool_sets
 from openswe.agent_cost import run_agent_cost_refresh
+from openswe.analytics.segment import SEGMENT_JOB, SegmentDelivery
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
+from openswe.event_claims import PURGE_JOB as EVENT_CLAIM_PURGE
+from openswe.event_claims import PURGE_SCHEDULE as EVENT_CLAIM_SCHEDULE
+from openswe.github.app import get_github_app_installation_token
+from openswe.github.approval_policy import EVALUATE_JOB as APPROVAL_EVALUATE
+from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
 from openswe.github.branch_config import refresh_required_checks
+from openswe.github.checks import REVIEW_CHECK_TIMEOUT_JOB
+from openswe.github.quota import SAMPLE_JOB as GITHUB_QUOTA_SAMPLE
+from openswe.github.quota import SAMPLE_SCHEDULE as GITHUB_QUOTA_SCHEDULE
+from openswe.github.quota import InstallationQuota
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
-from openswe.human_review.standard import run_deadline
+from openswe.human_review.settling import SETTLE_JOB as HUMAN_REVIEW_SETTLE
+from openswe.human_review.settling import SettleTarget
+from openswe.human_review.standard import run_deadline, settle_pull_request, settle_repository
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
-from openswe.jobs.worker import WORKER
-from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
-from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
-from openswe.memories.curator import WorkspaceCurator
+from openswe.jobs.worker import WORKER, JobWorker
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
@@ -42,9 +51,20 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 from openswe.notifications.service import JOB_KIND as NOTIFICATION_FALLBACK
 from openswe.notifications.service import AppNotification
+from openswe.plugins.records import (
+    ATTACHMENT_SWEEP_JOB,
+    ATTACHMENT_SWEEP_SCHEDULE,
+    AttachmentObjects,
+)
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
+from openswe.review.findings import get_thread_metadata
+from openswe.review.publish import (
+    ReviewCheckResult,
+    TrackedReviewCheck,
+    settle_review_check_run,
+)
 from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
@@ -57,6 +77,9 @@ from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.slack.mda_forwarding import RETIRED_SWEEP_JOB as SLACK_LOST_REQUESTS
+from openswe.slack.tools.search import PURGE_JOB as SLACK_SEARCH_GRANT_PURGE
+from openswe.slack.tools.search import PURGE_SCHEDULE as SLACK_SEARCH_GRANT_SCHEDULE
+from openswe.slack.tools.search import SlackSearchGrant
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
@@ -73,8 +96,11 @@ SESSION_COST: Final = "session_cost"
 RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
+SEGMENT_WORKER: Final = JobWorker(max_in_flight=2)
+SEGMENT_WORKER.register(SEGMENT_JOB)(SegmentDelivery.deliver)
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
+WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 
 
@@ -183,6 +209,22 @@ async def _human_review_deadline(job: Job) -> object:
     return await run_deadline(request_id, step)
 
 
+@WORKER.register(APPROVAL_EVALUATE)
+async def _approval_evaluate(job: Job) -> None:
+    await PullRequestApproval.evaluate_job(job)
+
+
+@WORKER.register(HUMAN_REVIEW_SETTLE)
+async def _human_review_settle(job: Job) -> None:
+    target = SettleTarget.from_job(job)
+    if target is None:
+        return
+    if target.number is None:
+        await settle_repository(target.owner, target.repo)
+    else:
+        await settle_pull_request(target.owner, target.repo, target.number, retries=target.retries)
+
+
 @_sandbox_work(RECONCILE)
 async def _reconcile(_job: Job) -> object:
     return await reconcile_stale_runs()
@@ -194,6 +236,32 @@ async def _thread_status_reconcile(_job: Job) -> object:
         "threads_settled": await reconcile_busy_threads(),
         "stalled_runs_failed": await fail_stalled_runs(),
     }
+
+
+@WORKER.register(REVIEW_CHECK_TIMEOUT_JOB)
+async def _review_check_timeout(job: Job) -> None:
+    thread_id, owner, repo = _text(job, "thread_id"), _text(job, "owner"), _text(job, "repo")
+    check_run_id = job.payload.get("check_run_id")
+    if thread_id is None or owner is None or repo is None:
+        return
+    tracked = TrackedReviewCheck.model_validate(await get_thread_metadata(thread_id))
+    if tracked.review_check_run_id != check_run_id:
+        return
+    token = await get_github_app_installation_token()
+    if not token:
+        raise RuntimeError("No GitHub token to time out the review check")
+    # Neutral: a hung reviewer is an Open SWE problem, not the PR's.
+    result = tracked.review_check_pending_result or ReviewCheckResult(
+        conclusion="neutral",
+        title="Review timed out",
+        summary="Robin did not finish reviewing within an hour. "
+        "Push a commit or re-request a review from Robin to run it again.",
+    )
+    await settle_review_check_run(
+        thread_id=thread_id, owner=owner, repo=repo, token=token, **result.model_dump()
+    )
+    if (await get_thread_metadata(thread_id)).get("review_check_run_id") == check_run_id:
+        raise RuntimeError("Could not settle the timed-out review check")
 
 
 @WORKER.register(REVIEW_GUIDE_ARCHIVE)
@@ -221,7 +289,17 @@ async def _tool_sets_purge(_job: Job) -> None:
     logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
-WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
+WORKER.register(EVENT_CLAIM_PURGE)(event_claims.purge_lapsed)
+
+
+@WORKER.register(SLACK_SEARCH_GRANT_PURGE)
+async def _slack_search_grant_purge(_job: Job) -> None:
+    logger.info("Slack search grants purged", extra={"purged": await SlackSearchGrant.purge()})
+
+
+@WORKER.register(ATTACHMENT_SWEEP_JOB)
+async def _plugin_attachment_sweep(_job: Job) -> None:
+    await AttachmentObjects.sweep_configured()
 
 
 @WORKER.register(WAKE_THREAD_JOB)
@@ -265,7 +343,18 @@ async def start_jobs() -> None:
             REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
         lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
-        lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
+        lambda: queue.schedule(EVENT_CLAIM_PURGE, cron=EVENT_CLAIM_SCHEDULE, key=EVENT_CLAIM_PURGE),
+        lambda: queue.schedule(
+            SLACK_SEARCH_GRANT_PURGE,
+            cron=SLACK_SEARCH_GRANT_SCHEDULE,
+            key=SLACK_SEARCH_GRANT_PURGE,
+        ),
+        lambda: queue.schedule(
+            GITHUB_QUOTA_SAMPLE, cron=GITHUB_QUOTA_SCHEDULE, key=GITHUB_QUOTA_SAMPLE
+        ),
+        lambda: queue.schedule(
+            ATTACHMENT_SWEEP_JOB, cron=ATTACHMENT_SWEEP_SCHEDULE, key=ATTACHMENT_SWEEP_JOB
+        ),
     ]
     for step in steps:
         try:

@@ -69,6 +69,7 @@ from rt.outbox import Outbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
 from rt.sandbox_setup import SandboxUnavailableError
 from runtime_api.catalog import (
+    BrowserSpec,
     Catalog,
     LoopRules,
     ModelSpec,
@@ -1577,12 +1578,12 @@ async def test_a_shared_factory_builds_once_per_inputs_and_never_sees_the_run(
     assert other.nodes["model"] is not first.nodes["model"]
 
 
-async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
+async def test_the_coding_agent_and_a_review_that_asks_browse_but_never_hand_the_browser_over(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, browsers: Browsers, tmp_path: Path
 ) -> None:
     """The coding agent gets the browser's tools and instructions but no browser_handoff,
-    and its first browse reports the browser it named when the run started; the
-    reviewer has no browser."""
+    and its first browse reports the browser it named when the run started; a review has
+    the browser only when its catalog asks for it."""
     offered: dict[str, set[str]] = {}
     instructed: dict[str, bool] = {}
 
@@ -1619,15 +1620,63 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     monkeypatch.setattr(mda_browser, "_RELEASE_AFTER_S", 0)
     store = InMemoryStore()
     await _run(store, "reviewed", _context("reviewer", "reviewer", _catalog("lookup", "grant")))
+    review_browser = BrowserSpec(session_domains=["review.example.com"])
+    capturing = _catalog("lookup", "grant").model_copy(update={"browser": review_browser})
+    await _run(store, "captured", _context("reviewer", "capturing", capturing))
     await _run(store, "browsed", _context("agent", "agent", _catalog("lookup", "grant")))
     await asyncio.sleep(0)
 
     tools = {"browser_run", "browser_snapshot", "browser_screenshot"}
-    assert tools <= offered["agent"] and "browser_handoff" not in offered["agent"]
+    for run in ("agent", "capturing"):
+        assert tools <= offered[run] and "browser_handoff" not in offered[run]
     assert not {name for name in offered["reviewer"] if name.startswith("browser_")}
-    assert instructed == {"agent": True, "reviewer": False}
-    browser = mda_browser._browser_name("thread:browsed")
-    assert browsers == [(browser, False), (browser, True)]
+    assert instructed == {"agent": True, "capturing": True, "reviewer": False}
+    browsed = mda_browser._browser_name("thread:browsed")
+    captured = mda_browser._browser_name("thread:captured")
+    assert sorted(browsers) == sorted(
+        [(captured, False), (captured, True), (browsed, False), (browsed, True)]
+    )
+
+
+async def test_a_review_installs_sign_in_sessions_only_for_its_own_domains(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, browsers: Browsers
+) -> None:
+    """A preview page can ask a review to sign in elsewhere; its browser refuses the session."""
+    from rt.session_handoff import _HELD
+
+    answers: list[str] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        results = [message for message in messages if isinstance(message, ToolMessage)]
+        if results:
+            answers.extend(message.text for message in results)
+            reply = AIMessage(content="done")
+        else:
+            # As an MCP result holds it: the model sees only the handle.
+            _HELD.get(current_run())["production"] = {
+                "host": "smith.langchain.com",
+                "storage_key": "sb-auth-token",
+                "session": {"access_token": "secret"},
+            }
+            call = ToolCall(name="browser_run", args={"session_handle": "production"}, id="in")
+            reply = AIMessage(content="", tool_calls=[call])
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    async def no_browser(*args: object, **kwargs: object) -> mda_browser._Session:
+        raise AssertionError("a refused session must not open the browser")
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *a, **k: self)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    monkeypatch.setattr(mda_browser, "_open", no_browser)
+    review_browser = BrowserSpec(session_domains=["review.smith.langchain.com"])
+    catalog = _catalog("lookup", "grant").model_copy(update={"browser": review_browser})
+
+    await _run(InMemoryStore(), "signed", _context("reviewer", "signing", catalog))
+
+    assert any("signs in only to its base and preview" in answer for answer in answers)
 
 
 @pytest.mark.parametrize("cancel", ["none", "task", "masked"])

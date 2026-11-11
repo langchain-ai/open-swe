@@ -126,6 +126,18 @@ class ParsedGitPush:
         )
         if default_sha is None:
             return False
+        default_commit = await _run_git(
+            backend, root, f"cat-file -e {shlex.quote(default_sha + '^{commit}')}"
+        )
+        if not default_commit.ok:
+            fetched = await _run_git(
+                backend,
+                root,
+                f"fetch --no-tags --no-write-fetch-head {shlex.quote(self.remote)} "
+                f"{shlex.quote(default_sha)}",
+            )
+            if not fetched.ok:
+                return False
         quoted_files = " ".join(shlex.quote(name) for name in files)
         same = await _run_git(
             backend,

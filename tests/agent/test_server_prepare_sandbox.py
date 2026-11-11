@@ -9,6 +9,8 @@ from openswe.tasks.store import Task, TaskContext, TaskDelegation, TaskMembershi
 from openswe.utils import thread_reads
 from openswe.workspaces.rows import WorkspaceRow
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     monkeypatch: pytest.MonkeyPatch,

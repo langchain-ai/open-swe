@@ -62,12 +62,14 @@ async def select_jev_choice[ChoiceT: str](
     instructions: str,
     criteria: Mapping[ChoiceT, str],
     decision: JevDecision | None = None,
+    min_confidence: float = 0.6,
     transport: httpx2.AsyncBaseTransport | None = None,
 ) -> ChoiceT | None:
     choices = await select_jev_choices(
         task,
         questions={question: Choice(instructions=instructions, criteria=dict(criteria.items()))},
         decisions={question: decision},
+        min_confidence=min_confidence,
         transport=transport,
     )
     return next((choice for choice in criteria if choice == choices[question]), None)
@@ -78,6 +80,7 @@ async def select_jev_choices(
     *,
     questions: Mapping[str, Choice],
     decisions: Mapping[str, JevDecision | None] | None = None,
+    min_confidence: float = 0.6,
     transport: httpx2.AsyncBaseTransport | None = None,
 ) -> dict[str, str | None]:
     results: dict[str, str | None] = dict.fromkeys(questions)
@@ -124,7 +127,7 @@ async def select_jev_choices(
             answer = response.choices[question]
             decision.choice = answer.choice if answer.choice in spec.criteria else None
             decision.confidence = answer.confidence if isfinite(answer.confidence) else None
-            if not 0.6 <= answer.confidence <= 1.0:
+            if not min_confidence <= answer.confidence <= 1.0:
                 logger.info(
                     "Jev classification confidence below threshold or invalid",
                     extra={"question": question, "confidence": answer.confidence},

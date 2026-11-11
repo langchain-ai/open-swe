@@ -109,7 +109,9 @@ def _started(thread_id: str, starting_ms: int) -> Callable[[Headers], Awaitable[
 
 
 # Thread routes that read though they are POSTs.
-_POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
+_POST_READS: Final = frozenset({"/history", "/state/checkpoint", "/stream/events"})
+# Reads held open until a run ends or the caller leaves.
+_HELD_READS: Final = re.compile(r"^/(?:stream(?:/events)?|runs/[^/]+/(?:join|stream))$")
 
 
 async def adopt_channel_run(
@@ -499,7 +501,12 @@ class ThreadRouter:
             if channel_of(thread.metadata) is None:
                 # The channel created its threads there; the backend's own may need it.
                 await mda.ensure_remote_thread(thread_id)
-            http = mda.read_http if reads else mda.http
+            if not reads:
+                http = mda.http
+            elif _HELD_READS.match(rest):
+                http = mda.stream_http
+            else:
+                http = mda.read_http
             await forward(http, scope, send, body, headers=write.headers)
             return
         if thread is not None:

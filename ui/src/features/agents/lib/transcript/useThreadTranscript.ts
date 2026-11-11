@@ -252,19 +252,33 @@ export function useThreadTranscript(
           )
             summaries.reconcile()
           if (!runTracker) return
-          const payload = event.payload
           runTracker.transcriptEvent({
+            turnId: event.payload.turn_id,
             opensRun: event.event_type === "turn.started",
+            humanMessageId:
+              event.event_type === "turn.requested" ||
+              (event.event_type === "message.completed" &&
+                event.payload.role === "human")
+                ? event.payload.message_id
+                : undefined,
             text:
-              event.event_type === "message.appended" &&
-              Boolean("text" in payload && payload.text),
+              event.event_type === "message.appended" && event.payload.text
+                ? "delta"
+                : event.event_type === "message.completed" &&
+                    event.payload.role === "ai" &&
+                    event.payload.text &&
+                    !current.messages[event.payload.message_id]?.text
+                  ? "message"
+                  : undefined,
+            ends:
+              event.event_type === "turn.completed"
+                ? "success"
+                : event.event_type === "turn.failed"
+                  ? "error"
+                  : event.event_type === "turn.interrupted"
+                    ? "interrupt"
+                    : undefined,
           })
-          if (event.event_type === "turn.completed")
-            runTracker.completed("success")
-          else if (event.event_type === "turn.failed")
-            runTracker.completed("error")
-          else if (event.event_type === "turn.interrupted")
-            runTracker.completed("interrupt")
         },
         onError: (streamError) => {
           if (disposed) return

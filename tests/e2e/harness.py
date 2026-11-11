@@ -35,6 +35,7 @@ patches.apply()
 
 import fakes  # noqa: E402
 import httpx2  # noqa: E402
+from cryptography.fernet import Fernet  # noqa: E402
 from e2e_env import (  # noqa: E402
     BASE_BRANCH,
     BASE_URL,
@@ -56,10 +57,10 @@ from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
     JSONResponse,
-    PlainTextResponse,
     RedirectResponse,
     Response,
 )
+from oauth_fakes import OAuthProviders  # noqa: E402
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
 # by the automated tests plus the named manual-test users. ``U_CAROL`` is in
@@ -130,14 +131,12 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 # --- control + Slack compose (the test driver) -----------------------------
 # Where the inbox spec holds its run: the fake model waits on it, the spec releases it.
 INBOX_GATE = {"waiting": False, "released": False}
-GOAL_CHECK = {"released": False}
 
 
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
     INBOX_GATE.update(waiting=False, released=False)
-    GOAL_CHECK.update(released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -219,9 +218,8 @@ async def _reset_durable_pr_state() -> None:
 
     from openswe.database import postgres
 
-    if postgres.configured():
-        async with postgres.transaction() as connection:
-            await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
+    async with postgres.transaction() as connection:
+        await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")
@@ -460,20 +458,6 @@ async def control_release_inbox_gate() -> JSONResponse:
     return JSONResponse(INBOX_GATE)
 
 
-@app.get("/control/goal-check")
-async def control_goal_check() -> PlainTextResponse:
-    """The condition a Goal mode spec's monitor checks: failing until the spec passes it."""
-    if not GOAL_CHECK["released"]:
-        return PlainTextResponse("not yet", status_code=503)
-    return PlainTextResponse("GOAL_CHECK_PASSED")
-
-
-@app.post("/control/goal-check")
-async def control_pass_goal_check() -> JSONResponse:
-    GOAL_CHECK["released"] = True
-    return JSONResponse(GOAL_CHECK)
-
-
 @app.post("/control/monitors/sync")
 async def control_sync_monitors(thread_id: str) -> JSONResponse:
     """Read the thread's monitors now, as the per-minute poll does, and count the events it is owed."""
@@ -698,6 +682,8 @@ async def _seed_test_user_mappings() -> None:
             email=user["email"],
             display_name=user["name"],
         )
+        if not os.environ.get("E2E_OAUTH"):
+            signed_in = await oauth_providers.provision(signed_in, user["email"])
         await signed_in.link(
             "slack", user["slack_id"], login=user["login"], email=user["email"], team_id="T_E2E"
         )
@@ -902,10 +888,12 @@ async def _signed_in(login: str, email: str) -> User:
     """The ``users`` row a real sign-in would give ``login``, created like the OAuth callback does."""
     await _seed_test_user_mappings()
     user = await User.for_login("github", login)
-    if user is not None:
-        return user
-    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
-    return await User.sign_in("github", github_id, login=login, email=email)
+    if user is None:
+        github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
+        user = await User.sign_in("github", github_id, login=login, email=email)
+    if not os.environ.get("E2E_OAUTH"):
+        user = await oauth_providers.provision(user, user.email or email)
+    return user
 
 
 @app.post("/control/notifications")
@@ -1058,20 +1046,18 @@ for _i, _route in enumerate(app.router.routes):
         break
 
 
-if os.environ.get("E2E_OAUTH"):
-    from cryptography.fernet import Fernet
-    from oauth_fakes import OAuthProviders
+oauth_providers = OAuthProviders(BASE_URL)
+oauth_providers.install(app)
+os.environ["LANGSMITH_CONNECTION_URL"] = oauth_providers.issuer
+os.environ["LANGSMITH_OAUTH_CLIENT_ID"] = "e2e-langsmith"
+os.environ["LANGSMITH_OAUTH_CLIENT_SECRET"] = "e2e-langsmith-secret"
+os.environ["LANGSMITH_ENDPOINT"] = oauth_providers.issuer
+os.environ["LANGSMITH_API_KEY"] = "e2e-deployment-key"
+os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
+if os.environ.get("E2E_OAUTH"):
     from openswe.dashboard import auth_routes, github_link
 
-    oauth_providers = OAuthProviders(BASE_URL)
-    oauth_providers.install(app)
-    os.environ["LANGSMITH_CONNECTION_URL"] = oauth_providers.issuer
-    os.environ["LANGSMITH_OAUTH_CLIENT_ID"] = "e2e-langsmith"
-    os.environ["LANGSMITH_OAUTH_CLIENT_SECRET"] = "e2e-langsmith-secret"
-    os.environ["LANGSMITH_ENDPOINT"] = oauth_providers.issuer
-    os.environ["LANGSMITH_API_KEY"] = "e2e-deployment-key"
-    os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
     os.environ["GITHUB_APP_CLIENT_ID"] = "e2e-github"
     auth_routes.GITHUB_AUTHORIZE_URL = BASE_URL + "/fake-gh/link/authorize"
     github_link.exchange_code = oauth_providers.exchange_github
@@ -1098,7 +1084,9 @@ async def control_account_recovery_thread() -> JSONResponse:
             "graph_id": "agent",
         },
     )
-    return JSONResponse({"thread_id": thread.thread_id, "login": login, "email": email})
+    return JSONResponse(
+        {"thread_id": thread.thread_id, "login": login, "email": email, "user_id": str(user.id)}
+    )
 
 
 @app.post("/control/logout")
@@ -1133,12 +1121,17 @@ async def mock_users() -> JSONResponse:
 
 
 @app.get("/mock/slack/messages")
-async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse:
+async def slack_messages(
+    channel: str = "", thread_ts: str = "", current_thread: bool = False
+) -> JSONResponse:
     selected_channel = channel or CURRENT_THREAD["channel"]
     assert selected_channel is not None
+    selected_thread = thread_ts or (CURRENT_THREAD["thread_ts"] if current_thread else "")
     msgs = (
-        fakes.slack_thread(selected_channel, thread_ts)
-        if thread_ts
+        fakes.slack_thread(selected_channel, selected_thread)
+        if selected_thread
+        else []
+        if current_thread
         else fakes.slack_messages(selected_channel)
     )
     return JSONResponse(

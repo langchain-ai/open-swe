@@ -98,6 +98,11 @@ test.describe("Open SWE full flow", () => {
       );
     await page.locator("#send").click();
 
+    await expect(
+      page.getByRole("link", { name: "the breakout thread", exact: true }),
+    ).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("button", { name: "# demo", exact: true }).click();
+
     const breakout = page
       .locator(".msg.bot")
       .filter({ hasText: /`\/breakout`: Add greet\(\) helper/ });

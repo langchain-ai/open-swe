@@ -174,6 +174,89 @@ async def test_a_thread_that_cannot_be_updated_still_records_the_runs_usage(
     assert prepare_harness["recorded"]["invocation_id"] == "inv-1"
 
 
+async def test_an_automation_runs_usage_is_its_creators(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An automation run has no sender of its own, so usage credits whoever created it."""
+    from openswe.run_config import RunConfig
+    from openswe.users import User, UserIdentity
+
+    creator = User(
+        identities=[
+            UserIdentity(provider="github", external_id="7", login="alice"),
+            UserIdentity(provider="slack", external_id="U7", email="alice@example.com"),
+        ]
+    )
+    monkeypatch.setattr(RunConfig, "automation_creator", AsyncMock(return_value=creator))
+    prepare_harness["thread_metadata"] = {"owner_type": "system", "visibility": "public"}
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "source": "schedule",
+            "schedule_id": "sched-1",
+            "invocation_id": "inv-1",
+        }
+    }
+
+    await _record(config, _turn(config))
+
+    recorded = prepare_harness["recorded"]
+    assert recorded["github_login"] == "alice"
+    assert recorded["user_email"] == "alice@example.com"
+
+
+async def test_an_automation_runs_usage_uses_the_creator_recorded_on_its_thread(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The creator recorded on the thread at dispatch wins, so a deleted automation still credits them."""
+    from uuid import uuid4
+
+    from openswe.schedules import store
+    from openswe.users import User, UserIdentity
+
+    creator = User(
+        id=uuid4(),
+        identities=[
+            UserIdentity(provider="github", external_id="7", login="alice"),
+            UserIdentity(provider="slack", external_id="U7", email="alice@example.com"),
+        ],
+    )
+
+    async def by_id(user_id: Any) -> User | None:
+        return creator if user_id == creator.id else None
+
+    monkeypatch.setattr(User, "get", by_id)
+    reread = AsyncMock(return_value=None)
+    monkeypatch.setattr(store, "get_agent_schedule", reread)
+    prepare_harness["thread_metadata"] = {
+        "owner_type": "system",
+        "visibility": "public",
+        "schedule_id": "sched-1",
+        "automation_creator_user_id": str(creator.id),
+    }
+    monkeypatch.setattr(
+        store,
+        "schedule_thread_metadata",
+        AsyncMock(return_value=prepare_harness["thread_metadata"]),
+    )
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "source": "schedule",
+            "schedule_id": "sched-1",
+            "automation_creator_user_id": str(uuid4()),
+            "invocation_id": "inv-1",
+        }
+    }
+
+    await _record(config, _turn(config))
+
+    recorded = prepare_harness["recorded"]
+    assert recorded["github_login"] == "alice"
+    assert recorded["user_email"] == "alice@example.com"
+    reread.assert_not_awaited()
+
+
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
     prepare_harness: dict[str, Any], github_client: _FakeGitHubClient
 ) -> None:

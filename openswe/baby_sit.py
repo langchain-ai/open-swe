@@ -423,8 +423,6 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
 
 
 async def _review_card(watch: BabySitWatch) -> HumanReviewRequest | None:
-    if not postgres.configured():
-        return None
     try:
         approval = await HumanReviewRequest.active_for(watch.owner, watch.repo, watch.pr_number)
     except Exception:

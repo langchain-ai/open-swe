@@ -90,8 +90,6 @@ class ReportReceipts:
         wanted = sorted(set(keys))
         if not wanted:
             return {}
-        if not postgres.configured():
-            return {key: Claimed(uuid7()) for key in wanted}
         cls = ReportReceipt
         async with postgres.transaction() as conn:
             claimed = await conn.execute(
@@ -123,7 +121,7 @@ class ReportReceipts:
         return {key: claims.get(key, Recording()) for key in wanted}
 
     async def record(self, kept: Sequence[tuple[Claimed, dict[str, JsonValue]]]) -> None:
-        if not kept or not postgres.configured():
+        if not kept:
             return
         cls = ReportReceipt
         async with postgres.transaction() as conn:
@@ -155,7 +153,7 @@ class ReportReceipts:
     async def release(self, claims: Iterable[Claimed]) -> None:
         """Give the keys up unrecorded, so the next delivery records them."""
         ids = [claim.id for claim in claims]
-        if not ids or not postgres.configured():
+        if not ids:
             return
         async with postgres.transaction() as conn:
             await conn.execute(

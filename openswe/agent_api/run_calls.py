@@ -9,7 +9,7 @@ them; the backend answers the typed API both sides import (``runtime_api``):
   What the turn's start records (its transcript turn, the thread's model and usage) is
   the ``run_started`` report, off the run's path
 - the inbox and skills, and the named calls MDA's middleware makes around a model call
-  (``reminders``, ``model_choice``, ``incident_context``, ``refresh_github_proxy``,
+  (``model_choice``, ``incident_context``, ``refresh_github_proxy``,
   ``reply_on_behalf``), to move its Slack conversation (``slack_move``, ``slack_moved``),
   and at the run's end (``run_ended``, or ``model_failed`` when a model call fails it,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``)
@@ -57,7 +57,6 @@ from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
     BROWSER,
     FINISH_SCOUT_PLAN,
-    GOAL,
     INBOX,
     INBOX_RECEIVED,
     INCIDENT_CONTEXT,
@@ -66,14 +65,12 @@ from runtime_api.loop import (
     MODEL_RESULT,
     PREPARE,
     REFRESH_GITHUB_PROXY,
-    REMINDERS,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
     RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
-    SET_GOAL,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
@@ -83,9 +80,6 @@ from runtime_api.loop import (
     ChosenModel,
     Done,
     GitHubProxyRefreshed,
-    Goal,
-    GoalChange,
-    GoalRead,
     Inbox,
     InboxItems,
     InboxRead,
@@ -93,11 +87,9 @@ from runtime_api.loop import (
     IncidentContext,
     ModelFailed,
     ModelResult,
-    PersonMessage,
     Prepare,
     Prepared,
     RefreshGitHubProxy,
-    Reminders,
     ReplyOnBehalf,
     Report,
     Route,
@@ -176,6 +168,7 @@ from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
+from openswe.analytics.segment_activity import SegmentActivity
 from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
 from openswe.incidents.runtime import IncidentSession
@@ -188,7 +181,6 @@ from openswe.middleware.settle_review_check import settle_review_check
 from openswe.middleware.stale_workspace import StaleWorkspaceReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
-from openswe.reminders import Reminder
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
@@ -199,7 +191,6 @@ from openswe.sandboxes.lifecycle import (
 )
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
-from openswe.threads.goal import ThreadGoals
 from openswe.threads.inbox import ThreadInbox
 from openswe.threads.store import THREADS
 from openswe.utils.thread_reads import shared_thread_reads
@@ -217,8 +208,6 @@ _batch_flushes: ContextVar[dict[str | None, RunnableConfig] | None] = ContextVar
 # Operations that can make the run's thread a task's coordinator mid-run, after its catalog
 # was planned without the task: their answer hands the run the task's context.
 _JOINS_TASK: Final = frozenset({"manage_baby_sit"})
-# Calls that change the work, after which a goal owes a completion check before it completes.
-_EDITS_WORK: Final = frozenset({"write_file", "edit_file", "delete", "open_pull_request"})
 # Each run's thread files, by its thread and grant, until they expire: building them reads
 # the thread and the run's skill stores, which every files call did.
 _FILES_TTL_SECONDS: Final = 6 * 60 * 60
@@ -338,6 +327,7 @@ class TokenRun:
         self.run = run
         self.run_id = run_id
         self.config = self._config()
+        self.activity = SegmentActivity(run)
 
     @classmethod
     async def answer(
@@ -540,6 +530,7 @@ class TokenRun:
         await self._reporting(
             request, "run_started", record, messages=messages_from_dict(request.humans)
         )
+        await self.activity.request_started(request, carried=carried)
         return Done()
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
@@ -567,14 +558,7 @@ class TokenRun:
                 await recorder.atool_finished(result)
 
         await self._reporting(request, "tool_result", record)
-        turn = self.run.settings.agent
-        if (
-            request.name in _EDITS_WORK
-            and result.status != "error"
-            and turn is not None
-            and turn.goal_mode
-        ):
-            await ThreadGoals.edited(self.run.thread_id)
+        await self.activity.tool_executed(request, is_error=result.status == "error")
         return Done()
 
     async def operation(self, request: RunOperation) -> OperationResult:
@@ -682,12 +666,6 @@ class TokenRun:
         selection = await classify_route(messages_from_dict(request.humans))
         return Route(route=selection.route, persist=selection.persist)
 
-    async def reminders(self, request: PersonMessage) -> Reminders:
-        """The reminders a person's message calls for."""
-        [message] = messages_from_dict([request.message])
-        found = await Reminder.called_for(message)
-        return Reminders(messages=dump_messages(as_messages(found)))
-
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         """A model a person asked for. MDA now answers this itself from the catalog's
         models; kept for one release, for MDA deployments that still ask."""
@@ -707,7 +685,7 @@ class TokenRun:
 
     async def refresh_github_proxy(self, request: RefreshGitHubProxy) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
-        if cfg.auth_provider == "langsmith":
+        if not cfg.github_linked:
             return GitHubProxyRefreshed()
         turn = self.run.settings.agent
         if turn is not None and turn.coordinator_thread_id is not None:
@@ -748,28 +726,6 @@ class TokenRun:
             )
 
         await self.in_run("reply_on_behalf", post)
-        return Done()
-
-    async def goal(self, request: GoalRead) -> Goal:
-        """The thread's goal, with what will wake the thread again when asked."""
-        kept = await ThreadGoals.current(self.run.thread_id)
-        if kept is None:
-            return Goal()
-        return Goal(
-            state=kept.state,
-            reason=kept.reason,
-            objective=None if kept.objective is None else run_context("goal", kept.objective),
-            ask=kept.ask,
-            updated_at_ms=kept.updated_at_ms,
-            waits=[wait.kind for wait in await ThreadGoals.waits(self.run.thread_id)]
-            if request.waits
-            else [],
-        )
-
-    async def set_goal(self, request: GoalChange) -> Done:
-        await ThreadGoals.change(
-            self.run.thread_id, request.state, request.reason, request=request.request
-        )
         return Done()
 
     async def slack_move(self, request: SlackMoveRequest) -> SlackMovePlan:
@@ -975,15 +931,12 @@ CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
 CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
-CALLS.serve(REMINDERS, TokenRun.reminders)
 CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 CALLS.serve(INCIDENT_CONTEXT, TokenRun.incident_context)
 CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
-CALLS.serve(GOAL, TokenRun.goal)
-CALLS.serve(SET_GOAL, TokenRun.set_goal)
 CALLS.serve(SLACK_MOVE, TokenRun.slack_move)
 CALLS.serve(SLACK_MOVED, TokenRun.slack_moved)
 CALLS.serve(RUN_STARTED, TokenRun.run_started)

@@ -137,25 +137,24 @@ async def test_jev_routes_or_falls_back(
             return httpx2.Response(403)
         if failure == "malformed":
             return httpx2.Response(200, json={"answers": {}})
+        confidence = "NaN" if failure == "nan" else 0.5 if failure == "confidence" else 0.9
         return httpx2.Response(
             200,
             json={
                 "model": "typesafe/jev-1.13.0",
                 "answers": {
-                    "route": {
+                    "task_type": {
                         "type": "choice",
-                        "choice": "fast",
-                        "confidence": "NaN"
-                        if failure == "nan"
-                        else 0.5
-                        if failure == "confidence"
-                        else 0.9,
-                        "probabilities": {
-                            "fast": 0.9,
-                            "balanced": 0.05,
-                            "performance": 0.05,
-                        },
-                    }
+                        "choice": "lookup",
+                        "confidence": confidence,
+                        "probabilities": {"lookup": 0.9, "design": 0.1},
+                    },
+                    "complexity": {
+                        "type": "choice",
+                        "choice": "routine",
+                        "confidence": 0.9,
+                        "probabilities": {"routine": 0.9, "open_ended": 0.1},
+                    },
                 },
             },
         )
@@ -172,18 +171,19 @@ async def test_jev_routes_or_falls_back(
     state = ModelSelectionState(messages=[_said("x" * 8_001)])
     update = await middleware.abefore_model(state, MagicMock())
     state.update(update)
-    assert update == ({} if failure else {"model_route": "fast"})
+    assert update == ({} if failure else {"model_route": "balanced"})
     assert len(requests) == 1
     assert requests[0].url == "https://gateway.example.com/v1/systemone"
     assert requests[0].headers["Authorization"] == "Bearer gateway-key"
     payload = json.loads(requests[0].read())
-    assert payload["state"] == "x" * 8_000
+    # A long request reaches the classifier as its start and its end.
+    assert payload["state"] == f"{'x' * 4_000}\n…\n{'x' * 4_000}"
     assert payload["model"] == "typesafe/jev-1.13.0"
-    assert payload["questions"]["route"]["type"] == "choice"
+    assert sorted(payload["questions"]) == ["complexity", "task_type"]
     state.update(await middleware.abefore_model(state, MagicMock()))
     assert len(requests) == (2 if failure else 1)
     if failure == "auth":
-        assert state["model_route"] == "fast"
+        assert state["model_route"] == "balanced"
         await middleware.abefore_model(state, MagicMock())
         assert len(requests) == 2
 
@@ -247,3 +247,18 @@ def test_a_kept_route_reads_as_both_sides_route_it(kept: object, route: str | No
     from runtime_api.catalog import kept_route
 
     assert kept_route(kept) == route
+
+
+@pytest.mark.asyncio
+async def test_a_thread_that_kept_default_before_routing_is_classified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jev = AsyncMock(return_value=RouteSelection("performance"))
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
+    middleware = _middleware()
+    state = ModelSelectionState(messages=[_said("Design the API")], model_route="default")
+
+    selection = await middleware.select_route(state)
+
+    assert selection.route == "performance"
+    jev.assert_awaited_once()

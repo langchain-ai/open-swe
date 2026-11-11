@@ -47,6 +47,7 @@ from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
 from openswe.utils.langsmith import resolve_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,12 @@ _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
 # as, which decides whether its catalog names that person's connections.
-_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", ACTING_USER_KEY)
+_TOKEN_METADATA_KEYS: Final = (
+    "event_match_ids",
+    "ls_attribution_identifier",
+    ACTING_USER_KEY,
+    *BILLING_FIELDS,
+)
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
@@ -76,6 +82,10 @@ _CHANNEL_CONVERSATIONS_LIMIT: Final = 4096
 #: How long a channel thread's conversation is kept before MDA is asked again: a run
 #: may hand its thread to another conversation, a Slack thread it moved to.
 _CHANNEL_CONVERSATION_SECONDS: Final = 60.0
+# Connections each MDA client holds at once: the short calls, then the streams, which
+# stay open as long as someone watches a thread.
+_MDA_CONNECTIONS: Final = 100
+_MDA_STREAM_CONNECTIONS: Final = 1000
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -182,7 +192,7 @@ class _SdkThreads:
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        await self.client.threads.update(thread_id, metadata=dict(metadata))
+        await self.client.threads.update(thread_id, metadata=dict(metadata), return_minimal=True)
 
     async def delete(self, thread_id: str) -> None:
         try:
@@ -222,13 +232,19 @@ class MdaRuntime:
         self._channel_conversations: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
         self._http: httpx.AsyncClient | None = None
         self._read_http: httpx.AsyncClient | None = None
+        self._stream_http: httpx.AsyncClient | None = None
 
-    def _client(self, extra: Mapping[str, str]) -> httpx.AsyncClient:
+    def _client(
+        self, extra: Mapping[str, str], *, max_connections: int = _MDA_CONNECTIONS
+    ) -> httpx.AsyncClient:
         headers = dict(extra)
         if api_key := mda_runtime_api_key():
             headers["x-api-key"] = api_key
         return httpx.AsyncClient(
-            base_url=self.url, headers=headers, timeout=httpx.Timeout(30.0, read=None)
+            base_url=self.url,
+            headers=headers,
+            timeout=httpx.Timeout(30.0, read=None),
+            limits=httpx.Limits(max_connections=max_connections),
         )
 
     @property
@@ -244,6 +260,18 @@ class MdaRuntime:
         if self._read_http is None:
             self._read_http = self._client(MDA_STUDIO_READ_HEADERS)
         return self._read_http
+
+    @property
+    def stream_http(self) -> httpx.AsyncClient:
+        """For reads held open until a run ends or a tab closes: thread and run streams, joins.
+
+        Their own pool, so open dashboard tabs never leave runs unable to start or stop.
+        """
+        if self._stream_http is None:
+            self._stream_http = self._client(
+                MDA_STUDIO_READ_HEADERS, max_connections=_MDA_STREAM_CONNECTIONS
+            )
+        return self._stream_http
 
     def sdk(self) -> LangGraphClient:
         """For writes, scoped to the threads the backend owns."""
@@ -461,6 +489,45 @@ class MdaRuntime:
         assistant_id = payload.get("assistant_id")
         if not isinstance(assistant_id, str):
             raise ValueError("A run needs an assistant_id")
+        run_metadata.pop("billed_user_id", None)
+        run_metadata["created_by"] = None
+        run_metadata.setdefault(
+            "billing_bucket", "channel" if dispatch.channel_of(thread_metadata) else "system"
+        )
+        actor = run_metadata.get(ACTING_USER_KEY)
+        if (
+            assistant_id == "agent"
+            and isinstance(actor, str)
+            and actor != run_metadata.get("billed_robin_user_id")
+        ):
+            from uuid import UUID
+
+            from openswe.users import User
+
+            for key in BILLING_USER_FIELDS:
+                run_metadata.pop(key, None)
+            run_metadata["billing_bucket"] = (
+                "channel" if dispatch.channel_of(thread_metadata) else "system"
+            )
+            try:
+                user = await User.get(UUID(actor))
+                if user is not None:
+                    run_metadata.update(user.billing_trace_metadata())
+            except Exception:
+                logger.warning("Could not resolve acting user for trace metadata", exc_info=True)
+        if run_metadata.get("user_id") != run_metadata.get("billed_robin_user_id"):
+            run_metadata.pop("user_id", None)
+        raw_config_metadata = config.get("metadata")
+        if isinstance(raw_config_metadata, dict):
+            config["metadata"] = {
+                **{
+                    key: value
+                    for key, value in raw_config_metadata.items()
+                    if key not in BILLING_FIELDS and key != "billed_user_id"
+                },
+                **{key: run_metadata[key] for key in BILLING_FIELDS if key in run_metadata},
+                "created_by": None,
+            }
         context = dict(
             await remote_run_context(
                 configurable,

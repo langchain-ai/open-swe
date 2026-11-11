@@ -21,7 +21,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx2
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import (
     AfterValidator,
@@ -40,25 +40,42 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.github.http import (
+    GitHubClient,
     GitHubError,
     GitHubSignInRequired,
     GraphQLError,
     RepoClient,
     UnsafeRepoPath,
 )
+from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_requests
 from openswe.github.repo_names import normalize_repo_full_name
+from openswe.plugins.featured import FeaturedApps
 from openswe.plugins.installed import (
+    CollectionWrittenByApp,
     InstalledPlugin,
     PluginChatNotFound,
     PluginPermissionDenied,
     RepositoryNotGranted,
 )
-from openswe.plugins.manifest import MAX_BUNDLE_BYTES, BundleError, PluginManifest, PluginPermission
+from openswe.plugins.manifest import (
+    MAX_BUNDLE_BYTES,
+    BundleError,
+    CollectionName,
+    PluginManifest,
+    PluginPermission,
+)
 from openswe.plugins.records import (
+    ATTACHMENT_TYPES,
+    MAX_ATTACHMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
     AppNotFound,
     AppVersion,
+    Attachment,
+    AttachmentName,
+    AttachmentStorageUnavailable,
     ConflictingDocumentWrites,
     Cursor,
+    DocumentKey,
     DocumentQuery,
     Installation,
     InstallationNotFound,
@@ -72,15 +89,12 @@ from openswe.plugins.records import (
 from openswe.plugins.rooms import MAX_PRESENCE_BYTES, ROOMS, Room
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
+from openswe.utils.object_store import ObjectStoreError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
-MAX_DOCUMENT_BYTES = 256_000
-
-CollectionName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
-DocumentKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
 FieldPath = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9_-]{1,64}){0,7}$")
 ]
@@ -97,12 +111,17 @@ def _as_http() -> Iterator[None]:
         yield
     except InstallationNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
-    except (PluginPermissionDenied, RepositoryNotGranted) as exc:
+    except (PluginPermissionDenied, RepositoryNotGranted, CollectionWrittenByApp) as exc:
         raise HTTPException(403, str(exc)) from exc
     except PluginChatNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     except (PluginNameTaken, PreviewHeldByAnother, ConflictingDocumentWrites) as exc:
         raise HTTPException(409, str(exc)) from exc
+    except AttachmentStorageUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ObjectStoreError as exc:
+        logger.warning("Object storage failed a plugin call", exc_info=True)
+        raise HTTPException(502, "object storage could not be reached") from exc
     except BundleError as exc:
         raise HTTPException(422, str(exc)) from exc
     except UnsafeRepoPath as exc:
@@ -190,9 +209,11 @@ class PluginSummary(BaseModel):
     repositories: list[str]
     """The repositories the viewer shared with it."""
     installed_at: datetime | None
+    featured: bool = False
+    """Whether an admin added the app for everyone, so the viewer can't remove it."""
 
     @classmethod
-    def of(cls, installation: Installation) -> PluginSummary:
+    def of(cls, installation: Installation, *, featured: bool = False) -> PluginSummary:
         return cls(
             id=installation.id,
             plugin_id=installation.plugin,
@@ -202,13 +223,15 @@ class PluginSummary(BaseModel):
             mine=installation.owner == installation.user_id,
             repositories=list(installation.repositories),
             installed_at=installation.created_at,
+            featured=featured,
         )
 
     @classmethod
     async def get(cls, installation_id: UUID, user_id: UUID) -> PluginSummary:
         """The person's install as it is now."""
         with _as_http():
-            return cls.of(await PluginInstallations.get(installation_id, user_id))
+            installation = await PluginInstallations.get(installation_id, user_id)
+        return cls.of(installation, featured=installation.plugin in await FeaturedApps.active())
 
 
 class PreviewModel(BaseModel):
@@ -256,7 +279,28 @@ class RepositoriesBody(BaseModel):
 
 @router.get("")
 async def api_list_plugins(viewer: ViewerDep) -> list[PluginSummary]:
-    return [PluginSummary.of(i) for i in await PluginInstallations.visible_to(viewer.id)]
+    """The viewer's apps, kept in line with the ones an admin added for everyone."""
+    try:
+        await FeaturedApps.add_for(viewer)
+    except Exception:  # noqa: BLE001
+        # The person's apps still load; what's featured catches up on a later load.
+        logger.exception(
+            "Could not bring featured apps into a person's web UI",
+            extra={"user_id": str(viewer.id)},
+        )
+    try:
+        # As uninstalling reads it, so an app shown as featured is one that can't be removed.
+        featured = await FeaturedApps.active()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Could not read the featured apps for a person's web UI",
+            extra={"user_id": str(viewer.id)},
+        )
+        featured = frozenset()
+    return [
+        PluginSummary.of(i, featured=i.plugin in featured)
+        for i in await PluginInstallations.visible_to(viewer.id)
+    ]
 
 
 @router.get("/apps")
@@ -272,6 +316,13 @@ async def api_list_apps(viewer: ViewerDep) -> list[AppModel]:
         )
         for app in await PluginApps.available_to(viewer.id)
     ]
+
+
+@router.get("/apps/versions/{version_id}")
+async def api_get_app_version(version_id: UUID, viewer: ViewerDep) -> AppVersionModel:
+    """A release the viewer may add, of their own app or a listed one, with its manifest."""
+    with _as_http():
+        return AppVersionModel.of(await PluginApps.version(version_id, viewer.id))
 
 
 @router.post("/apps", status_code=201)
@@ -420,6 +471,10 @@ async def api_share_plugin_repositories(
 async def api_unshare_plugin_repository(
     owner: str, repo: str, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
+    if await FeaturedApps.shares(plugin.installation.plugin, f"{owner}/{repo}"):
+        raise HTTPException(
+            409, "An admin shares this repository with the app for everyone, so it stays shared"
+        )
     await PluginInstallations.unshare(plugin.installation.id, viewer.id, f"{owner}/{repo}".lower())
     return await PluginSummary.get(plugin.installation.id, viewer.id)
 
@@ -427,6 +482,8 @@ async def api_unshare_plugin_repository(
 @router.delete("/{installation_id}", status_code=204)
 @audit_endpoint
 async def api_uninstall_plugin(plugin: PluginDep, viewer: ViewerDep) -> Response:
+    if plugin.installation.plugin in await FeaturedApps.active():
+        raise HTTPException(409, "An admin added this app for everyone, so it can't be removed")
     await PluginInstallations.remove(plugin.installation.id, viewer.id)
     return Response(status_code=204)
 
@@ -539,7 +596,7 @@ async def api_put_plugin_document(
     if len(body.model_dump_json()) > MAX_DOCUMENT_BYTES:
         raise HTTPException(413, "document too large")
     with _as_http():
-        scope = await plugin.document_scope(body.repository)
+        scope = await plugin.writable_scope(collection, body.repository)
         write = plugin.documents.create if if_absent else plugin.documents.put
         document = await write(collection, scope, key, body.document, by=plugin.user.id)
     return DocumentModel.of(document)
@@ -553,9 +610,108 @@ async def api_delete_plugin_document(
     repository: str | None = None,
 ) -> Response:
     with _as_http():
-        scope = await plugin.document_scope(repository)
+        scope = await plugin.writable_scope(collection, repository)
         if not await plugin.documents.delete(collection, scope, key):
             raise HTTPException(404, "document not found")
+    return Response(status_code=204)
+
+
+class AttachmentModel(BaseModel):
+    name: str
+    content_type: str
+    size: int
+    updated_at: datetime | None
+
+    @classmethod
+    def of(cls, attachment: Attachment) -> AttachmentModel:
+        return cls(
+            name=attachment.name,
+            content_type=attachment.content_type,
+            size=attachment.size,
+            updated_at=attachment.updated_at,
+        )
+
+
+@router.put("/{installation_id}/attachments/{collection}/{name}")
+async def api_put_plugin_attachment(
+    collection: CollectionName,
+    name: AttachmentName,
+    request: Request,
+    plugin: PluginDep,
+    key: Annotated[DocumentKey, Query()],
+    repository: str | None = None,
+) -> AttachmentModel:
+    """Keeps the request's body as ``name`` beside the document under ``key``.
+
+    The body is an image or a video, sent as its own content type.
+    """
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type not in ATTACHMENT_TYPES:
+        raise HTTPException(415, f"an attachment is one of {', '.join(sorted(ATTACHMENT_TYPES))}")
+    too_large = HTTPException(413, f"an attachment is at most {MAX_ATTACHMENT_BYTES} bytes")
+    length = request.headers.get("content-length")
+    if length is not None and length.isdigit() and int(length) > MAX_ATTACHMENT_BYTES:
+        raise too_large
+    with _as_http():
+        scope = await plugin.writable_scope(collection, repository)
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_ATTACHMENT_BYTES:
+            raise too_large
+    if not body:
+        raise HTTPException(422, "an attachment is not empty")
+    with _as_http():
+        attached = await plugin.documents.attach(
+            collection, scope, key, name, content_type, bytes(body), by=plugin.user.id
+        )
+    if attached is None:
+        raise HTTPException(404, "document not found")
+    return AttachmentModel.of(attached)
+
+
+@router.get(
+    "/{installation_id}/attachments/{collection}/{name}",
+    response_class=Response,
+    responses={200: {"content": {media: {} for media in sorted(ATTACHMENT_TYPES)}}},
+)
+async def api_get_plugin_attachment(
+    collection: CollectionName,
+    name: AttachmentName,
+    plugin: PluginDep,
+    key: Annotated[DocumentKey, Query()],
+    repository: str | None = None,
+) -> Response:
+    """An attachment's bytes, which the dashboard hands the plugin's frame as a Blob."""
+    with _as_http():
+        scope = await plugin.document_scope(repository)
+        found = await plugin.documents.attachment(collection, scope, key, name)
+    if found is None or found.content is None:
+        raise HTTPException(404, "attachment not found")
+    return Response(
+        found.content,
+        media_type=found.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": "attachment",
+            "Content-Security-Policy": "default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.delete("/{installation_id}/attachments/{collection}/{name}", status_code=204)
+async def api_delete_plugin_attachment(
+    collection: CollectionName,
+    name: AttachmentName,
+    plugin: PluginDep,
+    key: Annotated[DocumentKey, Query()],
+    repository: str | None = None,
+) -> Response:
+    with _as_http():
+        scope = await plugin.writable_scope(collection, repository)
+        if not await plugin.documents.detach(collection, scope, key, name):
+            raise HTTPException(404, "attachment not found")
     return Response(status_code=204)
 
 
@@ -647,8 +803,18 @@ class CommitBody(BaseModel):
     deletions: list[RepoPath] = Field(default_factory=list, max_length=100)
 
 
+class _GitHubRepository(BaseModel):
+    full_name: str = ""
+
+
 class _GitHubBranch(BaseModel):
     ref: str = ""
+    sha: str = ""
+    repo: _GitHubRepository | None = None
+
+
+class _GitHubTeam(BaseModel):
+    slug: str
 
 
 class _GitHubPull(BaseModel):
@@ -659,8 +825,14 @@ class _GitHubPull(BaseModel):
     html_url: str | None = None
     state: str | None = None
     draft: bool | None = None
+    merged: bool | None = None
     head: _GitHubBranch | None = None
     base: _GitHubBranch | None = None
+    user: _GitHubAccount | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    requested_reviewers: list[_GitHubAccount] = Field(default_factory=list)
+    requested_teams: list[_GitHubTeam] = Field(default_factory=list)
 
 
 class PullRequestModel(BaseModel):
@@ -668,22 +840,76 @@ class PullRequestModel(BaseModel):
     title: str
     url: str
     state: str
+    merged: bool
     draft: bool
     head: str
     base: str
+    head_sha: str
+    base_sha: str
+    author: str | None
+    created_at: str | None
+    updated_at: str | None
+    requested_reviewers: list[str]
+    """Logins GitHub still asks to review; a review answers the request."""
+    requested_teams: list[str]
+    """``org/slug`` of the teams GitHub still asks to review."""
 
     @classmethod
     def of(cls, payload: Mapping[str, object]) -> PullRequestModel:
         pull = _GitHubPull.model_validate(payload)
+        base_repo = pull.base.repo.full_name if pull.base and pull.base.repo else ""
+        org = base_repo.split("/", 1)[0]
         return cls(
             number=pull.number,
             title=pull.title or "",
             url=pull.html_url or "",
             state=pull.state or "open",
+            merged=bool(pull.merged),
             draft=bool(pull.draft),
             head=pull.head.ref if pull.head else "",
             base=pull.base.ref if pull.base else "",
+            head_sha=pull.head.sha if pull.head else "",
+            base_sha=pull.base.sha if pull.base else "",
+            author=pull.user.login if pull.user else None,
+            created_at=pull.created_at,
+            updated_at=pull.updated_at,
+            requested_reviewers=[
+                account.login for account in pull.requested_reviewers if account.login
+            ],
+            requested_teams=[f"{org}/{team.slug}" for team in pull.requested_teams],
         )
+
+
+class PullRequestSummary(BaseModel):
+    """A pull request as GitHub's search lists it, before reading it in full."""
+
+    repository: str
+    number: int
+    title: str
+    url: str
+    draft: bool
+    author: str | None
+    created_at: str | None
+    updated_at: str | None
+
+    @classmethod
+    def of(cls, pull: OpenPullRequest) -> PullRequestSummary:
+        return cls(
+            repository=pull.repo.lower(),
+            number=pull.number,
+            title=pull.title,
+            url=f"https://github.com/{pull.repo}/pull/{pull.number}",
+            draft=bool(pull.draft),
+            author=pull.author,
+            created_at=pull.created_at,
+            updated_at=pull.updated_at,
+        )
+
+
+class PullRequestSearch(BaseModel):
+    pulls: list[PullRequestSummary]
+    incomplete: bool
+    """Whether GitHub left some out: past its first page, or a search that timed out."""
 
 
 class PullRequestBody(BaseModel):
@@ -851,6 +1077,40 @@ async def api_plugin_commit(
                 deletions=body.deletions,
             )
     return RefResponse(sha=sha)
+
+
+@router.get("/{installation_id}/github/pulls")
+async def api_plugin_search_pulls(
+    plugin: PluginDep, role: Literal["review-requested", "author"]
+) -> PullRequestSearch:
+    """Open pull requests in the repositories the person shared and can read, by their role."""
+    with _as_http():
+        plugin.require(PluginPermission.GITHUB_READ, PluginPermission.GITHUB_WRITE)
+        readable = await plugin.readable_repositories()
+        if not readable:
+            return PullRequestSearch(pulls=[], incomplete=False)
+        async with GitHubClient.as_user(plugin.user.github_login) as github:
+            # GitHub's review-requested qualifier includes requests to the person's teams.
+            found = await list_open_pull_requests(
+                github,
+                plugin.user.github_login,
+                ",".join(readable),
+                scope="mine" if role == "author" else "review-requested",
+                lightweight=True,
+            )
+    return PullRequestSearch(
+        pulls=[PullRequestSummary.of(pull) for pull in found.pull_requests],
+        incomplete=found.incomplete or found.next_page is not None,
+    )
+
+
+@router.get("/{installation_id}/github/{owner}/{repo}/pulls/{number}")
+async def api_plugin_pull(
+    owner: str, repo: str, number: Annotated[int, Path(ge=1, le=2**31 - 1)], plugin: PluginDep
+) -> PullRequestModel:
+    with _as_http():
+        async with plugin.github(f"{owner}/{repo}") as client:
+            return PullRequestModel.of(await client.pull_request(number).pull())
 
 
 @router.get("/{installation_id}/github/{owner}/{repo}/pulls")

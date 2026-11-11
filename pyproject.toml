@@ -6,9 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.32",
-    # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
-    "langchain-core>=1.7.6,<2",
+    "deepagents==0.7.35",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/),
     # from the vendored SDK the deployment runs (vendor/README.md).
     "managed-deepagents>=0.10.1",
@@ -19,8 +17,8 @@ dependencies = [
     "httpx2>=2.12.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
-    "langgraph-sdk>=0.4.13",
-    "langchain[mcp]>=1.4.9",
+    "langgraph-sdk>=0.4.14",
+    "langchain[mcp]>=1.4.10",
     "langgraph>=1.2.20",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
@@ -29,7 +27,7 @@ dependencies = [
     "langsmith>=0.14.17",
     "langchain-openai>=1.7.4,<2.0.0",
     "openai>=3.10.0",
-    "langchain-fireworks>=1.7.2",
+    "langchain-fireworks>=1.7.3",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
     "exa-py>=2.18.1",
@@ -39,16 +37,16 @@ dependencies = [
     "aiohttp>=3.14.3",
     "alembic==1.20.1",
     "croniter>=6.0.0",
-    "sqlalchemy[asyncio]==2.1.6",
+    "sqlalchemy[asyncio]==2.1.8",
     "asyncpg==0.32.0",
     "pillow>=12.1.0",
     "Pygments>=2.21.0",
     "pyyaml>=6.0.3",
-    "githubkit[auth-app]==0.17.0",
-    "githubkit-schemas[2022-11-28]==26.10.28",
+    "githubkit[auth-app]==0.17.1",
+    "githubkit-schemas[2022-11-28]==26.11.5",
     "jinja2>=3.1.6",
-    "langchain-typesafe==0.0.1",
-    "langchain-quickjs==0.3.11",
+    "langchain-typesafe==0.0.2",
+    "langchain-quickjs==0.3.12",
     "open-swe-runtime-api",
 ]
 
@@ -69,7 +67,7 @@ managed-deepagents = { path = "vendor/managed-deepagents-sdk/packages/pypi", edi
 [tool.uv]
 constraint-dependencies = [
     "langgraph-api==0.19.0.dev3",
-    "langgraph-runtime-inmem==0.39.0.dev3",
+    "langgraph-runtime-inmem==0.39.0.dev5",
 ]
 
 [build-system]

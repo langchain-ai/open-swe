@@ -40,7 +40,7 @@ codes = (root / "codes").read_text().split() if (root / "codes").exists() else [
 print(codes[0] if codes else "204", end="")
 """
 
-pytestmark = pytest.mark.usefixtures("memory_event_claims")
+pytestmark = pytest.mark.usefixtures("memory_event_claims", "registry_db")
 
 
 @pytest.fixture

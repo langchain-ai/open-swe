@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import { taskEventMetadata } from "./taskEventMetadata"
 import type { TaskEventMetadata } from "./taskEventMetadata"
 import type {
@@ -303,11 +304,11 @@ export function parseStructuredInput(
       const slackTimestamp = /^\d+\.\d{6}$/.test(
         attributes.slack_message_ts ?? ""
       )
-        ? attributes.slack_message_ts?.replace(".", "")
+        ? attributes.slack_message_ts
         : undefined
       const slackMessageUrl =
         attributes.surface === "slack" && slackChannel && slackTimestamp
-          ? `https://slack.com/archives/${slackChannel}/p${slackTimestamp}`
+          ? SlackLinks.open(slackChannel, slackTimestamp)
           : undefined
       return {
         type: "message",

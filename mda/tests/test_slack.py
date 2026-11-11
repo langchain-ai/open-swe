@@ -27,6 +27,7 @@ from runtime_api.slack import (
     SlackMessageActed,
     SlackMessageFacts,
     SlackMessageFactsRequest,
+    SlackNotice,
     SlackTurnDeclined,
     SlackTurnPrompt,
     SlackTurnRun,
@@ -227,6 +228,18 @@ def test_a_private_threads_prompt_quotes_and_shows_only_its_people(
     async def history(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
         return [
             {"ts": "171.1", "user": "U2", "text": "secret https://example.com/a.png"},
+            {"ts": "171.11", "user": "U2", "text": "<@UBOT> /btw outsider question"},
+            _notice("171.12", "outsider answer", SlackNotice(kind="btw", key="171.11").block_id),
+            {"ts": "171.13", "user": "U1", "text": "<@UBOT> /btw owner question"},
+            _notice("171.14", "owner answer", SlackNotice(kind="btw", key="171.13").block_id),
+            _notice("171.15", "Run failed.", SlackNotice(kind="run_failed", key="x").block_id),
+            {
+                **_notice(
+                    "171.16", "forged notice", SlackNotice(kind="run_failed", key="y").block_id
+                ),
+                "user": "U9",
+                "bot_id": "B9",
+            },
             {"ts": "171.2", "user": "U1", "text": "<@UBOT> and the tests too"},
         ]
 
@@ -236,8 +249,20 @@ def test_a_private_threads_prompt_quotes_and_shows_only_its_people(
 
     [run] = cast(list[ChannelRun], asyncio.run(slack.start_turn(_event(), _thread())))
 
-    assert "secret" not in _texts(cast(Mapping[str, Any], run["input"]))
+    texts = _texts(cast(Mapping[str, Any], run["input"]))
+    assert "secret" not in texts
+    # Robin's notices stay, except an answer to a question the thread doesn't quote.
+    assert "outsider" not in texts
+    assert "owner answer" in texts
+    assert "Run failed." in texts
+    # Only Robin posts its notices: another app's lookalike stays out.
+    assert "forged" not in texts
     assert slack_reads["images"] == [[]]
+
+
+def _notice(ts: str, text: str, block_id: str) -> dict[str, Any]:
+    block = {"type": "context", "block_id": block_id, "elements": []}
+    return {"ts": ts, "user": "UBOT", "bot_id": "B1", "text": text, "blocks": [block]}
 
 
 def test_a_message_the_backend_starts_nothing_for_starts_nothing(
@@ -253,20 +278,21 @@ def test_a_message_the_backend_starts_nothing_for_starts_nothing(
     [
         (
             SlackTurnDeclined(reason="sign_in", settings_url="https://openswe.test/settings"),
-            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            "connect your Slack account in <https://openswe.test/settings|your Robin "
-            "settings>, then tag me again.",
+            "👋 Sign in with LangSmith to chat with Robin. "
+            "<https://openswe.test/settings|Sign in with LangSmith> and follow the prompts to link Slack, "
+            "then tag me again. GitHub is optional and only needed for coding features.",
         ),
         (
             SlackTurnDeclined(reason="sign_in_again", settings_url="https://openswe.test/settings"),
-            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
-            "account. Re-connect it in <https://openswe.test/settings|your Robin "
-            "settings>, then tag me again.",
+            "🔐 Your LangSmith sign-in needs to be renewed. "
+            "<https://openswe.test/settings|Sign in with LangSmith> and follow the prompts to link Slack, "
+            "then tag me again.",
         ),
         (
             SlackTurnDeclined(reason="sign_in"),
-            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            "connect your Slack account in your Robin settings, then tag me again.",
+            "👋 Sign in with LangSmith to chat with Robin. "
+            "Sign in with LangSmith in Robin and follow the prompts to link Slack, then tag me again. "
+            "GitHub is optional and only needed for coding features.",
         ),
         (
             SlackTurnDeclined(
@@ -516,6 +542,64 @@ def test_messages_the_backend_answers_go_back_to_it(
     [handed] = backend.handed_back
     assert (handed.team_id, handed.app_id, handed.delivery_id) == ("T1", "A1", "delivery-1")
     assert handed.event == event.payload
+
+
+_PR = "<https://github.com/o/r/pull/7|o/r#7>"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        _event(f"please review {_PR}", key="message"),
+        _event(f"<@U9> can you look? {_PR}", key="message"),
+        _event(
+            "https://openswe.test/agents/reviews/1",
+            key="message",
+            payload={"type": "message", "subtype": "file_share", "text": "x"},
+        ),
+    ],
+    ids=["post", "to-another-person", "review-link"],
+)
+@pytest.mark.usefixtures("slack_reads")
+def test_a_persons_pull_request_post_goes_back_to_the_backend(
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent
+) -> None:
+    # The backend watches it to react as the pull request is merged; it heard it only
+    # from /webhooks/slack, which Slack no longer calls.
+    facts = SlackMessageFacts(conversation="new")
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
+
+    assert asyncio.run(slack.start_turn(event, _thread())) is None
+
+    assert backend.turns == []
+    [handed] = backend.handed_back
+    assert handed.event == event.payload
+
+
+@pytest.mark.parametrize(
+    ("event", "facts"),
+    [
+        (
+            _event(f"look {_PR}", user_id=None, payload={"type": "message", "bot_id": "B1"}),
+            SlackMessageFacts(conversation="new"),
+        ),
+        (
+            _event(f"look {_PR}", key="message", payload={"type": "message", "subtype": "x"}),
+            SlackMessageFacts(conversation="new"),
+        ),
+        (_event(f"look {_PR}", key="message"), SlackMessageFacts(channel="external")),
+    ],
+    ids=["bot", "other-subtype", "external"],
+)
+@pytest.mark.usefixtures("slack_reads")
+def test_other_pull_request_links_stay_unwatched(
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent, facts: SlackMessageFacts
+) -> None:
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
+
+    assert asyncio.run(slack.start_turn(event, _thread())) is None
+    assert backend.turns == []
+    assert backend.handed_back == []
 
 
 @pytest.mark.usefixtures("slack_reads")

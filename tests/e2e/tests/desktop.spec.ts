@@ -127,6 +127,14 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     );
 
     await page.goto("open-swe://app/agents");
+    // New threads default to Cloud; this test drives a This Mac thread.
+    await page.evaluate(() =>
+      window.localStorage.setItem(
+        "open-swe.agents.desktop-thread-source",
+        "local",
+      ),
+    );
+    await page.reload();
     const taskThreadId = "74000000-0000-4000-8000-000000000099";
     const bridgeId = await page.evaluate(async (threadId) => {
       return window.openSweDesktop!.takeOverThread({ threadId, repo: "" });

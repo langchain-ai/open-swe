@@ -25,13 +25,14 @@ Supported dashboard preferences:
 - `default_workspace`: workspace slug; null clears the default.
 - `follow_up_behavior`: `queue` or `steer`.
   What a message sent while a run is live does: wait for the run to end, or steer the running agent.
+- `auto_show_changes`: boolean (default true); whether a thread's Changes panel opens when a run that edited files finishes.
 
 `concierge_mode` (the user's Slack DM with Robin as one conversation) is read-only through agent tools.
 Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
 
 Only save explicitly requested personal changes.
 If personal versus shared scope is unclear, ask first.
-Use `remember` for standing behavioral guidance and the existing personal skill tools for skills.
+Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills.
 This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences.
 Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
 

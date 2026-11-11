@@ -259,6 +259,15 @@ async def process_vote(
         try:
             outcome = await apply(approval)
             completed = True
+            await approval.log_event(
+                "expedited.click",
+                action=decision,
+                slack_user_id=slack_user_id,
+                slack_channel_id=channel_id,
+                slack_thread_ts=thread_ts,
+                target_channel=target_channel,
+                outcome=outcome.message,
+            )
             return outcome
         finally:
             if message_ts and message_blocks:

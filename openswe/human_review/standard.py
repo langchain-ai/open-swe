@@ -55,6 +55,7 @@ from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.pick_modals import SNOOZE_DURATIONS
 from openswe.human_review.picking import (
     Area,
+    Candidates,
     Coverage,
     Pick,
     ReviewerAvailability,
@@ -66,8 +67,8 @@ from openswe.human_review.requests import (
     AUTO_ASSIGN_ASKED,
     HumanReviewParticipant,
     HumanReviewRequest,
-    RequestKind,
 )
+from openswe.human_review.settling import SETTLED_KINDS, SettleTarget
 from openswe.human_review.supplementary import (
     STEP_PREFIX as SUPPLEMENTARY_STEP,
 )
@@ -79,7 +80,7 @@ from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
-from openswe.slack.channels import SlackChannel
+from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     get_slack_user_info,
@@ -103,7 +104,6 @@ AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 DeadlineStep = Literal["unclaimed", "pick_expiry", "auto_merge"]
-SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
@@ -161,6 +161,7 @@ class RequestResult(BaseModel):
     claimed: bool = False
     auto_merge: bool = True
     supplementary_refusal: str = ""
+    retry_after_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,9 +259,22 @@ async def target_channel(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
             "`.open-swe/settings.json`, or name a Slack channel."
         )
-    channel = await SlackChannel.resolve(configured)
+    try:
+        channel = await SlackChannel.resolve(configured, raise_unavailable=True)
+    except ChannelLookupUnavailable as exc:
+        return RequestResult(
+            success=False,
+            error=(
+                "Slack channel verification is temporarily unavailable. "
+                f"Try requesting the review again in {exc.retry_after} seconds."
+            ),
+            retry_after_seconds=exc.retry_after,
+        )
     if channel is None:
-        return _failure(f"Slack channel {configured.strip()!r} was not found.")
+        return _failure(
+            f"Could not find or access the Slack review channel {configured.strip()!r}. "
+            "Check the configured channel and make sure Robin has access."
+        )
     return channel
 
 
@@ -503,7 +517,7 @@ async def _request_review(
                     exc_info=True,
                 )
                 readiness_note = (
-                    "Could not confirm delivery of the author-only Mark ready button. "
+                    "Could not confirm delivery of the review-page link. "
                     "Ask the author to use Ready for review on GitHub."
                 )
         return _failure(
@@ -1229,16 +1243,18 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     return True
 
 
-async def settle_pull_request(owner: str, repo: str, number: int) -> None:
+async def settle_pull_request(owner: str, repo: str, number: int, *, retries: int = 0) -> None:
     request = await HumanReviewRequest.active_for(owner, repo, number)
-    if request is not None:
-        await settle(request)
+    if request is not None and not await settle(request):
+        await SettleTarget.retry(owner, repo, number, retries)
 
 
 async def settle_repository(owner: str, repo: str) -> None:
     """Re-check every open standard or posted request in a repository, for events that name no PR."""
     for request in await HumanReviewRequest.open_in_repository(owner, repo, kinds=SETTLED_KINDS):
-        await settle(request)
+        if not await settle(request):
+            pr = request.pull_request
+            await SettleTarget.retry(pr.owner, pr.repo, pr.number)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1364,9 +1380,14 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
         if row is None or row.state != "open" or _REMAINING_OWNERS_ASKED in row.run_config:
             return
         row.run_config = {**row.run_config, _REMAINING_OWNERS_ASKED: True}
+    candidates = await Candidates.of_request(request)
     suggestions: list[Suggestion] = []
     for area in open_areas:
-        choice = await choose_reviewer(request, area=area)
+        choice = (
+            await choose_reviewer(request, area=area, candidates=candidates)
+            if candidates is not None
+            else None
+        )
         suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
     logger.info(
         "Asking for reviewers for the code owners an approval left",

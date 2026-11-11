@@ -11,7 +11,11 @@ import logging
 
 from openswe.github.thread_token import resolve_thread_github_token
 from openswe.review.findings import get_thread_metadata
-from openswe.review.publish import settle_review_check_run
+from openswe.review.publish import (
+    ReviewCheckResult,
+    TrackedReviewCheck,
+    settle_review_check_run,
+)
 from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -26,8 +30,8 @@ async def settle_review_check() -> None:
     owner, repo = cfg.repo.owner, cfg.repo.name
 
     try:
-        metadata = await get_thread_metadata(thread_id)
-        if not isinstance(metadata.get("review_check_run_id"), int):
+        tracked = TrackedReviewCheck.model_validate(await get_thread_metadata(thread_id))
+        if tracked.review_check_run_id is None:
             return
         token = await resolve_thread_github_token()
         if not token:
@@ -35,33 +39,16 @@ async def settle_review_check() -> None:
             return
         # A pending result means publish_review DID finish but its completion
         # PATCH failed transiently — retry with the real conclusion instead of
-        # misreporting a published review as failed.
-        pending = metadata.get("review_check_pending_result")
-        if isinstance(pending, dict) and pending.get("conclusion") in {
-            "success",
-            "neutral",
-            "failure",
-        }:
-            conclusion = pending["conclusion"]
-            title = str(pending.get("title") or "Review completed")
-            summary = str(pending.get("summary") or "")
-        else:
-            # Neutral, not failure: an incomplete review is a reviewer-infra
-            # problem, and a red X on the PR misreads as a code problem.
-            conclusion = "neutral"
-            title = "Review did not complete"
-            summary = (
-                "The Robin review run ended without publishing a review. "
-                "Re-trigger the review by pushing a commit or re-requesting it."
-            )
+        # misreporting a published review as failed. Otherwise neutral, not
+        # failure: an incomplete review is a reviewer-infra problem.
+        result = tracked.review_check_pending_result or ReviewCheckResult(
+            conclusion="neutral",
+            title="Review did not complete",
+            summary="The Robin review run ended without publishing a review. "
+            "Re-trigger the review by pushing a commit or re-requesting it.",
+        )
         await settle_review_check_run(
-            thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            token=token,
-            conclusion=conclusion,
-            title=title,
-            summary=summary,
+            thread_id=thread_id, owner=owner, repo=repo, token=token, **result.model_dump()
         )
         logger.info("Settled stale review check run for thread %s", thread_id)
     except Exception:

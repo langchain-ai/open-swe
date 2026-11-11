@@ -17,7 +17,6 @@ its own.
 import asyncio
 import logging
 import os
-import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -240,14 +239,6 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
         return None
 
 
-_QUOTED: Final = re.compile(r"""(?<!-c )(?:'[^']*'|"(?:\\.|[^"\\])*")""")
-_SLEEP: Final = re.compile(r"(?<![\w./-])sleep\s+(\$\w+|\d+(?:\.\d+)?|\.\d+)([smhd]?)\b")
-_LOOP: Final = re.compile(r"(?<![\w=-])(?:while|until|for)(?=[\s(])")
-_UNIT_SECONDS: Final = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
-_LONGEST_SLEEP_SECONDS: Final = 10
-_LONGEST_POLL_SECONDS: Final = 5
-
-
 class Run:
     """One run of a graph, as the backend knows it: what it calls with, what it was
     planned with, and what it has told the backend.
@@ -276,6 +267,8 @@ class Run:
         self.backend = OpenSweBackend(self)
         # What the run tells the backend happened, until the backend takes it.
         self.outbox = Outbox(self.backend)
+        # The route the run's model calls take, once the run starts; its subagents follow it.
+        self.route: str | None = None
         self._locals: dict[object, object] = {}
 
     def local[T](self, key: object, make: Callable[[], T]) -> T:
@@ -326,26 +319,6 @@ class Run:
     def catalog(self) -> Catalog:
         """What the run may do: a launched worker's own catalog once it adopted its run."""
         return self.adopted if self.adopted is not None else self.planned
-
-    def sleep_refusal(self, command: object) -> str | None:
-        """Why this run may not run shell ``command``: in Goal mode a command that waits,
-        sleeping in a loop or for long, holds the run while nothing happens, where the
-        thread's wait tools free it and wake it when there is something to see."""
-        loop = self.catalog.loop
-        rules = None if loop is None else loop.work_state
-        if rules is None or not rules.sleep_refusal or not isinstance(command, str):
-            return None
-        unquoted = _QUOTED.sub("", command)
-        sleeps = _SLEEP.findall(unquoted)
-        if not sleeps:
-            return None
-        pauses = [
-            float("inf") if amount.startswith("$") else float(amount) * _UNIT_SECONDS[unit]
-            for amount, unit in sleeps
-        ]
-        polls = _LOOP.search(unquoted) is not None and max(pauses) >= _LONGEST_POLL_SECONDS
-        waits = polls or sum(pauses) >= _LONGEST_SLEEP_SECONDS
-        return rules.sleep_refusal if waits else None
 
     async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""

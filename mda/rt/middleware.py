@@ -374,7 +374,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         """The update preparing the run makes, and whether the sandbox is open, as far as
         this run tried."""
         trace = turn_trace(self._backend.run)
-        trace.start(self._trace_metadata())
+        trace.start()
+        trace.update(self._trace_metadata())
+        trace.tag(self._backend.run.catalog.trace_tags)
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
             thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
@@ -382,6 +384,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
+            trace.update(self._trace_metadata())
         for read in self._read_ahead:
             read()
         # What an earlier run left unsent goes out before anything this one does.
@@ -415,6 +418,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             prepared.update.update(self._loop.prepared(prepared))
             held = {**state.get(STATE_KEY, {}), **prepared.update}
             prepared.update.update(await self._loop.routed(held, state["messages"], classifying))
+            # The route the classifier chose, next to the model a person picked on the trace.
+            if (route := self._backend.run.route) not in (None, "default"):
+                trace.update({"model_route": route})
         finally:
             opening.cancel()
             if classifying is not None:

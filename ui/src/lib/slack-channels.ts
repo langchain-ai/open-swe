@@ -1,3 +1,4 @@
+import { SlackLinks } from "./slack-links"
 import { FuzzySearch } from "@/lib/fuzzySearch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
@@ -14,8 +15,7 @@ export const slackChannelDirectoryKey = ["slackChannels"] as const
 
 export const SLACK_CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 
-export const slackChannelHref = (id: string): string =>
-  `https://slack.com/app_redirect?channel=${encodeURIComponent(id)}`
+export const slackChannelHref = (id: string): string => SlackLinks.open(id)
 
 /**
  * The channels the bot can see, as the backend last walked them from Slack.

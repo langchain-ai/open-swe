@@ -787,11 +787,11 @@ def _rows_query(*pull_request_ids: UUID) -> Select[FindingRow]:
     )
 
 
-async def list_findings(thread_id: str) -> list[Finding]:
+async def list_findings(thread_id: str, *, strict: bool = False) -> list[Finding]:
     """Return all findings recorded for the reviewer thread.
 
     Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
-    PostgreSQL does not exist; other failures degrade to no findings.
+    PostgreSQL does not exist; other failures degrade to no findings unless ``strict``.
     """
     # The shadow module imports this one.
     from openswe.review.shadow import ReviewShadow
@@ -808,6 +808,8 @@ async def list_findings(thread_id: str) -> list[Finding]:
     except ReviewerThreadMissingError:
         raise
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         logger.exception(
             "Failed to load reviewer findings", extra={"reviewer_thread_id": thread_id}
         )

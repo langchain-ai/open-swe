@@ -93,7 +93,7 @@ export function pullRequestTone(
   const state = pullRequestState(pullRequest, health)
   if (state === "merged") return "text-brand-primary"
   if (state === "closed") return "text-error-secondary"
-  if (hasActionableIssues(pullRequest, health)) return "text-error-secondary"
+  if (hasActionableIssues(pullRequest, health)) return "text-warning-secondary"
   if (state === "draft") return "text-secondary"
   if (
     !health?.statusAvailable ||

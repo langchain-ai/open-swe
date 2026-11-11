@@ -17,7 +17,6 @@ import httpx2
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
 
-from openswe.database import configured
 from openswe.dispatch import dispatch_agent_run
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
@@ -253,8 +252,6 @@ async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccep
 
 async def _deployment_workspace(owner: str, repo: str) -> tuple[Repository, str, UUID] | None:
     """The repository and workspace that can keep a deployment subscription, if any."""
-    if not configured():
-        return None
     repository = await Repository.get(f"{owner}/{repo}")
     workspace = await workspace_for_repo(owner, repo)
     if repository is None or not workspace:
@@ -416,6 +413,6 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
         delivery_id=_delivery_id(event.target, event.commits),
         refs=EventRefs(github_repository=claims.repository),
     )
-    if configured() and not stored:
+    if not stored:
         raise HTTPException(status_code=503, detail="Deployment event was not recorded")
     return await accept_rollout_deploy(event.target, event.commits)

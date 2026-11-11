@@ -101,6 +101,8 @@ type GitHubWorkName = Literal[
     "notify_pr_updated",
     "review_fork_push",
     "settle_review_on_close",
+    # A pull request closed: what reviews saved to apps for it is deleted.
+    "delete_app_documents_on_close",
     "settle_human_reviews",
     "update_reviewer_watch",
     # The walkthrough plans an open pull request, drafts included, past the public-repo gate.
@@ -112,6 +114,8 @@ type GitHubWorkName = Literal[
     "review_push",
     "ci_event",
     "record_completed_review",
+    # The ``Robin Approves`` check is posted again on a pull request's head.
+    "evaluate_approval_policy",
 ]
 
 

@@ -29,6 +29,9 @@ The backend never runs middleware around a model call; the only middleware objec
 
 ## Conventions
 
+- The product is Robin: name it that in new prose, comments, prompts, user- and agent-facing text, and test data.
+  "Open SWE" survives only in existing identifiers (`open-swe`, `openswe`, `open_swe_notice.`); don't rename those in passing.
+
 - Do not build special-purpose features when the need can be met by composing generic capabilities such as plugins, automations, skills, or external MCP servers.
   First check whether existing capabilities, with small generic additions if needed, can deliver the feature.
 
@@ -97,6 +100,9 @@ The backend never runs middleware around a model call; the only middleware objec
 - Design new agent tools as fine-grained, Unix-style primitives: each does one thing and returns structured data that code mode can compose.
   Don't add batch tools or combined orchestration tools; use code mode to loop, branch, and run independent calls in parallel instead.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
+- An agent thread's view of its Slack thread never diverges from the Slack thread: its next turn reads every message there it doesn't hold yet.
+  That includes commands another thread took (`/btw`, `/breakout`) and their answers, and anything Robin posts that the thread's own agent didn't write; post those as notices (`SlackNotice`; replay keeps what `is_slack_notice` matches).
+  Never start a run or create a thread just to deliver them: a thread created later reads the Slack thread from its start.
 - Only the agent that owns a Slack channel thread posts in it.
   Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run.
   A DM sent for a thread passes `origin` to `send_dm`.

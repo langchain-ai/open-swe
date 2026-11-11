@@ -12,7 +12,6 @@ from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
-from openswe.memories.store import CURATOR_THREAD_KEY
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     REVIEWER_UNTITLED,
@@ -22,10 +21,12 @@ from openswe.review.session import ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.links import SlackLink
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.read_state import THREAD_READ_STATES
+from openswe.threads.workflow_review import WorkflowReview
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -152,10 +153,12 @@ def thread_is_readable(
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
-    if login and ThreadIdentity(login).user_id is not None:
-        return thread_is_private(metadata) and thread_is_owner(metadata, login)
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
         return review.owned_by(login)
+    if login and ThreadIdentity(login).user_id is not None:
+        return (thread_is_private(metadata) and thread_is_owner(metadata, login)) or (
+            not thread_is_private(metadata) and thread_source(metadata) == "slack"
+        )
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
@@ -175,7 +178,14 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     Claude Code session here: it runs in Claude Code.
     """
     if login and ThreadIdentity(login).user_id is not None:
-        return thread_is_readable(metadata, login)
+        return (
+            thread_is_readable(metadata, login)
+            and thread_source(metadata) != CLAUDE_CODE_SOURCE
+            and (
+                not SandboxBridgeBinding.reaches_a_machine(metadata)
+                or thread_is_owner(metadata, login)
+            )
+        )
     source = thread_source(metadata)
     return (
         source in _SURFACED_SOURCES
@@ -208,8 +218,7 @@ def _assert_thread_promptable(
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata) and not allow_bot:
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
-    # Its wake run must take direction from nobody, and a message would join that run.
-    if metadata.get(CURATOR_THREAD_KEY):
+    if metadata.get("curator"):
         raise HTTPException(403, "The memory curator's thread is read-only.")
 
 
@@ -299,7 +308,7 @@ def thread_source_url(metadata: Mapping[str, Any]) -> str | None:
 
 def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    team_id = SLACK_TEAM_ID.strip()
+    team_id = (slack_thread.team_id or SLACK_TEAM_ID).strip() if slack_thread else ""
     if (
         slack_thread is None
         or not team_id
@@ -316,10 +325,9 @@ def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
         return None
     channel_id = slack_thread.channel_id.strip()
-    team_id = SLACK_TEAM_ID.strip()
-    if not channel_id or not team_id:
+    if not channel_id:
         return None
-    return f"https://slack.com/app_redirect?{urlencode({'channel': channel_id, 'team': team_id})}"
+    return SlackLink(channel_id, team_id=slack_thread.team_id or SLACK_TEAM_ID).channel_url
 
 
 def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
@@ -508,6 +516,7 @@ async def _thread_summary(
     read_states: Mapping[str, JsonObject] | None = None,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
+    workflow_review = WorkflowReview(WorkflowReview.parse(metadata))
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
     if not isinstance(created_at, (int, float)):
@@ -603,6 +612,7 @@ async def _thread_summary(
             and _metadata_string(metadata, "automation_action_posted_at") is not None
         ),
         "status": status,
+        "pendingWorkflowApproval": workflow_review.pending,
         "latestRunId": _thread_run_id(metadata, latest_run_id),
         "viewed": read_metadata.get("viewed") is not False
         and _is_thread_viewed(read_metadata, _thread_run_id(metadata, latest_run_id)),

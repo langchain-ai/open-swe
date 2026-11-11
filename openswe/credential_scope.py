@@ -59,9 +59,7 @@ def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | No
     if metadata.get("visibility", "public") == "public":
         return None
     owner = metadata.get("owner_login")
-    login = (
-        (cfg.sender_id or "") if cfg.auth_provider == "langsmith" else cfg.github_login or ""
-    ).strip()
+    login = ((cfg.sender_id or "") if not cfg.github_linked else cfg.github_login or "").strip()
     if not isinstance(owner, str) or not login or owner.strip().lower() != login.lower():
         return None
     return login
@@ -82,7 +80,7 @@ async def private_credential_login(
 ) -> str | None:
     """Personal integrations require the saved private owner to start the run."""
     cfg, metadata = await _thread_scope(config, thread_id=thread_id)
-    if cfg.auth_provider == "langsmith":
+    if not cfg.github_linked:
         if (
             not cfg.user_id
             or metadata.get("owner_login") != f"user:{cfg.user_id}"
@@ -106,8 +104,8 @@ class GitHubCredentialScope:
         return "personal" if self.login is not None else "system"
 
     @classmethod
-    async def is_public_ask(cls) -> bool:
-        _, metadata = await _thread_scope()
+    async def is_public_ask(cls, config: Mapping[str, Any] | None = None) -> bool:
+        _, metadata = await _thread_scope(config)
         slack = SourceContext.from_metadata(metadata).slack_thread
         return (
             metadata.get("visibility", "public") == "public"
@@ -131,8 +129,8 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
-    if cfg.auth_provider == "langsmith":
-        raise PermissionError("Agent Workspace has no GitHub repository access")
+    if not cfg.github_linked:
+        raise PermissionError("GitHub is not linked for this thread")
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
     if await GitHubCredentialScope.is_public_ask():

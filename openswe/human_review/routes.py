@@ -138,6 +138,10 @@ async def api_request_human_review(
         inline_summary=inline_summary,
     )
     if not result.success:
+        if result.retry_after_seconds is not None:
+            raise HTTPException(
+                503, result.error, headers={"Retry-After": str(result.retry_after_seconds)}
+            )
         raise HTTPException(409, result.error)
     return result
 

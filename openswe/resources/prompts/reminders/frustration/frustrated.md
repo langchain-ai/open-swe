@@ -1,1 +1,0 @@
-The person is frustrated or annoyed with the agent's behavior: they repeat an instruction it ignored, complain that it did the wrong thing again, express exasperation, swear at it, or say it keeps making the same mistake.

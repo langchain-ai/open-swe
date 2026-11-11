@@ -41,9 +41,6 @@ async def refresh_guard(provider: str, login: str) -> AsyncIterator[None]:
     # The in-process lock keeps same-worker waiters from each opening a database connection.
     async with _local_locks.setdefault(key, asyncio.Lock()):
         uri = postgres.uri()
-        if uri is None:
-            yield
-            return
         async with _lock_engine(uri).begin() as conn:
             await conn.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from openswe.threads import index
+from openswe.threads.creation import TITLE_LOCKED_KEY
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -52,6 +53,16 @@ async def test_an_update_merges_top_level_keys_as_the_agent_server_does() -> Non
     assert updated is not None
     assert updated.metadata == {"a": 1, "b": {"y": 2}, "c": None}
     assert await index.update("missing", {"a": 1}) is None
+
+
+async def test_an_update_unless_title_locked_skips_a_thread_a_person_renamed() -> None:
+    await index.create("auto", runtime="mda", metadata={"title": "Untitled"})
+    await index.create("mine", runtime="mda", metadata={"title": "Mine", TITLE_LOCKED_KEY: True})
+
+    assert await index.update("auto", {"title": "PR"}, unless_title_locked=True) is not None
+    assert await index.update("mine", {"title": "PR"}, unless_title_locked=True) is None
+    mine = await index.get("mine")
+    assert mine is not None and mine.metadata["title"] == "Mine"
 
 
 async def test_search_filters_sorts_and_pages_like_the_agent_server() -> None:

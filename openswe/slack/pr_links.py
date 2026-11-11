@@ -68,7 +68,7 @@ class SlackPullRequestLink(Base):
     async def record(cls, envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
         """Record links without changing Slack routing; returns those new to their Slack thread."""
         event = envelope.event
-        if not postgres.configured() or event is None:
+        if event is None:
             return []
         refs = event_pull_requests(envelope)
         message = envelope.posted_message()

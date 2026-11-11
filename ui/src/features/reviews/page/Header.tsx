@@ -373,13 +373,6 @@ export function Header({
                   : "Approve & finish"
                 : undefined
             }
-            readyLabel={
-              queue
-                ? queue.next
-                  ? "Mark ready & next"
-                  : "Mark ready & finish"
-                : undefined
-            }
             onApproved={queue?.advance}
             nextLabel={queue ? (queue.next ? "Next" : "Finish") : undefined}
             onNext={queue?.advance}

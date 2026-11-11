@@ -13,6 +13,8 @@ from openswe.slack.channels import PAYLOAD_TTL, SlackChannel
 from openswe.slack.client import convert_mentions_to_slack_format, remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.mark.parametrize(
     ("text", "expected"),
@@ -205,6 +207,7 @@ async def test_read_thread_tool_outside_slack_reads_public_channels_only(
     assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
     slack_api.respond(_PUBLIC_CHANNEL)
+    await SlackChannel.load("C1", use_cache=False)
     slack_api.respond(
         {
             "ok": True,
@@ -471,3 +474,15 @@ async def test_channel_context_distinguishes_transient_and_definitive_failures(
     assert not context.allows_operations
     assert context.lookup_retry_after == delay
     assert "lookup_retry_after" not in context.dump()
+
+
+async def test_read_thread_tool_in_shared_thread_explains_refusal(slack_api, grant_tool_access):  # noqa: ANN001
+    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+
+    grant_tool_access(private=False)
+
+    refused = await slack_read_thread_messages("C1", "1.0")
+    assert refused["success"] is False
+    assert "other people can read it" in refused["error"]
+    assert "paste" in refused["error"]
+    assert not slack_api.calls

@@ -7,7 +7,7 @@ export const PERMISSION_COPY: Record<
   storage: {
     label: "Keep data",
     description:
-      "Save notes and comments, private to you or shared with everyone who can read a repository you share.",
+      "Save notes, comments and files such as screenshots, private to you or shared with everyone who can read a repository you share.",
   },
   "github:read": {
     label: "Read repositories",

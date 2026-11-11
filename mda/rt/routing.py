@@ -3,25 +3,20 @@
 The backend's ``classify_route`` (``openswe/middleware/model_selection.py``), moved here
 so a turn's route costs no call to the backend: Jev (``runtime_api.classifier``) needs
 only the LLM gateway's key, which this deployment calls its models with. The backend
-keeps its own for the runs it answers from their plan. The prompts are
-``prompts/model-selection``; ``tests/agent/test_mda_routing_prompts.py`` checks them
-against the backend's.
+keeps its own for the runs it answers from their plan. Both ask the questions in
+``runtime_api.route_questions``, worded by ``prompts/model-selection``, which
+``tests/agent/test_mda_routing_prompts.py`` checks against the backend's.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
 
 from langchain_core.messages import HumanMessage
-from runtime_api.catalog import ROUTES
-from runtime_api.classifier import JevDecision, select_jev_choice
 from runtime_api.provenance import Provenance
+from runtime_api.route_questions import TaskRoute
 
 from rt.input_messages import input_message_text
 from rt.prompts import prompt
-
-# The classifier reads the end of a long request.
-_TASK_CHARS: Final = 8_000
 
 
 @dataclass(frozen=True)
@@ -34,7 +29,7 @@ class Route:
 
 
 class RouteClassifier:
-    """Picks the least expensive route likely to complete the person's latest request."""
+    """Routes the person's latest request by what kind of task it is."""
 
     @staticmethod
     def latest_task(messages: Sequence[object]) -> str:
@@ -64,14 +59,7 @@ class RouteClassifier:
     async def classify(self, messages: Sequence[object]) -> Route:
         """The route the person's latest request takes; ``default`` for this run alone when
         the classifier cannot say."""
-        decision = JevDecision()
-        chosen = await select_jev_choice(
-            self.latest_task(messages)[-_TASK_CHARS:],
-            question="route",
-            instructions=prompt("model-selection/instructions"),
-            criteria={route: prompt(f"model-selection/{route}") for route in ROUTES},
-            decision=decision,
-        )
-        if chosen is None or decision.outcome != "accepted":
+        chosen, persist = await TaskRoute.classify(self.latest_task(messages), prompt=prompt)
+        if chosen is None:
             return Route("default", persist=False)
-        return Route(chosen)
+        return Route(chosen, persist=persist)

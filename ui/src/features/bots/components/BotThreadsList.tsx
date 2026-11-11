@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   ArrowLeftIcon,
   CaretRightIcon,
@@ -217,7 +218,8 @@ function BotThreadRow({
   thread: AgentThread
   entry?: AllowedSlackBotEntry
 }) {
-  const slackUrl = thread.sourceAppUrl ?? thread.sourceUrl
+  const sourceUrl = thread.sourceAppUrl ?? thread.sourceUrl
+  const slackUrl = sourceUrl ? SlackLinks.normalize(sourceUrl) : undefined
   return (
     <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
       <Link

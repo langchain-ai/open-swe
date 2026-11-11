@@ -1,12 +1,16 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from cryptography.fernet import Fernet
 
 from openswe import tools
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
+from openswe.slack.tools.search import SlackSearchGrant
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 async def test_list_channels_keeps_cursor_on_empty_page(slack_api: SlackAPI) -> None:
@@ -256,7 +260,68 @@ async def test_post_channel_message_refuses_missing_origin_link(
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
 
 
-def _search_run(monkeypatch: pytest.MonkeyPatch, *, shared: bool, token: str) -> None:
+@pytest.fixture
+def automation_post(slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.slack.tools import channels
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setattr(
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig.parse({"thread_id": "agent-thread", "schedule_id": "sched"}),
+    )
+    monkeypatch.setattr(channels, "run_slack_location", AsyncMock(return_value=("", "")))
+    slack_api.respond(
+        {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
+    )
+
+
+async def test_automation_channel_post_refuses_a_wall_of_text(
+    slack_api: SlackAPI, automation_post: None
+) -> None:
+    result = await tools.slack_post_message("C123", "x" * 401)
+    assert result["success"] is False
+    assert "details" in result["error"]
+    assert [method for method, _ in slack_api.calls] == ["users.conversations"]
+
+
+async def test_channel_post_refuses_oversized_rendered_details_before_posting(
+    slack_api: SlackAPI, automation_post: None
+) -> None:
+    result = await tools.slack_post_message("C123", "Report", details="&" * 38_000)
+    assert result == {"success": False, "error": "msg_too_long"}
+    assert not any(method == "chat.postMessage" for method, _ in slack_api.calls)
+
+
+async def test_channel_post_threads_its_details_under_the_headline(
+    slack_api: SlackAPI, automation_post: None
+) -> None:
+    slack_api.respond({"ok": True, "ts": "1700000000.000123"})
+    slack_api.respond({"ok": True, "ts": "1700000000.000456"})
+    details = "- **Adopt** the cache API\n" * 100
+    result = await tools.slack_post_message("C123", "3 MDA changes matter", details=details)
+    assert result == {
+        "success": True,
+        "channel_id": "C123",
+        "message_ts": "1700000000.000123",
+        "details_ts": "1700000000.000456",
+    }
+    (_, headline), (_, reply) = slack_api.calls[-2:]
+    assert "thread_ts" not in headline
+    assert "cache API" not in headline["text"]
+    assert reply["thread_ts"] == "1700000000.000123"
+    assert "cache API" in reply["text"]
+    assert reply["unfurl_links"] is False
+
+
+def _search_run(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    shared: bool,
+    token: str,
+    message_ts: str = "",
+    started_by_message: bool = True,
+) -> None:
     channel = {"id": "C123", "is_ext_shared": shared, "is_pending_ext_shared": False}
     monkeypatch.setattr(
         RunConfig,
@@ -266,10 +331,12 @@ def _search_run(monkeypatch: pytest.MonkeyPatch, *, shared: bool, token: str) ->
                 "slack_thread": {
                     "channel_id": "C123",
                     "thread_ts": "1.0",
+                    "triggering_event_ts": message_ts,
                     "channel_context": channel,
                 },
                 "source": "slack",
                 "slack_action_token": token,
+                "slack_search_message_ts": message_ts if started_by_message else None,
             }
         ),
     )
@@ -317,6 +384,25 @@ async def test_slack_search_searches_public_channels_with_the_runs_grant(
     assert payload["channel_types"] == ["public_channel"]
     assert payload["include_bots"] is False
     assert payload["limit"] == 20
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_slack_search_uses_the_grant_kept_for_the_runs_message(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The mention's `message` event started the run; its `app_mention` brought the grant.
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    await SlackSearchGrant.keep("C123", "1.5", "grant")
+    await SlackSearchGrant.keep("C123", "1.6", "another message's grant")
+    # A later run that only copied the thread's `slack_thread` gets no grant.
+    _search_run(monkeypatch, shared=False, token="", message_ts="1.5", started_by_message=False)
+    assert (await tools.slack_search("launch plan"))["success"] is False
+    assert slack_api.calls == []
+    _search_run(monkeypatch, shared=False, token="", message_ts="1.5")
+    slack_api.respond({"ok": True, "results": {"messages": []}})
+    assert (await tools.slack_search("launch plan"))["success"] is True
+    _, payload = slack_api.calls[0]
+    assert payload["action_token"] == "grant"
 
 
 @pytest.mark.usefixtures("registry_db")

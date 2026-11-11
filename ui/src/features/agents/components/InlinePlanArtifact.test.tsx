@@ -1,10 +1,16 @@
 /** @vitest-environment jsdom */
 
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { productAnalytics } from "@/lib/analytics"
+
 import { InlinePlanArtifact } from "./InlinePlanArtifact"
+
+vi.mock("@/lib/analytics", () => ({
+  productAnalytics: { featureOpened: vi.fn() },
+}))
 
 const mocks = vi.hoisted(() => ({
   status: "ready",
@@ -31,6 +37,7 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
 afterEach(() => {
   cleanup()
   mocks.status = "ready"
+  vi.mocked(productAnalytics.featureOpened).mockClear()
 })
 
 describe("InlinePlanArtifact", () => {
@@ -45,6 +52,13 @@ describe("InlinePlanArtifact", () => {
         .textContent
     ).toContain("Open artifact")
     expect(screen.getByTitle("Artifact preview")).toBeTruthy()
+    expect(productAnalytics.featureOpened).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open artifact in the conversation" })
+    )
+    expect(productAnalytics.featureOpened).toHaveBeenCalledExactlyOnceWith(
+      "artifact"
+    )
   })
 
   it("uses artifact terminology for legacy implementation plans", () => {
@@ -57,5 +71,12 @@ describe("InlinePlanArtifact", () => {
         .textContent
     ).toContain("Open artifact")
     expect(screen.getByTitle("Artifact preview")).toBeTruthy()
+    expect(productAnalytics.featureOpened).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open artifact in the conversation" })
+    )
+    expect(productAnalytics.featureOpened).toHaveBeenCalledExactlyOnceWith(
+      "artifact"
+    )
   })
 })

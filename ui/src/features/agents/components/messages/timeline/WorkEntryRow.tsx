@@ -1,3 +1,4 @@
+import { BrainIcon } from "@phosphor-icons/react/dist/ssr/Brain"
 import {
   CaretDownIcon,
   CheckIcon,
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils"
 
 const ICONS: Record<WorkEntryIconName, IconComponent> = {
   bot: RobotIcon,
+  brain: BrainIcon,
   check: CheckIcon,
   "circle-alert": WarningCircleIcon,
   eye: EyeIcon,

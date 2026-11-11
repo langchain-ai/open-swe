@@ -25,7 +25,7 @@ def test_a_model_falls_back_to_the_other_provider_reading_images_as_it_does() ->
     assert fallback is not None and fallback.model_id == "openai:gpt-6.1-sol"
     assert fallback.reads_images is True
     assert fallback.kwargs["reasoning"] == {"effort": "medium", "summary": "auto"}
-    assert fallback_spec("google_genai:gemini-4-argon") is None
+    assert fallback_spec("google_genai:gemini-4-carbon") is None
 
 
 def test_the_deployments_fallback_wins_but_never_the_model_itself() -> None:

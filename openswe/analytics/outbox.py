@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from openswe.analytics.events import EventEnvelope
 from openswe.analytics.ingestion import ingest
+from openswe.analytics.segment import SegmentDelivery
 from openswe.config import ENV
 from openswe.database import transaction
 from openswe.database.analytics import record_capture
@@ -109,6 +110,13 @@ async def deliver_batch() -> int:
         try:
             event = EventEnvelope.model_validate(record["event_body"])
             await ingest(event)
+            try:
+                await SegmentDelivery.enqueue_event(event)
+            except Exception as exc:
+                logger.warning(
+                    "Segment lifecycle capture failed",
+                    extra={"analytics_event_id": str(event_id), "error_type": type(exc).__name__},
+                )
             await _ack(event_id)
             delivered += 1
         except Exception as exc:  # noqa: BLE001

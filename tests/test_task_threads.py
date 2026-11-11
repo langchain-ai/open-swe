@@ -1039,7 +1039,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
     from openswe.dashboard.langsmith_login import LangSmithLogin
 
     grant = AsyncMock(return_value="langsmith-token")
-    monkeypatch.setattr(LangSmithLogin, "access_token", grant)
+    monkeypatch.setattr(LangSmithLogin, "authorize_session", grant)
     owner = client.owner
     owner.identities = [UserIdentity(provider="langsmith", external_id="ls-subject")]
     subject = f"user:{owner.id}"
@@ -1058,6 +1058,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
     worker = str((await launch(actor, "local-worker", "Research"))["worker_thread_id"])
     config = await service.recipient_config(worker)
     assert config["user_id"] == str(owner.id)
+    assert config["github_linked"] is False
     assert config["auth_provider"] == "langsmith"
     assert config["repo_explicitly_none"] is True
     assert "github_login" not in config
@@ -1065,7 +1066,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
     assert client.metadata[worker]["sandbox_id"] == "bridge:local-task"
     await service.authorized_metadata(service.Actor(worker, subject))
     service.enforce_github_login_gate.assert_not_awaited()
-    grant.return_value = None
+    grant.side_effect = HTTPException(401, "LangSmith login expired")
     with pytest.raises(HTTPException, match="LangSmith login expired"):
         await service.recipient_config(worker)
     with pytest.raises(HTTPException, match="LangSmith login expired"):

@@ -24,6 +24,8 @@ from openswe.users import User, UserIdentity
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces import routing
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 class _FakeThreads:
     """Every claim succeeds — dedupe is covered in test_slack_event_dedupe.py."""

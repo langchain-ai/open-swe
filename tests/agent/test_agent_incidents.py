@@ -36,6 +36,9 @@ from tests.agent.test_agent_assembly_context import (
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 CHANNEL = {
     "id": "C1",
     "name": "inc-test",
@@ -184,7 +187,14 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     run = stamped.model_copy(update={"settings": starting.settings()})
 
     # The Slack context the model is sent is evidence the report can cite.
-    context = turns.context_block("C1", {"ts": "1.0", "user": "U1", "text": "Errors reported"})
+    monkeypatch.setattr(
+        turns,
+        "get_slack_permalink",
+        AsyncMock(return_value="https://example.slack.com/archives/C1/p10"),
+    )
+    context = await turns.context_block(
+        "C1", {"ts": "1.0", "user": "U1", "text": "Errors reported"}
+    )
     told = await TokenRun.answer(
         parts,
         run,

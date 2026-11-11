@@ -40,6 +40,9 @@ from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _EVENTS_URL = mda_forwarding.TRIGGER_EVENTS_URL
 _MDA_THREAD = str(uuid.uuid4())
 _DM_THREAD = str(uuid.uuid4())
@@ -49,7 +52,6 @@ _OWNED_THREAD = mda_forwarding.owned_thread
 _STARTABLE_THREAD = mda_forwarding.startable_thread
 _STARTABLE_CONCIERGE = mda_forwarding.startable_concierge
 _JOIN_CONCIERGE = mda_forwarding.join_concierge
-_ACCOUNT_LINK_NEEDED = slack_service.account_link_needed
 
 
 class _FakeBackgroundTasks:
@@ -853,7 +855,9 @@ def _prepared(
     monkeypatch.setattr(slack_service, "prepare_slack_channel_run", prepare)
     monkeypatch.setattr(slack_channel.index, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_channel, "channel_run_starting", AsyncMock())
-    monkeypatch.setattr(dispatch, "_run_user_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        dispatch, "_run_user_metadata", AsyncMock(return_value={"billing_bucket": "system"})
+    )
     stub_mda_runtime(monkeypatch)
     return prepare
 
@@ -879,7 +883,9 @@ def _start_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr(event_claims, "claim", claims.claim)
     monkeypatch.setattr(event_claims, "held", claims.is_held)
     monkeypatch.setattr(
-        slack_channel, "build_settings_url", lambda: "https://openswe.test/settings"
+        slack_channel.LangSmithLogin,
+        "slack_onboarding_url",
+        lambda: "https://openswe.test/settings",
     )
     return _api(monkeypatch)
 
@@ -962,8 +968,7 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
             review_card=True,
         ),
     }
-    # A conversation the channel holds is neither gated again nor claimed again.
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
 
 
@@ -978,6 +983,7 @@ async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
         AsyncMock(
             return_value={
                 "ls_repo_provider": "github",
+                "billing_bucket": "user",
                 "user_id": "user-1",
                 "ls_attribution_identifier": "ada",
             }
@@ -1340,7 +1346,7 @@ async def test_a_breakout_opens_its_new_thread_and_runs_its_first_turn_there(
     assert source.thread_id == (owner or backend_thread)
     assert cast(slack_channel.BreakoutCommand, command).instruction == "fix the flaky test"
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     assert prepare.await_args.args[0] is opening
     assert start["thread_id"] == side
 
@@ -1427,37 +1433,9 @@ async def test_a_move_outside_an_mda_conversation_starts_nothing(
     assert start == _NO_RUN
     prepare.assert_not_awaited()
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
     assert record.no_run_reason == "move outside an MDA conversation"
-
-
-@pytest.mark.parametrize(
-    ("token", "record", "needed"),
-    [
-        ("gho_valid", False, None),
-        (None, True, "revoked"),
-        (None, False, "unlinked"),
-    ],
-)
-async def test_the_account_gate_runs_without_a_thread(
-    monkeypatch: pytest.MonkeyPatch, token: str | None, record: bool, needed: str | None
-) -> None:
-    monkeypatch.setattr(
-        webhook_common,
-        "get_slack_user_info",
-        AsyncMock(return_value={"profile": {"email": "ada@example.com"}}),
-    )
-    monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value="ada"))
-    monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=token))
-    monkeypatch.setattr(webhook_common, "has_access_token_record", AsyncMock(return_value=record))
-
-    gate = await _ACCOUNT_LINK_NEEDED("U1")
-
-    if needed is None:
-        assert gate is None
-    else:
-        assert gate == slack_service.AccountLinkNeeded("U1", "ada@example.com", needed)
 
 
 async def test_a_kitchen_channels_untagged_message_goes_to_mda(
@@ -1712,8 +1690,23 @@ async def test_a_modal_trigger_server_opened_closes_when_handed_to_it(
             "user": {"id": "U1"},
             "view": {"callback_id": "human_review_decline", "private_metadata": "{}"},
         },
+        {
+            "type": "block_actions",
+            "actions": [{"action_id": "open_swe_option_select_review", "type": "button"}],
+        },
+        {
+            "type": "block_actions",
+            "actions": [{"action_id": "open_swe_option_select_accept", "type": "button"}],
+        },
     ],
-    ids=["explain this", "options load", "code channel view", "backend-opened modal"],
+    ids=[
+        "explain this",
+        "options load",
+        "code channel view",
+        "backend-opened modal",
+        "review signup link",
+        "review acceptance link",
+    ],
 )
 async def test_explain_this_code_channel_views_and_the_backends_modals_stay_here(
     monkeypatch: pytest.MonkeyPatch, payload: dict[str, JsonValue]

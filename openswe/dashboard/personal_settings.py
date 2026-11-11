@@ -37,6 +37,7 @@ PREFERENCE_SETTING_KEYS = frozenset(
         "default_visibility",
         "default_workspace",
         "follow_up_behavior",
+        "auto_show_changes",
     }
 )
 type SettingValue = str | bool | dict[str, str] | None

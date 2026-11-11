@@ -1,4 +1,6 @@
+import { productAnalytics } from "@/lib/analytics"
 import { LogoMark } from "@/components/Branding"
+import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
@@ -19,6 +21,7 @@ import {
 } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
+import { Text } from "@langchain/macaw-components/Text"
 import { Icon } from "@langchain/macaw-components/Icon"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
@@ -28,9 +31,11 @@ import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import type {
   AgentPullRequest,
   AgentThread,
+  ComposerDraft,
   ImageChunk,
   Message,
   ThreadFixScope,
+  ToolExecutionChunk,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
@@ -39,7 +44,6 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
-import { ThreadGoalBar } from "@/features/agents/components/ThreadGoalBar"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import {
   readStoredPanelCollapsed,
@@ -96,16 +100,42 @@ import {
   threadTranscriptPainted,
 } from "@/lib/perf/threadLoad"
 
+/**
+ * Drafts a page around a thread has already put in its composer. The page keeps
+ * handing over its last draft, so without this every remount of the view (the
+ * dock reopening, a layout change) would put the same draft there again.
+ */
+const appliedComposerDrafts = new WeakSet<ComposerDraft>()
+
 interface AgentThreadViewProps {
   thread: AgentThread
-  composerDraft?: { key: number; text: string }
+  composerDraft?: ComposerDraft
 }
 
-/** Paths the agent has edited this thread, newest last, for `@file` mentions. */
 function plainSubmission(text: string): ComposerSubmission {
   return { text, images: [], replies: [] }
 }
 
+/** Completed file edits in a thread, including those an `eval` call's code made. */
+function completedEdits(messages: Array<Message>): number {
+  const count = (calls: Array<ToolExecutionChunk>): number =>
+    calls.reduce(
+      (total, call) =>
+        total +
+        (call.toolKind === "edit" && call.status === "completed" ? 1 : 0) +
+        count(call.calls ?? []),
+      0
+    )
+  return count(
+    messages.flatMap((message) =>
+      message.chunks.filter(
+        (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution"
+      )
+    )
+  )
+}
+
+/** Paths the agent has edited this thread, newest last, for `@file` mentions. */
 function editedPaths(messages: Array<Message>): Array<string> {
   const paths = new Set<string>()
   for (const message of messages) {
@@ -333,6 +363,17 @@ export function AgentThreadView({
         (followUpBehavior === "queue") !== (options?.alternate === true)
       const enqueue = isStreaming && queue
       const offload = content.trim() === "/offload"
+      const analyticsActorId = session.data?.user_id ?? null
+      const analyticsAction = productAnalytics.beginAction(
+        offload
+          ? "offload"
+          : enqueue
+            ? "queue"
+            : isStreaming
+              ? "steer"
+              : "new_turn",
+        analyticsActorId
+      )
       const messageId = crypto.randomUUID()
       // A message that goes straight into the transcript sits at the top while
       // the reply fills in below it. A queued one stays in the queue until its
@@ -351,6 +392,8 @@ export function AgentThreadView({
           images,
           replies,
           client_message_id: messageId,
+          analyticsActorId,
+          analyticsAction,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
@@ -360,6 +403,7 @@ export function AgentThreadView({
             : {}),
         })
       } catch (error) {
+        analyticsAction.failed(error)
         restoreAutoSelection()
         throw error
       }
@@ -371,6 +415,7 @@ export function AgentThreadView({
       followUpBehavior,
       isStreaming,
       sendMessage,
+      session.data?.user_id,
     ]
   )
 
@@ -408,19 +453,17 @@ export function AgentThreadView({
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
-  const [appliedComposerDraft, setAppliedComposerDraft] =
-    useState<typeof composerDraft>(undefined)
-  if (composerDraft !== appliedComposerDraft) {
-    setAppliedComposerDraft(composerDraft)
-    if (composerDraft) {
-      setRestoreDraft((previous) => ({
-        key: (previous?.key ?? 0) + 1,
-        text: composerDraft.text,
-        images: [],
-        replacesSuggestion: true,
-      }))
-    }
-  }
+  useEffect(() => {
+    if (!composerDraft || appliedComposerDrafts.has(composerDraft)) return
+    appliedComposerDrafts.add(composerDraft)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setRestoreDraft((previous) => ({
+      key: (previous?.key ?? 0) + 1,
+      text: composerDraft.text,
+      images: [...(composerDraft.images ?? [])],
+      replacesSuggestion: true,
+    }))
+  }, [composerDraft])
 
   const question = reviewChat?.question
   const clearQuestion = reviewChat?.clearQuestion
@@ -496,12 +539,19 @@ export function AgentThreadView({
   const withdrawQueued = useCallback(
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
-      if (source.kind === "stream") {
-        if (!(await source.cancelQueued(entry.turnId))) {
-          throw new Error("The queued message could not be cancelled.")
+      const action = productAnalytics.beginAction("queue_cancel")
+      try {
+        if (source.kind === "stream") {
+          if (!(await source.cancelQueued(entry.turnId))) {
+            throw new Error("The queued message could not be cancelled.")
+          }
+        } else {
+          await agentsApi.cancelRun(thread.id, entry.runId)
         }
-      } else {
-        await agentsApi.cancelRun(thread.id, entry.runId)
+        action.accepted()
+      } catch (error) {
+        action.failed(error)
+        throw error
       }
       restoreQueuedAutoSelection(entry.message.id)
     },
@@ -629,6 +679,44 @@ export function AgentThreadView({
     },
     [handlePanelCollapsedChange]
   )
+  // Show the Changes panel when the thread settles after editing files in view.
+  // Edits are counted from when streaming started, not from the last user
+  // message, so steered messages and queued follow-ups don't hide them. The
+  // baseline keeps moving until the transcript has hydrated, so earlier runs'
+  // edits never count toward a run that was already live when the view opened.
+  const autoShowChanges = session.data?.auto_show_changes ?? true
+  const lastSeenRun = useRef({
+    threadId: thread.id,
+    streaming: isStreaming,
+    hydrating: true,
+    editsAtStart: 0,
+  })
+  const hydrating = source.isHydrating
+  useEffect(() => {
+    const previous = lastSeenRun.current
+    const edits = completedEdits(baseMessages)
+    const tracking =
+      previous.threadId === thread.id &&
+      previous.streaming &&
+      !previous.hydrating
+    lastSeenRun.current = {
+      threadId: thread.id,
+      streaming: isStreaming,
+      hydrating,
+      editsAtStart: tracking ? previous.editsAtStart : edits,
+    }
+    const finished = tracking && !isStreaming
+    if (!finished || !autoShowChanges || edits <= previous.editsAtStart) return
+    setRevealChangesKey((key) => key + 1)
+    handlePanelCollapsedChange(false)
+  }, [
+    autoShowChanges,
+    baseMessages,
+    handlePanelCollapsedChange,
+    hydrating,
+    isStreaming,
+    thread.id,
+  ])
 
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
@@ -839,8 +927,15 @@ export function AgentThreadView({
                 ) : undefined
               }
             >
-              The last run hit an error before it could finish. Send another
-              message to retry.
+              <Text as="span" variant="sm" color="secondary">
+                The last run hit an error before it could finish. Send another
+                message to retry.
+              </Text>{" "}
+              <CopyErrorButton
+                error="The last run hit an error before it could finish."
+                details={{ Thread: thread.id, Trace: thread.traceUrl }}
+                className="-my-space-1 align-middle"
+              />
             </Banner>
           </div>
         )}
@@ -969,7 +1064,6 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              {!embedded && <ThreadGoalBar threadId={thread.id} />}
               {!embedded && (
                 <ThreadPullRequests
                   pullRequests={
@@ -1006,7 +1100,7 @@ export function AgentThreadView({
                           ? "Mirrored from Claude Code. Continue this session there"
                           : canPost
                             ? hasConversation
-                              ? "Add a follow up"
+                              ? "Work with Robin"
                               : "Send the first message"
                             : "Only workspace admins can send messages in this thread"
                 }

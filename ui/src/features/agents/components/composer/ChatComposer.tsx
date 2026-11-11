@@ -59,6 +59,7 @@ import type {
   WorkspaceOption,
 } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
+import { AttachedFile } from "@/features/agents/components/messages/MessageImage"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
@@ -78,10 +79,20 @@ import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
-const MAX_IMAGE_COUNT = 5
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+export const MAX_IMAGE_COUNT = 5
+export const MAX_FILE_COUNT = 10
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
-const SUPPORTED_IMAGE_TYPES = new Set([
+/** Non-image files the agent receives in its sandbox rather than as model input. */
+export const SUPPORTED_FILE_TYPES: ReadonlySet<string> = new Set([
+  "application/pdf",
+  "text/plain",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+])
+
+export const SUPPORTED_IMAGE_TYPES: ReadonlySet<string> = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",
@@ -131,6 +142,12 @@ export interface RestoredDraft {
   replacesSuggestion?: boolean
 }
 
+/** The last suggested prompt put in a composer, which the next suggestion replaces while it is untouched. */
+interface Suggestion {
+  text: string
+  images: ReadonlyArray<ImageChunk>
+}
+
 class ComposerDrafts {
   private drafts = new Map<
     string,
@@ -140,6 +157,7 @@ class ComposerDrafts {
       replies: Array<PendingReply>
     }
   >()
+  private suggestions = new Map<string, Suggestion>()
 
   read(key?: string) {
     return key ? this.drafts.get(key) : undefined
@@ -153,12 +171,26 @@ class ComposerDrafts {
   ) {
     if (!key) return
     this.drafts.delete(key)
-    if (!text && !images.length && !replies.length) return
+    if (!text && !images.length && !replies.length) {
+      this.suggestions.delete(key)
+      return
+    }
     this.drafts.set(key, { text, images, replies })
     if (this.drafts.size > 50) {
       const oldest = this.drafts.keys().next().value
-      if (oldest) this.drafts.delete(oldest)
+      if (oldest) {
+        this.drafts.delete(oldest)
+        this.suggestions.delete(oldest)
+      }
     }
+  }
+
+  suggestion(key?: string) {
+    return key ? this.suggestions.get(key) : undefined
+  }
+
+  suggest(key: string | undefined, suggestion: Suggestion) {
+    if (key) this.suggestions.set(key, suggestion)
   }
 }
 
@@ -194,6 +226,8 @@ export interface ChatComposerProps {
   /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
+  /** While the repository or project to preselect is still loading; its picker holds its place, hidden, rather than swapping labels in view. */
+  targetPending?: boolean
   onRepoChange?: (repo: string | null) => void
   /** The signed-in person while they must link GitHub; the repo picker then asks them to. */
   gitHubLinkUser?: SessionUser
@@ -232,8 +266,19 @@ export interface ChatComposerProps {
   routed?: { route?: string; modelId?: string | null } | null
 }
 
+function isAttachable(file: File): boolean {
+  return (
+    SUPPORTED_IMAGE_TYPES.has(file.type) || SUPPORTED_FILE_TYPES.has(file.type)
+  )
+}
+
+/** An attachment that goes to the sandbox rather than to the model as an image. */
+function isFileChunk(chunk: ImageChunk): boolean {
+  return SUPPORTED_FILE_TYPES.has(chunk.mimeType)
+}
+
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
-  if (!SUPPORTED_IMAGE_TYPES.has(file.type) || file.size > MAX_IMAGE_BYTES) {
+  if (!isAttachable(file) || file.size > MAX_IMAGE_BYTES) {
     return Promise.resolve(null)
   }
 
@@ -395,6 +440,7 @@ export const ChatComposer = memo(function ChatComposer({
   onSelectLocalRepoBranch,
   projects = [],
   selectedProjectId = null,
+  targetPending = false,
   onProjectChange,
   onCreateProject,
   workspaceOptions = [],
@@ -546,17 +592,23 @@ export const ChatComposer = memo(function ChatComposer({
     commandItems[0] ??
     null
 
+  const imageCount = pendingImages.filter((i) => !isFileChunk(i)).length
+  const filesWhileBusy = busy && pendingImages.some(isFileChunk)
   const selectedModelSupportsImages = useMemo(() => {
-    if (!selection || pendingImages.length === 0) return true
+    if (!selection || imageCount === 0) return true
     return models.some((m) => m.id === selection.modelId && m.supports_images)
-  }, [models, pendingImages.length, selection])
+  }, [models, imageCount, selection])
 
   const composerEmpty =
     value.trim().length === 0 &&
     pendingImages.length === 0 &&
     pendingReplies.length === 0
   const canSubmit =
-    !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
+    !disabled &&
+    !isSubmitting &&
+    selectedModelSupportsImages &&
+    !filesWhileBusy &&
+    !composerEmpty
 
   const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
     setValue(nextValue)
@@ -566,23 +618,44 @@ export const ChatComposer = memo(function ChatComposer({
   }, [])
 
   const restoredKeyRef = useRef<number | null>(null)
-  const lastSuggestionRef = useRef<string | null>(null)
+  // Kept with the draft, so a suggestion still replaces the last one after a remount.
+  const lastSuggestionRef = useRef<Suggestion | null>(
+    composerDrafts.suggestion(draftKey) ?? null
+  )
   useEffect(() => {
     if (!restoreDraft || restoredKeyRef.current === restoreDraft.key) return
     restoredKeyRef.current = restoreDraft.key
     const current = editorRef.current?.readSnapshot()?.value ?? value
+    const previous = lastSuggestionRef.current
     const untouched =
       restoreDraft.replacesSuggestion &&
-      current.trim() === (lastSuggestionRef.current ?? "").trim()
-    if (restoreDraft.replacesSuggestion)
-      lastSuggestionRef.current = restoreDraft.text
+      current.trim() === (previous?.text ?? "").trim()
+    if (restoreDraft.replacesSuggestion) {
+      lastSuggestionRef.current = {
+        text: restoreDraft.text,
+        images: restoreDraft.images,
+      }
+      composerDrafts.suggest(draftKey, lastSuggestionRef.current)
+    }
     const next = [restoreDraft.text, untouched ? "" : current]
       .filter((part) => part.trim().length > 0)
       .join("\n\n")
     applyPrompt(next, next.length)
-    if (restoreDraft.images.length > 0) {
+    // A replaced suggestion takes its images with it.
+    const replaced = untouched ? (previous?.images ?? []) : []
+    if (restoreDraft.images.length > 0 || replaced.length > 0) {
       // oxlint-disable-next-line react/set-state-in-effect
-      setPendingImages((prev) => [...restoreDraft.images, ...prev])
+      setPendingImages((prev) => {
+        const images = [
+          ...restoreDraft.images,
+          ...prev.filter((image) => !replaced.includes(image)),
+        ]
+        // Only a suggestion is held to the limit; the person's own images
+        // coming back (a cancelled queued message) are never dropped.
+        return restoreDraft.replacesSuggestion
+          ? images.slice(0, MAX_IMAGE_COUNT)
+          : images
+      })
     }
     const restoredReplies = restoreDraft.replies ?? []
     if (restoredReplies.length > 0) {
@@ -595,7 +668,7 @@ export const ChatComposer = memo(function ChatComposer({
       ])
     }
     editorRef.current?.focusAtEnd()
-  }, [applyPrompt, restoreDraft, value])
+  }, [applyPrompt, draftKey, restoreDraft, value])
 
   const handleSubmit = useCallback(
     async (options?: SubmitOptions) => {
@@ -763,6 +836,11 @@ export const ChatComposer = memo(function ChatComposer({
     ]
   )
 
+  const pendingImagesRef = useRef(pendingImages)
+  useEffect(() => {
+    pendingImagesRef.current = pendingImages
+  }, [pendingImages])
+
   const addFiles = useCallback(async (files: FileList | Array<File>) => {
     const nextImages = await Promise.all(
       Array.from(files).map(fileToImageChunk)
@@ -770,10 +848,24 @@ export const ChatComposer = memo(function ChatComposer({
     const validImages = nextImages.filter(
       (image): image is ImageChunk => image !== null
     )
-    if (validImages.length === 0) return
-    setPendingImages((prev) =>
-      [...prev, ...validImages].slice(0, MAX_IMAGE_COUNT)
+    const rejected = nextImages.length - validImages.length
+    setComposerError(
+      rejected
+        ? `${rejected} attachment${rejected > 1 ? "s were" : " was"} skipped: only images, PDF, Word, Excel, PowerPoint and text files up to 10MB are supported.`
+        : null
     )
+    if (validImages.length === 0) return
+    const next = [...pendingImagesRef.current, ...validImages]
+    if (
+      next.filter((chunk) => !isFileChunk(chunk)).length > MAX_IMAGE_COUNT ||
+      next.filter(isFileChunk).length > MAX_FILE_COUNT
+    ) {
+      setComposerError(
+        `You can add at most ${MAX_IMAGE_COUNT} images and ${MAX_FILE_COUNT} files to a message. Please select fewer attachments.`
+      )
+      return
+    }
+    setPendingImages(next)
   }, [])
 
   useEffect(() => {
@@ -867,7 +959,7 @@ export const ChatComposer = memo(function ChatComposer({
       for (const item of Array.from(event.clipboardData.items)) {
         if (item.kind !== "file") continue
         const file = item.getAsFile()
-        if (file && SUPPORTED_IMAGE_TYPES.has(file.type)) files.push(file)
+        if (file && isAttachable(file)) files.push(file)
       }
       if (files.length === 0) return
       event.preventDefault()
@@ -876,13 +968,15 @@ export const ChatComposer = memo(function ChatComposer({
     [addFiles]
   )
 
-  const executionTarget = runTarget && (
-    <RunTargetSelector
-      onChange={onRunTargetChange}
-      pending={runTargetPending}
-      value={runTarget}
-    />
-  )
+  const executionTarget = runTarget &&
+    (runTarget === "local" ||
+      (typeof window !== "undefined" && window.openSweDesktop)) && (
+      <RunTargetSelector
+        onChange={onRunTargetChange}
+        pending={runTargetPending}
+        value={runTarget}
+      />
+    )
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
       {runTarget !== "local" && onWorkspaceChange && (
@@ -894,15 +988,17 @@ export const ChatComposer = memo(function ChatComposer({
         />
       )}
       {runTarget !== "local" && onProjectChange && onCreateProject && (
-        <ProjectSelector
-          onCreate={onCreateProject}
-          onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
-          onSelect={onProjectChange}
-          projects={projects}
-          repos={gitHubLinkUser ? undefined : repos}
-          selectedId={selectedProjectId}
-          selectedRepo={selectedRepo}
-        />
+        <div className={cn("contents", targetPending && "invisible")}>
+          <ProjectSelector
+            onCreate={onCreateProject}
+            onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
+            onSelect={onProjectChange}
+            projects={projects}
+            repos={gitHubLinkUser ? undefined : repos}
+            selectedId={selectedProjectId}
+            selectedRepo={selectedRepo}
+          />
+        </div>
       )}
       {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
         <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
@@ -976,8 +1072,14 @@ export const ChatComposer = memo(function ChatComposer({
       {!selectedModelSupportsImages && (
         <Banner className="mb-space-2" intent="warning">
           {`The selected model does not accept image input. Remove the image${
-            pendingImages.length > 1 ? "s" : ""
+            imageCount > 1 ? "s" : ""
           } or switch to a vision-enabled model to send.`}
+        </Banner>
+      )}
+
+      {filesWhileBusy && (
+        <Banner className="mb-space-2" intent="warning">
+          Files can be sent once the agent finishes its run.
         </Banner>
       )}
 
@@ -1017,13 +1119,13 @@ export const ChatComposer = memo(function ChatComposer({
             <span className="rounded-md bg-brand-subtle px-space-3 py-space-1 text-xs font-medium text-brand-primary">
               {dragKind === "path"
                 ? "Drop to mention this file"
-                : "Drop images here"}
+                : "Drop files here"}
             </span>
           </div>
         )}
 
         <input
-          accept="image/png,image/jpeg,image/gif,image/webp"
+          accept={[...SUPPORTED_IMAGE_TYPES, ...SUPPORTED_FILE_TYPES].join(",")}
           className="hidden"
           multiple
           onChange={handleFileChange}
@@ -1047,16 +1149,20 @@ export const ChatComposer = memo(function ChatComposer({
                 className="group relative"
                 key={`${image.fileName ?? "image"}-${index}`}
               >
-                <img
-                  alt={image.fileName || "Pending image"}
-                  className="size-16 rounded-lg border border-default object-cover"
-                  src={`data:${image.mimeType};base64,${image.base64}`}
-                />
+                {isFileChunk(image) ? (
+                  <AttachedFile name={image.fileName || "file"} />
+                ) : (
+                  <img
+                    alt={image.fileName || "Pending image"}
+                    className="size-16 rounded-lg border border-default object-cover"
+                    src={`data:${image.mimeType};base64,${image.base64}`}
+                  />
+                )}
                 <IconButton
                   className="absolute -top-1.5 -right-1.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
                   color="secondary"
                   icon={XIcon}
-                  label="Remove image"
+                  label="Remove attachment"
                   onClick={() =>
                     setPendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
@@ -1114,7 +1220,7 @@ export const ChatComposer = memo(function ChatComposer({
             >
               <DropdownMenuItem
                 className="text-xs"
-                disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
+                disabled={disabled}
                 onSelect={() => fileInputRef.current?.click()}
                 size="sm"
               >
@@ -1122,7 +1228,7 @@ export const ChatComposer = memo(function ChatComposer({
                   className="size-3.5 shrink-0 text-icon-secondary"
                   weight="regular"
                 />
-                Attach images
+                Attach files
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1134,7 +1240,7 @@ export const ChatComposer = memo(function ChatComposer({
                 onOpenChange={setModelPickerOpen}
                 onSelectionChange={onSelectionChange}
                 open={modelPickerOpen}
-                requireImageSupport={pendingImages.length > 0}
+                requireImageSupport={imageCount > 0}
                 routed={routed}
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-space-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
@@ -1162,9 +1268,9 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && (
-        <div className="mx-space-3 -mt-space-4 flex min-w-0 flex-wrap items-center gap-x-space-4 gap-y-space-2 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 pt-space-5 pb-space-2 text-xs dark:border-transparent">
+        <div className="mx-space-3 -mt-space-4 flex min-w-0 items-center gap-space-4 rounded-b-xl border border-t-0 border-subtle bg-surface-level-2 px-space-4 pt-space-5 pb-space-2 text-xs dark:border-transparent">
           {targetControls}
-          <div className="ml-auto">{executionTarget}</div>
+          <div className="ml-auto shrink-0">{executionTarget}</div>
         </div>
       )}
     </div>

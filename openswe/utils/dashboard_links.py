@@ -88,6 +88,19 @@ class PublicOrigin:
         )
 
     @classmethod
+    def all(cls) -> list[str]:
+        """Every origin that serves this dashboard: the configured one first, then its aliases.
+
+        The desktop app opens links on any of them as its own, whichever one it was
+        pointed at.
+        """
+        primary = _origin(dashboard_base_url())
+        return [
+            *([primary] if primary is not None else []),
+            *sorted(cls.aliases() - {primary}),
+        ]
+
+    @classmethod
     def alias(cls, claimed: str | None) -> str | None:
         """``claimed`` normalized, if it is one of the configured alias origins.
 

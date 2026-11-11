@@ -7,6 +7,7 @@ from openswe.github.pull_request_context import parse_pull_request_url
 from openswe.review_guide.launch import GuideOrigin, GuideStart, GuideStartError, start_review_guide
 from openswe.run_config import RunConfig
 from openswe.slack.client import get_active_slack_thread
+from openswe.slack.links import SlackLink
 from openswe.source_context import SlackThreadRef
 from openswe.threads.summary import thread_is_private
 from openswe.tools.mcp_exposure import expose_mcp
@@ -43,7 +44,7 @@ async def slack_start_review_channel(
         "success": True,
         "channel_id": started.channel_id,
         "channel_link": f"<#{started.channel_id}>",
-        "channel_url": f"https://slack.com/archives/{started.channel_id}",
+        "channel_url": SlackLink(started.channel_id, team_id=origin.team_id).channel_url,
     }
 
 

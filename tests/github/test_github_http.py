@@ -1,6 +1,7 @@
 """Unit tests for the shared GitHub HTTP helper."""
 
 import asyncio
+import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,9 +14,10 @@ from openswe.github import http as github_http
 from openswe.github.http import (
     GitHubClient,
     GitHubSignInRequired,
-    _compute_backoff,
+    _Retry,
     github_request,
 )
+from openswe.github.revalidation import RevalidatingTransport
 
 
 @pytest.mark.asyncio
@@ -36,7 +38,84 @@ async def test_validation_listings_reject_incomplete_responses(listing: str) -> 
                 await repo.validation_artifacts(42)
 
 
-async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
+@pytest.mark.parametrize("listing", ["jobs", "artifacts"])
+@pytest.mark.parametrize("fault", [None, "duplicate", "changed_total"])
+async def test_validation_lists_all_pages_without_accepting_partial_evidence(listing, fault):
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        ids = range(1, 101) if page == 1 else [100 if fault == "duplicate" else 101]
+        items = [
+            {
+                "id": i,
+                "name": f"item-{i}",
+                "expired": False,
+                "run_id": 42,
+                "run_attempt": 1,
+                "status": "completed",
+                "conclusion": "success",
+            }
+            for i in ids
+        ]
+        return httpx2.Response(
+            200,
+            json={
+                "total_count": 102 if page == 2 and fault == "changed_total" else 101,
+                listing: items,
+            },
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        repo = GitHubClient(http).repo("acme", "widgets")
+        fetch = repo.validation_jobs if listing == "jobs" else repo.validation_artifacts
+        if fault:
+            with pytest.raises(ValueError):
+                await fetch(42)
+        else:
+            assert [item.id for item in await fetch(42)] == list(range(1, 102))
+
+
+@pytest.mark.parametrize("fault", [None, "changed", "missing", "duplicate", "truncated", "symlink"])
+async def test_service_source_fingerprint_matches_policy_format(fault):
+    entries = [
+        {"path": path, "mode": mode, "type": kind, "sha": sha * 40}
+        for path, mode, kind, sha in [
+            ("langdev", "100755", "blob", "c"),
+            ("cmd", "040000", "tree", "b"),
+            (".github", "040000", "tree", "a"),
+            ("smith-backend", "040000", "tree", "d"),
+        ]
+    ]
+    payload = {"tree": entries, "truncated": fault == "truncated"}
+    approved = "9546f5ca226a05e2efc02fd3be6d2af71e638fad5092d15df3283382b3986515"
+    if fault == "changed":
+        entries[2]["sha"] = "e" * 40
+    elif fault == "missing":
+        entries.pop(1)
+    elif fault == "duplicate":
+        entries.append(entries[0])
+    elif fault == "symlink":
+        entries[0]["mode"] = "120000"
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == f"/repos/acme/widgets/git/trees/{'f' * 40}"
+        assert not request.url.params
+        return httpx2.Response(200, json=payload)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        repo = GitHubClient(http).repo("acme", "widgets")
+        if fault in {"missing", "duplicate", "truncated", "symlink"}:
+            with pytest.raises(ValueError):
+                await repo.validation_source_digest("f" * 40)
+        else:
+            actual = await repo.validation_source_digest("f" * 40)
+            assert (actual == approved) is (fault is None)
+
+
+@pytest.mark.parametrize("total", [250, 300])
+@pytest.mark.parametrize("counted", [False, True])
+async def test_pages_read_the_rest_of_a_counted_list_concurrently(
+    total: int, counted: bool
+) -> None:
     later_pages = asyncio.Barrier(2)
     requested: list[int] = []
 
@@ -45,15 +124,51 @@ async def test_pages_read_the_rest_of_a_counted_list_concurrently() -> None:
         requested.append(page)
         if page > 1:
             await asyncio.wait_for(later_pages.wait(), timeout=1)
-        size = 50 if page == 3 else 100
+        size = total - 200 if page == 3 else 100
         runs = [{"id": page * 1000 + i} for i in range(size)]
-        return httpx2.Response(200, json={"total_count": 250, "check_runs": runs})
+        headers = (
+            {"Link": f'<https://api.github.com/check-runs?page={page + 1}>; rel="next"'}
+            if page < 3
+            else {}
+        )
+        return httpx2.Response(
+            200, json={"total_count": total, "check_runs": runs}, headers=headers
+        )
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
-        runs = await GitHubClient(http).pages("check-runs", key="check_runs")
+        runs = await GitHubClient(http).pages(
+            "check-runs", key="check_runs", total=total if counted else None
+        )
 
-    assert len(runs) == 250
+    assert len(runs) == total
     assert sorted(requested) == [1, 2, 3]
+
+
+@pytest.mark.parametrize("max_pages", [None, 1])
+@pytest.mark.parametrize("total", [0, 100, 101, 200])
+async def test_pages_follow_next_links_without_an_empty_terminal_request(
+    total: int, max_pages: int | None
+) -> None:
+    requested: list[int] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        requested.append(page)
+        start = (page - 1) * 100
+        headers = (
+            {"Link": f'<https://api.github.com/items?page={page + 1}>; rel="next"'}
+            if start + 100 < total
+            else {}
+        )
+        return httpx2.Response(
+            200, json=[{"id": i} for i in range(start, min(start + 100, total))], headers=headers
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        items = await GitHubClient(http).pages("items", max_pages=max_pages)
+
+    assert items == [{"id": i} for i in range(min(total, 100) if max_pages else total)]
+    assert requested == ([1, 2] if total > 100 and max_pages is None else [1])
 
 
 def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
@@ -63,8 +178,49 @@ def _make_response(status_code: int, headers: dict[str, str] | None = None) -> h
 class TestComputeBackoff:
     def test_caps_retry_after_at_max(self) -> None:
         resp = _make_response(429, {"Retry-After": "120"})
-        delay = _compute_backoff(resp, attempt=0)
-        assert delay <= 60.0
+        delay = _Retry.after_response(resp, "GET", attempt=0)
+        assert delay is not None and delay <= 60.0
+
+
+@pytest.mark.asyncio
+async def test_github_request_does_not_retry_a_spent_hourly_quota() -> None:
+    spent = httpx2.Response(
+        403,
+        text="API rate limit exceeded for installation ID 1.",
+        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(time.time()) + 1800)},
+    )
+    client = AsyncMock()
+    client.request = AsyncMock(return_value=spent)
+
+    response = await github_request(client, "GET", "https://api.github.com/test")
+
+    assert response.status_code == 403
+    assert client.request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_reads_revalidate_and_never_cross_tokens() -> None:
+    sent: list[tuple[str, str | None]] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        token = request.headers["Authorization"]
+        sent.append((token, request.headers.get("If-None-Match")))
+        if request.headers.get("If-None-Match") == f'"{token}"':
+            return httpx2.Response(304, headers={"ETag": f'"{token}"'})
+        return httpx2.Response(200, json={"for": token}, headers={"ETag": f'"{token}"'})
+
+    transport = RevalidatingTransport(httpx2.MockTransport(handle))
+    url = "https://api.github.com/repos/acme/app/pulls/1"
+    answers = []
+    for token in ("Bearer a", "Bearer a", "Bearer b"):
+        async with httpx2.AsyncClient(
+            transport=transport, headers={"Authorization": token}
+        ) as http:
+            response = await http.get(url)
+            answers.append((response.status_code, response.json()))
+
+    assert answers == [(200, {"for": "Bearer a"})] * 2 + [(200, {"for": "Bearer b"})]
+    assert sent == [("Bearer a", None), ("Bearer a", '"Bearer a"'), ("Bearer b", None)]
 
 
 @pytest.mark.asyncio
@@ -208,12 +364,12 @@ async def test_as_app_looks_up_a_reinstalled_repository_again(
 
     async def mint(*, installation_id: int, **kwargs: object) -> str:
         if installation_id == 123:
-            raise github_http.GitHubAppUnavailable("installation removed")
+            raise github_http.GitHubAppUnavailable("installation removed", gone=True)
         return f"token-{installation_id}"
 
     monkeypatch.setattr(github_app, "get_github_app_installation_id_for_repo", lookup)
     monkeypatch.setattr(github_app, "get_github_app_installation_token", mint)
-    monkeypatch.setattr(github_app.REPO_INSTALLATIONS, "forget", forget)
+    monkeypatch.setattr(github_app.INSTALLATIONS, "forget", forget)
 
     async with GitHubClient.as_app("acme", "app") as github:
         assert github.http.headers["authorization"].endswith("token-456")
@@ -336,6 +492,32 @@ async def test_check_runs_retains_results_without_a_known_replacement(
     async with httpx2.AsyncClient() as http:
         result = await GitHubClient(http).repo("acme", "app").check_runs("a" * 40)
     assert result == ([runs[0]] if distinct == "older_success" else runs)
+
+
+@pytest.mark.parametrize("distinct", ["app", "non_actions", "missing_suite"])
+async def test_check_runs_skip_workflow_reads_without_supersedable_duplicates(
+    monkeypatch: pytest.MonkeyPatch, distinct: str
+) -> None:
+    runs = [
+        {
+            "id": i,
+            "name": "test",
+            "app": {"id": 1, "slug": "github-actions"},
+            "check_suite": {"id": i},
+        }
+        for i in (10, 20)
+    ]
+    if distinct == "app":
+        runs[1]["app"]["id"] = 2
+    elif distinct == "non_actions":
+        runs[1]["app"]["slug"] = "other-ci"
+    else:
+        runs[1].pop("check_suite")
+    pages = AsyncMock(return_value=runs)
+    monkeypatch.setattr(github_http.RepoClient, "pages", pages)
+    async with httpx2.AsyncClient() as http:
+        assert await GitHubClient(http).repo("acme", "app").check_runs("a" * 40) == runs
+    pages.assert_awaited_once()
 
 
 @pytest.mark.parametrize("outcome", ["success", "proxy_failure", "cancelled"])

@@ -21,7 +21,11 @@ const AGENT_ASSISTANT_ID = "agent"
 export interface AgentThreadStream {
   stream: AgentStream
   connection: StreamConnection
-  trackRunAcceptance: (messageId: string) => () => Promise<RunAcceptance>
+  trackRunAcceptance: (
+    messageId: string | null,
+    onAccepted?: () => void,
+    onRejected?: (error: unknown) => void
+  ) => () => Promise<RunAcceptance>
 }
 
 /**

@@ -15,7 +15,7 @@ import base64
 import logging
 import mimetypes
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any, Final, cast
 from urllib.parse import urljoin, urlparse
 
@@ -34,6 +34,7 @@ from managed_deepagents._channels.slack.api import (  # noqa: PLC2701
 )
 from managed_deepagents._channels.types import ChannelError  # noqa: PLC2701
 from runtime_api.loop import VISIBLE_FROM
+from runtime_api.slack import SlackNotice
 
 from rt.images import extract_image_urls, fetch_image_block
 from rt.input_messages import (
@@ -84,6 +85,15 @@ _SYSTEM_MESSAGE_SUBTYPES: Final = frozenset(
     }
 )
 _SLACK_CONTEXT_SENDER_ID: Final = "system:slack-context"
+_SLACK_NOTICE_SENDER: Final[SystemIdentity] = {
+    "id": "system:slack-notice",
+    "display_name": "Robin notices",
+    "platform": "slack",
+    "content": (
+        "Notices Robin posts in the Slack thread itself, not an agent: for example, "
+        "where a `/breakout` continues, or that a run failed."
+    ),
+}
 # As the backend's ``openswe.utils.multimodal``; a Slack file needs the bot token.
 _MAX_IMAGE_BYTES: Final = 10 * 1024 * 1024
 _MAX_REDIRECTS: Final = 5
@@ -245,8 +255,14 @@ def select_context_messages(
     bot_username: str = "",
     *,
     treat_all_messages_as_mentions: bool = False,
+    held_timestamps: Collection[str] | None = None,
 ) -> tuple[list[SlackMessage], str]:
-    """The messages since the thread started or since the bot was last asked, and which."""
+    """The messages since the thread started or since the bot was last asked, and which.
+
+    With ``held_timestamps``, the Slack messages the conversation's thread holds, only a
+    mention it holds starts the context: a ``/btw`` or ``/breakout`` went to another
+    thread, and a new thread holds nothing, so it reads the Slack thread from its start.
+    """
     if not messages:
         return [], "thread_start"
 
@@ -278,7 +294,8 @@ def select_context_messages(
             and not message.get("bot_id")
             and not message.get("bot_profile")
         )
-        if is_explicit_mention or (treat_all_messages_as_mentions and is_user_message):
+        held = held_timestamps is None or str(message.get("ts", "")) in held_timestamps
+        if held and (is_explicit_mention or (treat_all_messages_as_mentions and is_user_message)):
             last_mention_index = index
 
     if last_mention_index >= 0:
@@ -612,7 +629,7 @@ def slack_person(
 ) -> PersonIdentity:
     person: PersonIdentity = {
         "id": person_id or f"slack:{user_id}",
-        "open_swe_account": "linked" if github_login else "unlinked",
+        "open_swe_account": "linked" if person_id or github_login else "unlinked",
     }
     if name:
         person["display_name"] = name
@@ -749,14 +766,21 @@ def build_input(
     described: set[str] = {trigger_person["id"], *(run_described_person_ids or ())}
     for message in messages:
         timestamp = str(message.get("ts", ""))
-        # The model wrote its own replies, and has every message an earlier run got.
+        # The model has every message an earlier run got.
         if timestamp == str(event_ts) or timestamp in already_dispatched:
             continue
+        sender_id: str
+        identity: PersonIdentity | SystemIdentity
+        kind: str
         if not web_only and is_own_message(message, bot_user_id):
-            continue
-        sender_id, identity, kind = _sender(
-            message, user_names_by_id, logins_by_user_id, person_ids_by_user_id
-        )
+            # The model wrote its own replies and already has them; a notice it never saw.
+            if not SlackNotice.marks(message):
+                continue
+            sender_id, identity, kind = _SLACK_NOTICE_SENDER["id"], _SLACK_NOTICE_SENDER, "system"
+        else:
+            sender_id, identity, kind = _sender(
+                message, user_names_by_id, logins_by_user_id, person_ids_by_user_id
+            )
         if sender_id not in described:
             described.add(sender_id)
             add_context(

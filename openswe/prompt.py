@@ -95,7 +95,7 @@ class SystemPrompt:
     conversation. What can change from one turn to the next is a ``TurnContext``.
 
     ``shared`` is the same for every thread of the deployment, ``workspace`` for every
-    thread of its workspace that opened since its curator last published, and
+    thread of its workspace, and
     ``thread`` is what only this thread's says. Each part is shared by fewer threads
     than the one before it, so a new thread's first model call reads the parts ahead
     of its own from the cache earlier threads wrote.
@@ -128,14 +128,10 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
-    workspace_memory: str = "",
-    workspace_memory_triggers: list[str] | None = None,
-    agent_workspace: bool = False,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
     shared = prompt(
         "system/main",
-        agent_workspace=agent_workspace,
         dashboard_context_section=prompt(
             "system/dashboard-context",
             environment=ENV.OPENSWE_ENV.optional(),
@@ -163,20 +159,7 @@ def construct_system_prompt(
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
     )
-    workspace = "\n\n".join(
-        section
-        for section in (
-            _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
-            prompt(
-                "system/workspace-memory",
-                memory=workspace_memory.strip(),
-                triggers=workspace_memory_triggers or [],
-            )
-            if workspace_memory.strip() or workspace_memory_triggers
-            else "",
-        )
-        if section
-    )
+    workspace = _render_workspace_section(workspace_name, workspace_instructions, workspace_repos)
     return SystemPrompt(shared=shared, workspace=workspace, thread=thread)
 
 
@@ -195,15 +178,13 @@ class TurnContext:
     """
 
     working_dir: str
-    agent_workspace: bool = False
+    working_folder: bool = False
     source: str = "dashboard"
     slack_context: bool = False
     slack_ask: bool = False
     slack_breakout: bool = False
     slack_by_the_way: bool = False
     slack_follow_up_suggestions: bool = False
-    # The sender only wants to hear about blockers and reviewed, ready PRs.
-    goal_mode: bool = False
     implementation_walkthrough_enabled: bool = False
     sandbox_file_downloads: bool = False
     local_checkout: bool = False
@@ -212,8 +193,6 @@ class TurnContext:
     tool_catalog_note: str = ""
     # The sender's other recent threads, whose activity changes from turn to turn.
     recent_threads: str = ""
-    # The workspace a curator run curates; its instructions stay in view across wakes.
-    curated_workspace: str = ""
 
     def environment(self) -> str:
         environment = prompt(
@@ -222,7 +201,7 @@ class TurnContext:
             else "system/working-environment",
             working_dir=self.working_dir,
             desktop=self.local_checkout_client == "desktop",
-            agent_workspace=self.agent_workspace,
+            working_folder=self.working_folder,
             sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
         if self.implementation_walkthrough_enabled:
@@ -237,8 +216,6 @@ class TurnContext:
         sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
         if not self.local_checkout and (scope := _render_repository_scope_section()):
             sections.append(scope)
-        if self.goal_mode:
-            sections.append(prompt("system/goal-mode"))
         return "\n\n".join(sections)
 
     def _source_guidance(self) -> str:
@@ -272,8 +249,6 @@ class TurnContext:
         guidance = {"environment": self.environment(), "source": self.source_guidance()}
         if self.recent_threads:
             guidance["recent-threads"] = self.recent_threads
-        if self.curated_workspace:
-            guidance["curator"] = prompt("curator/instructions", workspace=self.curated_workspace)
         blocks = {
             context_id: run_context(context_id, text) for context_id, text in guidance.items()
         }

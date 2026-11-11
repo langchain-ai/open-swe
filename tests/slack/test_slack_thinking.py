@@ -17,6 +17,8 @@ from openswe.threads.index import IndexedThread
 from openswe.threads.runtimes import MdaRun
 from tests.conftest import serve_runs_from
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture(autouse=True)
 def immediate_status_retries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -390,7 +392,6 @@ async def test_routed_answer_releases_background_server_after_run_finishes(
     )
     monkeypatch.setattr(routed_work, "sidebar_memberships", AsyncMock(return_value={}))
     monkeypatch.setattr(routed_work.TaskMessage, "pending_threads", AsyncMock(return_value=set()))
-    monkeypatch.setattr(routed_work.postgres, "configured", lambda: True)
     queued = AsyncMock(return_value=[])
     monkeypatch.setattr(routed_work.QueuedMessage, "for_thread", queued)
     origin = RoutedWork("origin")

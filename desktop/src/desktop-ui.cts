@@ -13,7 +13,7 @@ const path = require("node:path");
 const { gunzipSync } = require("node:zlib");
 
 type UiFetch = (url: string, init: RequestInit) => Promise<Response>;
-type UiSnapshot = { version: string; files: string[] };
+type UiSnapshot = { version: string; files: string[]; routes: string[] };
 
 function digest(body: Uint8Array | string): string {
   return createHash("sha256").update(body).digest("hex");
@@ -107,6 +107,67 @@ class DesktopUi {
     );
   }
 
+  async hasPage(pathname: string): Promise<boolean> {
+    this.snapshot ??= (await this.readSnapshot()) ?? (await this.refresh());
+    if (pathname.replace(/\/$/, "") === "/login") return false;
+    const segments = pathname.replace(/\/$/, "").split("/");
+    return (
+      this.snapshot?.routes.some((route) => {
+        const parts = route.replace(/\/$/, "").split("/");
+        return (
+          parts.every((part, index) =>
+            part === "$"
+              ? true
+              : part.startsWith("$")
+                ? !!segments[index]
+                : part === segments[index],
+          ) &&
+          (parts.at(-1) === "$"
+            ? segments.length >= parts.length - 1
+            : segments.length === parts.length)
+        );
+      }) ?? false
+    );
+  }
+
+  private async routes(version: string, files: string[]): Promise<string[]> {
+    if (!files.includes("/desktop-routes.json")) return [];
+    try {
+      const value: unknown = JSON.parse(
+        await readFile(
+          path.join(this.directory, version, "desktop-routes.json"),
+          "utf8",
+        ),
+      );
+      if (
+        !value ||
+        typeof value !== "object" ||
+        !("version" in value) ||
+        value.version !== 1 ||
+        !("paths" in value) ||
+        !Array.isArray(value.paths)
+      )
+        throw new Error("Invalid desktop UI routes");
+      const routes = value.paths.filter(
+        (route: unknown): route is string =>
+          typeof route === "string" &&
+          /^\/(?:(?:[a-zA-Z0-9_.-]+|\$[a-zA-Z0-9_]+)\/)*(?:[a-zA-Z0-9_.-]+|\$[a-zA-Z0-9_]*|)$/.test(
+            route,
+          ) &&
+          !route.includes(".."),
+      );
+      if (routes.length !== value.paths.length)
+        console.warn("Ignoring unsupported desktop UI routes");
+      return routes;
+    } catch (error) {
+      console.warn(
+        "Could not read desktop UI routes; opening links externally",
+        error,
+      );
+      return [];
+    }
+  }
+
   private async readSnapshot(): Promise<UiSnapshot | null> {
     try {
       const value: unknown = JSON.parse(
@@ -126,7 +187,11 @@ class DesktopUi {
         !value.files.includes("/_shell.html")
       )
         throw new Error("Invalid cached UI snapshot");
-      return { version: value.version, files: value.files };
+      return {
+        version: value.version,
+        files: value.files,
+        routes: await this.routes(value.version, value.files),
+      };
     } catch (error) {
       if (
         !(error instanceof Error && "code" in error && error.code === "ENOENT")
@@ -221,6 +286,7 @@ class DesktopUi {
     const snapshot: UiSnapshot = {
       version,
       files: files.map((file) => file.path),
+      routes: [],
     };
     await mkdir(this.directory, { recursive: true });
     const staging: string = await mkdtemp(
@@ -247,6 +313,7 @@ class DesktopUi {
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
+    snapshot.routes = await this.routes(snapshot.version, snapshot.files);
     const target = path.join(this.directory, "current.json");
     await writeFile(`${target}.tmp`, JSON.stringify(snapshot));
     await rename(`${target}.tmp`, target);

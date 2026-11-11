@@ -10,14 +10,20 @@ If their Slack user ID is unavailable, ask for it before posting.
 On an automation run, `channel_id` may instead be the automation creator's Slack member ID, which DMs them the run's result.
 No other member ID is accepted, and the post needs no mention.
 
+Never post a wall of text to a channel.
+Make `message` a short headline: one or two sentences with the outcome and the mention.
+Put any further detail, such as lists, findings, or links, in `details`, which is posted as a reply in the headline's thread.
+On an automation run, a channel `message` longer than 400 characters is refused.
+
 This sends a new top-level message without moving the current Robin conversation or starting a new agent task.
 For updates and answers in the current conversation, use `slack_reply`.
 
-Write `message` in standard Markdown: **bold**, _italic_, [link text](url), and <@USER_ID> mentions.
-Put source code, diffs, and commands in top-level fenced code blocks with a language identifier such as ```python or ```diff so Slack highlights them.
-Keep it concise and below 40,000 characters.
+Write `message` and `details` in standard Markdown: **bold**, _italic_, [link text](url), and <@USER_ID> mentions.
+Put source code, diffs, and commands in `details`, in top-level fenced code blocks with a language identifier such as ```python or ```diff so Slack highlights them.
+Keep `details` concise and below 40,000 characters.
 Share only content intended for the destination's audience.
 The tool returns the channel ID and message timestamp on success, or the Slack error on failure.
+If the headline posted but its details did not, the receipt carries `details_error`; do not repost the headline.
 
 For `not_in_channel` or `channel_not_found`, ask the user to verify the channel and invite the bot.
 For `rate_limited`, respect any retry delay in the error.

@@ -643,10 +643,11 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
     langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
-    langgraph.threads.update = AsyncMock()
     monkeypatch.setattr(opr, "get_client", lambda: langgraph)
-    mirror_metadata = AsyncMock()
-    monkeypatch.setattr(opr, "mirror_thread_metadata", mirror_metadata)
+    update = AsyncMock()
+    monkeypatch.setattr(opr.THREADS, "update", update)
+    retitle = AsyncMock()
+    monkeypatch.setattr(opr.THREADS, "retitle", retitle)
     details = {
         "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
         "number": 3,
@@ -678,18 +679,14 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     assert record_usage.await_args.kwargs["model_id"] == "anthropic:claude-opus-5-5"
 
     if concierge:
-        langgraph.threads.update.assert_not_awaited()
-        mirror_metadata.assert_not_awaited()
+        update.assert_not_awaited()
+        retitle.assert_not_awaited()
         return
-    assert langgraph.threads.update.await_args is not None
-    metadata = langgraph.threads.update.await_args.kwargs["metadata"]
+    update.assert_awaited_once()
     if retitle_thread and record_opening:
-        assert metadata["title"] == "feat: x"
-        assert metadata["title_seed"] is None
-        mirror_metadata.assert_awaited_once_with("t1", {"title": "feat: x", "title_seed": None})
+        retitle.assert_awaited_once_with("t1", "feat: x")
     else:
-        assert "title" not in metadata
-        mirror_metadata.assert_not_awaited()
+        retitle.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -736,11 +733,18 @@ def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_
     assert asyncio.run(profiles.has_access_token_record("johannes117")) is True
 
 
-@pytest.mark.parametrize("allowed", [True, False])
-def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed):
+@pytest.mark.parametrize(
+    ("allowed", "check_required"), [(True, True), (False, True), (True, False)]
+)
+def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed, check_required):
     _set_config(monkeypatch, {"thread_id": "thread-1", "github_login": "alice", "draft_prs": False})
     _stub_token(monkeypatch)
     monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        opr.Repository, "requires_approval_check", AsyncMock(return_value=check_required)
+    )
+    record_requester = AsyncMock(return_value=True)
+    monkeypatch.setattr(opr.PullRequestApproval, "record_requesters", record_requester)
     monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="app-token")
@@ -756,7 +760,7 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed)
         return "requester-token", "user"
 
     monkeypatch.setattr(opr, "_resolve_pr_author_token", requester_token)
-    asyncio.run(
+    result = asyncio.run(
         opr._open_pull_request(
             owner="langchain-ai",
             repo="open-swe",
@@ -768,13 +772,16 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed)
             author="other-participant",
         )
     )
-    if allowed:
+    if allowed and check_required:
         assert client.post_calls[0]["headers"]["Authorization"] == "Bearer app-token"
         assert client.post_calls[0]["json"]["draft"] is True
         assert "Requested by @alice" in client.post_calls[0]["json"]["body"]
         assert "other than the requester" in client.post_calls[0]["json"]["body"]
+        record_requester.assert_awaited_once_with("langchain-ai", "open-swe", 1, {"alice"})
     else:
         assert not client.post_calls
+    if not check_required:
+        assert "Robin Approves" in result["error"]
 
 
 @pytest.mark.asyncio

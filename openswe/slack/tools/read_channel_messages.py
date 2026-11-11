@@ -1,3 +1,4 @@
+from openswe.prompts import prompt
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     format_slack_messages_for_prompt,
@@ -22,15 +23,18 @@ async def readable_public_channel(
     channel_id: str, current_access: tool_access.Access
 ) -> SlackChannel:
     """The public channel this run may read with the bot's own access, else ``ChannelNotReadable``."""
-    if not current_access.private and current_access.slack_bot_channel != channel_id:
-        raise ChannelNotReadable("Bot-triggered runs can read only their current channel.")
+    if not current_access.private:
+        if current_access.slack_bot_channel is None:
+            raise ChannelNotReadable(prompt("slack/read-refused-shared-thread"))
+        if current_access.slack_bot_channel != channel_id:
+            raise ChannelNotReadable("Bot-triggered runs can read only their current channel.")
     channel = await SlackChannel.load(channel_id)
     if channel is None or not channel.public:
         raise ChannelNotReadable(_NOT_PUBLIC)
     return channel
 
 
-@tool_access.access(tool_access.Policy(trusted="channel_history"))
+@tool_access.access(tool_access.Policy(trusted="anywhere"))
 async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[str, object]:
     """Implement the `slack_read_channel_messages` tool."""
     if not channel_id or not channel_id.strip():

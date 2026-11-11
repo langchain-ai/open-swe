@@ -1,8 +1,22 @@
-Monitor `{{ monitor_id }}` ({{ description }}) emitted, starting at raw line {{ at_raw_line }}:
+{% if bursts | length == 1 %}
+Monitor `{{ monitor_id }}` ({{ description }}) emitted, starting at raw line {{ bursts[0][0] }}:
+{% else %}
+Monitor `{{ monitor_id }}` ({{ description }}) emitted {{ bursts | length }} times while it waited between events; here they are together, each with the raw line it starts at:
+{% endif %}
+{% for at_raw_line, lines in bursts %}
+{% if bursts | length > 1 %}
+
+Raw line {{ at_raw_line }}:
+{% endif %}
 
 {{ fence }}text
 {{ lines }}
 {{ fence }}
+{% endfor %}
+{% if omitted_lines %}
+
+{{ omitted_lines }} more lines arrived while it waited and are not shown.
+{% endif %}
 
 If this monitor is no longer needed, stop it now with `monitor(action="stop", monitor_id="{{ monitor_id }}")` rather than leaving it running until its timeout.
 

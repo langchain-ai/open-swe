@@ -1,3 +1,5 @@
+import { SlackLinks } from "@/lib/slack-links"
+import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { Button } from "@langchain/macaw-components/Button"
 import { Link } from "@langchain/macaw-components/Link"
 import { createContext, memo, useContext, useState } from "react"
@@ -242,8 +244,11 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
     (destination.hostname === "slack.com" ||
       destination.hostname.endsWith(".slack.com")) &&
     /^\/archives\/[A-Z0-9]+\/p\d+$/.test(destination.pathname)
-      ? destination.href
-      : undefined
+      ? SlackLinks.normalize(destination.href)
+      : typeof messageUrl === "string" &&
+          messageUrl.startsWith(`${dashboardApiUrl("/slack/open")}?`)
+        ? messageUrl
+        : undefined
   const label = HEADER_LABELS[isLinear ? "linear" : "slack"][state]
   return (
     <div className="min-w-0 px-space-1 py-0.5">

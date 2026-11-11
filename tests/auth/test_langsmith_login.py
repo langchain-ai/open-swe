@@ -228,7 +228,7 @@ async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> 
         await github_user.link("langsmith", server.subject)
 
 
-async def test_slack_email_on_a_github_person_requires_linking(langsmith_client) -> None:
+async def test_slack_email_collision_keeps_accounts_independent(langsmith_client) -> None:
     server, client = langsmith_client
     github_user = await User.sign_in("github", "1", login="alice", email="alice@example.com")
     await github_user.link("slack", "slack-alice", email="same@example.com")
@@ -238,8 +238,8 @@ async def test_slack_email_on_a_github_person_requires_linking(langsmith_client)
     assert user is not None and user.id != github_user.id
     exchanged = await server.exchange(client, callback)
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
-    assert (await client.get("/dashboard/api/me")).json()["requires_github_link"] is True
-    assert (await client.get("/dashboard/api/profile")).status_code == 403
+    assert (await client.get("/dashboard/api/me")).json()["requires_github_link"] is False
+    assert (await client.get("/dashboard/api/profile")).status_code == 200
 
 
 async def test_linking_github_returns_a_langsmith_person_to_their_github_account(
@@ -488,13 +488,21 @@ async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
+@pytest.mark.parametrize("github_session", [False, True])
 async def test_logout_revokes_replayed_sessions_and_runtime_grants(
-    langsmith_client, unavailable: bool
+    langsmith_client, unavailable: bool, github_session: bool
 ) -> None:
     server, client = langsmith_client
     exchanged = await server.exchange(client, await server.desktop_login(client))
     token = exchanged.json()["session"]
     session = oauth.decode_session(token)
+    if github_session:
+        user = await User.for_identity("langsmith", server.subject)
+        assert user is not None
+        user = await user.join_github("1", login="alice", email="same@example.com")
+        token = oauth.issue_session(
+            login="alice", email="same@example.com", avatar_url=None, user_id=str(user.id)
+        )
     client.cookies.set(oauth.COOKIE_NAME, token, domain="dashboard.example", path="/")
     server.unavailable = unavailable
     response = await client.post("/dashboard/api/auth/logout")
@@ -504,6 +512,8 @@ async def test_logout_revokes_replayed_sessions_and_runtime_grants(
     client.cookies.set(oauth.COOKIE_NAME, token)
     assert (await client.get("/dashboard/api/me")).status_code == 401
     assert await langsmith_oauth.langsmith_access_token(session["sub"]) is None
+    if github_session:
+        assert await langsmith_oauth.langsmith_access_token("alice") is None
     assert (await client.post("/dashboard/api/auth/logout")).status_code == 204
 
 

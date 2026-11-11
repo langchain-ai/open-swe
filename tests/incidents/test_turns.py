@@ -45,13 +45,15 @@ def _header(payload: dict) -> dict:
     return json.loads(payload["text"].split("\n", 1)[0].removeprefix(CONTEXT_MARKER))
 
 
-def test_context_block_is_citable_attributed_and_redacted():
-    human = turns.context_block(
+async def test_context_block_is_citable_attributed_and_redacted(monkeypatch):
+    permalink = AsyncMock(return_value="https://example.slack.com/archives/C1/p15")
+    monkeypatch.setattr(turns, "get_slack_permalink", permalink)
+    human = await turns.context_block(
         "C1", {"ts": "1.5", "user": "U1", "text": "token sk-abcdefghijklmnopqrstuvwxyz0123"}
     )
     assert _header(human) == {
         "evidence_id": "slack:1.5",
-        "source_url": "https://slack.com/archives/C1/p15",
+        "source_url": "https://example.slack.com/archives/C1/p15",
         "author": "<@U1>",
         "ts": "1.5",
     }
@@ -59,17 +61,36 @@ def test_context_block_is_citable_attributed_and_redacted():
     assert human["queue_id"] == "incident:C1:slack:1.5"
     assert human["sender"]["id"] == "slack:U1"
 
-    alert = turns.context_block(
+    alert = await turns.context_block(
         "C1",
         {"ts": "2.0", "bot_id": "B1", "bot_profile": {"name": "Datadog"}, "text": "p95 up"},
     )
     assert _header(alert)["author"] == "Datadog"
     assert "sender" not in alert
 
-    edited = turns.context_block(
-        "C1", {"ts": "1.5", "user": "U1", "edited": {"ts": "3.0"}, "text": "x"}
+    from openswe.incidents import evidence_tools
+    from openswe.incidents.report import context_evidence
+    from openswe.slack import links
+
+    monkeypatch.setattr(links, "dashboard_api_base_url", lambda: "https://robin.example")
+    monkeypatch.setattr(evidence_tools, "dashboard_api_base_url", lambda: "https://robin.example")
+    permalink.return_value = None
+    edited = await turns.context_block(
+        "C123",
+        {"ts": "1.5", "thread_ts": "1.0", "user": "U1", "edited": {"ts": "3.0"}, "text": "x"},
     )
     assert _header(edited)["evidence_id"] == "slack:1.5:3.0"
+    fallback = (
+        "https://robin.example/dashboard/api/slack/open?channel=C123&message_ts=1.5&thread_ts=1.0"
+    )
+    assert _header(edited)["source_url"] == fallback
+    collector = evidence_tools.EvidenceCollector()
+    assert context_evidence(edited["text"], collector) == 1
+    assert collector.evidence[0].url == fallback
+    assert evidence_tools.source_url(f"{fallback}&token=secret#fragment") == fallback
+    assert evidence_tools.source_url(fallback.replace("robin.example", "other.example")) == (
+        "https://other.example/dashboard/api/slack/open"
+    )
     assert edited["queue_id"] != human["queue_id"]
 
 

@@ -56,7 +56,6 @@ from openswe.slack.client import (
 from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
-from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -757,81 +756,44 @@ class ReviewCard:
         await self.update_post_reactions(snapshot)
 
     async def update_post_reactions(self, snapshot: PullRequestSnapshot | None = None) -> None:
-        """Positive reactions need every linked PR; any active PR can supply a blocker."""
+        """Positive reactions need every linked PR; any active PR can supply a blocker.
+
+        The post's lock keeps reaction writes in order, so a stale update can't undo a newer one.
+        """
         if skip_on_preview("update_post_reactions"):
             return
         request = self.request
-        async with HumanReviewRequest.locked_post(
-            request.slack_channel_id, request.slack_message_ts
-        ) as rows:
+        channel_id, message_ts = request.slack_channel_id, request.slack_message_ts
+        async with HumanReviewRequest.locked_post(channel_id, message_ts) as rows:
             row = next((row for row in rows if row.id == request.id), None)
             if row is None:
                 return
             if snapshot is not None:
-                preferences = await User.preferences_for_login(
-                    snapshot.author or row.pull_request.author
-                )
-                failing = preferences.pr_failure_reactions and snapshot.check_state in {
-                    "failure",
-                    "blocked",
-                }
-                reason = ", ".join(snapshot.failing_checks) or "a check finished without success"
                 row.run_config = {
                     **row.run_config,
-                    "posted_failure": reason if failing else "",
                     "posted_draft": snapshot.draft,
                     "posted_conflicted": snapshot.mergeable is False
                     or snapshot.mergeable_state == "dirty",
                 }
             active = [row for row in rows if row.state == "open"]
-            failures = sorted(
-                f"{row.pull_request.url}: {row.run_config['posted_failure']}"
-                for row in active
-                if row.run_config.get("posted_failure")
-            )
             expected = row.run_config.get("posted_pr_urls")
             complete = not isinstance(expected, list) or set(expected) == {
                 row.pull_request.url.lower() for row in rows
             }
             reactions = {
-                "warning": bool(failures),
+                "warning": False,
                 "construction": any(row.run_config.get("posted_conflicted") for row in active),
                 "pencil2": any(row.run_config.get("posted_draft") for row in active),
                 "white_check_mark": False,
             }
             if complete and all(row.state == "merged" for row in rows):
                 reactions["merged"] = True
-            await remove_slack_reaction(request.slack_channel_id, request.slack_message_ts, "x")
-            failure_reacted = False
+            await remove_slack_reaction(channel_id, message_ts, "x")
             for emoji, enabled in reactions.items():
                 react = add_slack_reaction if enabled else remove_slack_reaction
-                success = await react(request.slack_channel_id, request.slack_message_ts, emoji)
-                if emoji == "warning":
-                    failure_reacted = enabled and success
+                success = await react(channel_id, message_ts, emoji)
                 if emoji == "merged" and enabled and not success:
-                    await add_slack_reaction(
-                        request.slack_channel_id,
-                        request.slack_message_ts,
-                        "twisted_rightwards_arrows",
-                    )
-            notice = "\n".join(failures)
-            first = rows[0]
-            if notice and not failure_reacted:
-                return
-            if notice and first.run_config.get("posted_failure_notice") != notice:
-                requester = first.requested_by
-                if requester is not None and requester.slack_user_id:
-                    try:
-                        await wake_thread_owner(
-                            request.slack_channel_id,
-                            request.slack_message_ts,
-                            requester.slack_user_id,
-                            prompt("slack/pr-failure-reaction", failures=notice),
-                        )
-                    except Exception:
-                        logger.warning("Could not explain PR failure reaction", exc_info=True)
-                        return
-            first.run_config = {**first.run_config, "posted_failure_notice": notice}
+                    await add_slack_reaction(channel_id, message_ts, "twisted_rightwards_arrows")
 
     async def mark_merged(self) -> None:
         updated = await self.retire("merged", "merged")

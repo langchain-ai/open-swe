@@ -3,6 +3,7 @@
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 
 from openswe.github import webhook as github_webhooks
@@ -297,94 +298,46 @@ async def test_internal_bot_comment_never_prompts_the_agent(monkeypatch, registr
     assert seen["calls"] == []
 
 
-@pytest.mark.asyncio
-async def test_is_user_active_org_member_returns_false_when_no_token(monkeypatch) -> None:
-    from openswe.github import org_membership as github_org_membership
+def _org_answers(
+    monkeypatch, membership: httpx2.Response, token: str | None = "x"
+) -> dict[str, Any]:
+    """Serve the org's installation, its token and one membership answer."""
+    from openswe.github import app as github_app
+    from openswe.github import http as github_http
 
-    async def fake_installation(_org: str) -> int:
+    minted: dict[str, Any] = {}
+
+    async def installation(_org: str) -> int:
         return 1
 
-    async def fake_token(**_kwargs) -> None:
-        return None
+    async def mint(**kwargs: Any) -> str | None:
+        minted.update(kwargs)
+        return token
 
+    monkeypatch.setattr(github_app, "get_github_app_installation_id_for_org", installation)
+    monkeypatch.setattr(github_app, "get_github_app_installation_token", mint)
     monkeypatch.setattr(
-        github_org_membership, "get_github_app_installation_id_for_org", fake_installation
+        github_http, "GITHUB_TRANSPORT", httpx2.MockTransport(lambda _request: membership)
     )
-    monkeypatch.setattr(github_org_membership, "get_github_app_installation_token", fake_token)
-
-    assert await github_org_membership.is_user_active_org_member("alice", "langchain-ai") is False
-
-
-class _FakeAsyncClient:
-    def __init__(self, response) -> None:
-        self._response = response
-
-    async def __aenter__(self) -> _FakeAsyncClient:
-        return self
-
-    async def __aexit__(self, *_args) -> None:
-        return None
-
-    async def request(self, *_args, **_kwargs):
-        return self._response
-
-
-class _FakeResponse:
-    def __init__(self, status_code: int, payload: dict | None = None) -> None:
-        self.status_code = status_code
-        self._payload = payload or {}
-
-    def json(self) -> dict:
-        return self._payload
-
-
-def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, Any]:
-    from openswe.github import org_membership as github_org_membership
-
-    seen: dict[str, Any] = {}
-
-    async def fake_installation(_org: str) -> int:
-        return 1
-
-    async def fake_token(**kwargs) -> str:
-        seen.update(kwargs)
-        return "x"
-
-    monkeypatch.setattr(
-        github_org_membership, "get_github_app_installation_id_for_org", fake_installation
-    )
-    monkeypatch.setattr(github_org_membership, "get_github_app_installation_token", fake_token)
-
-    def factory(*_args, **_kwargs) -> _FakeAsyncClient:
-        return _FakeAsyncClient(response)
-
-    monkeypatch.setattr(github_org_membership.httpx2, "AsyncClient", factory)
-    return seen
+    return minted
 
 
 @pytest.mark.asyncio
-async def test_is_user_active_org_member_handles_404(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("membership", "token", "member"),
+    [
+        (httpx2.Response(200, json={"state": "active"}), None, False),
+        (httpx2.Response(404, json={"message": "Not Found"}), "x", False),
+        (httpx2.Response(200, json={"state": "pending"}), "x", False),
+        (httpx2.Response(200, json={"state": "active"}), "x", True),
+    ],
+)
+async def test_is_user_active_org_member(
+    monkeypatch, membership: httpx2.Response, token: str | None, member: bool
+) -> None:
     from openswe.github import org_membership as github_org_membership
 
-    _patch_membership_http(monkeypatch, _FakeResponse(404))
+    minted = _org_answers(monkeypatch, membership, token)
 
-    assert await github_org_membership.is_user_active_org_member("alice", "langchain-ai") is False
-
-
-@pytest.mark.asyncio
-async def test_is_user_active_org_member_active(monkeypatch) -> None:
-    from openswe.github import org_membership as github_org_membership
-
-    seen = _patch_membership_http(monkeypatch, _FakeResponse(200, {"state": "active"}))
-
-    assert await github_org_membership.is_user_active_org_member("alice", "langchain-ai") is True
-    assert seen == {"installation_id": 1, "permissions": {"members": "read"}}
-
-
-@pytest.mark.asyncio
-async def test_is_user_active_org_member_pending_returns_false(monkeypatch) -> None:
-    from openswe.github import org_membership as github_org_membership
-
-    _patch_membership_http(monkeypatch, _FakeResponse(200, {"state": "pending"}))
-
-    assert await github_org_membership.is_user_active_org_member("alice", "langchain-ai") is False
+    assert await github_org_membership.is_user_active_org_member("alice", "langchain-ai") is member
+    assert minted["permissions"] == {"members": "read"}

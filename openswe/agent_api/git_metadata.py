@@ -13,6 +13,8 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import JsonValue
 from runtime_api.operations import PullRequestHead
 
+from openswe.trace_metadata import BILLING_FIELDS
+
 _pull_requests: ContextVar[list[PullRequestHead] | None] = ContextVar(
     "git_trace_pr_targets", default=None
 )
@@ -21,6 +23,10 @@ _pull_requests: ContextVar[list[PullRequestHead] | None] = ContextVar(
 def trace_actor(config: RunnableConfig) -> dict[str, JsonValue]:
     """Who the turn's git work is attributed to."""
     metadata: dict[str, JsonValue] = {"ls_repo_provider": "github"}
+    for key in BILLING_FIELDS:
+        value = config.get("metadata", {}).get(key)
+        if isinstance(value, str) and value:
+            metadata[key] = value
     attribution = config.get("metadata", {}).get("ls_attribution_identifier")
     if isinstance(attribution, str) and attribution:
         metadata["ls_attribution_identifier"] = attribution

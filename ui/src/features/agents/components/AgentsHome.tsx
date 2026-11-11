@@ -1,4 +1,5 @@
 import { AgentChatEmptyState } from "@/features/agents/components/AgentChatEmptyState"
+import { useTraceFlight } from "@/features/trace-flight/hosts/app/launcher"
 import { cn } from "@/lib/utils"
 import {
   useCallback,
@@ -134,7 +135,9 @@ export function AgentsHome({
     null
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
-  const { projects } = useProjects({ enabled: cloudEnabled })
+  const { projects, isPending: projectsPending } = useProjects({
+    enabled: cloudEnabled,
+  })
   const folderProject = useFolderProject()
   const localThreads = useLocalThreads()
   const [projectId, setProjectId] = useState<string | null>(
@@ -541,6 +544,10 @@ export function AgentsHome({
       setLocalError("Update Robin Desktop to start without a project.")
       return
     }
+    const action = productAnalytics.beginAction(
+      "start_thread",
+      session.data?.user_id ?? null
+    )
     // Minted here so the seeded thread, the graph's HumanMessage and the
     // transcript row all carry the same message id.
     const messageId = crypto.randomUUID()
@@ -586,7 +593,12 @@ export function AgentsHome({
     // folder is new.
     const runProjectId =
       localRun && localCheckout
-        ? await folderProject(localCheckout, localThreads.data)
+        ? await folderProject(localCheckout, localThreads.data).catch(
+            (error: unknown) => {
+              action.failed(error)
+              throw error
+            }
+          )
         : selectedProject?.id
     if (runProjectId) configurable.project_id = runProjectId
 
@@ -628,6 +640,7 @@ export function AgentsHome({
           })
         )
       } catch (error) {
+        action.failed(error)
         // Nothing in the cloud refers to the checkout this prepared.
         if (prepared)
           void desktop
@@ -647,6 +660,7 @@ export function AgentsHome({
         }
         return
       }
+      action.accepted()
       productAnalytics.track(
         "agents_thread_created",
         {
@@ -698,6 +712,7 @@ export function AgentsHome({
         sentAt: submitted.sentAt,
       })
     : null
+  const traceFlight = useTraceFlight()
 
   return (
     <>
@@ -712,105 +727,116 @@ export function AgentsHome({
             submittedDraft ? undefined : setVisibilityOverride
           }
         />
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col",
-            !optimisticDraftThread &&
-              "justify-center overflow-y-auto py-space-6"
-          )}
-        >
-          {optimisticDraftThread ? (
-            <Messages
-              messages={optimisticDraftThread.messages}
-              isStreaming
-              contentWidthClass="max-w-3xl"
-            />
-          ) : (
-            <AgentChatEmptyState />
-          )}
-          <AgentComposerDock>
-            {localError && (
-              <Banner intent="error" className="mb-space-3 w-full">
-                {localError}
-              </Banner>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            inert={traceFlight.playing}
+            className={cn(
+              "flex min-h-0 flex-1 flex-col",
+              !optimisticDraftThread &&
+                "justify-center overflow-y-auto py-space-6"
             )}
-            <AgentPromptBar
-              draftKey={
-                session.data?.user_id
-                  ? `${session.data.user_id}:new`
-                  : undefined
-              }
-              activeRun={
-                optimisticDraftThread
-                  ? { threadId: pendingThreadId ?? "", running: true }
-                  : undefined
-              }
-              autoFocus
-              compact
-              placeholder="Describe a task or ask a question…"
-              onSubmit={handleSubmit}
-              onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
-              disabled={Boolean(submittedDraft)}
-              busy={Boolean(optimisticDraftThread)}
-              models={models}
-              selection={activeSelection}
-              onSelectionChange={handleSelectionChange}
-              repos={workspaceRepos}
-              selectedRepo={repo}
-              onRepoChange={optimisticDraftThread ? undefined : selectRepo}
-              gitHubLinkUser={gitHubLinkUser}
-              runTarget={runTarget}
-              onRunTargetChange={
-                !optimisticDraftThread && isDesktop && cloudEnabled
-                  ? handleRunTargetChange
-                  : undefined
-              }
-              localRepos={localRepos}
-              selectedLocalRepoPath={localRepoPath}
-              selectedLocalRepoBranch={localRepoBranch}
-              localRepoBranches={localRepoBranches}
-              onSelectLocalRepo={handleSelectLocalRepo}
-              onClearLocalRepo={
-                !optimisticDraftThread && taskWorkspaces
-                  ? () => {
-                      window.localStorage.removeItem(LAST_LOCAL_REPO_KEY)
-                      window.localStorage.removeItem(LEGACY_LAST_LOCAL_REPO_KEY)
-                      setLocalRepoPath(null)
-                      setLocalRepoBranch(null)
-                      setLocalRepoBranches([])
-                      setLocalError(null)
-                    }
-                  : undefined
-              }
-              onAddLocalRepo={() => void handleAddLocalRepo()}
-              onRemoveLocalRepo={(cwd) => void handleRemoveLocalRepo(cwd)}
-              onRefreshLocalRepoBranch={() => void refreshLocalRepoBranch()}
-              onSelectLocalRepoBranch={(branch) =>
-                void selectLocalRepoBranch(branch)
-              }
-              localWorkspaceMode={localWorkspaceMode}
-              localWorktreeLabel={
-                selectedLocalRef?.worktreePath ? "Worktree" : undefined
-              }
-              onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
-              projects={projects}
-              selectedProjectId={selectedProject?.id ?? null}
-              onProjectChange={
-                !optimisticDraftThread && cloudEnabled
-                  ? selectProject
-                  : undefined
-              }
-              onCreateProject={setCreatingProject}
-              workspaceOptions={workspaces}
-              selectedWorkspace={selectedWorkspace}
-              onWorkspaceChange={
-                !optimisticDraftThread && runTarget === "cloud"
-                  ? selectWorkspace
-                  : undefined
-              }
-              skills={skills.data}
-            />
-          </AgentComposerDock>
+          >
+            {optimisticDraftThread ? (
+              <Messages
+                messages={optimisticDraftThread.messages}
+                isStreaming
+                contentWidthClass="max-w-3xl"
+              />
+            ) : (
+              <AgentChatEmptyState logo={traceFlight.logo} />
+            )}
+            <AgentComposerDock>
+              {localError && (
+                <Banner intent="error" className="mb-space-3 w-full">
+                  {localError}
+                </Banner>
+              )}
+              <AgentPromptBar
+                draftKey={
+                  session.data?.user_id
+                    ? `${session.data.user_id}:new`
+                    : undefined
+                }
+                activeRun={
+                  optimisticDraftThread
+                    ? { threadId: pendingThreadId ?? "", running: true }
+                    : undefined
+                }
+                autoFocus
+                compact
+                placeholder="Describe a task or ask a question…"
+                onSubmit={handleSubmit}
+                onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
+                disabled={Boolean(submittedDraft)}
+                busy={Boolean(optimisticDraftThread)}
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={handleSelectionChange}
+                repos={workspaceRepos}
+                selectedRepo={repo}
+                targetPending={
+                  (cloudEnabled && projectsPending) ||
+                  profileQuery.isLoading ||
+                  reposQuery.isLoading
+                }
+                onRepoChange={optimisticDraftThread ? undefined : selectRepo}
+                gitHubLinkUser={gitHubLinkUser}
+                runTarget={runTarget}
+                onRunTargetChange={
+                  !optimisticDraftThread && isDesktop && cloudEnabled
+                    ? handleRunTargetChange
+                    : undefined
+                }
+                localRepos={localRepos}
+                selectedLocalRepoPath={localRepoPath}
+                selectedLocalRepoBranch={localRepoBranch}
+                localRepoBranches={localRepoBranches}
+                onSelectLocalRepo={handleSelectLocalRepo}
+                onClearLocalRepo={
+                  !optimisticDraftThread && taskWorkspaces
+                    ? () => {
+                        window.localStorage.removeItem(LAST_LOCAL_REPO_KEY)
+                        window.localStorage.removeItem(
+                          LEGACY_LAST_LOCAL_REPO_KEY
+                        )
+                        setLocalRepoPath(null)
+                        setLocalRepoBranch(null)
+                        setLocalRepoBranches([])
+                        setLocalError(null)
+                      }
+                    : undefined
+                }
+                onAddLocalRepo={() => void handleAddLocalRepo()}
+                onRemoveLocalRepo={(cwd) => void handleRemoveLocalRepo(cwd)}
+                onRefreshLocalRepoBranch={() => void refreshLocalRepoBranch()}
+                onSelectLocalRepoBranch={(branch) =>
+                  void selectLocalRepoBranch(branch)
+                }
+                localWorkspaceMode={localWorkspaceMode}
+                localWorktreeLabel={
+                  selectedLocalRef?.worktreePath ? "Worktree" : undefined
+                }
+                onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
+                projects={projects}
+                selectedProjectId={selectedProject?.id ?? null}
+                onProjectChange={
+                  !optimisticDraftThread && cloudEnabled
+                    ? selectProject
+                    : undefined
+                }
+                onCreateProject={setCreatingProject}
+                workspaceOptions={workspaces}
+                selectedWorkspace={selectedWorkspace}
+                onWorkspaceChange={
+                  !optimisticDraftThread && runTarget === "cloud"
+                    ? selectWorkspace
+                    : undefined
+                }
+                skills={skills.data}
+              />
+            </AgentComposerDock>
+          </div>
+          {traceFlight.game}
         </div>
       </div>
       {creatingProject !== null && (

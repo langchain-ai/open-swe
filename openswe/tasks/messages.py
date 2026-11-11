@@ -77,9 +77,11 @@ class TaskMessage(Base):
 
     @classmethod
     async def owed(cls, thread_id: str) -> list[Self]:
-        """Messages no run of the thread has received yet, oldest first."""
+        """Messages no run of the thread has received yet, oldest first.
+
+        Read before each model call, so it leaves pruning delivered messages to ``record``.
+        """
         async with postgres.session() as session:
-            await session.execute(delete(cls).where(cls.delivered_at < func.now() - _RETAINED))
             return list(
                 await session.scalars(
                     select(cls)
@@ -138,8 +140,6 @@ class TaskMessage(Base):
 
     @classmethod
     async def deliver_to(cls, thread_id: str) -> None:
-        if not postgres.configured():
-            return
         try:
             await cls.deliver(thread_id, "enqueue")
         except Exception:
@@ -177,7 +177,7 @@ class TaskMessage(Base):
         delivery attempts awaits nothing.
         """
         recent = [] if since is None else [cls.matched_at >= since]
-        if not postgres.configured() or not await cls._any_undelivered(
+        if not await cls._any_undelivered(
             thread_id, cls.delivery_attempts < _MAX_ATTEMPTS, *recent
         ):
             return False
@@ -251,7 +251,7 @@ class TaskMessage(Base):
 
     @classmethod
     async def pending_threads(cls, thread_ids: Sequence[str]) -> set[str]:
-        if not thread_ids or not postgres.configured():
+        if not thread_ids:
             return set()
         async with postgres.session() as session:
             return set(

@@ -31,22 +31,35 @@ function useBranding() {
   })
   const suffix = environment ? `-${environment}` : ""
   return {
-    colored: Boolean(environment),
-    logo: `${import.meta.env.BASE_URL}logo-mark${suffix}.png`,
+    logo: `${import.meta.env.BASE_URL}bird-mark.png`,
     favicon: `${import.meta.env.BASE_URL}favicon${suffix}.png`,
   }
 }
 
 export function LogoMark({
+  alt,
   className,
+  style,
   ...props
-}: Omit<ComponentProps<"img">, "src" | "srcSet">) {
+}: Omit<ComponentProps<"span">, "children"> & { alt: string }) {
   const branding = useBranding()
   return (
-    <img
+    <span
+      role={alt ? "img" : undefined}
+      aria-label={alt || undefined}
+      aria-hidden={alt ? undefined : true}
       {...props}
-      src={branding.logo}
-      className={cn(className, branding.colored && "grayscale-0")}
+      className={cn(
+        "inline-block bg-current text-icon-brand-fill dark:text-icon-brand-background",
+        className
+      )}
+      style={{
+        maskImage: `url("${branding.logo}")`,
+        maskSize: "contain",
+        maskRepeat: "no-repeat",
+        maskPosition: "center",
+        ...style,
+      }}
     />
   )
 }

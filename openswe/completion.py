@@ -34,11 +34,9 @@ from openswe.config import ENV
 from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
-from openswe.invocation import resolve_invocation_id, with_invocation_id
+from openswe.invocation import resolve_invocation_id
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
-from openswe.review.goal_review import GoalReview
 from openswe.review.run_failure import ReviewRunFailure
-from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import (
     SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
@@ -50,7 +48,6 @@ from openswe.slack.routed_work import RoutedWork
 from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.threads.goal import ThreadGoals
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
@@ -80,9 +77,6 @@ _MAX_CONSECUTIVE_FAILURE_REPLIES = 3
 # One failure reply per run, however many of its webhook and the stalled-run sweep race.
 _FAILURE_REPLY_CLAIM = "run_failure_reply"
 _FAILURE_REPLY_CLAIM_TTL = timedelta(days=2)
-_SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
-_SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
-_MAX_SESSION_COST_REFRESH_RUN_IDS = 20
 _MESSAGE_CONVERSION_ERRORS = (NotImplementedError, TypeError, ValueError)
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
@@ -288,24 +282,6 @@ def _consecutive_failures(metadata: dict[str, Any]) -> int:
     return count if isinstance(count, int) else 0
 
 
-def _scheduled_cost_run_ids(metadata: dict[str, Any]) -> list[str]:
-    raw = metadata.get(_SESSION_COST_REFRESH_RUN_IDS)
-    ids = [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
-    latest = metadata.get(_SESSION_COST_REFRESH_RUN_ID)
-    if isinstance(latest, str) and latest and latest not in ids:
-        ids.append(latest)
-    return ids
-
-
-def _cost_refresh_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, Any]:
-    ids = [item for item in _scheduled_cost_run_ids(metadata) if item != run_id]
-    ids.append(run_id)
-    return {
-        _SESSION_COST_REFRESH_RUN_ID: run_id,
-        _SESSION_COST_REFRESH_RUN_IDS: ids[-_MAX_SESSION_COST_REFRESH_RUN_IDS:],
-    }
-
-
 def _invocation_id(payload: dict[str, Any]) -> str | None:
     metadata = payload.get("metadata")
     if not isinstance(metadata, dict):
@@ -397,46 +373,8 @@ async def _handle_successful_run(
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
     await refresh_slack_background_status(thread_id)
-    payload_metadata = payload.get("metadata")
-    invocation_id = _invocation_id(payload)
-    if invocation_id is None:
-        return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
-    if run_id in _scheduled_cost_run_ids(metadata):
-        return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
-
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or not slack_thread.channel_id:
-        return {"status": "ignored", "reason": "no Slack channel"}
-    if not slack_thread.thread_ts:
-        return {"status": "ignored", "reason": "no Slack thread"}
-    channel_id = slack_thread.channel_id
-    thread_ts = slack_thread.thread_ts
-
-    scheduled = await schedule_session_cost_refresh(
-        {
-            "agent_thread_id": thread_id,
-            "run_id": run_id,
-            **with_invocation_id(None, invocation_id),
-            **(
-                {"invocation_started_at": payload_metadata["invocation_started_at"]}
-                if isinstance(payload_metadata, dict)
-                and isinstance(payload_metadata.get("invocation_started_at"), str)
-                else {}
-            ),
-            "channel_id": channel_id,
-            "thread_ts": thread_ts,
-        },
-    )
-    if not scheduled:
-        return {"status": "error", "reason": "cost refresh scheduling failed"}
-    try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata=_cost_refresh_metadata(metadata, run_id),
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
-    return {"status": "ok", "reason": "cost refresh scheduled"}
+    # Slack shows no run cost, so nothing refreshes a reply's footer with it.
+    return {"status": "ok", "reason": "run settled"}
 
 
 async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: object) -> None:
@@ -593,9 +531,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
-    if status in _TERMINAL_FAILURE_STATUSES:
-        await ThreadGoals.failed(thread_id)
-        await GoalReview.run_failed(thread_id)
     if (
         status in _TERMINAL_FAILURE_STATUSES
         and isinstance(payload_metadata, dict)

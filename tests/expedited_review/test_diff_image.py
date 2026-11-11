@@ -186,3 +186,23 @@ def test_png_paints_intraline_backgrounds_only_for_replacements() -> None:
         for color in (theme.add_highlight, theme.remove_highlight):
             assert any(rgb == ImageColor.getrgb(color) and count > 100 for count, rgb in colors)
             assert all(rgb != ImageColor.getrgb(color) for _, rgb in addition_colors)
+
+
+def test_long_paths_wrap_in_full_instead_of_being_elided() -> None:
+    path = "open-swe/" + "deeply/nested/" * 20 + "file.py"
+    renderer = DiffImageRenderer()
+    pieces = renderer._path_lines(path, 200)
+    assert len(pieces) > 1
+    assert "".join(pieces) == path
+    assert "…" not in "".join(pieces)
+    short = Image.open(
+        BytesIO(
+            render_diff_png([ChangedFile(filename="x.py", additions=1, deletions=1, patch=PATCH)])
+        )
+    )
+    long = Image.open(
+        BytesIO(
+            render_diff_png([ChangedFile(filename=path, additions=1, deletions=1, patch=PATCH)])
+        )
+    )
+    assert long.height > short.height

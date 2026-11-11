@@ -192,7 +192,7 @@ class ProjectStore:
 
     async def filing_for(self, login: str) -> ProjectFiling:
         """How the person signed in as ``login`` files threads into their projects."""
-        user = await User.for_login("github", login) if postgres.configured() else None
+        user = await User.for_login("github", login)
         return ProjectFiling.of(await self.for_member(user)) if user is not None else NO_PROJECTS
 
     async def member_for_run(self, config: Mapping[str, object]) -> User:

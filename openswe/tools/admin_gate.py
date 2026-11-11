@@ -16,7 +16,7 @@ def configurable() -> RunConfig:
 
 async def actor_is_admin(cfg: RunConfig, *, login: str | None = None) -> bool:
     """Whether the run's actor is a configured admin, or a scheduled run carries one's authorization."""
-    if cfg.auth_provider == "langsmith":
+    if not cfg.github_linked:
         return False
     if cfg.source == "schedule":
         return await authorized_admin_schedule(cfg) is not None

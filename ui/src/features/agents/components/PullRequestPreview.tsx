@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   HoverCard,
   HoverCardContent,
@@ -132,7 +133,7 @@ export function PreviewablePullRequestLink({
   const mention = usePullRequestMention(href)
   if (!mention)
     return (
-      <a href={href} {...props}>
+      <a href={href ? SlackLinks.normalize(href) : href} {...props}>
         {children}
       </a>
     )

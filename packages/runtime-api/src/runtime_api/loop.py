@@ -2,8 +2,8 @@
 
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
-what needs the backend's data or credentials, one named call each: the reminders a
-person's message calls for, a model's settings, the incident a run investigates, a fresh
+what needs the backend's data or credentials, one named call each: a model's
+settings, the incident a run investigates, a fresh
 GitHub proxy token, a reply posted on the model's behalf, and what the end of the run
 records. The runtime classifies each turn's route itself, and the catalog says which
 task the thread belongs to.
@@ -121,7 +121,6 @@ class ModelCall(BaseModel):
     # Another provider's model, tried once when a call to ``model`` fails.
     fallback: ModelSpec | None = None
     use_gateway: bool = False
-    reminder: str | None = None
 
 
 class BeforeModel(PhaseResult):
@@ -269,49 +268,11 @@ class Route(BaseModel):
     persist: bool = True
 
 
-class PersonMessage(RunRequest):
-    """The message a person sent that the model has not answered yet."""
-
-    message: dict[str, JsonValue]
-
-
-class Reminders(BaseModel):
-    """Notes the model reads beside the person's latest message, which the person never sees."""
-
-    messages: list[dict[str, JsonValue]] = []
-
-
 class ChosenModel(RunRequest):
     """A model the run calls by id, such as one a person asked for, at an effort."""
 
     model_id: str
     effort: str | None = None
-
-
-GoalState = Literal["working", "waiting", "waiting_on_user", "paused", "complete"]
-
-
-class GoalRead(RunRequest):
-    waits: bool = False
-
-
-class Goal(BaseModel):
-    """A Goal mode thread's goal as the backend keeps it."""
-
-    state: GoalState | None = None
-    reason: str | None = None
-    objective: str | None = None
-    ask: str | None = None
-    updated_at_ms: int = 0
-    waits: list[str] = []
-
-
-class GoalChange(RunRequest):
-    """The run moved its thread's goal; None clears it."""
-
-    state: Literal["working", "waiting", "paused"] | None
-    reason: Literal["no_progress", "failing_commands"] | None = None
-    request: str | None = None
 
 
 class IncidentContext(BaseModel):
@@ -351,10 +312,6 @@ BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
 ROUTE_MODEL = Endpoint(
     "route_model", Routed, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# Classifies a person's message; only reads, so it is safe to send again.
-REMINDERS = Endpoint(
-    "reminders", PersonMessage, Reminders, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
@@ -375,8 +332,6 @@ REFRESH_GITHUB_PROXY = Endpoint(
     delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
-GOAL = Endpoint("goal", GoalRead, Goal, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
-SET_GOAL = Endpoint("set_goal", GoalChange, Done, seconds=LOOP_CALL_SECONDS)
 # The run's turn began: the transcript opens it, and the thread and usage record what
 # it runs as.
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)

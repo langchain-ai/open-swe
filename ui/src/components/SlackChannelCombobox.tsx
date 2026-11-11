@@ -193,7 +193,7 @@ function channelTypeaheadProps(
       </>
     ),
     listFooter: (
-      <div className="mt-space-1 border-t border-subtle pt-space-1">
+      <div className="sticky bottom-0 mt-space-1 border-t border-subtle bg-popover pt-space-1">
         <RefreshSlackChannels {...channels} />
       </div>
     ),

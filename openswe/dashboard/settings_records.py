@@ -2,9 +2,11 @@
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from sqlalchemy import ColumnElement, and_, delete, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -47,6 +49,21 @@ class SettingsRecords:
     async def delete(self, key: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(SettingsRecord).where(self._where(key)))
+
+    @staticmethod
+    async def pinned_releases(session: AsyncSession) -> frozenset[UUID]:
+        """Every app release a record at either tier pins, in Apps in reviews or Apps for
+        everyone, so cleanup keeps it."""
+        found: set[UUID] = set()
+        for value in await session.scalars(select(SettingsRecord.value)):
+            for field in ("review_apps", "featured_apps"):
+                entries = value.get(field) if isinstance(value, dict) else None
+                for entry in entries if isinstance(entries, list) else []:
+                    try:
+                        found.add(UUID(str(entry["release"])))
+                    except KeyError, TypeError, ValueError:
+                        continue
+        return frozenset(found)
 
 
 INSTANCE_SETTINGS = SettingsRecords("instance")

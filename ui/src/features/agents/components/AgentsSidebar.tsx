@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -97,7 +98,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByAge,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -110,6 +111,7 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
+import { usePlugins } from "@/features/plugins/lib/queries"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -195,6 +197,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
+  const plugins = usePlugins()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -259,7 +262,10 @@ export function AgentsSidebar({
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
-  const pinnedQuery = useSidebarPinnedThreads({ enabled: true })
+  const pinnedQuery = useSidebarPinnedThreads({
+    enabled: true,
+    measure: !prefs.collapsedSectionKeys.includes("pinned"),
+  })
   const recentsQuery = useSidebarRecents({
     repoMode,
     includeAutomations,
@@ -271,6 +277,11 @@ export function AgentsSidebar({
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
+    measure:
+      workspaceOrganize ||
+      !prefs.collapsedSectionKeys.includes("repos") ||
+      (!prefs.collapsedSectionKeys.includes("pinned") &&
+        prefs.pinnedRepoKeys.length > 0),
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
@@ -647,12 +658,10 @@ export function AgentsSidebar({
     </>
   )
 
-  // Date mode gives each age bucket its own section; otherwise, and before any
-  // thread loads, one Recents section keeps the view menu reachable.
-  const ageGroups =
-    prefs.organize === "date" ? groupSidebarThreadsByAge(recents) : []
-  const recentGroups = ageGroups.length
-    ? ageGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
+  const dayGroups =
+    prefs.organize === "date" ? groupSidebarThreadsByDay(recents) : []
+  const recentGroups = dayGroups.length
+    ? dayGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
 
   const macFolders = new Set(
@@ -720,6 +729,10 @@ export function AgentsSidebar({
     pinnedQuery.isError ||
     recentsQuery.isError ||
     (repoMode && sidebarReposQuery.isError)
+  // The skeleton stands in for the sections, so they mount once it goes rather than sliding up under it.
+  const skeleton = cloudPending && allItems.length === 0
+  // Plugin rows join the nav above everything else, so the list stays hidden until they are known.
+  const navPending = plugins.isPending
   const isEmpty =
     !cloudPending &&
     filteredPinnedItems.length === 0 &&
@@ -783,7 +796,7 @@ export function AgentsSidebar({
               concierge.data?.thread_id
                 ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
-                  ? `slack://channel?id=${concierge.data.channel_id}`
+                  ? SlackLinks.open(concierge.data.channel_id)
                   : undefined
             }
             onClick={layout.closeOnMobile}
@@ -821,14 +834,17 @@ export function AgentsSidebar({
         )}
         <div
           ref={scrollViewport}
-          className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2"
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
+            navPending && "invisible"
+          )}
           onScroll={measureScrollEdges}
         >
           <SidebarNav
             className={isDesktop ? "pb-space-3" : "pb-space-4"}
             onNavigate={layout.closeOnMobile}
           />
-          {cloudPending && allItems.length === 0 && <ThreadListSkeleton />}
+          {skeleton && <ThreadListSkeleton />}
           {cloudError && (
             <ThreadSourceError
               label="Cloud threads unavailable"
@@ -877,7 +893,7 @@ export function AgentsSidebar({
             </section>
           )}
 
-          {repoMode && (
+          {repoMode && !skeleton && (
             <section className="mb-space-3">
               <SidebarSectionHeader
                 label={workspaceMode ? "Workspaces" : "Projects"}
@@ -929,6 +945,7 @@ export function AgentsSidebar({
           )}
 
           {!repoMode &&
+            !skeleton &&
             recentGroups.map((group, index) => (
               <section key={group.key} className="mb-space-3">
                 <SidebarSectionHeader

@@ -469,14 +469,14 @@ async def test_ask_channel_prs_use_bot_without_borrowing_reporter_credentials(
         source_context={"slack_thread": {"channel_id": "CASK", "thread_ts": "1.0"}},
     )
     run_config = config(source="slack")
-    run_config["configurable"]["auth_provider"] = provider
+    run_config["configurable"]["github_linked"] = provider == "github"
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
     monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
     )
     if provider == "langsmith":
-        with pytest.raises(PermissionError, match="no GitHub repository access"):
+        with pytest.raises(PermissionError, match="GitHub is not linked"):
             await opr._resolve_pr_author_token(author)
         credentials.assert_not_awaited()
         return

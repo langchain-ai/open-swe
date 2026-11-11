@@ -19,7 +19,6 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal, Self, TypedDict
-from urllib.parse import quote
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
@@ -266,6 +265,7 @@ class HumanReviewRequest(Base):
     async def card_url(self) -> str:
         """Link to the card even when Slack's permalink lookup is unavailable."""
         from openswe.slack.client import get_slack_permalink
+        from openswe.slack.links import SlackLink
 
         channel, timestamp = self.slack_channel_id, self.slack_message_ts
         if not channel or not timestamp:
@@ -273,7 +273,7 @@ class HumanReviewRequest(Base):
         permalink = await get_slack_permalink(channel, timestamp)
         if permalink:
             return permalink
-        return f"https://app.slack.com/archives/{quote(channel, safe='')}/p{quote(timestamp.replace('.', ''), safe='')}"
+        return SlackLink(channel, timestamp, self.slack_thread_ts).url
 
     @property
     def slack_location(self) -> tuple[str, str] | None:
@@ -482,8 +482,6 @@ class HumanReviewRequest(Base):
     @classmethod
     async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
         """The Open SWE review-request card this Slack thread holds, with its pull request."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls)
@@ -539,6 +537,28 @@ class HumanReviewRequest(Base):
             "state": self.state,
             "head_sha": self.head_sha,
             "detail": self.detail,
+            "tldr": self.tldr,
+            "diff_fingerprint": self.diff_fingerprint,
+            "excluded_hunks": [
+                {
+                    "path": hunk["path"],
+                    "digest": hunk["digest"],
+                    "header": hunk["header"],
+                    "additions": hunk["additions"],
+                    "deletions": hunk["deletions"],
+                    "guideline": hunk["guideline"],
+                    "reason": hunk["reason"],
+                    "approval_condition": hunk.get("approval_condition", False),
+                }
+                for hunk in self.excluded_hunks
+            ],
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "slack_thread_ts": self.slack_thread_ts,
+            "slack_diff_file_id": self.slack_diff_file_id,
+            "slack_channel_choices": [
+                {"id": choice["id"], "name": choice["name"]}
+                for choice in self.slack_channel_choices
+            ],
             "auto_merge": self.auto_merge,
             "awaiting_ready": self.awaiting_ready,
             "slack_channel_id": self.slack_channel_id,
@@ -573,6 +593,7 @@ class HumanReviewRequest(Base):
                     "assigned_by_agent": p.assigned_by_agent,
                     "joined_at": p.joined_at.isoformat() if p.joined_at else None,
                     "github_review_id": p.github_review_id,
+                    "github_review_sha": p.github_review_sha,
                     "dm_channel_id": p.dm_channel_id,
                     "dm_ts": p.dm_ts,
                 }

@@ -246,22 +246,6 @@ def kept_route(value: object) -> RouteName | None:
     return None
 
 
-class WorkStateRules(Nudging):
-    """Goal mode: the person wants the run to keep working until it calls ``tool`` to set
-    the thread's goal waiting on them, blocked or with the work ready. A turn that ends
-    while the goal neither waits on them nor on anything else is sent back with ``nudge``;
-    as Codex blocks a goal, three such turns in a row that do nothing, or that run only
-    failing commands, pause it. Its commands wait with the thread's wait tools, never
-    ``sleep``."""
-
-    tool: str
-    waits: list[str] = []
-    nudge_sender: str = ""
-    max_nudges: int = 3
-    reminder: str = ""
-    sleep_refusal: str = ""
-
-
 class RoutingRules(BaseModel):
     """How the run picks the route of each model call."""
 
@@ -303,7 +287,6 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
-    work_state: WorkStateRules | None = None
     # The task the thread may belong to, as its coordinator or a worker, as the run
     # started; None where it may not. A coordinator's first worker hands back the context
     # of the task it then joined (``runtime_api.workers.Worker``).
@@ -312,9 +295,6 @@ class LoopRules(BaseModel):
     # backend's ``task_context`` before each call. Remove once every deployment reads
     # ``task_context``.
     task_coordination: bool = False
-    # Whether the backend reads each new message a person sends for the reminders it calls for
-    # (``reminders``), which the model then reads beside it.
-    reminders: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
     # Open SWE's own framing of the tools the client runs, after every call's system prompt;
@@ -330,6 +310,19 @@ class LoopRules(BaseModel):
     offload_conversation: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
+
+    @property
+    def trace_tags(self) -> list[str]:
+        """The tags the run's trace carries: whether the classifier routes its model calls."""
+        active = self.routing is not None and self.routing.mode == "auto"
+        return [f"model_routing:{'active' if active else 'inactive'}"]
+
+
+class BrowserSpec(BaseModel):
+    """A review's browser, which opens pages the pull request's author controls."""
+
+    # The domains, each with its subdomains, it may install a sign-in session for.
+    session_domains: list[str] = []
 
 
 class Catalog(BaseModel):
@@ -347,6 +340,7 @@ class Catalog(BaseModel):
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
+    trace_tags: list[str] = []
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.
@@ -363,6 +357,8 @@ class Catalog(BaseModel):
     files: FilesSpec = FilesSpec()
     # Whether each tool result is recorded as incident evidence, which the result then cites.
     incident_evidence: bool = False
+    # A review's browser; None gives a review none. The coding agent always has its own.
+    browser: BrowserSpec | None = None
     # Where the Agent Server reports a launched worker's run ending; None launches none.
     worker_webhook: str | None = None
     # The most model calls one run of the graph makes; None leaves it to the runtime.

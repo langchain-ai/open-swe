@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
@@ -13,10 +14,13 @@ describe("ReasoningBlock", () => {
       <ReasoningBlock
         isLive={false}
         text={"**Checking the snapshot**\n\nThe image looks **stale**."}
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
 
-    const toggle = screen.getByRole("button", { name: "Checking the snapshot" })
+    const toggle = screen.getByRole("button", {
+      name: "Thought Checking the snapshot",
+    })
     expect(screen.queryByText(/The image looks/)).toBeNull()
 
     fireEvent.click(toggle)
@@ -83,12 +87,13 @@ describe("ReasoningBlock", () => {
       <ReasoningBlock
         isLive={false}
         text="Rename `reasoning_label` to _thought_preview_"
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
 
     expect(
       screen.getByRole("button", {
-        name: "Rename reasoning_label to thought_preview",
+        name: "Thought Rename reasoning_label to thought_preview",
       })
     ).toBeTruthy()
   })

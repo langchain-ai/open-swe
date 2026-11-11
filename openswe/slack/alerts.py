@@ -9,6 +9,7 @@ from openswe import event_claims
 from openswe.config import ENV
 from openswe.slack.blocks import block_payload, context, section
 from openswe.slack.http import SlackClient
+from openswe.slack.review_links import pr_review_links
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class SlackAlertLogger:
         message: str,
         *,
         details: Mapping[str, object],
+        slack_message: str | None = None,
         cooldown: timedelta = timedelta(minutes=1),
     ) -> bool:
         """Log locally and post within the channel-wide cooldown shared by all replicas."""
@@ -32,19 +34,21 @@ class SlackAlertLogger:
         try:
             if not await event_claims.claim("slack-alert", channel, ttl=cooldown):
                 return False
-            text = f"⚠️ *{escape(message, quote=False)}*"
+            text = f"⚠️ *{escape(slack_message or message, quote=False)}*"
             detail_text = "\n".join(
                 f"*{escape(key, quote=False)}:* {escape(str(value), quote=False)}"
                 for key, value in details.items()
                 if value is not None
             )
+            text, blocks = await pr_review_links(
+                text,
+                block_payload([section(text), *([context(detail_text)] if detail_text else [])]),
+            )
             async with SlackClient.bot() as client:
                 await client.chat_postMessage(
                     channel=channel,
                     text=text,
-                    blocks=block_payload(
-                        [section(text), *([context(detail_text)] if detail_text else [])]
-                    ),
+                    blocks=blocks,
                     unfurl_links=False,
                     unfurl_media=False,
                 )

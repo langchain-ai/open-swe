@@ -72,7 +72,7 @@ async def _git(backend: SandboxBackendProtocol, *args: str) -> str | None:
 
 
 async def rename_temporary_worktree_branch(
-    *, backend: SandboxBackendProtocol, request: str, model: BaseChatModel
+    *, thread_id: str, backend: SandboxBackendProtocol, request: str, model: BaseChatModel
 ) -> str | None:
     """Rename a placeholder worktree branch to one that describes the request."""
     current = await _git(backend, "symbolic-ref", "--quiet", "--short", "HEAD")
@@ -88,7 +88,11 @@ async def rename_temporary_worktree_branch(
             ],
             # Empty callbacks, so this call cannot inherit the run's handlers and
             # stream its tokens into the thread the user is watching.
-            config={"callbacks": [], "run_name": "worktree-branch-name"},
+            config={
+                "callbacks": [],
+                "run_name": "worktree-branch-name",
+                "metadata": {"thread_id": thread_id},
+            },
         )
     if not isinstance(result, _BranchName):
         return None
@@ -116,7 +120,9 @@ def schedule_worktree_branch_rename(
 
     async def run() -> None:
         try:
-            await rename_temporary_worktree_branch(backend=backend, request=request, model=model)
+            await rename_temporary_worktree_branch(
+                thread_id=thread_id, backend=backend, request=request, model=model
+            )
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Worktree branch rename failed",

@@ -24,6 +24,10 @@ from openswe.webhooks.common import (
 INSTALLATION_EVENTS: Final = frozenset({"installation", "installation_repositories"})
 # Pull request actions after which the walkthrough plans the pull request, drafts included.
 PR_WALKTHROUGH_ACTIONS: Final = frozenset({"opened", "reopened", "ready_for_review", "synchronize"})
+# Pull request actions that can change who may approve it, or the base whose rules apply.
+APPROVAL_POLICY_ACTIONS: Final = frozenset(
+    {"opened", "reopened", "synchronize", "ready_for_review", "edited"}
+)
 REVIEW_THREAD_ACTIONS: Final = frozenset({"resolved", "unresolved"})
 
 
@@ -60,6 +64,7 @@ def delivery_work(
         work.append("settle_human_reviews")
         if action == "submitted":
             work.append("record_completed_review")
+        work.append("evaluate_approval_policy")
     return tuple(work)
 
 
@@ -77,8 +82,10 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts) -> list[GitHubWorkNam
         work += ["withdraw_superseded_approvals", "notify_pr_updated", "review_fork_push"]
     if action == "opened" or action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("track_pull_request_usage")
+    if action in APPROVAL_POLICY_ACTIONS:
+        work.append("evaluate_approval_policy")
     if action == "closed":
-        work.append("settle_review_on_close")
+        work += ["settle_review_on_close", "delete_app_documents_on_close"]
     elif action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("settle_human_reviews")
     if action in GH_PR_WATCH_TOGGLE_ACTIONS:

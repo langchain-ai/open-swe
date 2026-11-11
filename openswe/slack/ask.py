@@ -36,9 +36,8 @@ from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import settle_slack_thread_status
-from openswe.slack.webhook import workspace_scoped_default_repo
+from openswe.slack.webhook import SlackAuthorization, workspace_scoped_default_repo
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.users import User
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace
 
@@ -217,25 +216,6 @@ async def _refuse(request: SlackAskRequest, text: str) -> None:
     )
 
 
-async def _runnable_login(request: SlackAskRequest, login: str | None, email: str) -> str | None:
-    """The GitHub login to run as, or None once the asker has been asked to link one."""
-    reason = await common.account_link_reason(login)
-    if reason is None:
-        return login
-    await _settle_thinking_status(request)
-    await common.post_account_link_prompt(
-        request.channel_id,
-        request.reply_thread_ts,
-        request.user_id,
-        email or None,
-        reason=reason,
-        ephemeral=True,
-    )
-    if request.response_url:
-        await clear_slack_command_message(request.response_url)
-    return None
-
-
 async def _process_slack_ask(
     request: SlackAskRequest, *, channel_run: _AskRunCapture | None = None
 ) -> None:
@@ -262,24 +242,37 @@ async def _process_slack_ask(
         return
 
     user_name, user_email = await _slack_user_profile(request.user_id)
-    login = await _runnable_login(
-        request,
-        await User.login_for_slack(request.user_id)
-        or (await User.login_for_email(user_email) if user_email else None),
-        user_email,
-    )
-    if login is None:
+    authorization = await SlackAuthorization.resolve(request.user_id)
+    if (needed := authorization.needed) is not None:
+        await _settle_thinking_status(request)
+        await common.post_account_link_prompt(
+            request.channel_id,
+            request.reply_thread_ts,
+            request.user_id,
+            user_email or None,
+            reason=needed.reason,
+            ephemeral=True,
+            langsmith=True,
+        )
+        if request.response_url:
+            await clear_slack_command_message(request.response_url)
         return
+    identity = authorization.identity
+    login = authorization.github_login
 
     thread_id = request.thread_id
     # A repository the channel names owns the routing decision, so it has to be
     # resolved before the workspace is.
-    resolution = await common.get_slack_repo_config(
-        request.channel_id,
-        "",
-        slack_user_id=request.user_id,
-        channel_context=channel_context,
-        thread_id=thread_id,
+    resolution = (
+        common.SlackRepoResolution()
+        if not login
+        else await common.get_slack_repo_config(
+            request.channel_id,
+            "",
+            slack_user_id=request.user_id,
+            channel_context=channel_context,
+            thread_id=thread_id,
+        )
     )
     workspace = (
         await resolve_workspace(
@@ -289,7 +282,7 @@ async def _process_slack_ask(
         )
     ).slug
     resolved_repo = resolution.repo
-    if not resolution.explicit:
+    if login and not resolution.explicit:
         resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace, login)
     repo = resolved_repo.model_dump() if resolved_repo else None
     slack_thread = SlackThreadRef(
@@ -314,13 +307,14 @@ async def _process_slack_ask(
         thread_id,
         source="slack",
         repo_config=repo,
-        github_login=login,
+        github_login=login or "",
         user_email=user_email,
         title=request.question,
         source_context=source_context,
         workspace=workspace,
         visibility="private",
-        owner_login=login,
+        owner_login=identity.subject if identity else "",
+        identity=identity,
         unlisted=True,
     )
     if not persisted:
@@ -331,11 +325,11 @@ async def _process_slack_ask(
         **source_context.dump(),
         "repo": repo,
         "source": "slack",
-        "github_login": login,
         "user_email": user_email,
         "workspace": workspace,
         "environment": workspace,
     }
+    authorization.configure(configurable)
     run_prompt = prompt(
         "runs/slack-explain"
         if request.selected_message

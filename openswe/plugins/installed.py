@@ -14,11 +14,13 @@ from uuid import UUID
 
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.repo_names import RepoFullName, normalize_repo_full_name
+from openswe.github.repos import accessible_repo_full_names
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import (
     DocumentScope,
     Installation,
+    PluginApps,
     PluginChat,
     PluginChats,
     PluginDocuments,
@@ -53,6 +55,11 @@ class PluginChatNotFound(LookupError):
         super().__init__("chat not found")
 
 
+class CollectionWrittenByApp(PermissionError):
+    def __init__(self, collection: str) -> None:
+        super().__init__(f"only the app writes its {collection} collection")
+
+
 class RepositoryNotGranted(PermissionError):
     def __init__(self, repository: str) -> None:
         super().__init__(f"{repository} is not shared with the plugin")
@@ -83,12 +90,35 @@ class InstalledPlugin:
             raise RepositoryNotGranted(name)
         return name
 
+    async def readable_repositories(self) -> list[str]:
+        """The repositories the person shared with the plugin and can still read, sorted.
+
+        A shared repository since renamed, deleted or closed to them drops out, so a search
+        across them is not refused whole.
+        """
+        accessible = await accessible_repo_full_names(self.user.github_login)
+        return sorted(name for name in self.installation.repositories if name in accessible)
+
     async def document_scope(self, repository: str | None) -> DocumentScope:
         """Shared with readers of ``repository``, or private to this person without one."""
         self.require(PluginPermission.STORAGE)
         if repository is None:
             return DocumentScope(user_id=self.user.id)
         return DocumentScope(repository=await self.repository(repository))
+
+    async def writable_scope(self, collection: str, repository: str | None) -> DocumentScope:
+        """``document_scope``, when the person may also change ``collection`` there.
+
+        Data belongs to the app across its versions, so a rule the owner released binds an
+        install still pinned to a version or preview without it.
+        """
+        scope = await self.document_scope(repository)
+        if self.installation.manifest.app_writes(collection):
+            raise CollectionWrittenByApp(collection)
+        release = await PluginApps.newest_release(self.installation.plugin)
+        if release is not None and release.manifest.app_writes(collection):
+            raise CollectionWrittenByApp(collection)
+        return scope
 
     async def room(self, name: str, repository: str | None) -> Room:
         """A live room, shared like documents: per repository, or this person's own."""

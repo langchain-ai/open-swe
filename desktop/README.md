@@ -66,7 +66,8 @@ When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview
 Choosing one switches only until the app restarts; the stored backend URL stays the same.
 Nothing is configured on the desktop side.
 
-On macOS, Universal Links open agent and review pages in the app only when the URL's origin matches the configured backend.
+On macOS, Universal Links open agent and review pages in the app only when the URL's origin is the configured backend's, or one of the dashboard origins that backend lists (its canonical domain and aliases, from `/dashboard/api/desktop/environments`).
+The app claims `robin.langchain.dev` and `openswe.langchain.dev` (`entitlements.mac.plist`).
 Links for other deployments open in the default browser instead.
 Associated domains are fixed in the signed app, so macOS may still launch Robin before it hands a mismatched link back to the browser.
 
@@ -146,6 +147,8 @@ Neither command builds or embeds the dashboard.
 The dashboard's `ui/public/logo-mark.png` is the shared source for the desktop app icon.
 Electron Builder converts it into platform-specific icon formats during packaging and copies it as `icon.png` for native windows; source launches use the same source image directly.
 Change that source image rather than maintaining desktop-specific icon assets.
+Run `python scripts/branding.py` from the Open SWE root to regenerate browser, PWA, mobile, and environment-specific icons from it; Pillow is a declared project dependency.
+Preview and staging retain their pink and green backgrounds to distinguish them from production.
 Installed app icons require a desktop shell release, not a downloaded UI update.
 Build outputs are written to `desktop/dist/`; the bundle is `Robin.app`.
 The source installer replaces a verified `Open SWE.app` in the same Applications directory after installing Robin; it does not remove profile or CLI data.

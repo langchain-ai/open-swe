@@ -195,12 +195,16 @@ function InstalledAppRow({
               Update to #{newer.number}
             </Button>
           )}
-          <IconButton
-            icon={TrashIcon}
-            label={`Remove ${plugin.manifest.displayName}`}
-            size="xs"
-            onClick={() => uninstall.mutate(plugin.id)}
-          />
+          {plugin.featured ? (
+            <span className="text-xs text-secondary">Added for everyone</span>
+          ) : (
+            <IconButton
+              icon={TrashIcon}
+              label={`Remove ${plugin.manifest.displayName}`}
+              size="xs"
+              onClick={() => uninstall.mutate(plugin.id)}
+            />
+          )}
         </div>
       </div>
       <PermissionList permissions={plugin.manifest.permissions} />

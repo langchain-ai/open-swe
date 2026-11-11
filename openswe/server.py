@@ -7,7 +7,6 @@ stateless.
 """
 
 # ruff: noqa: E402, PLC2701
-import hashlib
 import logging
 import time
 import warnings
@@ -22,8 +21,6 @@ from openswe.config import ENV
 
 logger = logging.getLogger(__name__)
 
-_MODEL_ROUTING_SPLIT = 0.5
-
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
@@ -36,7 +33,6 @@ from runtime_api.catalog import (
     McpServerSpec,
     ReplyRules,
     RoutingRules,
-    WorkStateRules,
 )
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import QUICK_CALL_SECONDS
@@ -87,7 +83,6 @@ from openswe.dashboard.options import (
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-from openswe.database import postgres
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
@@ -100,7 +95,6 @@ from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.runtime import MCPTools, catalog_note
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
-from openswe.memories.store import CURATOR_SOURCE, MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -115,10 +109,8 @@ from openswe.middleware.require_user_reply import (
     REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
-    WORK_STATE_GUARD,
     ReplySurface,
     reply_nudge,
-    work_state_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import StaleWorkspaceReporter
@@ -128,6 +120,7 @@ from openswe.model_request import (
     infer_requested_model,
     model_selection_trace,
 )
+from openswe.model_routing import RoutingArm
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
@@ -170,7 +163,6 @@ from openswe.thread_title import (
     schedule_thread_title_generation,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
-from openswe.threads.goal import ThreadGoals
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -187,9 +179,7 @@ from openswe.tools import (
     create_automation,
     create_project,
     create_sandbox_file_download_url,
-    decide_memory,
     delete_automation,
-    delete_memory_trigger,
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
@@ -199,20 +189,12 @@ from openswe.tools import (
     expedite_pr_approval,
     expose_port,
     fetch_url,
-    forget,
     get_human_review_status,
     get_thread,
-    goal_create,
-    goal_get,
-    goal_set_objective,
-    goal_set_state,
     http_request,
-    link_memory_trigger,
     link_pull_request,
     list_automations,
     list_event_types,
-    list_memories,
-    list_memory_triggers,
     list_projects,
     list_threads,
     list_workspaces,
@@ -231,13 +213,9 @@ from openswe.tools import (
     publish_app,
     publish_artifact,
     publish_workspace,
-    publish_workspace_prompt,
     read_only_sql,
     read_user_settings,
-    read_workspace_prompt,
-    recall,
     recreate_sandbox,
-    remember,
     reorder_sidebar_threads,
     reorder_thread_pins,
     report_platform_issue,
@@ -245,13 +223,12 @@ from openswe.tools import (
     request_pr_review,
     request_rollout_check,
     save_organization_skill,
+    save_user_instructions,
     save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
     search_pull_requests,
     send_announcement,
-    set_memory_trigger,
-    set_memory_trigger_guidance,
     share_project,
     slack_add_reaction,
     slack_attach_html,
@@ -286,6 +263,7 @@ from openswe.tools.admin_gate import (
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
+from openswe.tools.manage_review_apps import manage_review_apps
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
 from openswe.tools.note_on_diff import note_on_diff
@@ -502,17 +480,10 @@ async def _thread_participant(
             slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
-    curated_in = (
-        RunConfig.from_config(config).workspace_slug
-        if user is not None and user.typed_preferences.experimental_memory
-        else None
-    )
-    profile, workspace_admin, instructions, memories, triggers = await asyncio.gather(
+    profile, workspace_admin, instructions = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
-        MEMORIES.personal(user.id if user else None, curated_in=curated_in),
-        MEMORIES.triggers(user.id if user else None, curated_in=curated_in),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
@@ -526,8 +497,6 @@ async def _thread_participant(
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
-        memories=tuple(memory.line for memory in memories),
-        memory_triggers=tuple(trigger.line for trigger in triggers),
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -659,10 +628,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "background_task",
         "monitor",
         # Only the parent's own turn can say where the work stands.
-        "goal_create",
-        "goal_get",
-        "goal_set_objective",
-        "goal_set_state",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         # The review page reads both from the parent's transcript.
@@ -691,18 +656,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "share_project",
         "unshare_project",
         "move_thread_to_project",
-        "remember",
-        "forget",
-        "recall",
-        "list_memories",
-        "read_workspace_prompt",
-        "decide_memory",
-        "publish_workspace_prompt",
-        "list_memory_triggers",
-        "set_memory_trigger",
-        "set_memory_trigger_guidance",
-        "delete_memory_trigger",
-        "link_memory_trigger",
+        "save_user_instructions",
         "record_incident_report",
         "search_incidents",
         "start_thread",
@@ -749,18 +703,7 @@ AGENT_TOOLS: Final = (
     publish_artifact,
     preview_app,
     publish_app,
-    remember,
-    forget,
-    recall,
-    list_memories,
-    read_workspace_prompt,
-    decide_memory,
-    publish_workspace_prompt,
-    list_memory_triggers,
-    set_memory_trigger,
-    set_memory_trigger_guidance,
-    delete_memory_trigger,
-    link_memory_trigger,
+    save_user_instructions,
     save_user_settings,
     list_projects,
     create_project,
@@ -801,10 +744,6 @@ AGENT_TOOLS: Final = (
     recreate_sandbox,
     report_platform_issue,
     schedule_thread_wakeup,
-    goal_create,
-    goal_get,
-    goal_set_objective,
-    goal_set_state,
     request_rollout_check,
     listen_events,
     list_event_types,
@@ -838,6 +777,7 @@ AGENT_TOOLS: Final = (
     execute_database_sql,
     write_database_rows,
     manage_feature_flags,
+    manage_review_apps,
     manage_review_approval_mode,
     manage_review_shadow,
     manage_review_repos,
@@ -895,7 +835,6 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
                 plan_walkthrough.walkthrough_plan_chunk,
                 plan_walkthrough.walkthrough_split_hunks,
                 plan_walkthrough.walkthrough_move_to_other,
-                plan_walkthrough.walkthrough_describe_other,
             ]
         ),
     ]
@@ -1083,10 +1022,7 @@ _NOT_FROM_CODE = (
 # Everyday tools code mode still offers the model directly. Every other tool it calls
 # from code, where the run's tools can differ from person to person and run to run without
 # changing the tools offered to the model, which the provider's prompt cache keys on.
-_GOAL_TOOLS: Final = frozenset({"goal_create", "goal_get", "goal_set_objective", "goal_set_state"})
-_DIRECT_IN_CODE_MODE = (
-    SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"} | _GOAL_TOOLS
-)
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"}
 
 
 def callable_from_code(name: str) -> bool:
@@ -1211,10 +1147,9 @@ def _slack_concierge_run(cfg: RunConfig) -> bool:
     )
 
 
-def _model_routing_mode(thread_id: str) -> RoutingMode:
-    digest = hashlib.sha256(thread_id.encode()).hexdigest()
-    bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
-    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "fast"
+def _model_routing_mode(thread_id: str) -> RoutingMode | None:
+    """The thread's arm: ``auto`` routes through the classifier, None runs the model its person picked."""
+    return "auto" if RoutingArm.hashes_routed(thread_id) else None
 
 
 def _make_model_or_defer(
@@ -1525,6 +1460,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 decision.pin_persisted = bool(requested_model)
             else:
                 requested_model = settings.get("requested_model")
+                if requested_model not in self._requested_models:
+                    requested_model = None
                 decision.requested_model = requested_model
                 decision.outcome = "reused_saved_choice" if requested_model else "not_classified"
                 decision.reason = (
@@ -1584,6 +1521,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         # Reads only who the run is for, so it runs alongside participants.
         recent_threads = asyncio.create_task(self._recent_threads(cfg))
+        workspace_settings = asyncio.create_task(cached_workspace_settings(workspace_slug(cfg)))
         # A dashboard switched back to Auto drops the route the thread kept.
         reroute = (
             not requested_model
@@ -1624,30 +1562,24 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
+        defaults = await workspace_settings
         turn = TurnContext(
             working_dir=work_dir,
-            agent_workspace=cfg.repo_explicitly_none is True,
+            working_folder=cfg.repo_explicitly_none is True,
             source="background_task" if cfg.background_task_completion else self._source,
             slack_context=cfg.slack_context,
             slack_ask=cfg.slack_ask_mode,
             slack_by_the_way=cfg.slack_ask_mode and bool(cfg.slack_by_the_way_thread_ts),
             slack_breakout=cfg.slack_breakout is True,
             slack_follow_up_suggestions=_slack_concierge_run(cfg)
-            or (await cached_workspace_settings(workspace_slug(cfg))).get(
-                "slack_follow_up_suggestions"
-            )
-            is True,
-            goal_mode=self._turn.goal_mode,
-            implementation_walkthrough_enabled=(
-                await cached_workspace_settings(workspace_slug(cfg))
-            ).get("implementation_walkthrough_enabled")
+            or defaults.get("slack_follow_up_suggestions") is True,
+            implementation_walkthrough_enabled=defaults.get("implementation_walkthrough_enabled")
             is True,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
             recent_threads=await recent_threads,
-            curated_workspace=(cfg.workspace_slug or "") if self._source == CURATOR_SOURCE else "",
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
@@ -1703,25 +1635,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
     async def _render_system_prompt(self, cfg: RunConfig) -> SystemPrompt:
         """The thread's system prompt, from what holds for it as its first run starts."""
-        async with aphase(self._thread_id, "prepare.default_repo"):
-            default_repo = await _resolve_prompt_default_repo(cfg)
-        async with aphase(self._thread_id, "prepare.workspace"):
-            workspace = await load_workspace(workspace_slug(cfg))
-            curated = (
-                workspace
-                and self._profile_login
-                and (await User.preferences_for_login(self._profile_login)).experimental_memory
-            )
-            memory, shared_triggers = (
-                await asyncio.gather(
-                    MEMORIES.workspace_prompt(workspace.slug),
-                    MEMORIES.shared_triggers(workspace.slug),
-                )
-                if workspace and curated
-                else ("", [])
-            )
+        default_repo, workspace = await asyncio.gather(
+            _timed(self._thread_id, "prepare.default_repo", _resolve_prompt_default_repo(cfg)),
+            _timed(self._thread_id, "prepare.workspace", load_workspace(workspace_slug(cfg))),
+        )
         return construct_system_prompt(
-            agent_workspace=cfg.repo_explicitly_none is True,
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
             default_repo=default_repo,
@@ -1729,8 +1647,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_name=workspace.name if workspace else None,
             workspace_instructions=workspace.instructions if workspace else None,
             workspace_repos=workspace.repos if workspace else None,
-            workspace_memory=memory,
-            workspace_memory_triggers=[trigger.line for trigger in shared_triggers],
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
@@ -1741,7 +1657,7 @@ def agent_sender(config: RunnableConfig, turn: AgentTurnSettings) -> RunSender:
     """Who an agent run's invocation is attributed to: whoever sent what started it."""
     cfg = RunConfig.from_config(config)
     return RunSender(
-        github_login=cfg.github_login if cfg.auth_provider == "langsmith" else turn.profile_login,
+        github_login=cfg.github_login if not cfg.github_linked else turn.profile_login,
         github_user_id=cfg.github_user_id,
         user_email=cfg.user_email,
         source=cfg.source or "dashboard",
@@ -1763,6 +1679,23 @@ async def record_agent_run(
     if thread_id is None:
         return
     sender = started.sender or (None if carried else agent_sender(config, turn))
+    if sender is not None and not (
+        sender.github_login or sender.github_user_id or sender.user_email
+    ):
+        # An automation runs as no one; its usage is its creator's.
+        try:
+            creator = await cfg.automation_creator()
+        except Exception:
+            logger.warning(
+                "Failed to look up the automation's creator",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+            creator = None
+        if creator is not None and creator.github_login:
+            sender = sender.model_copy(
+                update={"github_login": creator.github_login, "user_email": creator.email}
+            )
     model_id = started.model_id or (None if carried else cfg.resolved_agent_model_id)
     effort = started.effort or (None if carried else cfg.resolved_agent_effort)
     source = (sender.source if sender is not None else None) or "dashboard"
@@ -1929,8 +1862,26 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     adaptive_model_routing = settings.model_routing_enabled if settings else False
+    # The routed arm ignores every model a person picked (the composer's choice, their
+    # preferred default, a pin saved on the thread, or one asked for in a message);
+    # the pick is still recorded on the run. The other arm runs the pick.
+    # Every kind of message is in the experiment: channel threads, DMs and `/oswe`
+    # questions alike.
+    routed_arm = (
+        adaptive_model_routing
+        and cfg.source != "incidents_agent"
+        and _model_routing_mode(thread_id) == "auto"
+    )
+    user_model_choice = (
+        (cfg.agent_model_id, cfg.agent_effort)
+        if cfg.model_selection == "explicit" and cfg.agent_model_id
+        else None
+    )
+    if routed_arm and thread_settings.get("requested_model") is not None:
+        thread_settings["requested_model"] = None
+        settings_changed = True
     stored_model = thread_settings.get("model_id")
-    if isinstance(stored_model, str) and not reset_model_selection:
+    if not routed_arm and isinstance(stored_model, str) and not reset_model_selection:
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
@@ -1938,7 +1889,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.model_selection == "explicit":
+    if routed_arm:
+        pass  # Nothing a person picked applies; the route decides.
+    elif cfg.model_selection == "explicit":
         adaptive_model_routing = False
         thread_settings["requested_model"] = None
         thread_settings["model_handoff_complete"] = True
@@ -1960,21 +1913,28 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             model_id, profile_effort = routing_defaults["performance"]
             subagent_model_id, subagent_effort = routing_defaults["performance"]
 
-    # Auto never falls back outside its tiers: an uncertain route uses Fast.
-    if adaptive_model_routing and not slack_ask_mode:
+    # Auto never falls back outside its tiers: an uncertain route uses Balanced.
+    if routed_arm or (adaptive_model_routing and _model_routing_mode(thread_id) == "auto"):
         if (subagent_model_id, subagent_effort) == (model_id, profile_effort):
-            subagent_model_id, subagent_effort = routing_defaults["fast"]
-        model_id, profile_effort = routing_defaults["fast"]
+            subagent_model_id, subagent_effort = routing_defaults["balanced"]
+        model_id, profile_effort = routing_defaults["balanced"]
 
     # Capability fallbacks can temporarily replace a pinned text-only model.
     image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
+    image_fallback = cfg.model_override_reason == "image_input" and not model_supports_images(
+        model_id
+    )
     if (
         (
-            not thread_settings.get("requested_model")
-            or cfg.model_selection == "explicit"
-            or (cfg.model_override_reason == "image_input" and not model_supports_images(model_id))
+            image_fallback
+            if routed_arm
+            else (
+                not thread_settings.get("requested_model")
+                or cfg.model_selection == "explicit"
+                or image_fallback
+            )
         )
         and isinstance(per_thread_model, str)
         and (not reset_model_selection or cfg.model_override_reason == "image_input")
@@ -1999,10 +1959,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    goal_worker = bool(task_coordination and task_coordination.is_worker)
-    goal_mode = bool(profile_login) and not goal_worker and sender_preferences.goal_mode
     try:
-        if cfg.source != "incidents_agent" and postgres.configured():
+        # Most runs continue a thread whose task exists; only a new one takes the creation lock.
+        if cfg.source != "incidents_agent" and await Task.of_thread(thread_id) is None:
             indexed = await THREADS.get(thread_id)
             title = indexed.metadata.get("title") if indexed is not None else None
             await Task.for_thread(
@@ -2010,15 +1969,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
                 title=title if isinstance(title, str) and title.strip() else "Untitled",
                 workspace=cfg.workspace_slug or "default",
             )
-        goal_mode = await ThreadGoals.for_run(
-            thread_id,
-            sender=profile_login,
-            sender_goal_mode=sender_preferences.goal_mode,
-            worker=goal_worker,
-        )
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
-    work_state_tool = _registered_tool_name(goal_set_state)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -2051,16 +2003,17 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         model_id, profile_effort = image_model_override
         subagent_model_id, subagent_effort = image_model_override
 
-    # A `/oswe` question runs on the asker's own default model, and never routes
-    # adaptively: one question gets one answer, so there is nothing to route.
-    if slack_ask_mode:
-        adaptive_model_routing = False
-
     model_routing_mode = _model_routing_mode(thread_id) if adaptive_model_routing else None
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        # What the person picked, recorded even where routing ignored it.
+        **(
+            {"user_model_choice": user_model_choice[0], "user_effort_choice": user_model_choice[1]}
+            if user_model_choice
+            else {}
+        ),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -2116,8 +2069,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if goal_mode else (goal_get, goal_set_objective, goal_set_state)),
-        *((goal_create,) if goal_worker else ()),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
@@ -2146,7 +2097,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
-    if not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled:
+    if not settings.expedited_review_enabled:
         static_tools = [
             tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
         ]
@@ -2165,7 +2116,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             plan_walkthrough.walkthrough_plan_chunk,
             plan_walkthrough.walkthrough_split_hunks,
             plan_walkthrough.walkthrough_move_to_other,
-            plan_walkthrough.walkthrough_describe_other,
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
@@ -2202,6 +2152,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
+        and not routed_arm
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
         and incident_session is None
@@ -2256,7 +2207,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         bridge_client=bridge_client,
         review_guide=guide is not None,
         review_guide_closed=walkthrough is not None and walkthrough.closed,
-        goal_mode=goal_mode,
         coordinator_thread_id=task_coordination.coordinator_thread_id
         if task_coordination
         else None,
@@ -2307,23 +2257,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         cli_result=CliResultRules(tool=cli_result_tool, nudges=cli_result_nudge(cli_result_tool))
         if cli_result_required
         else None,
-        work_state=WorkStateRules(
-            tool=work_state_tool,
-            waits=[
-                _registered_tool_name(tool)
-                for tool in (schedule_thread_wakeup, background_execute, monitor)
-            ],
-            reminder=prompt("runs/goal-waiting-on-user"),
-            sleep_refusal=prompt("tools/no-sleep"),
-            nudges=work_state_nudge(work_state_tool),
-            nudge_sender=WORK_STATE_GUARD["id"],
-        )
-        if goal_mode
-        else None,
         task_context=task_coordination.task_context() if task_coordination else None,
         task_coordination=task_coordination is not None,
-        reminders=sender_preferences.experimental_memory
-        and _registered_tool_name(remember) in reserved_tool_names - excluded_tools,
         client_tools=client_tools is not None,
         client_prompt="\n\n".join(
             part

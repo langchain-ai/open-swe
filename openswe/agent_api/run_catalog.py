@@ -50,7 +50,11 @@ from openswe.server import (
     runtime_runs,
 )
 from openswe.threads.access import agent_version_metadata
+from openswe.utils.thread_reads import shared_thread_reads
 
+# The model a person picked, which the planner records on the run's config, so a trace
+# compares it with the model routing chose.
+_ROUTING_TRACE_KEYS: Final = ("user_model_choice", "user_effort_choice")
 # MDA's own deep agent runs subagents and code.
 _SYNC_SUBAGENT_TOOL: Final = "task"
 _MDA_TOOLS: Final = frozenset({_SYNC_SUBAGENT_TOOL, "eval"})
@@ -98,8 +102,10 @@ class RunCatalog:
         # Resolved from the run as dispatch stamped it, never from the settings it decides.
         config = run_config(run, settled=False)
         surface = ToolSurface()
-        await kind.catalog(config, surface)
-        await surface.prepare()
+        # The kind's lookups consult the thread's ownership and access many times over.
+        async with shared_thread_reads():
+            await kind.catalog(config, surface)
+            await surface.prepare()
         return cls(kind, run, surface, config)
 
     async def start(self) -> RunStart:
@@ -221,6 +227,7 @@ class RunCatalog:
                 checks=list(surface.file_checks),
             ),
             incident_evidence=surface.loop.incident,
+            browser=surface.browser,
             worker_webhook=COMPLETION_WEBHOOK_URL if surface.delegates else None,
             skill_sources=list(surface.skill_sources),
             inbox=surface.inbox,
@@ -243,9 +250,15 @@ class RunCatalog:
             None if sandbox is None else SandboxSpec.model_validate(sandbox.model_dump(mode="json"))
         )
         catalog = self.build()
+        metadata = self.config.get("metadata") or {}
         return catalog.model_copy(
             update={
-                "trace_metadata": {**trace_actor(self.config), **agent_version_metadata()},
+                "trace_metadata": {
+                    **trace_actor(self.config),
+                    **agent_version_metadata(),
+                    **{key: metadata[key] for key in _ROUTING_TRACE_KEYS if key in metadata},
+                },
+                "trace_tags": catalog.loop.trace_tags,
                 "sandbox": spec,
                 "operations": [
                     operation.model_copy(

@@ -46,7 +46,6 @@ from openswe.runtime import (
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.tools.plan_walkthrough import (
-    walkthrough_describe_other,
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
     walkthrough_split_hunks,
@@ -294,7 +293,6 @@ def scout_tools() -> list[BaseTool]:
             walkthrough_plan_chunk,
             walkthrough_split_hunks,
             walkthrough_move_to_other,
-            walkthrough_describe_other,
             record_human_input,
             suggest_task,
         ]

@@ -183,6 +183,10 @@ export function SidebarFrame({
   )
 }
 
+type KeyboardWithLayout = {
+  getLayoutMap: () => Promise<ReadonlyMap<string, string>>
+}
+
 /**
  * The desktop title bar's buttons beside the traffic lights: the sidebar
  * toggle, then back and forward, which the app needs without browser chrome.
@@ -216,11 +220,26 @@ function WindowControls({
   const forwardShortcut = useShortcutLabel("mod+]")
 
   useEffect(() => {
+    const keyboard = (
+      navigator as Navigator & { keyboard?: KeyboardWithLayout }
+    ).keyboard
+    // Layouts with no unshifted `[` (e.g. Czech, German) match the physical
+    // bracket keys. Re-read on every key so a layout switch is picked up.
+    let physical: boolean | undefined
+    const readLayout = () =>
+      keyboard?.getLayoutMap().then(
+        (map) => (physical = ![...map.values()].includes("[")),
+        () => (physical = undefined)
+      )
+    void readLayout()
     const onKeyDown = (event: KeyboardEvent) => {
+      void readLayout()
       const mod = shortcutPlatform() === "mac" ? event.metaKey : event.ctrlKey
       if (!mod || event.altKey || event.shiftKey) return
-      if (event.key === "[") window.history.back()
-      else if (event.key === "]") window.history.forward()
+      const byCode = physical ?? /[^\x20-\x7e]/.test(event.key)
+      const key = byCode ? event.code : event.key
+      if (key === "[" || key === "BracketLeft") window.history.back()
+      else if (key === "]" || key === "BracketRight") window.history.forward()
       else return
       event.preventDefault()
     }

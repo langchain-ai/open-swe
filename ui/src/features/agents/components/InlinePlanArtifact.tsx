@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -45,12 +46,13 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         type="button"
         data-testid="inline-plan-artifact"
         aria-label="Open artifact in the conversation"
-        onClick={() =>
+        onClick={() => {
+          productAnalytics.featureOpened("artifact")
           void navigate({
             to: "/agents/$threadId/plan",
             params: { threadId },
           })
-        }
+        }}
         className="block h-[250px] w-full justify-start overflow-hidden rounded-xl border border-default bg-surface-level-1 p-0 text-left whitespace-normal shadow-sm transition-shadow outline-none hover:shadow-md focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         {html ? (

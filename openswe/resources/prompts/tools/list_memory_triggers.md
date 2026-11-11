@@ -1,1 +1,0 @@
-List this workspace's memory triggers: each `path`, its `summary` of when it applies, the `guidance` it holds for every thread of the workspace, and the `memory_ids` of the personal memories it recalls.

@@ -7,15 +7,16 @@ import hmac
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Collection, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
+from runtime_api.slack import SlackNotice
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
@@ -60,37 +61,6 @@ _SLACK_THREAD_MUTATION_LOCK_SCOPE = "slack-thread-lock"
 _SLACK_THREAD_MUTATION_LOCK_TTL = timedelta(minutes=1)
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
-_SLACK_NOTICE_BLOCK_PREFIX = "open_swe_notice."
-
-
-@dataclass(frozen=True)
-class SlackNotice:
-    """An automatic notice that is not posted again while the thread still ends with it.
-
-    ``key`` is what makes two notices the same, so per-run details such as a trace
-    link stay out of it. The notice is also held back while the thread ends with
-    a notice of a kind in ``quiet_after``.
-    """
-
-    kind: str
-    key: str
-    quiet_after: frozenset[str] = frozenset()
-
-    @property
-    def block_id(self) -> str:
-        digest = hashlib.sha256(self.key.encode()).hexdigest()[:16]
-        return f"{_SLACK_NOTICE_BLOCK_PREFIX}{self.kind}.{digest}"
-
-    def repeats(self, message: Mapping[str, object]) -> bool:
-        blocks = message.get("blocks")
-        for block in blocks if isinstance(blocks, list) else []:
-            block_id = block.get("block_id") if isinstance(block, dict) else None
-            if not isinstance(block_id, str) or not block_id.startswith(_SLACK_NOTICE_BLOCK_PREFIX):
-                continue
-            kind = block_id.removeprefix(_SLACK_NOTICE_BLOCK_PREFIX).partition(".")[0]
-            if block_id == self.block_id or kind in self.quiet_after:
-                return True
-        return False
 
 
 @dataclass(frozen=True)
@@ -307,8 +277,14 @@ def select_slack_context_messages(
     bot_username: str = "",
     *,
     treat_all_messages_as_mentions: bool = False,
+    held_timestamps: Collection[str] | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
-    """Select context from thread start or previous bot mention."""
+    """Select context from thread start or previous bot mention.
+
+    With ``held_timestamps``, the Slack messages the agent thread holds, only a mention it
+    holds starts the context: a ``/btw`` or ``/breakout`` went to another thread, and a
+    new thread holds nothing, so it reads the Slack thread from its start.
+    """
     if not messages:
         return [], "thread_start"
 
@@ -340,7 +316,8 @@ def select_slack_context_messages(
             and not message.get("bot_id")
             and not message.get("bot_profile")
         )
-        if is_explicit_mention or (treat_all_messages_as_mentions and is_user_message):
+        held = held_timestamps is None or str(message.get("ts", "")) in held_timestamps
+        if held and (is_explicit_mention or (treat_all_messages_as_mentions and is_user_message)):
             last_mention_index = index
 
     if last_mention_index >= 0:
@@ -446,7 +423,7 @@ def format_forwarded_slack_attachments(attachments: Any) -> str:
     return "\n".join(forwarded)
 
 
-def _slack_thread_reply_marker(message: dict[str, Any]) -> str:
+def _slack_thread_reply_marker(message: dict[str, Any], *, with_ts: bool = True) -> str:
     """A pointer to the replies hanging off a channel message, when it has any."""
     raw_thread_ts = message.get("thread_ts")
     thread_ts = raw_thread_ts.strip() if isinstance(raw_thread_ts, str) else ""
@@ -456,7 +433,12 @@ def _slack_thread_reply_marker(message: dict[str, Any]) -> str:
     if reply_count < 1:
         return ""
     plural = "reply" if reply_count == 1 else "replies"
-    return f" [thread: {reply_count} {plural}, thread_ts={thread_ts}]"
+    return f" [thread: {reply_count} {plural}{f', thread_ts={thread_ts}' if with_ts else ''}]"
+
+
+def slack_ts_time(ts: str) -> str:
+    """A Slack ``ts`` as the time it names, such as ``Tue 10 Nov 2026 13:58 UTC``."""
+    return f"{datetime.fromtimestamp(float(ts), UTC):%a %d %b %Y %H:%M} UTC"
 
 
 def format_slack_messages_for_prompt(
@@ -466,8 +448,12 @@ def format_slack_messages_for_prompt(
     bot_username: str = "",
     *,
     include_thread_replies: bool = False,
+    readable_times: bool = False,
 ) -> str:
-    """Format Slack messages, including forwarded context, as readable prompt text."""
+    """Format Slack messages, including forwarded context, as readable prompt text.
+
+    With ``readable_times``, each message carries the UTC time it was sent instead of its ``ts``.
+    """
     if not messages:
         return "(no thread messages available)"
 
@@ -494,9 +480,17 @@ def format_slack_messages_for_prompt(
         raw_message_ts = message.get("ts")
         message_ts = raw_message_ts.strip() if isinstance(raw_message_ts, str) else ""
         identifier = (
-            f" [message_ts={message_ts}]" if _SLACK_MESSAGE_TS_RE.fullmatch(message_ts) else ""
+            ""
+            if not _SLACK_MESSAGE_TS_RE.fullmatch(message_ts)
+            else f" [{slack_ts_time(message_ts)}]"
+            if readable_times
+            else f" [message_ts={message_ts}]"
         )
-        replies = _slack_thread_reply_marker(message) if include_thread_replies else ""
+        replies = (
+            _slack_thread_reply_marker(message, with_ts=not readable_times)
+            if include_thread_replies
+            else ""
+        )
         line = f"{author}{identifier}{replies}: {text}"
         if forwarded:
             line += f"\n{forwarded}"
@@ -619,28 +613,14 @@ def _slack_thread_dashboard_url(
     return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
 
 
-def _safe_model_label(model: str) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
-    return sanitized.rsplit("/", 1)[-1][:48].strip("-")
-
-
 SLACK_COST_PENDING_LABEL = "calculating cost..."
 _PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
-    if usage is None:
-        return ""
-    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
-    model_text = " + ".join(labels[:3])
-    if len(labels) > 3:
-        model_text = f"{model_text} +{len(labels) - 3}"
-    if model_text and usage.reasoning_effort:
-        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
-    parts = [model_text] if model_text else []
-    if usage.session_cost_usd is not None:
-        parts.append(format_slack_session_cost(usage.session_cost_usd))
-    return " • ".join(parts)
+    """Slack shows neither the models a run used nor its cost; the dashboard does."""
+    del usage
+    return ""
 
 
 _SESSION_COST_LABEL_RE = re.compile(
@@ -938,10 +918,22 @@ async def post_slack_ephemeral_reply(
 
 
 async def post_slack_thread_message_with_ts(
-    channel_id: str, thread_ts: str, text: str, *, blocks: list[dict[str, Any]] | None = None
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    unfurl: bool = True,
 ) -> str:
     """Post a plain bot message in a Slack thread, without a reply's dashboard footer."""
-    return await _post_slack_message_with_ts(channel_id, text, thread_ts=thread_ts, blocks=blocks)
+    return await _post_slack_message_with_ts(
+        channel_id,
+        text,
+        thread_ts=thread_ts,
+        blocks=blocks,
+        unfurl_links=unfurl,
+        unfurl_media=unfurl,
+    )
 
 
 async def post_slack_top_level_message_with_ts(
@@ -1436,6 +1428,12 @@ async def _post_slack_callback(
         or not parsed.path.startswith(path_prefix)
     ):
         return False
+    text, blocks = await pr_review_links(payload.get("text", ""), payload.get("blocks"))
+    payload = {**payload}
+    if "text" in payload:
+        payload["text"] = text
+    if blocks is not None:
+        payload["blocks"] = blocks
     request = httpx2.Request(
         "POST",
         response_url,

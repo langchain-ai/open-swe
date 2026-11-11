@@ -76,10 +76,14 @@ async def test_langsmith_identity_is_private_owner_only_and_cannot_inherit_admin
     assert summary.thread_is_promptable(metadata, subject)
     assert not summary.thread_is_readable(metadata, f"user:{uuid7()}", "admin@example.com")
     assert not summary.thread_is_readable({**metadata, "visibility": "public"}, subject)
-    assert not Principal.of_login(subject, "admin@example.com").admin
-    assert not await actor_is_admin(
-        RunConfig(auth_provider="langsmith", user_email="admin@example.com")
+    public_slack = {**metadata, "source": "slack", "visibility": "public"}
+    assert summary.thread_is_readable(public_slack, subject)
+    assert summary.thread_is_promptable(public_slack, subject)
+    assert not summary.thread_is_readable(
+        {**public_slack, "visibility": "private"}, f"user:{uuid7()}"
     )
+    assert not Principal.of_login(subject, "admin@example.com").admin
+    assert not await actor_is_admin(RunConfig(github_linked=False, user_email="admin@example.com"))
     with pytest.raises(HTTPException) as rejected:
         await handlers.get_dashboard_pull_request_checks(
             [{"repo_full_name": "private/repo", "number": 1}], subject

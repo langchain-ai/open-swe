@@ -1,4 +1,4 @@
-"""Review cards and picks only carry clicks Trigger Server forwards."""
+"""Review cards link to reviews and let picked reviewers answer in Slack."""
 
 import json
 from typing import Any, cast
@@ -17,13 +17,15 @@ def _request() -> HumanReviewRequest:
     return request
 
 
-def test_signing_up_and_accepting_are_plain_buttons() -> None:
+def test_signing_up_and_accepting_open_the_review() -> None:
     request = _request()
 
     review, dismiss = card._buttons(request)
 
-    for element in (review, dismiss, card.accept_button(request)):
-        assert "url" not in element
+    for element in (review, card.accept_button(request)):
+        assert element["url"] == request.pull_request.url
+        assert json.loads(element["value"])["action"] == "review"
+    assert "url" not in dismiss
 
 
 def test_decline_and_snooze_open_their_modal_through_trigger_server() -> None:

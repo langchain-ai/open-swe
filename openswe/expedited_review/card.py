@@ -50,10 +50,8 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
     if approval.approval_condition:
-        blocks.append(section(f"*Approval condition:* {escape(approval.approval_condition)}"))
-        blocks.append(
-            context(f"Already covered by auto-approval: {escape(approval.auto_approved)}")
-        )
+        blocks.append(section(f"*You're approving:* {escape(approval.approval_condition)}"))
+        blocks.append(context(f"Covered by auto-approve: {escape(approval.auto_approved)}"))
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
@@ -126,9 +124,8 @@ def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
     added = sum(counts[0] for counts in stats.values())
     deleted = sum(counts[1] for counts in stats.values())
     heading = (
-        f"*Covered by the condition above (not shown):* {len(stats)} "
-        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Robin's review "
-        "would approve these subject to human approval of the stated condition.\n"
+        f"*Fully described by the change above (not shown):* {len(stats)} "
+        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}\n"
     )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
@@ -334,9 +331,9 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = pr.label
-        return f"Expedited review: {outcome} — {pr.url}", [
-            section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
+        icon = ":merged: " if approval.state == "merged" else ""
+        return f"{icon}Expedited review: {outcome} — {pr.url}", [
+            section(f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(title)}")
         ]
     blocks: list[Block] = [
         *_header(approval, title, author),
@@ -353,9 +350,10 @@ def author_status(
 ) -> tuple[str, list[Block]]:
     """The persistent author DM record, without a diff or actions."""
     pr = approval.pull_request
-    text = f"Expedited review: {outcome} — {pr.url}"
+    icon = ":merged: " if approval.state == "merged" else ""
+    text = f"{icon}Expedited review: {outcome} — {pr.url}"
     blocks: list[Block] = [
-        section(f"*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
+        section(f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
     ]
     if origin_url:
         blocks.append(context(f"Requested from <{origin_url}|this thread>."))

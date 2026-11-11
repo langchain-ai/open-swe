@@ -10,9 +10,17 @@ the backend.
 import json
 import re
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 MANIFEST_TYPE = "application/openswe-plugin+json"
 MAX_BUNDLE_BYTES = 64_000_000
@@ -33,9 +41,9 @@ class PluginPermission(StrEnum):
     """What a plugin may ask the web UI to do for the person using it."""
 
     STORAGE = "storage"
-    """Keep documents: private to that person, or shared per GitHub repository."""
+    """Keep documents and their attachments: private to that person, or shared per GitHub repository."""
     GITHUB_READ = "github:read"
-    """Read files, trees, branches, history and pull requests in its repositories."""
+    """Read files, trees, branches, history and pull requests in its repositories, and search their pull requests."""
     GITHUB_WRITE = "github:write"
     """Create branches, commit files and open pull requests in its repositories."""
     AGENT = "agent"
@@ -62,6 +70,38 @@ class SidebarEntry(BaseModel):
     icon: SidebarIcon = "puzzle-piece"
 
 
+CollectionName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
+
+
+class CollectionRules(BaseModel):
+    """Who may change one of the app's storage collections; anyone who may read it reads it."""
+
+    write: Literal["people", "app"] = "people"
+    """``people``: anyone using the app who may read the scope. ``app``: only the app's own
+    server-side work; people read it but can't change it."""
+
+
+class ReviewStep(BaseModel):
+    """What the app has a pull request's review do for it, once a workspace adds it to reviews.
+
+    The review follows ``instructions`` beside its own, writes only the collections in
+    ``writes`` (each app-written, so people cannot forge what it saves), and gets the
+    thread's browser when ``browser`` asks for it.
+    """
+
+    instructions: str = Field(min_length=1, max_length=8000)
+    writes: list[CollectionName] = Field(default_factory=list, max_length=8)
+    browser: bool = False
+
+    @field_validator("instructions")
+    @classmethod
+    def _stays_in_its_block(cls, instructions: str) -> str:
+        # Reviews read them inside <app>…</app>, which they may not close early.
+        if "</app" in instructions.lower():
+            raise ValueError("review instructions may not contain </app")
+        return instructions
+
+
 class PluginManifest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -71,6 +111,25 @@ class PluginManifest(BaseModel):
     description: str = Field(default="", max_length=280)
     sidebar: SidebarEntry
     permissions: list[PluginPermission] = []
+    collections: dict[CollectionName, CollectionRules] = Field(default_factory=dict, max_length=64)
+    """Rules for collections that need any; the rest are written by people."""
+    review: ReviewStep | None = None
+    """What reviews do for the app in workspaces that add it to them."""
+
+    @model_validator(mode="after")
+    def _review_writes_app_collections(self) -> Self:
+        if self.review is not None:
+            people = [name for name in self.review.writes if not self.app_writes(name)]
+            if people:
+                raise ValueError(
+                    f"a review writes only app-written collections; mark {', '.join(people)} "
+                    '"write": "app"'
+                )
+        return self
+
+    def app_writes(self, collection: str) -> bool:
+        rules = self.collections.get(collection)
+        return rules is not None and rules.write == "app"
 
     @property
     def tool_prefix(self) -> str:

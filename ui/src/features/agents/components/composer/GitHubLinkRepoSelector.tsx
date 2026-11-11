@@ -32,7 +32,7 @@ export function GitHubLinkRepoSelector({
           size="sm"
           type="button"
           aria-label="Select repository"
-          className="max-w-[260px] cursor-pointer gap-space-1 text-secondary transition-opacity hover:opacity-80"
+          className="max-w-[260px] min-w-0 cursor-pointer gap-space-1 text-secondary transition-opacity hover:opacity-80"
         >
           <FolderIcon size={14} weight="regular" className="shrink-0" />
           <span className="flex-1 truncate text-left">Select repository</span>

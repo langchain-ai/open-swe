@@ -1,0 +1,9 @@
+If the user follows up requesting more changes to this pull request, immediately cancel this review request before investigating, editing, or pushing, so it cannot auto-merge while work is pending.
+Call:
+
+```python
+dismiss_human_review_request(pr_url={{ pr_url | tojson }}, reason="User requested more changes")
+```
+
+Do not wait for a new commit or ask for confirmation.
+Request human review again only after the requested changes are complete, verified, and pushed, and the pull request is ready for review.

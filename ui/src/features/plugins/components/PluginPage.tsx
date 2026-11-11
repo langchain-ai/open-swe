@@ -12,6 +12,7 @@ import { useEffect, useEffectEvent, useState } from "react"
 import { SideSheet } from "@/components/SideSheet"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
+import type { ComposerDraft, ImageChunk } from "@/features/agents/lib/types"
 import {
   PluginAgentDock,
   usePluginAgent,
@@ -221,11 +222,11 @@ function InstalledPluginPage({
 function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
   const enabled = plugin.manifest.permissions.includes("agent")
   const [open, setOpen] = useState(false)
-  const [chat, setChat] = useState<ChatTarget>({
-    name: "default",
-    repository: null,
-  })
-  const [draft, setDraft] = useState<{ key: number; text: string }>()
+  // A draft belongs to the chat it was opened on and never follows the dock to another.
+  const [{ chat, draft }, setTarget] = useState<{
+    chat: ChatTarget
+    draft?: ComposerDraft
+  }>({ chat: { name: "default", repository: null } })
   const [threadId, setThreadId] = useState<string | null>(null)
   const provided = usePluginAgent()
   return {
@@ -238,15 +239,19 @@ function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
     threadId,
     setThreadId,
     chooseChat: (next: ChatTarget) =>
-      setChat((prev) =>
-        prev.name === next.name && prev.repository === next.repository
+      setTarget((prev) =>
+        prev.chat.name === next.name && prev.chat.repository === next.repository
           ? prev
-          : next
+          : { chat: next }
       ),
-    openChat: (text: string | null) => {
+    openChat: (text: string | null, images: Array<ImageChunk>) => {
       if (!onScreen()) return
       setOpen(true)
-      if (text) setDraft((prev) => ({ key: (prev?.key ?? 0) + 1, text }))
+      if (text || images.length)
+        setTarget((prev) => ({
+          chat: prev.chat,
+          draft: { key: (prev.draft?.key ?? 0) + 1, text: text ?? "", images },
+        }))
     },
   }
 }

@@ -33,7 +33,7 @@ _APP_ORIGIN = {"origin": "open-swe://app"}
 
 
 @pytest.fixture
-def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+def links(monkeypatch: pytest.MonkeyPatch, langsmith_users) -> list[dict[str, Any]]:
     """Stub the Slack legs and collect the account links they produce."""
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
@@ -52,7 +52,7 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         )
 
     collected: list[dict[str, Any]] = []
-    user = User()
+    user = langsmith_users.add("alice")
 
     async def fake_link(provider: str, external_id: str, **kwargs: Any) -> User:
         collected.append({"provider": provider, "external_id": external_id, **kwargs})

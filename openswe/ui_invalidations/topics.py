@@ -29,6 +29,10 @@ type Session = dict[str, Any]
 type Connection = AsyncConnection | AsyncSession
 type KeysAuthorizer = Callable[[Session, set[str]], Awaitable[set[str]]]
 
+# GitHub deliveries that name a pull request only through its checks.
+_CHECK_EVENTS = frozenset({"check_run", "check_suite", "workflow_run"})
+_CHECKS_MIN_INTERVAL_SECONDS = 15.0
+
 # Keys carry GitHub names, and a repository's may hold "_".
 _WELL_FORMED = re.compile(r"^[a-z][a-z-]*(?:/[\w.:@-]+)*$", re.ASCII)
 _MAX_LENGTH = 200
@@ -37,8 +41,9 @@ _MAX_LENGTH = 200
 class BaseTopic(ABC):
     _by_name: ClassVar[dict[str, BaseTopic]] = {}
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, *, min_interval_seconds: float = 0.0) -> None:
         self.name = name
+        self.min_interval_seconds = min_interval_seconds
         BaseTopic._by_name[name] = self
 
     def __str__(self) -> str:
@@ -46,6 +51,12 @@ class BaseTopic(ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
+
+    @classmethod
+    def min_interval(cls, topic: str) -> float:
+        """How long a stream waits after sending ``topic`` before sending it again."""
+        kind = cls._by_name.get(topic.partition("/")[0])
+        return kind.min_interval_seconds if kind is not None else 0.0
 
     @staticmethod
     def well_formed(topic: str) -> bool:
@@ -100,7 +111,11 @@ class Topic(BaseTopic):
 
     PULL_REQUESTS: ClassVar[KeyedTopic[PullRequestKey]]
     """Keyed: one pull request's live state and review page, from its GitHub
-    reviews, checks and comments to the reviewer's findings and the walkthrough."""
+    reviews and comments to the reviewer's findings and the walkthrough."""
+
+    PULL_REQUEST_CHECKS: ClassVar[KeyedTopic[PullRequestKey]]
+    """Keyed: one pull request's check runs, check suites and workflow runs. A CI
+    run changes them many times a second, so a stream sends this at most every 15s."""
 
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
@@ -109,9 +124,6 @@ class Topic(BaseTopic):
     """Keyed by thread id: the browser window that thread's agent opened, and who controls it."""
     THREAD_BACKGROUND_WORK: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the sandbox commands and monitors running for that thread."""
-
-    THREAD_GOALS: ClassVar[KeyedTopic[str]]
-    """Keyed by thread id: where that thread's Goal mode work stands."""
 
     TASK_WORKERS: ClassVar[KeyedTopic[str]]
     """Keyed by coordinator thread id: the workers its task delegated to, as the
@@ -149,6 +161,11 @@ class Topic(BaseTopic):
         """
         await self._publish(conn, self.name)
 
+    @staticmethod
+    def for_pull_request_event(github_event: str) -> KeyedTopic[PullRequestKey]:
+        """The topic a GitHub delivery about a pull request makes stale."""
+        return Topic.PULL_REQUEST_CHECKS if github_event in _CHECK_EVENTS else Topic.PULL_REQUESTS
+
     async def authorize(self, session: Session, keys: set[str]) -> set[str]:
         return keys & {""}
 
@@ -166,8 +183,14 @@ class AdminTopic(Topic):
 class KeyedTopic[K: str](BaseTopic):
     """A topic whose records each have one of their own, ``<topic>/<key>``."""
 
-    def __init__(self, name: str, *, authorize_keys: KeysAuthorizer | None = None) -> None:
-        super().__init__(name)
+    def __init__(
+        self,
+        name: str,
+        *,
+        authorize_keys: KeysAuthorizer | None = None,
+        min_interval_seconds: float = 0.0,
+    ) -> None:
+        super().__init__(name, min_interval_seconds=min_interval_seconds)
         self._authorize_keys = authorize_keys
 
     async def invalidate(self, conn: Connection | None = None, *, key: K | None = None) -> None:
@@ -286,12 +309,16 @@ Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
+Topic.PULL_REQUEST_CHECKS = KeyedTopic(
+    "pull-request-checks",
+    authorize_keys=_readable_pull_requests,
+    min_interval_seconds=_CHECKS_MIN_INTERVAL_SECONDS,
+)
 Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)
 Topic.THREAD_BROWSERS = KeyedTopic("thread-browsers", authorize_keys=_readable_threads)
 Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
-Topic.THREAD_GOALS = KeyedTopic("thread-goals", authorize_keys=_readable_threads)
 Topic.TASK_WORKERS = KeyedTopic("task-workers", authorize_keys=_readable_threads)
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
 Topic.SLACK_CHANNELS = Topic("slack-channels")

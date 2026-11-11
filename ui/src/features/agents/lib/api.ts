@@ -1,10 +1,10 @@
+import { productAnalytics } from "@/lib/analytics"
 import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
   AgentBackgroundOutput,
   AgentBackgroundWork,
-  AgentThreadGoal,
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
@@ -275,34 +275,36 @@ export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const requestId = newRequestId()
-  const res = await timedFetch(dashboardApiUrl(path), {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
-      ...init.headers,
-    },
-  }).catch((cause: unknown) => {
-    throw networkError(cause, requestId)
-  })
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const body = await res.json()
-      if (body?.detail) {
-        message = errorDetailMessage(body.detail)
+  return productAnalytics.mutation(path, init.method, async () => {
+    const requestId = newRequestId()
+    const res = await timedFetch(dashboardApiUrl(path), {
+      ...init,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+        ...dashboardForwardedHeaders(),
+        ...init.headers,
+      },
+    }).catch((cause: unknown) => {
+      throw networkError(cause, requestId)
+    })
+    if (!res.ok) {
+      let message = res.statusText
+      try {
+        const body = await res.json()
+        if (body?.detail) {
+          message = errorDetailMessage(body.detail)
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
+      throw new AgentsApiError(res.status, message, requestId)
     }
-    throw new AgentsApiError(res.status, message, requestId)
-  }
-  // A proxied cancel comes back 202 with no body; only parse what is there.
-  const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
+    // A proxied cancel comes back 202 with no body; only parse what is there.
+    const text = await res.text()
+    return (text ? JSON.parse(text) : undefined) as T
+  })
 }
 
 function filenameFromContentDisposition(value: string | null): string | null {
@@ -509,10 +511,6 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
-    ),
-  getThreadGoal: (threadId: string) =>
-    agentsRequest<AgentThreadGoal | null>(
-      `/threads/${encodeURIComponent(threadId)}/goal`
     ),
   getThreadBackgroundWork: (threadId: string) =>
     agentsRequest<AgentBackgroundWork>(

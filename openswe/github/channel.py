@@ -47,16 +47,17 @@ from runtime_api.github import (
 )
 
 from openswe import event_claims
-from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
-from openswe.github.app import REPO_INSTALLATIONS
+from openswe.github.app import INSTALLATIONS
+from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.comments import OPEN_SWE_TAGS
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.github.work import delivery_work
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.mda_channels.api import ChannelCall
 from openswe.merge_queue.controller import wake_native_queue
+from openswe.review_apps.cleanup import ReviewAppData
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.threads.router import (
@@ -103,6 +104,11 @@ _OUTSIDE_THE_ALLOWLIST: Final = GitHubDeliveryFacts(
 
 def _allowed(delivery: GitHubDelivery, refs: EventRefs) -> bool:
     """Whether the repository allowlist takes the delivery, with a log line when not."""
+    action = delivery.payload.get("action")
+    if EventLog.dropped(
+        "github", delivery.event, delivery.delivery_id, action if isinstance(action, str) else ""
+    ):
+        return False
     # The owner alone, as installation events name it, passes when any of its repositories do.
     named_repo = {"owner": refs.github_owner, "name": refs.github_repository.partition("/")[2]}
     if refs.github_owner and not common.is_repo_allowed(named_repo):
@@ -171,7 +177,7 @@ async def record_github_delivery(
         refs=refs,
     )
     if refs.pull_request is not None:
-        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
+        await Topic.for_pull_request_event(delivery.event).invalidate(key=refs.pull_request)
     facts = await _repository_facts(delivery)
     if work := delivery_work(delivery.event, delivery.payload, facts):
         await _accept_work(call, delivery, work)
@@ -209,9 +215,7 @@ class _CommentChannel:
 
     async def once(self) -> bool:
         # MDA may send the call again after an answer it didn't get.
-        return not postgres.configured() or await event_claims.claim(
-            _COMMENT_CLAIMS, self._act.delivery_id, ttl=_WORK_CLAIM_TTL
-        )
+        return await event_claims.claim(_COMMENT_CLAIMS, self._act.delivery_id, ttl=_WORK_CLAIM_TTL)
 
 
 async def _route_comment(act: ActOnGitHubDelivery) -> GitHubThreadRun | None:
@@ -252,7 +256,7 @@ async def _forget_installations() -> None:
     """An installation or its repositories changed: forget everyone's repository listing
     and which installation each repository is in."""
     await forget_cached_repos()
-    await REPO_INSTALLATIONS.forget_all()
+    await INSTALLATIONS.forget_all()
 
 
 def _tasks(
@@ -271,6 +275,9 @@ def _tasks(
         "notify_pr_updated": lambda: notify_pr_updated(payload),
         "review_fork_push": lambda: service.process_github_pr_synchronize(payload),
         "settle_review_on_close": lambda: service.settle_human_review_on_close(payload),
+        # Reviews can save documents and files to apps for a pull request, such as Design QA's
+        # screenshots; they're kept only while it's open.
+        "delete_app_documents_on_close": lambda: ReviewAppData.delete_on_close(payload),
         "settle_human_reviews": lambda: service.settle_human_reviews(payload),
         "update_reviewer_watch": lambda: service.process_github_pr_close(payload),
         "review_pull_request": lambda: _review_pull_request(payload),
@@ -280,6 +287,7 @@ def _tasks(
         "review_push": lambda: service.process_github_push_event(payload),
         "ci_event": lambda: service.process_github_ci_event(payload, event, delivery_id),
         "record_completed_review": lambda: CompletedReview.record(payload),
+        "evaluate_approval_policy": lambda: PullRequestApproval.evaluate_payload(payload),
     }
 
 
@@ -335,7 +343,7 @@ async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> Non
     fields = {"github_event": delivery.event, "github_delivery": delivery.delivery_id}
     if pull_request is not None:
         try:
-            await Topic.PULL_REQUESTS.invalidate(key=pull_request)
+            await Topic.for_pull_request_event(delivery.event).invalidate(key=pull_request)
         except Exception:
             logger.warning(
                 "Refreshing a pull request's dashboard state failed", extra=fields, exc_info=True
@@ -344,10 +352,7 @@ async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> Non
         facts = await _repository_facts(delivery)
         work = delivery_work(delivery.event, delivery.payload, facts)
         if not work or (
-            postgres.configured()
-            and not await event_claims.claim(
-                _WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL
-            )
+            not await event_claims.claim(_WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL)
         ):
             return
     except Exception:
@@ -364,9 +369,7 @@ async def _accept_work(
 ) -> None:
     """Run the work after answering, in the order given, once per delivery: GitHub sends
     a delivery again when someone redelivers it."""
-    if postgres.configured() and not await event_claims.claim(
-        _WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL
-    ):
+    if not await event_claims.claim(_WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL):
         return
     tasks = _tasks(delivery)
     for name in dict.fromkeys(work):

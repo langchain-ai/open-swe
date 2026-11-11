@@ -30,6 +30,9 @@ from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords, serve_threads_from
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
@@ -1253,8 +1256,47 @@ async def test_existing_request_checks_explicit_channel_before_updating_summary(
     assert result.success and result.reused
     assert result.request_id == str(request.id)
     assert result.channel == "C_CURRENT"
-    assert result.permalink == "https://app.slack.com/archives/C_CURRENT/p123456"
+    assert result.permalink.endswith(
+        "/dashboard/api/slack/open?channel=C_CURRENT&message_ts=123.456"
+    )
     assert result.channel_mismatch is mismatch
     assert result.requested_channel == ("C_NEW" if mismatch else "")
     assert result.summary_updated is not mismatch
     assert request.tldr == ("Original summary" if mismatch else "Updated summary")
+
+
+@pytest.mark.parametrize(
+    ("settled", "repository", "retries", "delay"),
+    [
+        (True, False, 0, None),
+        (False, False, 0, 1),
+        (False, True, 0, 1),
+        (False, False, 3, 8),
+        (False, False, 6, None),
+    ],
+)
+async def test_unreadable_settle_is_retried_with_backoff(
+    settled: bool,
+    repository: bool,
+    retries: int,
+    delay: int | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.human_review import standard
+
+    request = MagicMock(pull_request=MagicMock(owner="lc", repo="repo", number=7))
+    monkeypatch.setattr(standard, "settle", AsyncMock(return_value=settled))
+    monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=request))
+    monkeypatch.setattr(HumanReviewRequest, "open_in_repository", AsyncMock(return_value=[request]))
+    queue = AsyncMock()
+    monkeypatch.setattr(standard.SettleTarget, "queue", queue)
+    if repository:
+        await standard.settle_repository("lc", "repo")
+    else:
+        await standard.settle_pull_request("lc", "repo", 7, retries=retries)
+    if delay is None:
+        queue.assert_not_awaited()
+    else:
+        queue.assert_awaited_once_with(
+            "lc", "repo", 7, after=timedelta(minutes=delay), retries=retries + 1
+        )

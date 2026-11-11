@@ -29,6 +29,7 @@ from openswe.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
+from openswe.slack.ask_messages import AskChannelMessage
 from openswe.slack.breakout import (
     BreakoutCommand,
     process_slack_breakout,
@@ -42,7 +43,6 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
-from openswe.slack.live_activity import STOP_ACTION, SlackLiveMessage
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.payloads import (
     SlackBlockAction,
@@ -835,6 +835,14 @@ class SlackEventsDelivery:
                     user_id=user_id,
                     explicit_mention=False,
                 )
+        if (
+            (in_kitchen_channel or solo_followup)
+            and not (explicit_mention or is_message_update or allowed_bot)
+            and not await AskChannelMessage.for_robin(
+                channel_id=channel_id, thread_ts=thread_ts, message_ts=original_message_ts
+            )
+        ):
+            in_kitchen_channel = solo_followup = False
         if not (in_kitchen_channel or solo_followup):
             suggest_review()
         if not (
@@ -1293,11 +1301,15 @@ async def slack_interactivity(
 
 
 def _answered_here(interaction: SlackInteraction) -> bool:
-    """Explain this, code channel views and the options they load, and modals the backend
-    opened itself: Trigger Server takes none of them."""
+    """Handle review links, backend modals and code channel views without Trigger Server."""
     if interaction.type in {"message_action", "block_suggestion"}:
         return True
     if interaction.container.type == "code_channel_view":
+        return True
+    if interaction.type == "block_actions" and any(
+        action.action_id in {"open_swe_option_select_review", "open_swe_option_select_accept"}
+        for action in interaction.actions
+    ):
         return True
     if interaction.type != "view_submission":
         return False
@@ -1385,22 +1397,6 @@ async def act_on_interaction(
         )
         if feedback_action is not None:
             background_tasks.add_task(process_feedback, interaction, feedback_action)
-            return {}
-        stop_action = next(
-            (action for action in interaction.actions if action.action_id == STOP_ACTION), None
-        )
-        if stop_action is not None:
-            # Goes through Slack's own Stop checks: the thread bound to this location,
-            # the workspace, a linked person, and their access to the thread.
-            background_tasks.add_task(
-                SlackLiveMessage.stop_clicked,
-                channel_id=interaction.channel_id,
-                thread_ts=interaction.thread_ts,
-                message_ts=interaction.message_ts,
-                user_id=interaction.user.id,
-                team_id=interaction.team.id,
-                action_ts=stop_action.action_ts,
-            )
             return {}
 
     if interaction.type == "block_suggestion" and interaction.container.type == "code_channel_view":

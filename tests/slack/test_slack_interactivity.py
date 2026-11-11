@@ -13,6 +13,8 @@ from openswe.slack.blocks import option_actions
 from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 from tests.conftest import MemoryEventClaims
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture(autouse=True)
 def _backend_acts_on_clicks(monkeypatch: pytest.MonkeyPatch) -> None:

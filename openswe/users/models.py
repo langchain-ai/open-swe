@@ -9,7 +9,7 @@ reference ``users.id`` instead of a provider-specific handle.
 """
 
 import logging
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
@@ -87,10 +87,27 @@ class User(Base):
         """This person's handle on ``provider``, for display; never an identity key."""
         return self._identity_field(provider, "login") or self.display_name or str(self.id)[:8]
 
+    def billing_trace_metadata(self) -> dict[str, str]:
+        """Trace-only attribution to this Robin user."""
+        metadata = {
+            "user_id": str(self.id),
+            "billing_bucket": "user",
+            "billed_robin_user_id": str(self.id),
+        }
+        if self.email:
+            metadata["billed_user_email"] = self.email
+        return metadata
+
     @property
     def github_login(self) -> str:
         """The GitHub handle, or ``""`` — unlike :meth:`login_for`, never a stand-in."""
         return self._identity_field("github", "login")
+
+    @property
+    def github_id(self) -> int | None:
+        """GitHub's numeric account id, which survives renames."""
+        external_id = self._identity_field("github", "external_id")
+        return int(external_id) if external_id.isdigit() else None
 
     @property
     def slack_user_id(self) -> str:
@@ -162,6 +179,17 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
+    async def for_ids(cls, user_ids: Collection[UUID]) -> dict[UUID, Self]:
+        """The people with these ids, identities loaded; ids with no row are left out."""
+        if not user_ids:
+            return {}
+        async with postgres.session() as session:
+            users = await session.scalars(
+                cls._with_identities(select(cls)).where(cls.id.in_(user_ids))
+            )
+            return {user.id: user for user in users}
+
+    @classmethod
     async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
         """The person a dashboard session belongs to.
 
@@ -169,8 +197,6 @@ class User(Base):
         identity, so a renamed login never falls through to whoever took the old
         handle; only a row whose GitHub identity moved away falls back to the login.
         """
-        if not postgres.configured():
-            return None
         if user_id is not None:
             user = await cls.get(user_id)
             if user is not None and any(i.provider == "github" for i in user.identities):
@@ -180,8 +206,6 @@ class User(Base):
     @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -411,7 +435,7 @@ class User(Base):
     async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:
         """Lowercased GitHub logins among ``logins`` that belong to a person."""
         wanted = {login.strip().lower() for login in logins if login and login.strip()}
-        if not wanted or not postgres.configured():
+        if not wanted:
             return frozenset()
         async with postgres.session() as session:
             rows = await session.scalars(
@@ -454,8 +478,6 @@ class User(Base):
     @classmethod
     async def for_identity(cls, provider: Provider, external_id: str) -> Self | None:
         """The person owning that provider account, or ``None``."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -472,7 +494,7 @@ class User(Base):
     ) -> dict[str, Self]:
         """The people owning those provider accounts, keyed by account id; unknown ids are absent."""
         wanted = {external_id for external_id in external_ids if external_id}
-        if not wanted or not postgres.configured():
+        if not wanted:
             return {}
         async with postgres.session() as session:
             rows = await session.execute(
@@ -487,7 +509,7 @@ class User(Base):
     async def for_github_logins(cls, logins: Collection[str]) -> dict[str, Self]:
         """The people behind GitHub ``logins``, keyed by the lowercased login asked for."""
         wanted = {login.lower() for login in logins}
-        if not wanted or not postgres.configured():
+        if not wanted:
             return {}
         async with postgres.session() as session:
             rows = await session.execute(
@@ -512,10 +534,21 @@ class User(Base):
         return await cls.for_login("github", handle)
 
     @classmethod
+    async def automation_creator(cls, record: Mapping[str, object]) -> Self | None:
+        """Who created an automation: by stable user id, or by login for rows saved before it."""
+        if user_id := record.get("created_by_user_id"):
+            try:
+                return await cls.get(UUID(str(user_id)))
+            except ValueError:
+                return None
+        login = record.get("created_by")
+        if not isinstance(login, str) or not login.strip():
+            return None
+        return await cls.for_login("github", login.strip())
+
+    @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
-        if not postgres.configured():
-            return None
         if login.startswith("user:"):
             user_id = cls.key_id(login)
             return await cls.get(user_id) if user_id is not None else None
@@ -586,7 +619,7 @@ class User(Base):
         email: str = "",
         team_id: str = "",
     ) -> Self:
-        """Attach another provider account to this person, taking it over if needed."""
+        """Attach a provider account without moving another person's Slack identity."""
         if provider == "langsmith" or (
             provider == "github" and any(i.provider == "langsmith" for i in self.identities)
         ):
@@ -601,7 +634,7 @@ class User(Base):
                 email=email,
                 team_id=team_id,
             )
-            await session.execute(
+            result = await session.execute(
                 upsert.on_conflict_do_update(
                     index_elements=[UserIdentity.provider, UserIdentity.external_id],
                     set_={
@@ -609,8 +642,13 @@ class User(Base):
                         "last_seen_at": func.clock_timestamp(),
                         **_known(login=login, email=email, team_id=team_id),
                     },
-                )
+                    where=UserIdentity.user_id == self.id if provider == "slack" else None,
+                ).returning(UserIdentity.user_id)
             )
+            if result.scalar_one_or_none() is None:
+                raise AccountConflict(
+                    "This Slack account is already linked to another Robin account"
+                )
             await session.flush()
             stored = await cls._load(session, self.id)
         if stored is None:

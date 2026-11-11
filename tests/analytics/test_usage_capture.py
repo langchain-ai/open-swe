@@ -127,15 +127,24 @@ async def test_findings_keep_first_milestones_and_latest_observation(analytics_d
 @pytest.mark.parametrize(
     ("name", "payload"),
     [
-        (EventName.RUN_FAILED, RunFailedPayload(failure_class="error", total_tokens=9)),
-        (EventName.RUN_CANCELED, RunCanceledPayload(cancellation_source="user", total_tokens=9)),
+        (
+            EventName.RUN_FAILED,
+            RunFailedPayload(failure_class="error", total_tokens=9, cache_read_tokens=4),
+        ),
+        (
+            EventName.RUN_CANCELED,
+            RunCanceledPayload(cancellation_source="user", total_tokens=9, cache_read_tokens=4),
+        ),
     ],
 )
 async def test_unsuccessful_invocations_preserve_token_accounting(analytics_db, name, payload):
     workspace, transaction = analytics_db
     await ingestion.ingest(event(workspace, name, payload, run_id=uuid4()))
     async with transaction() as conn:
-        assert await conn.scalar(text("SELECT total_tokens FROM run_projection")) == 9
+        run = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
+        assert run["total_tokens"] == 9
+        assert run["cache_read_tokens"] == 4
+        assert run["cache_creation_tokens"] is None
 
 
 async def test_observation_lifecycle_counts_state_changes_and_survives_retention(analytics_db):

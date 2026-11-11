@@ -17,9 +17,15 @@ from openswe.bridge import routes as bridge_routes
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, workspace_settings
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
-from openswe.database import postgres
 from openswe.threads.principals import PrincipalDep
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import LangSmithUsers
+
+
+@pytest.fixture(autouse=True)
+def authorized_people(langsmith_users: LangSmithUsers) -> None:
+    for login in ("alice", "admin", "ordinary", "user-0", "user-1", "user-2"):
+        langsmith_users.add(login)
 
 
 class Settings(BaseModel):
@@ -130,7 +136,6 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
         return True
 
     monkeypatch.setattr(middleware, "append_safely", append)
-    monkeypatch.setattr(postgres, "configured", lambda: True)
     monkeypatch.setattr(BridgeStore, "heartbeat", heartbeat)
     application = app()
     application.include_router(bridge_routes.router, prefix="/dashboard/api")
@@ -260,7 +265,6 @@ async def test_audit_failure_preserves_response(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
-    monkeypatch.setattr(store.postgres, "configured", lambda: True)
 
     async def fail(entry: AuditLog) -> None:
         raise RuntimeError("database unavailable")

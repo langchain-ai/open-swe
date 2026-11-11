@@ -40,6 +40,7 @@ import {
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
+import { copyPageLink } from "@/features/reviews/lib/copyText"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { reportError } from "@/lib/errorReporting"
@@ -174,6 +175,7 @@ export function AgentThreadHeader({
   const visibilityMenu = thread ? (
     <ThreadVisibilityMenu
       value={thread.visibility ?? "public"}
+      onCopyLink={thread.visibility === "private" ? undefined : copyPageLink}
       onChange={(next) => {
         if (next === "private") continueThreadPrivately()
         else if (canShare) setShareOpen(true)
@@ -307,7 +309,7 @@ export function AgentThreadHeader({
                   align="start"
                   sideOffset={4}
                   onCloseAutoFocus={keepRenameFocus}
-                  className="min-w-[10rem]"
+                  className="min-w-[10rem] border-default bg-elevated"
                 >
                   {menuItems("dropdown", thread)}
                 </DropdownMenuContent>
@@ -359,7 +361,7 @@ export function AgentThreadHeader({
         <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
         <ContextMenuContent
           onCloseAutoFocus={keepRenameFocus}
-          className="min-w-[10rem]"
+          className="min-w-[10rem] border-default bg-elevated"
         >
           {menuItems("context", thread)}
         </ContextMenuContent>

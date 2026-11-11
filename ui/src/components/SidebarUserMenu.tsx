@@ -137,7 +137,9 @@ export function SidebarUserMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" className="min-w-56">
-          <DropdownMenuLabel>Theme</DropdownMenuLabel>
+          <DropdownMenuLabel className="px-space-2 py-space-1 text-xxs font-medium text-tertiary">
+            Theme
+          </DropdownMenuLabel>
           {THEME_OPTIONS.map((option) => {
             const Icon = option.icon
             return (

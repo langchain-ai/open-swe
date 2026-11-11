@@ -537,7 +537,6 @@ async def api_get_review_chat(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewChat:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_chat(owner, repo, pr_number, session["sub"], session.get("email"))
 
 

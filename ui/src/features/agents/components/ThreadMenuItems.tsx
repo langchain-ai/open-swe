@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import { PushPinRegularIcon } from "@langchain/macaw-components/icons"
 import { ContextMenuSeparator } from "@langchain/macaw-components/ContextMenu"
 import { DropdownMenuSeparator } from "@langchain/macaw-components/DropdownMenu"
@@ -7,6 +8,7 @@ import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { CodeIcon } from "@phosphor-icons/react/dist/ssr/Code"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { EyeSlashIcon } from "@phosphor-icons/react/dist/ssr/EyeSlash"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
@@ -20,6 +22,7 @@ import { useState } from "react"
 
 import { ContextMenuItem, DropdownMenuItem } from "@/components/MenuItem"
 import type { AgentThread } from "@/features/agents/lib/types"
+import { reportError } from "@/lib/errorReporting"
 
 export type ThreadMenuKind = "dropdown" | "context"
 
@@ -55,6 +58,7 @@ export function ThreadMenuItems({
 }) {
   const { Item, Separator } = MENU[menu]
   const [diagnostics, setDiagnostics] = useState(false)
+  const openInBrowser = window.openSweDesktop?.openInBrowser
   if (diagnostics) {
     return (
       <>
@@ -127,11 +131,27 @@ export function ThreadMenuItems({
         )}
         {thread.viewed ? "Mark unread" : "Mark read"}
       </Item>
-      {(thread.sourceUrl || thread.automationId) && <Separator />}
+      {(openInBrowser || thread.sourceUrl || thread.automationId) && (
+        <Separator />
+      )}
+      {openInBrowser && (
+        <Item
+          onSelect={() => {
+            void openInBrowser(
+              `/agents/${encodeURIComponent(thread.id)}`
+            ).catch((error: unknown) =>
+              reportError({ title: "Couldn't open the browser", error })
+            )
+          }}
+        >
+          <ArrowSquareOutIcon size={ICON_SIZE} />
+          Open in Browser
+        </Item>
+      )}
       {thread.sourceUrl && (
         <Item asChild>
           <a
-            href={thread.sourceAppUrl ?? thread.sourceUrl}
+            href={SlackLinks.normalize(thread.sourceAppUrl ?? thread.sourceUrl)}
             target="_blank"
             rel="noreferrer"
           >

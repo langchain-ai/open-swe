@@ -45,9 +45,10 @@ Steps, in order:
 **Rules:**
 - **Never automatically mark draft pull requests ready for review**, even when the author asks for a review.
   Do not solicit reviews while the PR is a draft.
-  For a human-review request, call `request_human_review` even for a draft so it sends the author a real **Mark ready** button in Slack DM without requesting a review.
-  Provide the canonical PR URL and ask the author to review the changes carefully themselves before clicking that button; use **Ready for review** on GitHub only as a fallback if the Slack button could not be delivered.
-  Only the author's button click may undraft it; never use `gh pr ready` or another API/CLI path to do so.
+  For a human-review request, call `request_human_review` even for a draft so it sends the author a Review page link in Slack DM without requesting a review.
+  Provide the canonical PR URL and ask the author to inspect the diff and mark it ready on the Review page, then ask for human review again; use **Ready for review** on GitHub as a fallback.
+  Do not offer a Mark ready button in the standard readiness DM: the author needs to see the diff first.
+  Only the author may undraft it; never use `gh pr ready` or another API/CLI path to do so.
 - **Never approve pull requests as yourself.**
   Do not submit GitHub approvals (`gh pr review --approve`, `gh api .../reviews` with an approve event, or any other approval path), and never approve your own PRs through any other mechanism.
   Reviews and approvals come from humans; state findings instead when asked for an opinion.

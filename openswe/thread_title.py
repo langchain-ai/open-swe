@@ -59,6 +59,17 @@ def _title_input(messages: Sequence[BaseMessage]) -> str | None:
     return transcript[:MAX_TITLE_INPUT_CHARS] if transcript else None
 
 
+def _breakout_title_input(request: str, conversation: str) -> str:
+    """A breakout inherits its source thread's transcript, including requests other
+    breakouts took, so the title names its own opening request and reads the rest only
+    to resolve what that request refers to."""
+    return (
+        f"Request to title:\n{request}\n\n"
+        "Earlier messages, newest first, for context only:\n"
+        f"{conversation}"
+    )
+
+
 def _normalize_title(title: str) -> str:
     normalized = " ".join(title.strip().strip("`\"'").split())
     normalized = " ".join(normalized.split()[:8]).rstrip(".")
@@ -85,6 +96,9 @@ async def generate_and_store_thread_title(
     ):
         return
 
+    breakout = SourceContext.from_metadata(metadata).slack_thread
+    if breakout and breakout.breakout_root_suffix is not None:
+        conversation = _breakout_title_input(title_seed, conversation)
     title_input = human_input(
         conversation,
         {
@@ -100,7 +114,11 @@ async def generate_and_store_thread_title(
         HumanMessage(content=title_input),
     ]
     # Empty callbacks keep title tokens out of the thread's message stream.
-    config: RunnableConfig = {"callbacks": [], "run_name": "thread-title"}
+    config: RunnableConfig = {
+        "callbacks": [],
+        "run_name": "thread-title",
+        "metadata": {"thread_id": thread_id},
+    }
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
         try:
             structured = model.with_structured_output(_ThreadTitle)

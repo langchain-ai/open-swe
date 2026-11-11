@@ -272,6 +272,14 @@ it("renames an unopened thread from its context menu and discards cancelled draf
     </QueryClientProvider>
   )
   const row = screen.getByRole("link", { name: /Thread/ })
+  expect(screen.queryByRole("button", { name: "Pin thread" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Archive thread" })).toBeNull()
+  fireEvent.contextMenu(row)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }))
+  expect(stub.noop).toHaveBeenCalledOnce()
+  fireEvent.contextMenu(row)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }))
+  expect(stub.noop).toHaveBeenCalledTimes(2)
   fireEvent.contextMenu(row)
   fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
   const input = (await screen.findByRole("textbox", {

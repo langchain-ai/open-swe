@@ -31,6 +31,7 @@ const CONNECT_DEBOUNCE_MS = 150
 const SILENCE_LIMIT_MS = 45_000
 const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 30_000
+const PULL_REQUEST_REFRESH_MS = 5_000
 
 /**
  * One browser tab's part in the dashboard's single invalidation stream.
@@ -51,6 +52,10 @@ export class InvalidationTab {
   private reportTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribeCache: (() => void) | null = null
   private stopped = false
+  private readonly pullRequestRefreshes = new Map<
+    InvalidationTopic,
+    { timer: ReturnType<typeof setTimeout> | null; dirty: boolean }
+  >()
 
   constructor(
     private readonly queryClient: QueryClient,
@@ -100,6 +105,10 @@ export class InvalidationTab {
     this.stopped = true
     this.unsubscribeCache?.()
     if (this.reportTimer) clearTimeout(this.reportTimer)
+    for (const refresh of this.pullRequestRefreshes.values()) {
+      if (refresh.timer) clearTimeout(refresh.timer)
+    }
+    this.pullRequestRefreshes.clear()
     this.leave()
     window.removeEventListener("pagehide", this.leave)
     this.leader?.close()
@@ -205,12 +214,61 @@ export class InvalidationTab {
   }
 
   private invalidate(topics: readonly InvalidationTopic[]): void {
+    if (this.stopped || !topics.length) return
+    const immediate: InvalidationTopic[] = []
+    for (const topic of topics) {
+      if (topic !== "pull-requests" && !topic.startsWith("pull-requests/")) {
+        immediate.push(topic)
+        continue
+      }
+      const pending = this.pullRequestRefreshes.get(topic)
+      if (pending) {
+        pending.dirty = true
+      } else {
+        this.refreshPullRequest(topic)
+      }
+    }
+    this.refetch(immediate)
+  }
+
+  private refreshPullRequest(topic: InvalidationTopic): void {
+    const pending: {
+      timer: ReturnType<typeof setTimeout> | null
+      dirty: boolean
+    } = {
+      timer: null,
+      dirty: this.queryClient
+        .getQueryCache()
+        .getAll()
+        .some(
+          (query) =>
+            query.state.fetchStatus === "fetching" &&
+            queryTopics(query).includes(topic)
+        ),
+    }
+    this.pullRequestRefreshes.set(topic, pending)
+    void this.refetch([topic], false).finally(() => {
+      if (this.stopped) return
+      pending.timer = setTimeout(() => {
+        this.pullRequestRefreshes.delete(topic)
+        if (pending.dirty) this.refreshPullRequest(topic)
+      }, PULL_REQUEST_REFRESH_MS)
+    })
+  }
+
+  private async refetch(
+    topics: readonly InvalidationTopic[],
+    cancelRefetch = true
+  ): Promise<void> {
     if (!topics.length) return
     const invalidated = new Set(topics)
-    void this.queryClient.invalidateQueries({
-      predicate: (query) =>
-        queryTopics(query).some((topic) => invalidated.has(topic)),
-    })
+    await this.queryClient.invalidateQueries(
+      {
+        predicate: (query) =>
+          queryTopics(query).some((topic) => invalidated.has(topic)),
+      },
+      { cancelRefetch }
+    )
   }
 
   private cover(topics: readonly InvalidationTopic[], at: number): void {

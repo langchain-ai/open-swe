@@ -5,6 +5,7 @@ import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
+import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 
 import { agentsApi } from "./api"
 import {
@@ -386,11 +387,18 @@ describe("sidebar queries", () => {
       .mockResolvedValue([idle, { ...running, status: "finished" }])
     const client = testClient()
     client.setQueryData(agentThreadKeys.page(params), page)
-    const { result } = renderHook(() => useSidebarPinnedThreads(), {
-      wrapper: ({ children }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
-    })
+    clearPerfSpans()
+    const { result } = renderHook(
+      () => {
+        useSidebarPinnedThreads()
+        return useSidebarPinnedThreads({ measure: true })
+      },
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
     await vi.waitFor(() => expect(result.current.data?.[0]).toEqual(idle))
     await act(() => vi.advanceTimersByTimeAsync(2000))
     await vi.waitFor(() =>
@@ -408,6 +416,10 @@ describe("sidebar queries", () => {
     const calls = listPins.mock.calls.length
     await act(() => vi.advanceTimersByTimeAsync(6000))
     expect(listPins).toHaveBeenCalledTimes(calls)
+    expect(
+      getPerfSpans().filter((span) => span.name === "thread_list_load")
+    ).toHaveLength(1)
+    clearPerfSpans()
     expect(result.current.data?.map((thread) => thread.id)).toEqual([
       "outside-page",
       "running-pin",

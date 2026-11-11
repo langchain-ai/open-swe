@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 RETIRED_PROFILE_KEYS = frozenset(
     {
+        "experimental_live_activity",
         "create_prs",
         "dm_session_enabled",
         "default_model",
@@ -90,18 +91,11 @@ class ProfileUpdate(KitchenChannelPreference):
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
-    pr_failure_reactions: bool | None = None
-    goal_mode: bool | None = None
-    experimental_memory: bool | None = None
     experimental_conditional_approval: bool | None = None
     experimental_classify: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    # A live run shows its latest thoughts and tool calls in the dashboard fold and in Slack.
-    experimental_live_activity: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     slack_onboarding_dismissed: bool = False
@@ -173,11 +167,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
-        ),
-        "experimental_live_activity": (
-            update.experimental_live_activity
-            if update.experimental_live_activity is not None
-            else existing.get("experimental_live_activity")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -420,9 +409,6 @@ async def put_my_profile(
             UserPreferencesPatch(
                 personal_kitchen_channel_id=update.personal_kitchen_channel_id,
                 concierge_mode=update.concierge_mode,
-                pr_failure_reactions=update.pr_failure_reactions,
-                goal_mode=update.goal_mode,
-                experimental_memory=update.experimental_memory,
                 experimental_conditional_approval=update.experimental_conditional_approval,
                 experimental_classify=update.experimental_classify,
             ),
@@ -432,9 +418,6 @@ async def put_my_profile(
     if preferences is None and (
         update.personal_kitchen_channel_id is not None
         or update.concierge_mode
-        or update.pr_failure_reactions
-        or update.goal_mode
-        or update.experimental_memory
         or update.experimental_conditional_approval
         or update.experimental_classify
     ):

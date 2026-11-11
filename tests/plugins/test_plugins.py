@@ -2,23 +2,32 @@
 
 import asyncio
 import json
-from datetime import timedelta
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import text
+from fastapi import HTTPException, Request
+from sqlalchemy import text, update
+from starlette.types import Message
 
 from openswe.dashboard import repo_access
+from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
 from openswe.database import postgres
 from openswe.github import repos as github_repos
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import records as records_module
 from openswe.plugins import routes as plugin_routes
+from openswe.plugins.featured import FeaturedApps
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import (
+    INLINE_ATTACHMENT_BYTES,
     AppNotFound,
+    AppVersion,
+    AttachmentObjects,
     Cursor,
     DocumentQuery,
     DocumentScope,
@@ -33,11 +42,12 @@ from openswe.plugins.records import (
     PreviewHeldByAnother,
 )
 from openswe.plugins.rooms import Room
-from openswe.plugins.routes import RoomJoin, _RoomStream
+from openswe.plugins.routes import DocumentWrite, RoomJoin, _RoomStream
 from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.utils import ttl_cache
+from openswe.utils.object_store import ObjectStore, StoredObject
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -49,7 +59,10 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _bundle(
-    name: str = "docs", permissions: list[str] | None = None, body: str = "<p>docs</p>"
+    name: str = "docs",
+    permissions: list[str] | None = None,
+    body: str = "<p>docs</p>",
+    collections: dict[str, dict[str, str]] | None = None,
 ) -> str:
     manifest = {
         "name": name,
@@ -57,6 +70,7 @@ def _bundle(
         "version": "1.0.0",
         "sidebar": {"label": "Docs"},
         "permissions": permissions if permissions is not None else ["storage"],
+        "collections": collections or {},
     }
     return f'<script type="application/openswe-plugin+json">{json.dumps(manifest)}</script>{body}'
 
@@ -104,6 +118,84 @@ async def test_only_the_first_create_of_a_key_is_stored() -> None:
     assert first.document == second.document
     stored = await docs.get("drafts", shared, "intro.md")
     assert stored is not None and stored.document == first.document
+
+
+async def test_attachments_are_read_like_their_document_and_deleted_with_it() -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    docs = PluginDocuments((await PluginInstallations.get(await _install(ada), ada)).plugin)
+    other = PluginDocuments((await PluginInstallations.get(await _install(bob), bob)).plugin)
+    shared = DocumentScope(repository="acme/app")
+
+    assert await docs.attach("runs", shared, "r1", "a.png", "image/png", b"png", by=ada) is None
+    await docs.put("runs", shared, "r1", {"status": "running"}, by=ada)
+    attached = await docs.attach("runs", shared, "r1", "a.png", "image/png", b"png", by=ada)
+    assert attached is not None and attached.size == 3
+
+    # Rewriting the document keeps its files.
+    await docs.put("runs", shared, "r1", {"status": "complete"}, by=bob)
+    found = await docs.attachment("runs", shared, "r1", "a.png")
+    assert found is not None and found.content == b"png"
+    assert (
+        await docs.attachment("runs", DocumentScope(repository="acme/web"), "r1", "a.png") is None
+    )
+    assert await other.attachment("runs", shared, "r1", "a.png") is None
+
+    await docs.delete("runs", shared, "r1")
+    await docs.put("runs", shared, "r1", {"status": "running"}, by=ada)
+    assert await docs.attachment("runs", shared, "r1", "a.png") is None
+
+
+@dataclass(frozen=True, slots=True)
+class _MemoryStore(ObjectStore):
+    """A bucket in memory: ``objects`` maps each key to its bytes and last write."""
+
+    objects: dict[str, tuple[bytes, datetime]] = field(default_factory=dict)
+
+    async def put(self, key: str, content: bytes, content_type: str) -> None:
+        self.objects[key] = (content, datetime.now(UTC))
+
+    async def get(self, key: str) -> bytes | None:
+        found = self.objects.get(key)
+        return found[0] if found else None
+
+    async def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+    async def list(self, prefix: str) -> AsyncIterator[StoredObject]:
+        for key, (_, modified) in sorted(self.objects.items()):
+            if key.startswith(prefix):
+                yield StoredObject(key, modified)
+
+
+async def test_large_attachments_live_in_object_storage_until_nothing_names_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada = await _person("ada", "1")
+    docs = PluginDocuments((await PluginInstallations.get(await _install(ada), ada)).plugin)
+    shared = DocumentScope(repository="acme/app")
+    await docs.put("runs", shared, "r1", {"status": "complete"}, by=ada)
+    large = b"x" * (INLINE_ATTACHMENT_BYTES + 1)
+
+    # Without object storage, PostgreSQL keeps it.
+    monkeypatch.setattr(ObjectStore, "configured", classmethod(lambda _cls: None))
+    await docs.attach("runs", shared, "r1", "kept.png", "image/png", large, by=ada)
+    kept = await docs.attachment("runs", shared, "r1", "kept.png")
+    assert kept is not None and kept.content == large
+
+    store = _MemoryStore("https://objects.test", "bucket", "auto", "key", "secret")
+    monkeypatch.setattr(ObjectStore, "configured", classmethod(lambda _cls: store))
+    await docs.attach("runs", shared, "r1", "a.png", "image/png", large, by=ada)
+    [first] = store.objects
+    found = await docs.attachment("runs", shared, "r1", "a.png")
+    assert found is not None and found.content == large
+    await docs.attach("runs", shared, "r1", "a.png", "image/png", large + b"y", by=ada)
+
+    # The replaced object goes only once it is past the grace an upload in flight gets.
+    assert await AttachmentObjects(store).sweep() == 0
+    store.objects[first] = (large, datetime.now(UTC) - AttachmentObjects.GRACE * 2)
+    assert await AttachmentObjects(store).sweep() == 1
+    found = await docs.attachment("runs", shared, "r1", "a.png")
+    assert found is not None and found.content == large + b"y"
 
 
 async def test_documents_come_back_ordered_and_bounded() -> None:
@@ -327,6 +419,184 @@ async def test_only_listed_apps_reach_other_people_and_a_name_is_added_once() ->
         await _install(bob)
 
 
+class _Admin:
+    """What an instance admin turns on under Apps for everyone."""
+
+    @staticmethod
+    async def feature(*entries: tuple[AppVersion, list[str]]) -> None:
+        await upsert_instance_settings(
+            WorkspaceSettingsUpdate.model_validate(
+                {
+                    "featured_apps": [
+                        {"app": str(v.app), "release": str(v.id), "repositories": names}
+                        for v, names in entries
+                    ]
+                }
+            )
+        )
+
+
+async def _people(monkeypatch: pytest.MonkeyPatch) -> tuple[User, User]:
+    """Ada and Bob, who can read acme/web and acme/mine on GitHub and nothing else."""
+
+    async def reads(self: User, name: str) -> bool:
+        return name in {"acme/web", "acme/mine"}
+
+    monkeypatch.setattr(User, "can_read_repository", reads)
+    ada = await User.get(await _person("ada", "1"))
+    bob = await User.get(await _person("bob", "2"))
+    assert ada is not None and bob is not None
+    return ada, bob
+
+
+async def test_an_app_featured_for_everyone_follows_the_admins_approvals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    first = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(first.app, ada.id, True)
+    await PluginInstallations.install(first, user_id=ada.id)
+    assert not await PluginInstallations.robin_added(bob.id)
+    await _Admin.feature((first, []))
+
+    for _ in range(2):
+        await FeaturedApps.add_for(bob)
+    [added] = await PluginInstallations.visible_to(bob.id)
+    assert (added.version.id, added.added_by_robin) == (first.id, True)
+    with pytest.raises(HTTPException) as refused:
+        await plugin_routes.api_uninstall_plugin(await _installed(added, bob.id), bob)
+    assert refused.value.status_code == 409
+
+    # An admin approves the next release: the install nobody changed follows it, and the
+    # one its owner made stays where she put it.
+    second = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await _Admin.feature((second, []))
+    for person in (ada, bob):
+        await FeaturedApps.add_for(person)
+    assert [i.version.id for i in await PluginInstallations.visible_to(bob.id)] == [second.id]
+    assert [i.version.id for i in await PluginInstallations.visible_to(ada.id)] == [first.id]
+
+    # Featuring another publisher's app of the same name instead replaces it in one load.
+    namesake = await PluginApps.publish(bob.id, _bundle(), origin={})
+    await PluginApps.set_listed(namesake.app, bob.id, True)
+    await _Admin.feature((namesake, []))
+    await FeaturedApps.add_for(bob)
+    assert [i.plugin for i in await PluginInstallations.visible_to(bob.id)] == [namesake.app]
+
+    # Turned off, it leaves the web UIs that never changed it.
+    await _Admin.feature()
+    await FeaturedApps.add_for(bob)
+    assert await PluginInstallations.visible_to(bob.id) == []
+    assert not await PluginInstallations.robin_added(bob.id)
+
+
+async def test_the_apps_list_loads_when_featuring_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    ada, _ = await _people(monkeypatch)
+    app = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(app.app, ada.id, True)
+    await PluginInstallations.install(app, user_id=ada.id)
+    await _Admin.feature((app, []))
+    monkeypatch.setattr(FeaturedApps, "add_for", AsyncMock(side_effect=RuntimeError("down")))
+
+    listed = await plugin_routes.api_list_plugins(ada)
+
+    # Still marked featured, as removing it is still refused.
+    assert [(summary.name, summary.featured) for summary in listed] == [("docs", True)]
+
+
+async def test_an_unreadable_featured_release_breaks_no_ones_apps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    first = await PluginApps.publish(ada.id, _bundle(name="broken"), origin={})
+    good = await PluginApps.publish(ada.id, _bundle(name="good"), origin={})
+    for release in (first, good):
+        await PluginApps.set_listed(release.app, ada.id, True)
+    await _install(bob.id)
+    await _Admin.feature((first, ["acme/web"]), (good, []))
+    await FeaturedApps.add_for(bob)
+    # The admin approves a newer release, whose manifest then stops reading.
+    second = await PluginApps.publish(ada.id, _bundle(name="broken"), origin={})
+    await _Admin.feature((second, ["acme/web"]), (good, []))
+    async with postgres.session() as session:
+        await session.execute(
+            update(records_module.PluginVersionRow)
+            .where(records_module.PluginVersionRow.id == second.id)
+            .values(manifest={})
+        )
+
+    listed = await plugin_routes.api_list_plugins(bob)
+
+    # Bob keeps the release he had, with its share, still featured; his other apps load.
+    assert sorted(
+        (summary.name, summary.featured, summary.version.number, tuple(summary.repositories))
+        for summary in listed
+    ) == [("broken", True, 1, ("acme/web",)), ("docs", False, 1, ()), ("good", True, 1, ())]
+
+
+async def test_a_featured_app_reads_the_admins_repositories_for_everyone_who_can(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    app = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(app.app, ada.id, True)
+    # Ada added it herself and shared one repository of her own.
+    adas = await PluginInstallations.install(app, user_id=ada.id)
+    await PluginInstallations.share(adas, ada.id, ["acme/mine"])
+    await _Admin.feature((app, ["acme/web", "acme/secret"]))
+    checked: list[str] = []
+
+    async def reads(self: User, name: str) -> bool:
+        checked.append(f"{self.github_login}:{name}")
+        return name in {"acme/web", "acme/mine"}
+
+    monkeypatch.setattr(User, "can_read_repository", reads)
+
+    for _ in range(2):
+        for person in (ada, bob):
+            await FeaturedApps.add_for(person)
+    # Asked GitHub once each, though nobody can read acme/secret and two loads ran.
+    assert sorted(checked) == ["ada:acme/secret", "ada:acme/web", "bob:acme/secret", "bob:acme/web"]
+    [bobs] = await PluginInstallations.visible_to(bob.id)
+    [hers] = await PluginInstallations.visible_to(ada.id)
+    # Only what each can read on GitHub, on Robin's install and on her own alike.
+    assert bobs.repositories == ("acme/web",)
+    assert hers.repositories == ("acme/mine", "acme/web")
+    with pytest.raises(HTTPException) as refused:
+        await plugin_routes.api_unshare_plugin_repository(
+            "acme", "web", await _installed(bobs, bob.id), bob
+        )
+    assert refused.value.status_code == 409
+
+    # Ada shares acme/web herself too, so it's hers now.
+    await PluginInstallations.share(hers.id, ada.id, ["acme/web"])
+
+    # The admin drops it: Robin stops sharing it, and Ada keeps what she shared.
+    await _Admin.feature((app, []))
+    for person in (ada, bob):
+        await FeaturedApps.add_for(person)
+    assert [i.repositories for i in await PluginInstallations.visible_to(bob.id)] == [()]
+    assert [i.repositories for i in await PluginInstallations.visible_to(ada.id)] == [
+        ("acme/mine", "acme/web")
+    ]
+
+
+async def test_a_featured_release_outlives_cleanup_until_everyone_has_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    pinned = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(pinned.app, ada.id, True)
+    await _Admin.feature((pinned, []))
+    for _ in range(6):
+        await PluginApps.publish(ada.id, _bundle(), origin={})
+    # Removing an install cleans up the app's versions.
+    await PluginInstallations.remove(await _install(ada.id), ada.id)
+
+    await FeaturedApps.add_for(bob)
+    assert [i.version.id for i in await PluginInstallations.visible_to(bob.id)] == [pinned.id]
+
+
 async def _installed(installation: Installation, user_id: UUID) -> InstalledPlugin:
     user = await User.get(user_id)
     assert user is not None
@@ -358,6 +628,88 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
         plugin.require(PluginPermission.GITHUB_WRITE)
     with pytest.raises(PluginPermissionDenied):
         await plugin.room("draft", "acme/app")
+
+
+def _upload(content_type: str, body: bytes) -> Request:
+    """An attachment upload as it reaches the route, ``body`` its bytes."""
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "PUT",
+            "headers": [(b"content-type", content_type.encode())],
+            "query_string": b"",
+        },
+        receive,
+    )
+
+
+async def test_people_cannot_change_a_collection_the_app_writes_even_over_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    older = await PluginApps.publish(ada, _bundle(name="qa"), origin={})
+    await PluginApps.set_listed(older.app, ada, True)
+    # Bob stays on the version before the rule; Ada runs the release that declares it.
+    bobs = await PluginInstallations.install(older, user_id=bob)
+    ruled = _bundle(name="qa", collections={"captures": {"write": "app"}})
+    adas = await PluginInstallations.install(
+        await PluginApps.publish(ada, ruled, origin={}), user_id=ada
+    )
+    for person, installation in ((ada, adas), (bob, bobs)):
+        await PluginInstallations.share(installation, person, ["acme/app"])
+
+    async def readable(_user: User, repository: str) -> bool:
+        return repository == "acme/app"
+
+    monkeypatch.setattr(User, "can_read_repository", readable)
+    shared = DocumentScope(repository="acme/app")
+    docs = PluginDocuments(older.app)
+    await docs.put("captures", shared, "pulls/7/c1", {"status": "complete"}, by=ada)
+    await docs.attach("captures", shared, "pulls/7/c1", "a.png", "image/png", b"png", by=ada)
+
+    for person, installation in ((ada, adas), (bob, bobs)):
+        plugin = await _installed(await PluginInstallations.get(installation, person), person)
+        forged = DocumentWrite(repository="acme/app", document={"status": "forged"})
+        writes = [
+            plugin_routes.api_put_plugin_document("captures", "pulls/7/c1", forged, plugin),
+            plugin_routes.api_put_plugin_document(
+                "captures", "pulls/7/c2", forged, plugin, if_absent=True
+            ),
+            plugin_routes.api_delete_plugin_document("captures", "pulls/7/c1", plugin, "acme/app"),
+            plugin_routes.api_put_plugin_attachment(
+                "captures",
+                "a.png",
+                _upload("image/png", b"forged"),
+                plugin,
+                key="pulls/7/c1",
+                repository="acme/app",
+            ),
+            plugin_routes.api_delete_plugin_attachment(
+                "captures", "a.png", plugin, key="pulls/7/c1", repository="acme/app"
+            ),
+        ]
+        for write in writes:
+            with pytest.raises(HTTPException) as refused:
+                await write
+            assert refused.value.status_code == 403
+
+        read = await plugin_routes.api_get_plugin_document(
+            "captures", "pulls/7/c1", plugin, "acme/app"
+        )
+        assert read.document == {"status": "complete"}
+        shot = await plugin_routes.api_get_plugin_attachment(
+            "captures", "a.png", plugin, key="pulls/7/c1", repository="acme/app"
+        )
+        assert shot.body == b"png"
+        # Collections without a rule stay the people's.
+        note = DocumentWrite(repository="acme/app", document={"body": "hi"})
+        await plugin_routes.api_put_plugin_document("notes", f"n-{person}", note, plugin)
+
+    assert await docs.get("captures", shared, "pulls/7/c2") is None
 
 
 async def test_a_repository_read_is_trusted_only_while_github_says_yes(

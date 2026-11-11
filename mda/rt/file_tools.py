@@ -24,7 +24,7 @@ import random
 import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from functools import partial
+from functools import partial, wraps
 from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware
@@ -35,6 +35,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from langsmith import get_current_run_tree
 from langsmith.sandbox import SandboxRetryableConnectionError
 from pydantic import JsonValue
 from runtime_api.catalog import FilesSpec
@@ -216,6 +217,8 @@ class FileToolsMiddleware(AgentMiddleware):
         call_ = request.tool_call
         if call_["name"] not in FILE_TOOLS:
             return await handler(request)
+        if request.tool is not None:
+            request = request.override(tool=self._skill_tool(request, request.tool))
         spec = self._spec
         if _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
             run: Handler = self._run_skill
@@ -251,15 +254,6 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
         """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
         command = request.tool_call["args"].get("command")
-        if request.tool_call["name"] == "execute" and (
-            refusal := self._backend.run.sleep_refusal(command)
-        ):
-            return ToolMessage(
-                content=refusal,
-                tool_call_id=request.tool_call.get("id") or "",
-                name="execute",
-                status="error",
-            )
         if (
             request.tool_call["name"] != "execute"
             or "shell_commands" not in self._spec.guards
@@ -298,9 +292,46 @@ class FileToolsMiddleware(AgentMiddleware):
         finally:
             git.changed(started)
 
+    def _skill_tool(self, request: ToolCallRequest, tool: BaseTool) -> BaseTool:
+        path = _absolute(request.tool_call["args"].get("file_path"))
+        if request.tool_call["name"] != "read_file" or path is None:
+            return tool
+        parent, filename = posixpath.split(path)
+        source, skill = posixpath.split(parent)
+        listed = any(
+            source == prefix.rstrip("/") for prefix in self._backend.run.catalog.skill_sources
+        )
+        if (
+            filename != "SKILL.md"
+            or not skill
+            or not (listed or source.endswith(("/.agents/skills", "/.claude/skills")))
+        ):
+            return tool
+        if not isinstance(tool, StructuredTool) or tool.coroutine is None:
+            return tool
+        read = tool.coroutine
+
+        @wraps(read)
+        async def read_skill(*args: object, **kwargs: object) -> object:
+            result = await read(*args, **kwargs)
+            failed = (isinstance(result, ToolMessage) and result.status == "error") or (
+                isinstance(result, str) and result.startswith("Error:")
+            )
+            if (
+                not failed
+                and (span := get_current_run_tree()) is not None
+                and span.run_type == "tool"
+                and span.name == "read_file"
+            ):
+                span.add_metadata({"ls_skill_name": skill})
+            return result
+
+        return tool.model_copy(update={"coroutine": read_skill})
+
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the backend's files, as the sandbox's own tool would run it."""
-        return await _invoked(self._remote[request.tool_call["name"]], request)
+        tool = self._skill_tool(request, self._remote[request.tool_call["name"]])
+        return await _invoked(tool, request)
 
     async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the run's skills, as the sandbox's own tool would run it."""
@@ -312,12 +343,12 @@ class FileToolsMiddleware(AgentMiddleware):
                 name=request.tool_call["name"],
                 status="error",
             )
-        return await _invoked(tool, request)
+        return await _invoked(self._skill_tool(request, tool), request)
 
     async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
         """A code mode call, run by the tool the model's own call of it runs."""
         tools = self._sandbox_tools if self._in_sandbox else self._remote
-        return await _invoked(tools[request.tool_call["name"]], request)
+        return await _invoked(self._skill_tool(request, tools[request.tool_call["name"]]), request)
 
     async def _checked(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler`` in the graph's own order: image reads, then tool errors, then AGENTS.md."""

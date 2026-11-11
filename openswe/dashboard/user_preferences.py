@@ -25,6 +25,8 @@ class UserPreferencesUpdate(BaseModel):
     # What Enter does while a run is live: hold the message until the run ends,
     # or steer the live run. Omitted keeps the stored value.
     follow_up_behavior: FollowUpBehavior | None = None
+    # Open a thread's Changes panel when a run that edited files finishes.
+    auto_show_changes: bool | None = None
 
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
@@ -39,6 +41,7 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
         "follow_up_behavior": (
             "queue" if (record or {}).get("follow_up_behavior") == "queue" else "steer"
         ),
+        "auto_show_changes": (record or {}).get("auto_show_changes") is not False,
     }
 
 
@@ -65,6 +68,11 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
             update.follow_up_behavior
             if update.follow_up_behavior is not None
             else existing.get("follow_up_behavior")
+        ),
+        "auto_show_changes": (
+            update.auto_show_changes
+            if update.auto_show_changes is not None
+            else existing.get("auto_show_changes")
         ),
         "created_at": existing.get("created_at") or now_iso(),
         "updated_at": now_iso(),

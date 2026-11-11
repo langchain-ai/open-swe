@@ -236,10 +236,10 @@ describe("WorkTail", () => {
     tail.entries.map((entry) =>
       entry.kind === "tool"
         ? entry.chunk.toolCallId
-        : [entry.heading, entry.body, entry.lines]
+        : [entry.heading, entry.body]
     )
 
-  it("keeps the newest work that fits ten lines and leaves approvals to the fold", () => {
+  it("keeps only the latest thought and tool and leaves approvals to the fold", () => {
     const tail = new WorkTail(
       buildRenderItems([
         tool("read-0"),
@@ -255,18 +255,20 @@ describe("WorkTail", () => {
     )
 
     expect(summary(tail)).toEqual([
-      "read-1",
-      "read-2",
-      "read-3",
-      "read-4",
-      "read-5",
       [
         "Checking the write path",
         "Now I'm reading the queue store. ".repeat(12).trim(),
-        4,
       ],
       "read-7",
     ])
-    expect(tail.previous).toMatchObject({ kind: "reasoning", lines: 1 })
+  })
+  it("drops thinking after ten newer tools", () => {
+    const tail = new WorkTail(
+      buildRenderItems([
+        { kind: "reasoning", text: "Reading the configuration" },
+        ...Array.from({ length: 10 }, (_, index) => tool(`read-${index}`)),
+      ])
+    )
+    expect(summary(tail)).toEqual(["read-9"])
   })
 })

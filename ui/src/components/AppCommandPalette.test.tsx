@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   cloudThread: {
     id: "cloud-1",
     title: "Cloud result",
+    updatedAt: Date.now(),
   } as AgentThread,
 }))
 
@@ -73,6 +74,26 @@ describe("AppCommandPalette", () => {
     })
   })
 
+  it("narrows results to the selected tab", () => {
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }))
+    expect(screen.queryByRole("option", { name: /Open settings/ })).toBeNull()
+    expect(screen.getByRole("option", { name: /Cloud result/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Commands" }))
+    expect(screen.queryByRole("option", { name: /Cloud result/ })).toBeNull()
+    expect(screen.getByRole("option", { name: /Open settings/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }))
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "> settings" },
+    })
+    expect(screen.getByRole("option", { name: /Open settings/ })).toBeTruthy()
+  })
+
   it("loads additional cloud thread pages", () => {
     render(
       <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
@@ -94,7 +115,7 @@ describe("AppCommandPalette", () => {
       },
     })
     expect(
-      await screen.findByRole("option", { name: "Cloud result" })
+      await screen.findByRole("option", { name: /Cloud result/ })
     ).toBeTruthy()
 
     fireEvent.change(input, {

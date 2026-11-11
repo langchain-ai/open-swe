@@ -12,6 +12,8 @@ import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { SentReply, UserMessage } from "./UserMessage"
+import { ExpandableMessageChip } from "./ExpandableMessageChip"
+import type { Message } from "@/features/agents/lib/types"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
@@ -145,6 +147,20 @@ export const Messages = memo(function MessagesComponent({
     () => messages.filter((message) => !message.hidden),
     [messages]
   )
+  const messageGroups = visibleMessages.reduce<
+    Array<{ message: Message; events: Array<Message> }>
+  >((groups, message) => {
+    const previous = groups.at(-1)
+    if (
+      message.structuredSenderKind === "system" &&
+      message.structuredSenderId === "system:event-subscription" &&
+      !message.taskEvent
+    ) {
+      if (previous?.events.length) previous.events.push(message)
+      else groups.push({ message, events: [message] })
+    } else groups.push({ message, events: [] })
+    return groups
+  }, [])
   const costsByTurn = useMemo(
     () => turnCosts(visibleMessages, runCosts),
     [visibleMessages, runCosts]
@@ -231,11 +247,31 @@ export const Messages = memo(function MessagesComponent({
             )}
             {visibleMessages.length === 0 && emptyState}
             <div ref={transcriptRef}>
-              {visibleMessages.map((message, index) => {
-                const isLastMessage = index === visibleMessages.length - 1
+              {messageGroups.map(({ message, events }, index) => {
+                const isLastMessage = index === messageGroups.length - 1
                 const messageIsStreaming = isStreaming && isLastMessage
                 const messageIsMarkdownLive =
                   message.id === liveMarkdownMessageId
+
+                if (events.length > 1) {
+                  return (
+                    <div key={message.id} className="my-space-4">
+                      <ExpandableMessageChip
+                        messageIds={events.map((event) => event.id)}
+                        label={`${events.length} events`}
+                        accessibleLabel={`${events.length} event listener messages`}
+                      >
+                        {events.map((event) => (
+                          <UserMessage
+                            key={event.id}
+                            message={event}
+                            threadId={threadId}
+                          />
+                        ))}
+                      </ExpandableMessageChip>
+                    </div>
+                  )
+                }
 
                 if (
                   message.author === "user" ||
@@ -277,6 +313,14 @@ export const Messages = memo(function MessagesComponent({
               <WorkflowApprovalCard
                 threadId={threadId}
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
+                latestUserMessageAt={
+                  visibleMessages.findLast(
+                    (message) =>
+                      message.author === "user" &&
+                      message.structuredSenderKind !== "system" &&
+                      !message.timestampIsFallback
+                  )?.timestamp
+                }
               />
             )}
             {/* Above the queue: the live run's activity, then what waits for it. */}

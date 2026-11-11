@@ -36,12 +36,18 @@ def _worker(ran: list[Job], *, fail: bool = False) -> JobWorker:
 
 async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
     ran: list[Job] = []
+    unrelated = await queue.schedule("other", due_at=_PAST - timedelta(seconds=1))
     await queue.schedule("probe", {"n": 1}, due_at=_PAST)
 
-    counts = await asyncio.gather(*(_worker(ran).run_due() for _ in range(4)))
+    counts = await asyncio.gather(*(_worker(ran).run_due(limit=1) for _ in range(4)))
 
     assert sum(counts) == 1
     assert [job.payload for job in ran] == [{"n": 1}]
+    assert [job.id for job in await queue.find({})] == [unrelated.id]
+    assert await queue.claim_due(1, kinds=["probe"]) == []
+    [other] = await queue.claim_due(1)
+    assert other.id == unrelated.id
+    await other.finish()
     assert await queue.find({}) == []
 
 
@@ -135,6 +141,27 @@ async def test_a_run_that_ends_after_its_job_was_replaced_and_reclaimed_leaves_i
     assert await second.hold() == Hold.HELD
     [job] = await queue.find({})
     assert job.payload == {"v": "new"}
+
+
+async def test_coalesced_work_shares_a_waiting_run_and_follows_a_running_one() -> None:
+    later = datetime.now(UTC) + timedelta(hours=1)
+    await queue.coalesce("probe", {"v": 1}, key="probe:d", due_at=later)
+    await queue.coalesce("probe", {"v": 2}, key="probe:d", due_at=_PAST)
+    await queue.coalesce("probe", {"v": 3}, key="probe:d", due_at=later)
+    [waiting] = await queue.find({})
+    assert (waiting.payload, waiting.due_at) == ({"v": 2}, _PAST)
+
+    [running] = await queue.claim_due(1)
+    await queue.coalesce("probe", {"v": 4}, key="probe:d", due_at=later)
+    await queue.coalesce("probe", {"v": 5}, key="probe:d", due_at=_PAST)
+    assert await queue.claim_due(1) == []
+    assert await running.hold() == Hold.HELD
+    await running.finish()
+
+    [after] = await queue.claim_due(1)
+    assert after.payload == {"v": 5}
+    await after.finish()
+    assert await queue.find({}) == []
 
 
 async def test_jobs_are_found_and_cancelled_by_metadata() -> None:

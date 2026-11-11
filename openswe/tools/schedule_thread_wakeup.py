@@ -12,7 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import Config
 from pydantic import JsonValue, TypeAdapter
 
-from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
+from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_durable_run, prepare_run_config
 from openswe.input_messages import RunInput, build_run_input
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -23,8 +23,13 @@ from openswe.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
+
+class WakeupRunConfig(Config, total=False):
+    metadata: dict[str, JsonValue]
+
+
 _json = TypeAdapter(dict[str, JsonValue])
-_run_config = TypeAdapter(Config)
+_run_config = TypeAdapter(WakeupRunConfig)
 _run_input = TypeAdapter(RunInput)
 
 _AGENT_ASSISTANT_ID = "agent"
@@ -227,13 +232,19 @@ async def run_thread_wakeup(
             "Thread wakeup is running late",
             extra={"thread_id": thread_id, "job_id": job_id, "lateness_seconds": lateness_seconds},
         )
+    prepared = await prepare_durable_run(
+        _AGENT_ASSISTANT_ID,
+        config,
+        _object(payload.get("metadata")),
+        source="wakeup",
+    )
     run = await get_client(url=langgraph_url()).runs.create(
         thread_id,
         _AGENT_ASSISTANT_ID,
         # ty does not match a TypedDict against the SDK's TypedDict-like protocol.
         input=run_input,  # ty: ignore[invalid-argument-type]
-        config=None if config is None else _run_config.validate_python(config),
-        metadata=_object(payload.get("metadata")),
+        config=_run_config.validate_python(prepared),
+        metadata=prepared["metadata"],
         multitask_strategy="enqueue",
         webhook=COMPLETION_WEBHOOK_URL or None,
     )

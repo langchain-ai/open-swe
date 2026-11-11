@@ -1,5 +1,8 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Link } from "@langchain/macaw-components/Link"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { PaperclipIcon } from "@phosphor-icons/react/dist/ssr/Paperclip"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
@@ -125,6 +128,7 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
                 >
                   <MessageImage
                     chunk={img}
+                    fill
                     className="block h-auto max-h-[220px] w-full object-cover"
                   />
                 </div>
@@ -291,47 +295,53 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
             {message.deliveryStatus !== "failed" ? (
               "Sending"
             ) : (
-              <Button
-                color="error"
-                variant="plain"
-                size="xs"
-                type="button"
-                aria-label={`Failed to send${message.deliveryError ? ` · ${message.deliveryError}` : ""} · Copy debug details`}
-                title={`${message.deliveryError ?? "Failed to send"} · Click to copy debug details`}
-                data-testid="user-message-delivery-error"
-                className="h-auto max-w-full border-0 px-0 text-right whitespace-normal text-error-secondary"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(
-                      JSON.stringify(
-                        {
-                          url: threadId
-                            ? new URL(
-                                `${import.meta.env.BASE_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(threadId)}`,
-                                window.location.origin
-                              ).href
-                            : undefined,
-                          message_id: message.id,
-                          turn_id: message.deliveryTurnId,
-                          timestamp: message.timestamp,
-                          error: message.deliveryError,
-                        },
-                        null,
-                        2
-                      )
-                    )
-                    toast.success("Debug details copied")
-                  } catch {
-                    toast.error(
-                      "Unable to copy debug details. Check clipboard permissions."
-                    )
-                  }
-                }}
+              <Tooltip
+                title="Click to copy debug details"
+                description={message.deliveryError}
+                align="end"
+                tooltipClassName="[overflow-wrap:anywhere] whitespace-pre-wrap"
               >
-                {message.deliveryError
-                  ? `Failed to send · ${message.deliveryError}`
-                  : "Failed to send"}
-              </Button>
+                <Button
+                  color="error"
+                  variant="plain"
+                  size="xs"
+                  type="button"
+                  aria-label="Failed to send · Copy debug details"
+                  leftDecorator={WarningCircleIcon}
+                  rightDecorator={CopyIcon}
+                  data-testid="user-message-delivery-error"
+                  className="max-w-full border-0"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        JSON.stringify(
+                          {
+                            url: threadId
+                              ? new URL(
+                                  `${import.meta.env.BASE_URL.replace(/\/$/, "")}/agents/${encodeURIComponent(threadId)}`,
+                                  window.location.origin
+                                ).href
+                              : undefined,
+                            message_id: message.id,
+                            turn_id: message.deliveryTurnId,
+                            timestamp: message.timestamp,
+                            error: message.deliveryError,
+                          },
+                          null,
+                          2
+                        )
+                      )
+                      toast.success("Debug details copied")
+                    } catch {
+                      toast.error(
+                        "Unable to copy debug details. Check clipboard permissions."
+                      )
+                    }
+                  }}
+                >
+                  Failed to send
+                </Button>
+              </Tooltip>
             )}
           </div>
         )}

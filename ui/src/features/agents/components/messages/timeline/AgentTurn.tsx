@@ -45,7 +45,6 @@ import {
 import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
-import { useProfile } from "@/lib/profile"
 import { formatElapsed } from "@/lib/utils"
 
 /**
@@ -89,7 +88,8 @@ function EditWorkEntry({
   repoPath?: string
 }) {
   const diff = latestDiff(chunk)
-  if (!diff) return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
+  if (!diff || chunk.status === "error")
+    return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, repoPath)}
@@ -253,7 +253,6 @@ export function AgentTurn({
   activityLabel?: string
   costUsd?: number
 } & ApprovalCallbacks) {
-  const liveActivity = useProfile().data?.experimental_live_activity ?? false
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
     [message.chunks, message.id]
@@ -505,7 +504,7 @@ export function AgentTurn({
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />
-        {live && !expanded && liveActivity && (
+        {live && !expanded && (
           <LiveWorkTail
             tail={new WorkTail(segment.items)}
             repoPath={repoPath}

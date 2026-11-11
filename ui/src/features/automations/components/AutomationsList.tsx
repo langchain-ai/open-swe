@@ -1,4 +1,5 @@
 import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
+import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { Text } from "@langchain/macaw-components/Text"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -231,55 +232,80 @@ function AutomationRow({
 
   return (
     <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
-      <Link
-        to="/agents/automations/$scheduleId"
-        params={{ scheduleId: schedule.id }}
-        className="flex min-w-0 flex-1 items-center gap-space-3"
-      >
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            schedule.enabled ? "bg-success-strong" : "bg-surface-level-4"
-          )}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-space-2">
-            <span className="truncate text-sm font-medium text-primary">
-              {schedule.name}
-            </span>
-            {schedule.lastError && (
-              <WarningCircleIcon
-                size={14}
-                weight="regular"
-                className="shrink-0 text-icon-error"
-                aria-label="Last run failed"
-              >
-                <title>Last run failed</title>
-              </WarningCircleIcon>
+      <div className="min-w-0 flex-1">
+        <Link
+          to="/agents/automations/$scheduleId"
+          params={{ scheduleId: schedule.id }}
+          className="flex min-w-0 items-center gap-space-3"
+        >
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              schedule.enabled ? "bg-success-strong" : "bg-surface-level-4"
             )}
-          </div>
-          <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-tertiary">
-            <span className="flex items-center gap-space-1">
-              <ClockIcon size={14} weight="regular" />
-              {describeTriggers(schedule)}
-            </span>
-            {workspaces.length > 1 && (
-              <span className="flex items-center gap-space-1">
-                <StackRegularIcon size={14} />
-                {workspaceName}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-space-2">
+              <span className="truncate text-sm font-medium text-primary">
+                {schedule.name}
               </span>
-            )}
-            <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
+              {schedule.lastError && (
+                <WarningCircleIcon
+                  size={14}
+                  weight="regular"
+                  className="shrink-0 text-icon-error"
+                  aria-label="Last run failed"
+                >
+                  <title>Last run failed</title>
+                </WarningCircleIcon>
+              )}
+            </div>
+            <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-tertiary">
+              <span className="flex items-center gap-space-1">
+                <ClockIcon size={14} weight="regular" />
+                {describeTriggers(schedule)}
+              </span>
+              {workspaces.length > 1 && (
+                <span className="flex items-center gap-space-1">
+                  <StackRegularIcon size={14} />
+                  {workspaceName}
+                </span>
+              )}
+              <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
+            </div>
+            <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">
+              <span>Created by: {schedule.createdBy || "Unknown"}</span>
+              <span>
+                Last edited by:{" "}
+                {schedule.updatedBy || schedule.createdBy || "Unknown"}
+              </span>
+            </div>
           </div>
-          <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">
-            <span>Created by: {schedule.createdBy || "Unknown"}</span>
-            <span>
-              Last edited by:{" "}
-              {schedule.updatedBy || schedule.createdBy || "Unknown"}
-            </span>
+        </Link>
+        {schedule.lastError && (
+          <div className="mt-space-1 flex min-w-0 items-center gap-space-3">
+            <span aria-hidden className="size-2 shrink-0" />
+            <div className="flex min-w-0 items-center gap-space-1">
+              <Link
+                to="/agents/automations/$scheduleId"
+                params={{ scheduleId: schedule.id }}
+                className="truncate text-xs text-error-secondary"
+              >
+                Last run failed: {schedule.lastError.trim().split("\n", 1)[0]}
+              </Link>
+              <CopyErrorButton
+                error={schedule.lastError}
+                details={{
+                  Automation: `${schedule.name} (${schedule.id})`,
+                  "Failed at": schedule.lastErrorAt,
+                  "Last thread": schedule.lastThreadId,
+                }}
+                className="shrink-0"
+              />
+            </div>
           </div>
-        </div>
-      </Link>
+        )}
+      </div>
       {schedule.lastThreadId && (
         <IconButton
           asChild

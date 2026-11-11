@@ -68,27 +68,13 @@ _TOOL_MODULES = {
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "preview_app": ".apps",
+    "save_app_document": ".review_apps",
     "publish_app": ".apps",
     "publish_artifact": ".publish_artifact",
-    "remember": ".remember",
-    "forget": ".remember",
-    "recall": ".remember",
-    "list_memories": ".curator",
-    "read_workspace_prompt": ".curator",
-    "decide_memory": ".curator",
-    "publish_workspace_prompt": ".curator",
-    "list_memory_triggers": ".curator",
-    "set_memory_trigger": ".curator",
-    "set_memory_trigger_guidance": ".curator",
-    "delete_memory_trigger": ".curator",
-    "link_memory_trigger": ".curator",
+    "save_user_instructions": ".save_user_instructions",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
-    "goal_create": ".goal",
-    "goal_get": ".goal",
-    "goal_set_objective": ".goal",
-    "goal_set_state": ".goal",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
     "snapshotctl": ".workspaces",
@@ -175,20 +161,10 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "preview_app",
+    "save_app_document",
     "publish_app",
     "publish_artifact",
-    "remember",
-    "forget",
-    "recall",
-    "list_memories",
-    "read_workspace_prompt",
-    "decide_memory",
-    "publish_workspace_prompt",
-    "list_memory_triggers",
-    "set_memory_trigger",
-    "set_memory_trigger_guidance",
-    "delete_memory_trigger",
-    "link_memory_trigger",
+    "save_user_instructions",
     "save_user_settings",
     "list_projects",
     "create_project",
@@ -198,10 +174,6 @@ __all__ = [
     "move_thread_to_project",
     "save_user_skill",
     "delete_user_skill",
-    "goal_create",
-    "goal_get",
-    "goal_set_objective",
-    "goal_set_state",
     "schedule_thread_wakeup",
     "search_pull_requests",
     "snapshotctl",
@@ -262,23 +234,11 @@ if TYPE_CHECKING:
     from openswe.tools.code_channel_set_view import code_channel_set_view
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
-    from openswe.tools.curator import (
-        decide_memory,
-        delete_memory_trigger,
-        link_memory_trigger,
-        list_memories,
-        list_memory_triggers,
-        publish_workspace_prompt,
-        read_workspace_prompt,
-        set_memory_trigger,
-        set_memory_trigger_guidance,
-    )
     from openswe.tools.discover_managed_tools import discover_managed_tools
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
     from openswe.tools.fetch_review_diff import fetch_review_diff
     from openswe.tools.fetch_url import fetch_url
-    from openswe.tools.goal import goal_create, goal_get, goal_set_objective, goal_set_state
     from openswe.tools.http_request import http_request
     from openswe.tools.list_findings import list_findings
     from openswe.tools.list_review_findings import list_review_findings
@@ -303,7 +263,6 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
-    from openswe.tools.remember import forget, recall, remember
     from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
@@ -316,6 +275,8 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
+    from openswe.tools.review_apps import save_app_document
+    from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests

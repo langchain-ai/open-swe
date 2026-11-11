@@ -202,14 +202,17 @@ function localCallbackUrl(navigationUrl, backendUrl) {
   }
 }
 
-function desktopDeepLinkUrl(value, backendUrl) {
+/** Localizes a trusted dashboard origin; the downloaded UI decides page ownership. */
+function desktopDeepLinkUrl(value, backendUrl, dashboardOrigins = []) {
   try {
     const target = new URL(value);
     const backend = new URL(backendUrl);
     if (
       !["http:", "https:"].includes(target.protocol) ||
-      target.origin !== backend.origin ||
-      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
+      target.username ||
+      target.password ||
+      (target.origin !== backend.origin &&
+        !dashboardOrigins.includes(target.origin))
     )
       return null;
     return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;

@@ -84,7 +84,11 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
     await _start()
     usage_storage[0] = DAY + timedelta(seconds=12)
     summary = RunUsageSummary(
-        models=("model",), input_tokens=100, output_tokens=50, total_tokens=150
+        models=("model",),
+        input_tokens=100,
+        output_tokens=50,
+        total_tokens=150,
+        cache_read_tokens=80,
     )
     assert await usage.record_agent_invocation_completion(invocation_id="run", usage=summary)
     assert not await usage.record_agent_invocation_completion(invocation_id="run", usage=summary)
@@ -96,7 +100,10 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
     await _deliver(transaction, reverse=True)
     await _deliver(transaction)
     async with transaction() as conn:
-        assert await conn.scalar(text("SELECT configured_effort FROM run_projection")) == "high"
+        run = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
+        assert run["configured_effort"] == "high"
+        assert run["cache_read_tokens"] == 80
+        assert run["cache_creation_tokens"] is None
     report = await _report()
     row = report["rows"][0]
     assert row["user"]["name"] == "Octo Cat"

@@ -72,7 +72,7 @@ async def test_mcp_caller_opens_a_private_channel_only_for_their_own_linked_slac
         assert "Slack account is not linked" in content["error"]
         start.assert_not_awaited()
         return
-    assert content["channel_url"] == "https://slack.com/archives/C456"
+    assert content["channel_url"] == "https://slack.com/app_redirect?channel=C456&team=T9"
     request = start.call_args.args[0]
     assert (request.owner, request.repo, request.number) == ("langchain-ai", "open-swe", 3557)
     assert request.invite == ["U888"]

@@ -14,6 +14,7 @@ from openswe.expedited_review.eligibility import (
     MAX_FILES,
     ApprovalCondition,
     ChangedFile,
+    EligibleDiff,
     ExcludedHunk,
     Exclusion,
     Ineligible,
@@ -33,7 +34,6 @@ from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef, delete_slack_message
-from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -173,6 +173,40 @@ class ExpeditedReviewNomination:
             return None, exclusions
         return condition, [*exclusions, *condition.cover(files, exclusions)]
 
+    def event_origin(self, channel_id: str, thread_ts: str) -> JsonObject:
+        origin = self.origin
+        return {
+            "slack_channel_id": channel_id,
+            "slack_thread_ts": thread_ts,
+            "requester_user_id": str(origin.requester.id) if origin.requester else None,
+            "thread_id": origin.thread_id,
+        }
+
+    def nomination_details(
+        self,
+        channel_id: str,
+        thread_ts: str,
+        verdict: EligibleDiff,
+        condition: ApprovalCondition | None,
+        files: list[ChangedFile],
+        displaced: HumanReviewRequest | None,
+    ) -> JsonObject:
+        """Everything the card was nominated on, for the event log."""
+        return {
+            "nominated_in": self.event_origin(channel_id, thread_ts),
+            "changed_lines": verdict.changed_lines,
+            "test_lines": verdict.test_lines,
+            "generated_lines": verdict.generated_lines,
+            "excluded_lines": verdict.excluded_lines,
+            "fingerprint": verdict.fingerprint,
+            "approval_condition": condition.text if condition is not None else "",
+            "files": [
+                {"filename": f.filename, "additions": f.additions, "deletions": f.deletions}
+                for f in files
+            ],
+            "displaced_request_id": str(displaced.id) if displaced is not None else None,
+        }
+
     def audit_pull_request(self, pull_request_id: UUID) -> None:
         """The row may first exist once the card is saved, so the audit entry learns its id then."""
         entry = current_audit_log.get()
@@ -301,6 +335,11 @@ class ExpeditedReviewNomination:
             and active.approval_condition == (condition.text if condition is not None else "")
         ):
             self.audit_pull_request(active.pull_request_id)
+            await active.log_event(
+                "expedited.reused",
+                head_sha=head_sha,
+                nominated_in=self.event_origin(channel_id, thread_ts),
+            )
             if active.awaiting_ready and not payload.draft:
                 updated = await HumanReviewRequest.transition(
                     active.id, expected=("open",), awaiting_ready=False
@@ -390,6 +429,12 @@ class ExpeditedReviewNomination:
                         await ReviewCard(displaced).reopen()
                     return self.failure(readiness_warning)
                 await ReviewCard(approval).remove_superseded()
+                await approval.log_event(
+                    "expedited.nominated",
+                    **self.nomination_details(
+                        channel_id, thread_ts, verdict, condition, files, displaced
+                    ),
+                )
                 return {
                     "success": True,
                     "approval_id": str(approval.id),
@@ -413,22 +458,17 @@ class ExpeditedReviewNomination:
         await card.broadcast_configured()
         await card.remove_superseded()
         readiness_warning = await card.prompt_author_ready()
+        await card.request.log_event(
+            "expedited.nominated",
+            **self.nomination_details(channel_id, thread_ts, verdict, condition, files, displaced),
+            readiness_warning=readiness_warning,
+        )
         next_step = self.next_step(
             reused=False,
             elsewhere=False,
             in_thread=bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),
             over_mcp=requester is not None,
         )
-        if (
-            requester is not None
-            and requester.slack_user_id
-            and await send_dm(
-                requester.slack_user_id,
-                f"Expedited review requested for <{pr_ref.url}|{pr_ref.repo}#{pr_ref.number}> "
-                f"in <#{channel_id}>. Robin merges it once someone approves.",
-            )
-        ):
-            next_step = f"{next_step} The person was sent a Slack DM pointing to the card."
         return {
             "success": True,
             "readiness_warning": readiness_warning,

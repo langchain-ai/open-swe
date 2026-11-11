@@ -7,7 +7,7 @@ would start the wrong work or none rather than let anyone in, but it must not dr
 
 import pytest
 
-from openswe.github.comments import OPEN_SWE_TAGS
+from openswe.github.comments import OPEN_SWE_TAGS, ROBIN_NOTIFICATION_MARKER
 from openswe.webhooks import common
 from tests.github_channel import MDA_ROUTES
 
@@ -15,6 +15,7 @@ from tests.github_channel import MDA_ROUTES
 def test_the_action_sets_are_the_backends() -> None:
     assert MDA_ROUTES.ISSUE_ACTIONS == common.SUPPORTED_GH_ISSUE_ACTIONS
     assert MDA_ROUTES.COMMENT_ACTIONS == common.SUPPORTED_GH_COMMENT_ACTIONS
+    assert MDA_ROUTES.NOTIFICATION_MARKER == ROBIN_NOTIFICATION_MARKER
 
 
 @pytest.mark.parametrize(

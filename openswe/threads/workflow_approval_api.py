@@ -23,6 +23,7 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.threads.workflow_review import WorkflowReview
 
 workflow_approval_router = APIRouter(
     prefix="/dashboard/api/workflow-approval",
@@ -40,9 +41,15 @@ async def list_workflow_push_approvals(
     if not thread_is_readable(metadata, session["sub"], session.get("email")):
         raise HTTPException(404, "thread not found")
     approvals = await get_workflow_push_approvals(thread_id)
+    review = await WorkflowReview.resolve(
+        thread_id,
+        {**metadata, "workflow_push_approvals": approvals},
+        session["sub"],
+        session.get("email"),
+    )
     return {
         "threadId": thread_id,
-        "approvals": workflow_push_approval_responses(approvals),
+        "approvals": workflow_push_approval_responses(review.records),
     }
 
 

@@ -8,6 +8,7 @@ from openswe.slack import client as slack_client
 from openswe.slack import http as slack_http
 from openswe.slack import stop as slack_stop
 from openswe.slack import thinking
+from openswe.slack import webhook as slack_service
 from openswe.slack.records import bind_slack_thread_id
 from openswe.threads import handlers
 from openswe.users.models import User, UserIdentity
@@ -97,6 +98,10 @@ def _patch_native_stop(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> A
     _patch_handler(monkeypatch, client)
     user = User(identities=[UserIdentity(provider="github", external_id="123", login="owner")])
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
+    monkeypatch.setattr(
+        slack_service.LangSmithLogin, "authorize_user", AsyncMock(return_value="ls_token")
+    )
+    monkeypatch.setattr(slack_service.common, "account_link_reason", AsyncMock(return_value=None))
     monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
     monkeypatch.setattr(handlers, "settle_run_turn", AsyncMock())

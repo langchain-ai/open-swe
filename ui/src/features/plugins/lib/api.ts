@@ -1,11 +1,15 @@
 import type {
+  AttachmentType,
   Commit,
   CursorWire,
   JsonObject,
   PluginPermission,
   PullRequest,
+  PullRequestRole,
+  PullRequestSearch,
   RepositoryInfo,
   RepositoryTree,
+  StoredAttachment,
   StoredDocument,
 } from "@openswe/plugin-sdk"
 
@@ -38,6 +42,15 @@ export interface PluginManifest {
   description: string
   sidebar: { label: string; icon: SidebarIcon }
   permissions: Array<PluginPermission>
+  /** What reviews do for the app in workspaces that add it to them. */
+  review?: ReviewStep | null
+}
+
+/** An app's step in pull request reviews: instructions, what it writes, and a browser. */
+export interface ReviewStep {
+  instructions: string
+  writes: Array<string>
+  browser: boolean
 }
 
 /** One immutable build of an app. */
@@ -73,6 +86,8 @@ export interface InstalledPlugin {
   /** The repositories the viewer shared with it. */
   repositories: Array<string>
   installed_at: string | null
+  /** Whether an admin added the app for everyone, so the viewer can't remove it. */
+  featured?: boolean
 }
 
 /** The app an agent builds in a thread, as it runs beside it. */
@@ -120,14 +135,49 @@ function plugin(id: string): string {
   return `/plugins/${segment(id)}`
 }
 
-function repo(id: string, repository: string): string {
+function ownerAndName(repository: string): string {
   const [owner = "", name = "", ...rest] = repository.split("/")
   if (rest.length) throw new UnsafePathError("repository must be owner/repo")
-  return `${plugin(id)}/github/${segment(owner)}/${segment(name)}`
+  return `${segment(owner)}/${segment(name)}`
+}
+
+function repo(id: string, repository: string): string {
+  return `${plugin(id)}/github/${ownerAndName(repository)}`
+}
+
+/** Bytes the backend serves, `null` for the statuses that mean there are none. */
+async function blobOrNull(
+  path: string,
+  missing: ReadonlyArray<number>
+): Promise<Blob | null> {
+  const requestId = newRequestId()
+  const res = await fetch(dashboardApiUrl(path), {
+    credentials: "include",
+    headers: {
+      [REQUEST_ID_HEADER]: requestId,
+      ...dashboardForwardedHeaders(),
+    },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
+  })
+  if (missing.includes(res.status)) return null
+  if (!res.ok)
+    throw new DashboardRequestError(res.status, res.statusText, requestId)
+  return res.blob()
 }
 
 function document(id: string, collection: string, key: string): string {
   return `${plugin(id)}/documents/${segment(collection)}/${segments(key)}`
+}
+
+function attachment(
+  id: string,
+  collection: string,
+  key: string,
+  name: string,
+  repository?: string
+): string {
+  return `${plugin(id)}/attachments/${segment(collection)}/${segment(name)}${query({ key, repository })}`
 }
 
 function roomPath(id: string, target: RoomTarget, action: string): string {
@@ -139,6 +189,42 @@ interface DocumentWire {
   document: JsonObject
   updated_at: string | null
 }
+
+interface PullRequestWire {
+  number: number
+  title: string
+  url: string
+  state: string
+  merged: boolean
+  draft: boolean
+  head: string
+  base: string
+  head_sha: string
+  base_sha: string
+  author: string | null
+  created_at: string | null
+  updated_at: string | null
+  requested_reviewers: Array<string>
+  requested_teams: Array<string>
+}
+
+const pullRequest = (wire: PullRequestWire): PullRequest => ({
+  number: wire.number,
+  title: wire.title,
+  url: wire.url,
+  state: wire.state,
+  merged: wire.merged,
+  draft: wire.draft,
+  head: wire.head,
+  base: wire.base,
+  headSha: wire.head_sha,
+  baseSha: wire.base_sha,
+  author: wire.author,
+  createdAt: wire.created_at,
+  updatedAt: wire.updated_at,
+  requestedReviewers: wire.requested_reviewers,
+  requestedTeams: wire.requested_teams,
+})
 
 const stored = (wire: DocumentWire): StoredDocument => ({
   key: wire.key,
@@ -235,6 +321,11 @@ export function roomsStreamUrl(
 export const pluginsApi = {
   list: () => agentsRequest<Array<InstalledPlugin>>("/plugins"),
   apps: () => agentsRequest<Array<App>>("/plugins/apps"),
+  /** A release the viewer may add, of their own app or a listed one. */
+  appVersion: (id: string) =>
+    agentsRequest<AppVersion>(
+      `/plugins/apps/versions/${encodeURIComponent(id)}`
+    ),
   publish: (html: string) =>
     agentsRequest<AppVersion>("/plugins/apps", {
       method: "POST",
@@ -341,6 +432,63 @@ export const pluginsApi = {
       `${document(id, collection, key)}${query({ repository })}`,
       { method: "DELETE" }
     ),
+  attach: async (
+    id: string,
+    target: DocumentTarget,
+    key: string,
+    name: string,
+    bytes: Uint8Array,
+    contentType: AttachmentType
+  ): Promise<StoredAttachment> => {
+    const wire = await agentsRequest<{
+      name: string
+      content_type: AttachmentType
+      size: number
+      updated_at: string | null
+    }>(
+      attachment(
+        id,
+        target.collection,
+        key,
+        name,
+        target.repository ?? undefined
+      ),
+      {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: new Uint8Array(bytes),
+      }
+    )
+    return {
+      name: wire.name,
+      contentType: wire.content_type,
+      size: wire.size,
+      updatedAt: wire.updated_at,
+    }
+  },
+  /** A document's attachment as bytes, `null` when absent. */
+  attachment: (id: string, target: DocumentTarget, key: string, name: string) =>
+    blobOrNull(
+      attachment(
+        id,
+        target.collection,
+        key,
+        name,
+        target.repository ?? undefined
+      ),
+      [404]
+    ),
+  detach: (id: string, target: DocumentTarget, key: string, name: string) =>
+    agentsRequest<void>(
+      attachment(
+        id,
+        target.collection,
+        key,
+        name,
+        target.repository ?? undefined
+      ),
+      { method: "DELETE" }
+    ),
 
   repository: async (id: string, repository: string) => {
     const info = await agentsRequest<{
@@ -373,30 +521,11 @@ export const pluginsApi = {
       )
     )?.text ?? null,
   /** An image in the repository as bytes, `null` when absent or not an image. */
-  image: async (
-    id: string,
-    repository: string,
-    path: string,
-    ref: string
-  ): Promise<Blob | null> => {
-    const requestId = newRequestId()
-    const res = await fetch(
-      dashboardApiUrl(`${repo(id, repository)}/image${query({ path, ref })}`),
-      {
-        credentials: "include",
-        headers: {
-          [REQUEST_ID_HEADER]: requestId,
-          ...dashboardForwardedHeaders(),
-        },
-      }
-    ).catch((cause: unknown) => {
-      throw networkError(cause, requestId)
-    })
-    if (res.status === 404 || res.status === 415) return null
-    if (!res.ok)
-      throw new DashboardRequestError(res.status, res.statusText, requestId)
-    return res.blob()
-  },
+  image: (id: string, repository: string, path: string, ref: string) =>
+    blobOrNull(
+      `${repo(id, repository)}/image${query({ path, ref })}`,
+      [404, 415]
+    ),
   history: async (
     id: string,
     repository: string,
@@ -454,11 +583,50 @@ export const pluginsApi = {
         }),
       })
     ).sha,
-  findPull: (id: string, repository: string, head: string) =>
-    agentsRequest<PullRequest | null>(
+  pull: async (id: string, repository: string, number: number) => {
+    const found = await orNull(
+      agentsRequest<PullRequestWire>(`${repo(id, repository)}/pulls/${number}`)
+    )
+    return found && pullRequest(found)
+  },
+  findPull: async (id: string, repository: string, head: string) => {
+    const found = await agentsRequest<PullRequestWire | null>(
       `${repo(id, repository)}/pulls${query({ head })}`
-    ),
-  openPull: (
+    )
+    return found && pullRequest(found)
+  },
+  searchPulls: async (
+    id: string,
+    role: PullRequestRole
+  ): Promise<PullRequestSearch> => {
+    const found = await agentsRequest<{
+      pulls: Array<{
+        repository: string
+        number: number
+        title: string
+        url: string
+        draft: boolean
+        author: string | null
+        created_at: string | null
+        updated_at: string | null
+      }>
+      incomplete: boolean
+    }>(`${plugin(id)}/github/pulls${query({ role })}`)
+    return {
+      pulls: found.pulls.map((pull) => ({
+        repository: pull.repository,
+        number: pull.number,
+        title: pull.title,
+        url: pull.url,
+        draft: pull.draft,
+        author: pull.author,
+        createdAt: pull.created_at,
+        updatedAt: pull.updated_at,
+      })),
+      incomplete: found.incomplete,
+    }
+  },
+  openPull: async (
     id: string,
     repository: string,
     body: {
@@ -469,10 +637,12 @@ export const pluginsApi = {
       draft?: boolean
     }
   ) =>
-    agentsRequest<PullRequest>(`${repo(id, repository)}/pulls`, {
-      method: "POST",
-      ...json(body),
-    }),
+    pullRequest(
+      await agentsRequest<PullRequestWire>(`${repo(id, repository)}/pulls`, {
+        method: "POST",
+        ...json(body),
+      })
+    ),
 
   people: async (id: string, logins: Array<string>) => {
     const people = await agentsRequest<

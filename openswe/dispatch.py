@@ -53,6 +53,7 @@ from openswe.invocation import new_invocation_id, resolve_invocation_id, with_in
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
+from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
 from openswe.ui_invalidations import Topic
 from openswe.users import User
 
@@ -68,6 +69,9 @@ TURN_ATTRIBUTION_FIELDS = frozenset(
     {
         "user_id",
         "user_email",
+        "billed_user_id",
+        *BILLING_FIELDS,
+        "created_by",
         ACTING_USER_KEY,
         "ls_repo_provider",
         "ls_attribution_identifier",
@@ -92,6 +96,31 @@ class RunMetadata(BaseModel):
         if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
             return cls()
         return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
+
+    async def billing_metadata(self) -> dict[str, str] | None:
+        """Attribute review work to its stored PR author, never the review requester."""
+        if self.pull_request is None:
+            return None
+        from openswe.github.pull_requests import PullRequest
+
+        metadata = {"billing_bucket": "system"}
+        owner, repo, number = self.pull_request.split("/")
+        try:
+            pull = await PullRequest.get(owner, repo, int(number))
+            if pull is None:
+                return metadata
+            user = (
+                await User.get(pull.author_user_id)
+                if pull.author_user_id is not None
+                else await User.for_login("github", pull.author)
+                if pull.author
+                else None
+            )
+            if user is not None:
+                metadata.update(user.billing_trace_metadata())
+        except Exception:
+            logger.warning("Could not resolve PR author for trace metadata", exc_info=True)
+        return metadata
 
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
@@ -165,7 +194,7 @@ async def dispatch_input(
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)
-    if not sender_id and cfg.auth_provider == "langsmith" and cfg.user_id:
+    if not sender_id and not cfg.github_linked and cfg.user_id:
         sender_id = f"user:{cfg.user_id}"
         sender = {"id": sender_id}
     if not sender_id and login:
@@ -312,6 +341,7 @@ def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[
     if isinstance(owner, str) and owner.startswith("user:"):
         configurable.update(
             user_id=owner.removeprefix("user:"),
+            github_linked=False,
             auth_provider="langsmith",
             repo_explicitly_none=True,
         )
@@ -340,6 +370,7 @@ def prepare_run_config(
         merged_metadata.update(metadata)
     merged_metadata.update(_slack_channel_metadata(configurable))
     merged_metadata["ls_repo_provider"] = "github"
+    merged_metadata["created_by"] = None
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
@@ -355,7 +386,7 @@ async def _run_user_metadata(
     config: LangGraphRunConfig | None, *, source: str | None = None
 ) -> dict[str, str]:
     """Resolve canonical attribution identically for durable and dashboard-started turns."""
-    metadata = {"ls_repo_provider": "github"}
+    metadata = {"ls_repo_provider": "github", "billing_bucket": "system"}
     configurable = (config or {}).get("configurable")
     if not isinstance(configurable, Mapping):
         return metadata
@@ -363,7 +394,7 @@ async def _run_user_metadata(
     if cfg.background_task_completion:
         return metadata
     try:
-        if cfg.auth_provider == "langsmith" and cfg.user_id:
+        if not cfg.github_linked and cfg.user_id:
             user = await User.get(UUID(cfg.user_id))
         elif (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
@@ -376,9 +407,15 @@ async def _run_user_metadata(
         elif cfg.user_email:
             user = await User.for_email(cfg.user_email)
         else:
+            # An automation runs as no one; only its spend is credited to its creator.
+            creator = await cfg.automation_creator()
+            if creator is not None:
+                billing = creator.billing_trace_metadata()
+                billing.pop("user_id", None)
+                metadata.update(billing)
             return metadata
         if user is not None:
-            metadata["user_id"] = str(user.id)
+            metadata.update(user.billing_trace_metadata())
             if user.email:
                 metadata["user_email"] = user.email
             if user.github_login:
@@ -398,8 +435,9 @@ async def prepare_durable_run(
 ) -> LangGraphRunConfig:
     """The config and metadata a durable run starts with, wherever it is created.
 
-    The run is attributed to the person its config names (``user_id``), and acts as them
-    (``ACTING_USER_KEY``) only when they started it: ``as_sender`` for a message they
+    Reviews are attributed to the PR author; other runs to the config's person.
+    A run acts as the config's person (``ACTING_USER_KEY``) only when they started it:
+    ``as_sender`` for a message they
     sent from the dashboard, and a channel's own run, which MDA starts as its verified
     sender. Any other run, such as a wakeup, an event match or a task message, acts as
     no one, whoever it is attributed to.
@@ -409,14 +447,23 @@ async def prepare_durable_run(
         key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
     } | recorded.model_dump(exclude_none=True)
     run_metadata.update(await _run_user_metadata(config, source=source))
-    user_id = run_metadata.get("user_id")
-    if user_id is not None and (as_sender or channel_of(run_metadata) is not None):
-        run_metadata[ACTING_USER_KEY] = user_id
+    execution_user_id = run_metadata.get("user_id")
+    if execution_user_id is not None and (as_sender or channel_of(run_metadata) is not None):
+        run_metadata[ACTING_USER_KEY] = execution_user_id
+    billing = await recorded.billing_metadata()
+    if assistant_id in _PULL_REQUEST_GRAPHS and billing is None:
+        billing = {"billing_bucket": "system"}
+    if billing is not None:
+        for key in BILLING_USER_FIELDS:
+            run_metadata.pop(key, None)
+        run_metadata.update(billing)
+    elif channel_of(run_metadata) is not None and run_metadata["billing_bucket"] != "user":
+        run_metadata["billing_bucket"] = "channel"
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
     run_config = prepare_run_config(config, run_metadata)
-    if "user_id" not in run_metadata:
+    if execution_user_id is None:
         configurable = run_config["configurable"]
         if isinstance(configurable, dict):
             configurable.pop("user_id", None)

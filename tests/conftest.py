@@ -9,18 +9,24 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import httpx
 import httpx2
 import pytest
+from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
+from openswe.dashboard.langsmith_login import LangSmithLogin
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, index, listing, proxy, runs, summary
 from openswe.threads.index import IndexedThread
 from openswe.threads.store import CommandReply, ThreadStore
 from openswe.tools import access as tool_access
+from openswe.users import User
+from openswe.users.models import Provider, UserIdentity
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
@@ -101,6 +107,89 @@ class ThreadStoreOverClient(ThreadStore):
         return CommandReply(
             response.status_code, response.content, response.headers.get("content-type")
         )
+
+
+class LangSmithUsers:
+    """Explicit test people with linked, currently authorized LangSmith accounts."""
+
+    def __init__(self) -> None:
+        self.people: dict[UUID, User] = {}
+        self.revoked: set[UUID] = set()
+        self.original_get = User.get
+        self.original_for_login = User.for_login
+        self.original_for_identity = User.for_identity
+        self.original_for_session = User.for_session
+
+    def add(self, login: str, *, user_id: UUID | None = None) -> User:
+        user = User(identities=[UserIdentity(provider="langsmith", external_id=f"ls-{login}")])
+        if user_id is not None:
+            user.id = user_id
+        if not login.startswith("user:"):
+            user.identities.append(UserIdentity(provider="github", external_id=login, login=login))
+        self.people[user.id] = user
+        return user
+
+    async def get(self, user_id: UUID) -> User | None:
+        return self.people.get(user_id) or await self.original_get(user_id)
+
+    async def for_session(self, user_id: UUID | None, login: str) -> User | None:
+        if user_id is not None and user_id in self.people:
+            return self.people[user_id]
+        user = next((user for user in self.people.values() if user.github_login == login), None)
+        return user or await self.original_for_session(user_id, login)
+
+    async def for_login(self, provider: Provider, login: str) -> User | None:
+        user = next(
+            (
+                user
+                for user in self.people.values()
+                if any(
+                    item.provider == provider and item.login == login for item in user.identities
+                )
+            ),
+            None,
+        )
+        return user or await self.original_for_login(provider, login)
+
+    async def for_identity(self, provider: Provider, external_id: str) -> User | None:
+        user = next(
+            (
+                user
+                for user in self.people.values()
+                if any(
+                    item.provider == provider and item.external_id == external_id
+                    for item in user.identities
+                )
+            ),
+            None,
+        )
+        return user or await self.original_for_identity(provider, external_id)
+
+    async def authorize_session(self, principal: DashboardPrincipal) -> str:
+        user = self.people.get(principal.user_id) if principal.user_id else None
+        if (
+            user is None
+            or user.id in self.revoked
+            or not any(
+                identity.provider == "langsmith"
+                and identity.external_id == principal.langsmith_subject
+                for identity in user.identities
+            )
+        ):
+            raise HTTPException(401, "LangSmith login expired — sign in again")
+        return "langsmith-test-token"
+
+
+@pytest.fixture
+def langsmith_users(monkeypatch: pytest.MonkeyPatch) -> LangSmithUsers:
+    """Fake only explicitly seeded people and the external LangSmith authorization check."""
+    users = LangSmithUsers()
+    monkeypatch.setattr(User, "get", users.get)
+    monkeypatch.setattr(User, "for_session", users.for_session)
+    monkeypatch.setattr(User, "for_login", users.for_login)
+    monkeypatch.setattr(User, "for_identity", users.for_identity)
+    monkeypatch.setattr(LangSmithLogin, "authorize_session", users.authorize_session)
+    return users
 
 
 class FakeUserRecords:
@@ -229,21 +318,6 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
         pytest.skip(f"{_TEST_POSTGRES_URI_SETTING} is required for PostgreSQL regressions")
     async with isolated_database(uri, monkeypatch):
         yield
-
-
-@pytest.fixture
-async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[bool]:
-    """``registry_db`` when a database is configured; otherwise the unconfigured path.
-
-    Lets tests whose code under test degrades without PostgreSQL run both ways.
-    """
-    uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
-    if not uri:
-        monkeypatch.delenv("POSTGRES_URI", raising=False)
-        yield False
-        return
-    async with isolated_database(uri, monkeypatch):
-        yield True
 
 
 @pytest.fixture
@@ -462,3 +536,11 @@ def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
     monkeypatch.setattr(event_claims, "release", claims.release)
     monkeypatch.setattr(event_claims, "held", claims.is_held)
     return claims
+
+
+@pytest.fixture(autouse=True)
+def _no_dropped_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests see every event; the ones about ``DROPPED_EVENTS`` set it themselves."""
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset())

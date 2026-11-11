@@ -530,11 +530,11 @@ async def test_a_head_change_during_planning_ends_the_scout(
     stored.head_sha = _commit(repo, {"cli.py": "print(2)\n"}, "push")
 
     operation = RunOperation(
-        name="walkthrough_describe_other",
-        arguments={"summary": "Noise"},
+        name="walkthrough_move_to_other",
+        arguments={"files": [{"path": "cli.py", "hunks": ["+1"]}]},
         state={"scout_nothing_to_plan": False},
         request_id="call-1",
-        grant=run.grant("walkthrough_describe_other"),
+        grant=run.grant("walkthrough_move_to_other"),
     )
     result = OperationResult.model_validate(
         await TokenRun.answer(
@@ -543,7 +543,7 @@ async def test_a_head_change_during_planning_ends_the_scout(
     )
     # The scout's loop ends the run before its next model call once this is set.
     assert result.state == {"scout_nothing_to_plan": True}
-    assert workspace.plan.other_summary == ""
+    assert not workspace.plan.other
     session.commit.assert_not_awaited()
 
 

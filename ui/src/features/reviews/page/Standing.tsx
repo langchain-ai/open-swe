@@ -24,9 +24,11 @@ import type {
   ReviewDetail,
   ReviewFinding,
 } from "@/lib/api"
+import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn, INHERITED_LINK } from "@/lib/utils"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -272,6 +274,7 @@ function Row({
   icon,
   label,
   children,
+  summaryAction,
   action,
   expandable,
   expanded,
@@ -280,6 +283,8 @@ function Row({
   icon: ReactNode
   label: string
   children: ReactNode
+  /** Sits right after the summary text, outside the expand toggle. */
+  summaryAction?: ReactNode
   action?: ReactNode
   expandable?: boolean
   expanded?: boolean
@@ -306,25 +311,41 @@ function Row({
       </span>
     </>
   )
+  const main = expandable ? (
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-labelledby={`${labelId} ${summaryId}`}
+      type="button"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className={cn(
+        "-my-space-1 h-auto min-w-0 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent",
+        !summaryAction && "flex-1"
+      )}
+    >
+      {body}
+    </Button>
+  ) : (
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-space-3",
+        !summaryAction && "flex-1"
+      )}
+    >
+      {body}
+    </div>
+  )
   return (
     <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
-      {expandable ? (
-        <Button
-          color="secondary"
-          variant="plain"
-          size="sm"
-          aria-labelledby={`${labelId} ${summaryId}`}
-          type="button"
-          aria-expanded={expanded}
-          onClick={onToggle}
-          className="-my-space-1 h-auto min-w-0 flex-1 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
-        >
-          {body}
-        </Button>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-space-3">
-          {body}
+      {summaryAction ? (
+        <div className="flex min-w-0 flex-1 items-center gap-space-1">
+          {main}
+          <span className="flex shrink-0 items-center">{summaryAction}</span>
         </div>
+      ) : (
+        main
       )}
       {action && (
         <div className="flex shrink-0 items-center gap-space-2 empty:hidden">
@@ -680,7 +701,8 @@ function BranchRow({
             />
           }
         >
-          Conflicts with {detail.pr.base_ref} must be resolved
+          Conflicts with <BranchLink pr={pr} branch={detail.pr.base_ref} /> must
+          be resolved
         </Row>
       )}
       {status.mergeState === "behind" && canUpdateBranch(status) && (
@@ -691,7 +713,7 @@ function BranchRow({
             <UpdatePullRequestBranch pr={status} onUpdated={refresh.status} />
           }
         >
-          Behind {detail.pr.base_ref}
+          Behind <BranchLink pr={pr} branch={detail.pr.base_ref} />
         </Row>
       )}
       {status.draft && (
@@ -735,12 +757,30 @@ function MergeRow({
         />
       }
     >
-      {merged
-        ? "Merging…"
-        : status.mergeState === "unstable"
-          ? `Into ${baseRef}, though some checks aren't passing`
-          : `Into ${baseRef}`}
+      {merged ? (
+        "Merging…"
+      ) : (
+        <>
+          Into <BranchLink pr={pr} branch={baseRef} />
+          {status.mergeState === "unstable" &&
+            ", though some checks aren't passing"}
+        </>
+      )}
     </Row>
+  )
+}
+
+function BranchLink({ pr, branch }: { pr: PullRequestRef; branch: string }) {
+  return (
+    <MacawLink
+      variant="xs"
+      href={githubUrls.branch(pr, branch)}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(INHERITED_LINK, subtleLink)}
+    >
+      {branch}
+    </MacawLink>
   )
 }
 
@@ -793,7 +833,7 @@ function OpenSweRow({
                 : verdict.decision === "would_approve"
                   ? "would approve"
                   : verdict.decision === "would_approve_conditionally"
-                    ? "would approve subject to human approval"
+                    ? "needs approval of one change"
                     : "needs human review"
               : null,
             bugs || flags
@@ -812,6 +852,19 @@ function OpenSweRow({
           running ? <Spinner size="xs" /> : <AgentMark className="size-4" />
         }
         label="Robin"
+        summaryAction={
+          !running && detail.status === "error" && detail.review_error ? (
+            <CopyErrorButton
+              error={detail.review_error}
+              details={{
+                "Pull request": `${pr.owner}/${pr.repo}#${pr.number}`,
+                "Head commit": detail.head_sha,
+                "Review thread": detail.thread_id,
+                Trace: detail.trace_url,
+              }}
+            />
+          ) : undefined
+        }
         expandable={canExpand}
         expanded={expanded}
         onToggle={() => setChosen(!expanded)}

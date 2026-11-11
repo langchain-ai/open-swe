@@ -7,7 +7,6 @@ is the credential; ``langsmith_access_token`` is the entry point for callers.
 from fastapi import HTTPException
 
 from openswe.config import ENV
-from openswe.database import postgres
 
 
 class LangSmithOAuthError(Exception):
@@ -22,12 +21,8 @@ def langsmith_issuer() -> str:
 
 
 def langsmith_oauth_configured() -> bool:
-    """Grants live in PostgreSQL, so LangSmith access needs it alongside the client."""
-    return (
-        ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set()
-        and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
-        and postgres.configured()
-    )
+    """Whether the LangSmith OAuth client credentials are set."""
+    return ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set() and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
 
 
 async def langsmith_access_token(login: str) -> str | None:

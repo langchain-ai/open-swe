@@ -69,16 +69,15 @@ const {
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
+const { DesktopEnvironments } = require("./desktop-environments.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
-  desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
-  desktopDeepLinkUrl,
   resolveAppRuntime,
   resolveBackendUrl,
   connectExchangeUrl,
@@ -134,7 +133,29 @@ let backendUrl = null;
 // one of its alternate environments, which lasts until the app restarts.
 let primaryBackendUrl = null;
 let alternativeEnvironments = [];
-let desktopUi: InstanceType<typeof DesktopUi> | null = null;
+const desktopEnvironments = new DesktopEnvironments();
+const desktopUi = {
+  instance: null as InstanceType<typeof DesktopUi> | null,
+  current() {
+    if (!backendUrl) throw new Error("Backend is not configured");
+    if (this.instance?.backendUrl !== backendUrl) {
+      this.instance = new DesktopUi(
+        backendUrl,
+        fetch,
+        path.join(app.getPath("userData"), "ui-cache"),
+        (filename: string) => net.fetch(pathToFileURL(filename).toString()),
+        process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
+        () =>
+          void dialog.showMessageBox({
+            type: "warning",
+            message: `${appRuntime.name} needs an update`,
+            detail: `Your backend has a newer UI than this version of ${appRuntime.name} can run. You are still on the previous UI; update the desktop app to get the new one.`,
+          }),
+      );
+    }
+    return this.instance;
+  },
+};
 let mainWindow = null;
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
@@ -641,6 +662,14 @@ function configureDesktopIpc() {
     target.search = source.search;
     target.hash = source.hash;
     clipboard.writeText(target.toString());
+  });
+  ipcMain.handle("desktop:open-in-browser", async (event, path) => {
+    requireTrustedDesktopIpc(event);
+    if (!backendUrl) throw new Error("Robin is not connected to a backend");
+    if (typeof path !== "string") throw new Error("Invalid path");
+    await shell.openExternal(
+      await desktopEnvironments.dashboardPageUrl(backendUrl, path),
+    );
   });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
@@ -1158,13 +1187,11 @@ async function loadAlternativeEnvironments() {
   if (!url) return;
   let environments = [];
   try {
-    const response = await fetch(desktopEnvironmentsUrl(url), {
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (response.ok)
-      environments = parseDesktopEnvironments(await response.json());
-  } catch (error) {
-    console.warn("Could not read the alternate environments", error);
+    environments = parseDesktopEnvironments(
+      await desktopEnvironments.response(url),
+    );
+  } catch {
+    // Logged where the request fails.
   }
   if (url !== primaryBackendUrl) return;
   alternativeEnvironments = environments;
@@ -1175,6 +1202,7 @@ async function loadAlternativeEnvironments() {
 async function connectToBackend(url) {
   const previousUrl = backendUrl;
   backendUrl = url;
+  void desktopEnvironments.response(url).catch(() => {});
   if (previousUrl && previousUrl !== url)
     await session.defaultSession.clearStorageData({ origin: APP_URL });
   createMenu();
@@ -1348,28 +1376,11 @@ async function clearBackendCookies(url) {
 async function serveDesktopUi(request: Request) {
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
-  const url = new URL(request.url);
-  if (url.pathname.startsWith("/dashboard/api"))
+  if (new URL(request.url).pathname.startsWith("/dashboard/api"))
     return proxyBackendRequest(request);
-  if (!["GET", "HEAD"].includes(request.method)) {
+  if (!["GET", "HEAD"].includes(request.method))
     return new Response("Method not allowed", { status: 405 });
-  }
-  if (desktopUi?.backendUrl !== backendUrl) {
-    desktopUi = new DesktopUi(
-      backendUrl,
-      fetch,
-      path.join(app.getPath("userData"), "ui-cache"),
-      (filename: string) => net.fetch(pathToFileURL(filename).toString()),
-      process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
-      () =>
-        void dialog.showMessageBox({
-          type: "warning",
-          message: `${appRuntime.name} needs an update`,
-          detail: `Your backend has a newer UI than this version of ${appRuntime.name} can run. You are still on the previous UI; update the desktop app to get the new one.`,
-        }),
-    );
-  }
-  return desktopUi.serve(request);
+  return desktopUi.current().serve(request);
 }
 
 const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
@@ -1684,26 +1695,78 @@ async function completeExternalLogin(verifier, code) {
   await loadApp(window);
 }
 
-function handleNavigation(window, event, url) {
+async function handleNavigation(window, event, url) {
+  if (desktopLinks.slackUrl(url)) {
+    event.preventDefault();
+    void desktopLinks
+      .openSlack(url)
+      .catch((error: unknown) =>
+        dialog.showErrorBox(
+          `${appRuntime.name} could not open Slack`,
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    return;
+  }
   if (isAppLoginUrl(url)) {
     event.preventDefault();
     void startExternalLogin(url);
     return;
   }
-  const targetUrl = backendUrl
-    ? localCallbackUrl(url, backendUrl) || desktopDeepLinkUrl(url, backendUrl)
-    : null;
+  if (isAppUrl(url)) return;
+  event.preventDefault();
+  const navigationBackend = backendUrl;
+  const targetUrl =
+    (navigationBackend && localCallbackUrl(url, navigationBackend)) ||
+    (await desktopLinks.appUrl(url, navigationBackend));
+  if (window.isDestroyed() || backendUrl !== navigationBackend) return;
   if (targetUrl) {
-    event.preventDefault();
     void window.loadURL(targetUrl);
     return;
   }
-  if (isAppUrl(url)) return;
-  event.preventDefault();
-  const target = new URL(url);
-  if (["http:", "https:", "mailto:"].includes(target.protocol)) {
+  if (
+    URL.canParse(url) &&
+    ["http:", "https:", "mailto:"].includes(new URL(url).protocol)
+  ) {
     void shell.openExternal(url);
   }
+}
+
+function showEditContextMenu(window, params) {
+  const { editFlags, isEditable, misspelledWord, dictionarySuggestions } =
+    params;
+  const hasSelection = params.selectionText.trim().length > 0;
+  if (!isEditable && !hasSelection) return;
+  const template = [];
+  if (isEditable && misspelledWord) {
+    for (const suggestion of dictionarySuggestions)
+      template.push({
+        label: suggestion,
+        click: () => window.webContents.replaceMisspelling(suggestion),
+      });
+    if (!dictionarySuggestions.length)
+      template.push({ label: "No suggestions", enabled: false });
+    template.push(
+      {
+        label: "Add to Dictionary",
+        click: () =>
+          window.webContents.session.addWordToSpellCheckerDictionary(
+            misspelledWord,
+          ),
+      },
+      { type: "separator" },
+    );
+  }
+  if (isEditable)
+    template.push(
+      { role: "cut", enabled: editFlags.canCut },
+      { role: "copy", enabled: editFlags.canCopy },
+      { role: "paste", enabled: editFlags.canPaste },
+      { type: "separator" },
+      { role: "selectAll", enabled: editFlags.canSelectAll },
+    );
+  else template.push({ role: "copy", enabled: editFlags.canCopy });
+  Menu.buildFromTemplate(template).popup({ window });
 }
 
 function createWindow(initialUrl = APP_URL) {
@@ -1737,7 +1800,11 @@ function createWindow(initialUrl = APP_URL) {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    handleNavigation(window, { preventDefault() {} }, url);
+    const target =
+      backendUrl && isAppUrl(url) && !isAppLoginUrl(url)
+        ? backendRequestUrl(backendUrl, url) + new URL(url).hash
+        : url;
+    void handleNavigation(window, { preventDefault() {} }, target);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) =>
@@ -1760,6 +1827,9 @@ function createWindow(initialUrl = APP_URL) {
   );
   window.webContents.on("console-message", (_event, details) =>
     rendererConsole.push(normalizeConsoleMessage(details)),
+  );
+  window.webContents.on("context-menu", (_event, params) =>
+    showEditContextMenu(window, params),
   );
   mainWindow = window;
   void loadApp(window, initialUrl);
@@ -1910,8 +1980,14 @@ function configurePermissions() {
 
 const desktopLinks = new DesktopLinks({
   backendUrl: () => backendUrl,
+  dashboardOrigins: (url: string) => desktopEnvironments.dashboardOrigins(url),
+  hasPage: (pathname: string, url: string) =>
+    url === backendUrl
+      ? desktopUi.current().hasPage(pathname)
+      : Promise.resolve(false),
   openApp: openDesktopLink,
   openExternal: (url: string) => shell.openExternal(url),
+  fetchBackend: backendFetch,
 });
 
 function openDesktopLink(target: string) {

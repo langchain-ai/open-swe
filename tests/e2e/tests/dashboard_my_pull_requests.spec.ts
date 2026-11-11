@@ -149,7 +149,7 @@ test.describe("my pull requests", () => {
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
   });
 
-  test("queues requested reviews before own drafts and advances after success", async ({
+  test("queues requested reviews before own drafts and keeps marked-ready PRs open", async ({
     page,
   }) => {
     const files = {
@@ -213,9 +213,22 @@ test.describe("my pull requests", () => {
       .click();
     await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
     await expect.poll(() => changes.evaluate((node) => node.scrollTop)).toBe(0);
+    const readyResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/dashboard/api/repos/fakeorg/demo/pulls/${mine.number}/action` &&
+        response.request().method() === "POST",
+    );
     await page
-      .getByRole("button", { name: "Mark ready & finish", exact: true })
+      .locator("header")
+      .getByRole("button", { name: "Mark ready", exact: true })
       .click();
+    expect((await readyResponse).ok()).toBeTruthy();
+    await expect(
+      page.getByRole("button", { name: "Finish", exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
+    await page.getByRole("button", { name: "Finish", exact: true }).click();
     await expect(page).toHaveURL(/tab=to-review/);
     await expect(
       page.getByText("Nothing to review. You’re all caught up."),

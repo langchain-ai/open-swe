@@ -1,20 +1,12 @@
 import { BrainIcon } from "@phosphor-icons/react/dist/ssr/Brain"
-import { useState } from "react"
 
-import { WorkTail } from "../renderItems"
-import { WorkEntryLine } from "./WorkEntryRow"
-import { describeWorkEntry } from "./workEntry"
-import type { WorkTailEntry } from "../renderItems"
-import { cn } from "@/lib/utils"
+import type { WorkTail, WorkTailEntry } from "../renderItems"
+import { WorkEntryRow } from "./WorkEntryRow"
+import { ShellEntryBody, JsonInputEntryBody } from "./entryBodies"
+import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
+import { DiffView } from "@/features/agents/components/chat/DiffView"
 
-/** One text line (`leading-5`); every tail entry is a whole number of them. */
-const LINE_HEIGHT_REM = 1.25
-
-/**
- * A folded live run's latest thoughts and tool calls, never taller than
- * `WorkTail.MAX_LINES`. Each new entry grows in at the bottom and pushes the
- * oldest up under a fade at the top edge; the fold row opens the whole log.
- */
+/** The current thought and a collapsed disclosure for the latest tool call. */
 export function LiveWorkTail({
   tail,
   repoPath,
@@ -22,35 +14,12 @@ export function LiveWorkTail({
   tail: WorkTail
   repoPath?: string
 }) {
-  const shown = tail.previous ? [tail.previous, ...tail.entries] : tail.entries
-  // Entries already there when the tail mounts (a reload mid-run, or folding
-  // the log again) show at once; only entries that arrive afterwards animate.
-  const [settledKeys] = useState(() => new Set(shown.map((entry) => entry.key)))
-  if (shown.length === 0) return null
+  if (tail.entries.length === 0) return null
 
   return (
-    <div
-      aria-label="Recent activity"
-      role="group"
-      className={cn(
-        "flex flex-col justify-end overflow-hidden px-0.5",
-        tail.previous &&
-          "[mask-image:linear-gradient(to_bottom,transparent,black_2.5rem)]"
-      )}
-      style={{ maxHeight: `${WorkTail.MAX_LINES * LINE_HEIGHT_REM}rem` }}
-    >
-      {shown.map((entry) => (
-        <div
-          key={entry.key}
-          className={cn(
-            "grid shrink-0 grid-rows-[1fr]",
-            !settledKeys.has(entry.key) && "motion-safe:animate-work-tail-enter"
-          )}
-        >
-          <div className="min-h-0 overflow-hidden">
-            <TailEntry entry={entry} repoPath={repoPath} />
-          </div>
-        </div>
+    <div aria-label="Recent activity" role="group" className="space-y-space-1">
+      {tail.entries.map((entry) => (
+        <TailEntry key={entry.key} entry={entry} repoPath={repoPath} />
       ))}
     </div>
   )
@@ -64,7 +33,32 @@ function TailEntry({
   repoPath?: string
 }) {
   if (entry.kind === "tool") {
-    return <WorkEntryLine entry={describeWorkEntry(entry.chunk, repoPath)} />
+    const view = describeWorkEntry(entry.chunk, repoPath)
+    const diff = latestDiff(entry.chunk)
+    const Body =
+      entry.chunk.toolKind === "execute" ? ShellEntryBody : JsonInputEntryBody
+    return (
+      <WorkEntryRow
+        entry={view}
+        timestamp={entry.chunk.timestamp}
+        body={
+          diff && entry.chunk.status !== "error" ? (
+            <DiffView diffData={diff} snippet />
+          ) : hasToolCallDetail(
+              entry.chunk,
+              Object.keys(entry.chunk.input ?? {}).length > 0
+            ) ? (
+            ({ loadedText, loadError }) => (
+              <Body
+                chunk={entry.chunk}
+                loadedText={loadedText}
+                loadError={loadError}
+              />
+            )
+          ) : undefined
+        }
+      />
+    )
   }
   return (
     <div className="flex gap-space-2 select-none">

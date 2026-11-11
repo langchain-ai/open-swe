@@ -285,12 +285,6 @@ async def walkthrough_move_to_other(
 
 
 @_one_at_a_time
-async def walkthrough_describe_other(summary: str) -> dict[str, Any]:
-    """Implement the `walkthrough_describe_other` tool."""
-    return await _plan(lambda ctx: ctx.workspace.describe_other(summary))
-
-
-@_one_at_a_time
 async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str, Any]:
     """Implement the `walkthrough_end` tool."""
     try:
@@ -351,7 +345,6 @@ def walkthrough_tools(mode: GuideMode) -> list[Callable[..., Awaitable[Any]]]:
         walkthrough_plan_chunk,
         walkthrough_split_hunks,
         walkthrough_move_to_other,
-        walkthrough_describe_other,
         walkthrough_end,
         *closing,
     ]

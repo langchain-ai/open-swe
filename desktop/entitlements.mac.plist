@@ -8,6 +8,7 @@
   <string>H253X88X9F</string>
   <key>com.apple.developer.associated-domains</key>
   <array>
+    <string>applinks:robin.langchain.dev</string>
     <string>applinks:openswe.langchain.dev</string>
   </array>
   <key>com.apple.security.cs.allow-jit</key>

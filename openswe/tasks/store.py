@@ -1,13 +1,10 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final, Literal
+from typing import Literal
 from uuid import UUID, uuid7
 
-from pydantic import JsonValue
-from runtime_api.loop import GoalState
-from sqlalchemy import ForeignKey, Text, func, or_, select, text, update
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import ForeignKey, Text, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,11 +13,6 @@ from openswe.database.orm import NOW, Base
 from openswe.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
-type UserWaitReason = Literal["blocked", "ready"]
-type PauseReason = Literal["stopped", "requested", "no_progress", "failing_commands", "error"]
-type GoalReason = UserWaitReason | PauseReason
-type GoalCheck = Literal["due", "asked"]
-_PERSON_PAUSES: Final = ("stopped", "requested")
 
 
 class WorkerAlreadyLaunchedError(PermissionError):
@@ -36,12 +28,6 @@ class Task(Base):
     """The work a person hands over: its coordinating thread, and any workers it
     delegates to. Every agent thread coordinates one from its first run; ``delegated``
     says whether it went on to delegate.
-
-    In Goal mode the task keeps where its work stands (``goal_state``): working,
-    resting on what will wake it (``goal_waits``), waiting on its person for
-    ``goal_ask``, paused, or complete, with why (``goal_reason``) and who moved it last.
-    An explicitly set goal or one whose work edited files owes a completion check
-    (``goal_check``) before it completes.
     """
 
     __tablename__ = "task"
@@ -52,16 +38,6 @@ class Task(Base):
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
-    goal_objective: Mapped[str | None] = mapped_column(Text, default=None)
-    goal_state: Mapped[GoalState | None] = mapped_column(Text, default=None)
-    goal_reason: Mapped[GoalReason | None] = mapped_column(Text, default=None)
-    goal_ask: Mapped[str | None] = mapped_column(Text, default=None)
-    goal_waits: Mapped[list[dict[str, JsonValue]] | None] = mapped_column(JSONB, default=None)
-    goal_check: Mapped[GoalCheck | None] = mapped_column(Text, default=None)
-    goal_updated_at: Mapped[datetime | None] = mapped_column(default=None)
-    goal_updated_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
 
     def require_coordinator(self) -> str:
         if self.coordinator_thread_id is None:
@@ -138,96 +114,9 @@ class Task(Base):
     @classmethod
     async def of_thread(cls, thread_id: str) -> Task | None:
         """The task ``thread_id`` works on, as coordinator or worker."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             membership = await session.get(TaskMembership, thread_id)
             return None if membership is None else await session.get(cls, membership.task_id)
-
-    @classmethod
-    async def move_goal(
-        cls,
-        task_id: UUID,
-        *,
-        state: GoalState | None,
-        reason: GoalReason | None = None,
-        ask: str | None = None,
-        objective: str | None = None,
-        check: GoalCheck | None = None,
-        waits: list[dict[str, JsonValue]] | None = None,
-        by: UUID | None = None,
-        over_stop: bool = True,
-        from_state: GoalState | None = None,
-        checked: bool = False,
-    ) -> bool:
-        """Set the task's goal, or clear it with no ``state``; whether it moved. Its
-        ``objective`` stays unless given, and goes with the goal. A new objective starts
-        with ``check``; completing or clearing the goal drops its check.
-
-        Without ``over_stop`` a goal its person paused stays paused: only they resume it.
-        With ``checked`` it moves only while no completion check is due.
-        """
-        resets: dict[str, str | None] = {}
-        if objective is not None:
-            resets["goal_objective"] = objective
-            resets["goal_check"] = check
-        if state is None:
-            resets["goal_objective"] = None
-        if state in {None, "complete"}:
-            resets["goal_check"] = None
-        statement = (
-            update(cls)
-            .where(cls.id == task_id)
-            .values(
-                **resets,
-                goal_state=state,
-                goal_reason=reason,
-                goal_ask=ask,
-                goal_waits=waits,
-                goal_updated_at=None if state is None else func.clock_timestamp(),
-                goal_updated_by=by,
-            )
-        )
-        if from_state is not None:
-            statement = statement.where(cls.goal_state == from_state)
-        if checked:
-            statement = statement.where(cls.goal_check.is_distinct_from("due"))
-        if not over_stop:
-            statement = statement.where(
-                (cls.goal_state.is_distinct_from("paused"))
-                | (cls.goal_reason.not_in(_PERSON_PAUSES))
-                | cls.goal_reason.is_(None)
-            )
-        async with postgres.session() as session:
-            return await session.scalar(statement.returning(cls.id)) is not None
-
-    @classmethod
-    async def move_goal_check(
-        cls,
-        coordinator_thread_id: str,
-        *,
-        to: GoalCheck,
-        from_checks: tuple[GoalCheck | None, ...],
-    ) -> bool:
-        """Move the completion check of the goal this thread coordinates from one of
-        ``from_checks``, while the goal is underway; whether it moved."""
-        statement = (
-            update(cls)
-            .where(
-                cls.coordinator_thread_id == coordinator_thread_id,
-                cls.goal_state.is_not(None),
-                cls.goal_state != "complete",
-                or_(
-                    *(
-                        cls.goal_check.is_(None) if check is None else cls.goal_check == check
-                        for check in from_checks
-                    )
-                ),
-            )
-            .values(goal_check=to)
-        )
-        async with postgres.session() as session:
-            return await session.scalar(statement.returning(cls.id)) is not None
 
     @classmethod
     async def for_thread(cls, thread_id: str, *, title: str, workspace: str) -> Task:
@@ -280,8 +169,6 @@ class TaskMembership(Base):
 
     @classmethod
     async def context_for_thread(cls, thread_id: str) -> TaskContext | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             membership = await session.get(cls, thread_id)
             if membership is None:
@@ -322,8 +209,6 @@ class TaskDelegation(Base):
 
     @classmethod
     async def get(cls, worker_thread_id: str) -> TaskDelegation | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.get(cls, worker_thread_id)
 
@@ -389,7 +274,7 @@ async def sidebar_memberships(
     thread_ids: Sequence[str], *, workers_of: bool = False
 ) -> dict[str, SidebarTaskMembership]:
     """Read authoritative task relationships in batches, without thread metadata."""
-    if not thread_ids or not postgres.configured():
+    if not thread_ids:
         return {}
     memberships: dict[str, SidebarTaskMembership] = {}
     async with postgres.session() as session:

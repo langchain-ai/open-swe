@@ -8,6 +8,7 @@ import {
   useScopedSettings,
   type SettingsScope,
 } from "@/features/settings/lib/settingsScope"
+import { ReviewAppsSettings, ReviewBrowserSettings } from "./ReviewAppsSettings"
 import { TierRow } from "./WorkspaceSettingsSections"
 
 /** Review guidelines and toggles at one tier: the instance, or one workspace's overrides. */
@@ -132,6 +133,11 @@ export function ReviewSettings({
           />
         </div>
       </SettingsSection>
+
+      <ReviewAppsSettings settings={settings} editable={editable} />
+      {!scoped && (
+        <ReviewBrowserSettings settings={settings} editable={editable} />
+      )}
 
       {!canEdit && (
         <p className="text-xs text-secondary">

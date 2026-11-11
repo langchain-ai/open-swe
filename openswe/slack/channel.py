@@ -40,7 +40,7 @@ from runtime_api.slack import (
 )
 
 from openswe import event_claims
-from openswe.dashboard.oauth import build_settings_url
+from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
@@ -48,6 +48,7 @@ from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
+from openswe.slack.ask_messages import AskChannelMessage
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, web_opening
 from openswe.slack.breakout_links import notify_web_breakout
 from openswe.slack.client import SlackThreadMappingError
@@ -58,6 +59,7 @@ from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
 from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
+from openswe.slack.tools.search import SlackSearchGrant
 from openswe.slack.webhook import SlackTurnRead
 from openswe.threads import index
 from openswe.threads.router import channel_run_metadata, channel_run_starting
@@ -151,6 +153,16 @@ async def slack_message_facts(
                 user_id=message.user_id,
                 explicit_mention=False,
             )
+    if (
+        (kitchen or solo_followup)
+        and not (message.explicit_mention or message.bot_id)
+        and not await AskChannelMessage.for_robin(
+            channel_id=message.channel_id,
+            thread_ts=message.thread_ts,
+            message_ts=message.message_ts,
+        )
+    ):
+        kitchen = solo_followup = False
     return SlackMessageFacts(
         dm=dm,
         code_channel=code_channel,
@@ -208,6 +220,9 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     """
     webhook_id = call.request.headers.get("webhook-id", "")
     fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
+    if turn.action_token:
+        # Kept before the claim: the event that starts the turn may be the one without it.
+        await SlackSearchGrant.keep(turn.channel_id, turn.message_ts, turn.action_token)
     # An edit keeps its message's timestamp, and a message may be edited more than once.
     if turn.kind != "edit" and not await _claim_once(
         (_TURN_SCOPE, _TURN_TTL),
@@ -219,6 +234,9 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         return SlackTurnStarted()
     channel_context = await common.resolve_slack_channel_context(turn.channel_id)
     key_ts = CONCIERGE_TS if turn.concierge else turn.thread_ts
+    declined = await _account_gate(turn, webhook_id, fields)
+    if declined is not None:
+        return declined
     owner_login = None if turn.bot_id else await service.slack_login(turn.user_id)
     parsed = ParsedSlackMessage.parse(
         turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
@@ -248,9 +266,6 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         _no_run(f"{turn.kind} outside an MDA conversation", **fields)
         return SlackTurnStarted()
     else:
-        declined = await _account_gate(turn, webhook_id, fields)
-        if declined is not None:
-            return declined
         conversation = await _claim(turn, owner_login)
     if turn.concierge:
         # Each Slack thread of a concierge DM joins the DM's one conversation.
@@ -267,6 +282,7 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         user_id=turn.user_id,
         text=turn.text,
         attachments=cast(list[dict[str, Any]], turn.attachments),
+        action_token=turn.action_token,
         bot_user_id=common.SLACK_BOT_USER_ID,
         thread_id=conversation,
         held_thread_id=branch_of,
@@ -376,7 +392,7 @@ async def _account_gate(
     return SlackTurnStarted(
         declined=SlackTurnDeclined(
             reason="sign_in_again" if needed.reason == "revoked" else "sign_in",
-            settings_url=build_settings_url(),
+            settings_url=LangSmithLogin.slack_onboarding_url(),
         )
     )
 
@@ -409,7 +425,12 @@ async def _branches(source: object, turn: StartSlackTurn, owner_login: str | Non
     return (
         source is not None
         and str(source) == str(turn.thread_id)
-        and await forks.branches_from(str(source), login=owner_login)
+        and await forks.branches_from(
+            str(source),
+            login=await service.slack_login(turn.user_id, thread_id=str(source))
+            if not turn.bot_id
+            else owner_login,
+        )
     )
 
 

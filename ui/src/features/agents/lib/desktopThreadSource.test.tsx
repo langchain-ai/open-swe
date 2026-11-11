@@ -11,14 +11,14 @@ afterEach(() => cleanup())
 function SourceControl({ label }: { label: string }) {
   const [source, setSource] = useDesktopThreadSource()
   return (
-    <button type="button" onClick={() => setSource("cloud")}>
+    <button type="button" onClick={() => setSource("local")}>
       {label}: {source}
     </button>
   )
 }
 
 describe("useDesktopThreadSource", () => {
-  it("defaults to local and synchronizes mounted consumers", () => {
+  it("defaults to cloud and synchronizes mounted consumers", () => {
     render(
       <>
         <SourceControl label="First" />
@@ -26,12 +26,12 @@ describe("useDesktopThreadSource", () => {
       </>
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "First: local" }))
+    fireEvent.click(screen.getByRole("button", { name: "First: cloud" }))
 
-    expect(screen.getByRole("button", { name: "First: cloud" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Second: cloud" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "First: local" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Second: local" })).toBeTruthy()
     expect(
       window.localStorage.getItem("open-swe.agents.desktop-thread-source")
-    ).toBe("cloud")
+    ).toBe("local")
   })
 })

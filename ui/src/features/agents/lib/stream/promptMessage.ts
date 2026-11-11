@@ -4,7 +4,9 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 
 export function imageBlocks(images: ReadonlyArray<ImageChunk> = []) {
   return images.map((image) => ({
-    type: "image" as const,
+    type: image.mimeType.startsWith("image/")
+      ? ("image" as const)
+      : ("file" as const),
     base64: image.base64,
     mime_type: image.mimeType,
     ...(image.fileName ? { file_name: image.fileName } : {}),

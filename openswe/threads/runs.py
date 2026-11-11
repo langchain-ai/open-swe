@@ -34,7 +34,6 @@ from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.dashboard.workspace_settings import (
     get_workspace_settings,
 )
-from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
     TURN_ATTRIBUTION_FIELDS,
@@ -65,6 +64,7 @@ from openswe.slack.client import (
     post_slack_thread_reply,
     update_slack_message,
 )
+from openswe.slack.staged_files import DASHBOARD_FILE_DIR, SlackFileEntry, queue_slack_files
 from openswe.slack.user_options import SlackUserOption
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
@@ -85,6 +85,7 @@ from openswe.threads.summary import (
     _parse_repo,
     chats_beside_plugin,
     repo_config_from_metadata,
+    thread_is_promptable,
     thread_source,
 )
 from openswe.transcript.attachments import PendingAttachment
@@ -132,7 +133,17 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "events",
 )
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_SUPPORTED_FILE_MIME_TYPES = frozenset(
+    {
+        "application/pdf",
+        "text/plain",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
 _MAX_DASHBOARD_IMAGES = 5
+_MAX_DASHBOARD_FILES = 10
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
     "id": "system:dashboard-handoff",
@@ -157,6 +168,58 @@ class DashboardImageBody(BaseModel):
     base64: str = Field(min_length=1)
     mime_type: str = Field(alias="mimeType", min_length=1)
     file_name: str | None = Field(default=None, alias="fileName")
+    attachment_id: uuid.UUID = Field(default_factory=uuid.uuid7)
+
+    @classmethod
+    def files_in(cls, content: object) -> list[DashboardImageBody]:
+        """The non-image file blocks of a message's content."""
+        if not isinstance(content, list):
+            return []
+        files: list[DashboardImageBody] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "file":
+                continue
+            data, mime, name = block.get("base64"), block.get("mime_type"), block.get("file_name")
+            if not isinstance(data, str) or not isinstance(mime, str):
+                raise HTTPException(422, "invalid file data")
+            files.append(
+                cls(
+                    kind="file",
+                    base64=data,
+                    mimeType=mime,
+                    fileName=name if isinstance(name, str) else None,
+                )
+            )
+        if len(files) > _MAX_DASHBOARD_FILES:
+            raise HTTPException(422, f"at most {_MAX_DASHBOARD_FILES} files are supported")
+        return files
+
+    @classmethod
+    async def stage_files(cls, thread_id: str, params: dict[str, Any]) -> list[DashboardImageBody]:
+        """Queue a command's files for the thread's sandbox and leave a note in their place."""
+        content = _command_message_content(params)
+        files = cls.files_in(content)
+        if not files or not isinstance(content, list):
+            return []
+        message_id = _command_message_id(params)
+        for position, file in enumerate(files):
+            _decode_dashboard_image(file)
+            if message_id:
+                # A retried run.start reuses the message id; matching ids keep its queue on the stored bytes.
+                file.attachment_id = uuid.uuid5(
+                    uuid.NAMESPACE_URL, f"{thread_id}/{message_id}/{position}"
+                )
+        staged = await queue_slack_files(
+            thread_id,
+            [SlackFileEntry(name=f.file_name or "", attachment_id=f.attachment_id) for f in files],
+            directory=DASHBOARD_FILE_DIR,
+        )
+        note = prompt("threads/dashboard-files", paths=[file.sandbox_path for file in staged])
+        params["input"]["messages"][-1]["content"] = [
+            *(b for b in content if not (isinstance(b, dict) and b.get("type") == "file")),
+            {"type": "text", "text": note},
+        ]
+        return files
 
 
 class ThreadRenameBody(BaseModel):
@@ -205,7 +268,10 @@ def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tu
 
 
 def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
-    if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+    if image.kind == "file":
+        if image.mime_type not in _SUPPORTED_FILE_MIME_TYPES:
+            raise HTTPException(422, f"unsupported file type: {image.mime_type}")
+    elif image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
         raise HTTPException(422, f"unsupported image type: {image.mime_type}")
     try:
         data = base64.b64decode(image.base64, validate=True)
@@ -355,11 +421,7 @@ async def create_dashboard_thread_record(
     if extra_metadata:
         metadata.update(extra_metadata)
 
-    # A deployment without PostgreSQL has nowhere to keep a transcript, so the
-    # thread is not stamped as one and keeps reading LangGraph state.
-    transcribed = postgres.configured()
-    if transcribed:
-        metadata["transcript"] = TRANSCRIPT_VERSION
+    metadata["transcript"] = TRANSCRIPT_VERSION
 
     client = langgraph_client()
     await create_thread(
@@ -370,8 +432,6 @@ async def create_dashboard_thread_record(
         if_exists=if_exists,
     )
     thread = await client.threads.get(thread_id)
-    if not transcribed:
-        return as_thread_dict(thread)
     await append(
         thread_id,
         [
@@ -419,13 +479,35 @@ async def _build_dashboard_configurable(
         **(
             {"github_login": login}
             if ThreadIdentity(login).github_login
-            else {"user_id": str(ThreadIdentity(login).user_id), "auth_provider": "langsmith"}
+            else {
+                "user_id": str(ThreadIdentity(login).user_id),
+                "github_linked": False,
+                "auth_provider": "langsmith",
+            }
         ),
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
+    if ThreadIdentity(login).github_login:
+        from openswe.dashboard.profiles import get_valid_access_token
+
+        try:
+            github_token = await get_valid_access_token(login)
+        except Exception:
+            logger.warning(
+                "GitHub token unavailable; continuing without repository access", exc_info=True
+            )
+            github_token = None
+        if not github_token:
+            user = await ThreadIdentity(login).user()
+            if user is None:
+                raise HTTPException(401, "Sign in with LangSmith to use Robin")
+            configurable.pop("github_login", None)
+            configurable.update(user_id=str(user.id), github_linked=False)
     repo_config = repo_config_from_metadata(metadata)
-    if repo_config:
+    if configurable.get("github_linked") is False:
+        configurable["repo_explicitly_none"] = True
+    elif repo_config:
         configurable["repo"] = repo_config
     elif metadata.get("repo_explicitly_none") is True:
         configurable["repo_explicitly_none"] = True
@@ -486,6 +568,11 @@ async def create_dashboard_session(
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
         repo = profile.repository(workspace)
+    if body.repo is None and identity.github_login:
+        from openswe.webhooks.common import account_link_reason
+
+        if await account_link_reason(identity.github_login) is not None:
+            repo = None
     repo_config = _parse_repo(repo) or {}
     if repo:
         if not repo_config:
@@ -721,7 +808,7 @@ def _transcript_attachments(
     metadata: list[MessageAttachment] = []
     pending: list[PendingAttachment] = []
     for position, image in enumerate(images):
-        attachment_id = uuid.uuid7()
+        attachment_id = image.attachment_id
         pending.append(
             PendingAttachment(
                 attachment_id=attachment_id,
@@ -965,8 +1052,8 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
     if not creating and ThreadIdentity(login).user_id is not None:
-        if metadata.get("visibility") != "private":
-            raise HTTPException(403, "LangSmith accounts require private tasks")
+        if not thread_is_promptable(metadata, login):
+            raise HTTPException(403, "This account cannot prompt this task")
 
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1046,6 +1133,11 @@ async def _enrich_run_start_command(
             _plugin_context(metadata, client_configurable, plugin_chat) if plugin_chat else ([], [])
         )
         command_images = _dashboard_images_from_content(content)
+        if files := DashboardImageBody.files_in(content):
+            if not creating and metadata.get("transcript") != TRANSCRIPT_VERSION:
+                raise HTTPException(422, "this thread is too old to accept files")
+            for file in files:
+                _decode_dashboard_image(file)
         invocation_id = new_invocation_id()
         invocation_started_at = datetime.now(UTC).isoformat()
         overrides = with_invocation_id(None, invocation_id)
@@ -1095,7 +1187,8 @@ async def _enrich_run_start_command(
                 repo_explicitly_none=identity.user_id is not None
                 or client_configurable.get("repo_explicitly_none") is True,
                 visibility=visibility,
-                prompt=_command_prompt_text(content),
+                prompt=_command_prompt_text(content)
+                or ", ".join(f.file_name or "file" for f in DashboardImageBody.files_in(content)),
                 images=command_images,
                 model_id=client_configurable.get("agent_model_id"),
                 effort=client_configurable.get("agent_effort"),
@@ -1128,6 +1221,8 @@ async def _enrich_run_start_command(
 
         prior = await history if history is not None else _ThreadHistory()
         profile = await profile_read or {}
+        command_files = await DashboardImageBody.stage_files(thread_id, params)
+        content = _command_message_content(params)
     finally:
         reads = (profile_read,) if history is None else (history, profile_read)
         for read in reads:
@@ -1146,9 +1241,7 @@ async def _enrich_run_start_command(
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
-    transcribed = (creating and postgres.configured()) or metadata.get(
-        "transcript"
-    ) == TRANSCRIPT_VERSION
+    transcribed = creating or metadata.get("transcript") == TRANSCRIPT_VERSION
     client_message_id = _command_message_id(params)
     message_id: str | None = None
     if client_message_id and client_message_id not in prior.message_ids:
@@ -1218,7 +1311,9 @@ async def _enrich_run_start_command(
             # deduplicates it — and the run then has to join the turn that was
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
-            attachments, pending = _transcript_attachments(command_images, message_id)
+            attachments, pending = _transcript_attachments(
+                [*command_images, *command_files], message_id
+            )
             attachments.extend(context_attachments)
             appended = await append(
                 thread_id,
@@ -1356,6 +1451,8 @@ async def steer_running_thread(
     replies = _command_message_replies(params)
     relayed_from = _relayed_from(params)
     command_images = _dashboard_images_from_content(content)
+    if DashboardImageBody.files_in(content):
+        raise HTTPException(409, "files can be attached once the agent has finished its run")
     if not _command_prompt_text(content) and not command_images and not replies:
         raise HTTPException(422, "a follow-up needs a message")
 
@@ -1648,9 +1745,10 @@ async def dispatch_pending_follow_ups(
 class _SlackWebHandoff:
     def __init__(self, thread_id: str, metadata: Mapping[str, object]) -> None:
         self.thread_id = thread_id
+        slack_thread = SourceContext.from_metadata(metadata).slack_thread
         self.location = (
-            SourceContext.from_metadata(metadata).slack_location
-            if metadata.get("source") == "slack"
+            slack_thread.location
+            if metadata.get("source") == "slack" and slack_thread and not slack_thread.is_dm
             else None
         )
 
@@ -1829,8 +1927,8 @@ async def _enrich_system_run_start_command(
     prompt = _command_prompt_text(content)
     if not prompt.strip():
         raise HTTPException(422, "a run needs a prompt")
-    if _dashboard_images_from_content(content):
-        raise HTTPException(422, "machine principals cannot attach images")
+    if _dashboard_images_from_content(content) or DashboardImageBody.files_in(content):
+        raise HTTPException(422, "machine principals cannot attach images or files")
 
     if not creating and client_configurable.get("sandbox_bridge_id") is not None:
         raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")

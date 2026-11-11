@@ -27,6 +27,7 @@ import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
+import { productAnalytics } from "@/lib/analytics"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface AgentRightPanelProps {
@@ -194,6 +195,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       return
     }
     onCollapsedChange(false)
+    productAnalytics.featureOpened("terminal")
     const existing = surfaces.find((surface) => surface.kind === "terminal")
     if (existing) handleActivate(existing)
     else handleAddTerminal()
@@ -229,6 +231,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
                   if (!collapsed && activeSurface?.kind === "diff") {
                     onCollapsedChange(true)
                   } else {
+                    productAnalytics.featureOpened("diff")
                     onCollapsedChange(false)
                     handleAddDiff()
                   }

@@ -20,9 +20,13 @@ Never meet the budget by hiding real behavior changes in Other.
 
 A chunk is one coherent concept, told through the hunks that make it up, wherever they are: a new type and the code that reads it, a function and its callers, a behavior and the test that pins it.
 Gather related hunks from different files into one chunk instead of giving each hunk or each file its own.
+Substantive, hand-written Markdown belongs in chunks, not Other: include prompts and tool instructions alongside the behavior they define, and group documentation into a focused reading step when it stands on its own.
+Do not treat Markdown as boilerplate by extension; generated content and the noise listed below, including changelog entries that merely restate the code, can still go in Other.
 When git's hunk spans different chunks, or mixes imports with a real change, split it so each part lands in the chunk, or Other, it belongs to.
 Split between whole statements and blocks, never line by line: every chunk should read as contiguous code with its closing braces, not scattered single lines.
-Order the chunks so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, with related tests alongside the behavior they cover.
+Spend the first one or two chunks on the changes that are hard to undo once shipped: database migrations, public API changes and SDK changes.
+Skip this when the change has none.
+After those, order the chunks so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, with related tests alongside the behavior they cover.
 
 Send to Other the hunks that hold nothing but:
 
@@ -34,7 +38,7 @@ Send to Other the hunks that hold nothing but:
 6. Forced plumbing: forwarded parameters, zero values for a new return slot, annotations that follow from a change elsewhere.
 7. Comment churn that narrates the code, and reworded error or log text.
 8. Test scaffolding and repeated cases, keeping one scenario per behavior.
-9. Docs, changelogs and config churn that restate the code.
+9. Changelog and config churn that restate the code.
 
 A hunk that mixes noise with a real change goes in a chunk, unless you split the noise off first.
 Never hide a real behavior change in Other: a new condition, a different call, a changed value, return path or data flow always goes in a chunk.
@@ -47,8 +51,6 @@ Never hide a real behavior change in Other: a new condition, a different call, a
   Wrap identifiers, types, flags and paths in `backticks`.
 - `walkthrough_split_hunks` splits unplanned hunks at changed lines you name, before you place their parts.
 - `walkthrough_move_to_other` sends hunks to Other without placing a chunk, or with `restore: true` takes them out again.
-- `walkthrough_describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds.
-  Update it when Other changes in kind.
 
 When the pull request moved since the plan was made, chunks kept every line git left unchanged, and a new line in a hunk a chunk already holds joined that chunk.
 Only hunks no chunk holds are unplanned.

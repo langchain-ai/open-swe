@@ -83,11 +83,12 @@ export const ShellEntryBody = memo(function ShellEntryBody(
   return (
     <ToolCallBody
       {...props}
-      {...(props.chunk.toolKind === "background" && {
-        loadedText: backgroundLaunchText(
-          props.loadedText ?? props.chunk.output
-        ),
-      })}
+      {...(props.chunk.toolKind === "background" &&
+        (props.loadedText != null || !props.chunk.loadOutput) && {
+          loadedText: BackgroundLaunch.text(
+            props.loadedText ?? props.chunk.output
+          ),
+        })}
       input={
         command && (
           <pre className="cursor-text overflow-x-auto font-mono text-xxs leading-relaxed whitespace-pre text-primary select-text">
@@ -100,22 +101,20 @@ export const ShellEntryBody = memo(function ShellEntryBody(
   )
 })
 
-/**
- * A background launch's result reads as whether it started; its progress and
- * output live in the Background work panel, not in the launch receipt.
- */
-function backgroundLaunchText(output: string | null | undefined): string {
-  if (!output) return ""
-  try {
-    const result: unknown = JSON.parse(output)
-    if (typeof result !== "object" || result === null) return output
-    if ("error" in result && typeof result.error === "string")
-      return result.error
-    return "success" in result && result.success === true
-      ? "Started in the background."
-      : output
-  } catch {
-    return output
+class BackgroundLaunch {
+  static text(output: string | null | undefined): string {
+    if (!output) return ""
+    try {
+      const result: unknown = JSON.parse(output)
+      if (typeof result !== "object" || result === null) return output
+      if ("error" in result && typeof result.error === "string")
+        return result.error
+      return "success" in result && result.success === true
+        ? "Started in the background."
+        : output
+    } catch {
+      return output
+    }
   }
 }
 

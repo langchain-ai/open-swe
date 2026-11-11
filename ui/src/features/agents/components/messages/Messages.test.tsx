@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
 import { Messages } from "./Messages"
+import { transcriptPositions } from "./transcriptPositions"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 
@@ -49,6 +50,100 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("folds consecutive listener events without hiding their details or other messages", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "listener",
+        content:
+          '<dynamic-context kind="system" id="system:event-subscription">\ndisplay_name: Event listener\n</dynamic-context>',
+      }),
+      ...["Build completed", "Review posted", "Checks passed"].map(
+        (text, index) =>
+          new HumanMessage({
+            id: `event-${index}`,
+            content: `<input-message sender="system:event-subscription" kind="system" surface="github">${text}</input-message>`,
+          })
+      ),
+      new HumanMessage({ id: "human", content: "Please continue" }),
+      new HumanMessage({
+        id: "separate-event",
+        content:
+          '<input-message sender="system:event-subscription" kind="system" surface="github">New commit</input-message>',
+      }),
+    ])
+    vi.stubGlobal("CSS", { escape: (value: string) => value })
+    const { container } = render(
+      <Messages messages={messages} isStreaming={false} />,
+      { wrapper }
+    )
+
+    const group = screen.getByRole("button", {
+      name: "3 event listener messages",
+    })
+    expect(group.getAttribute("aria-expanded")).toBe("false")
+    expect(screen.queryByText("Build completed")).toBeNull()
+    expect(screen.getByText("Please continue")).toBeTruthy()
+    expect(
+      screen.getAllByRole("button", { name: "Event listener" })
+    ).toHaveLength(1)
+
+    fireEvent.click(group)
+    expect(group.getAttribute("aria-expanded")).toBe("true")
+    const events = screen.getAllByRole("button", { name: "Event listener" })
+    expect(events).toHaveLength(4)
+    fireEvent.click(events[0]!)
+    expect(screen.getByText("Build completed")).toBeTruthy()
+    const firstEvent = container.querySelector<HTMLElement>(
+      '[data-message-id="event-0"]'
+    )!
+    const secondEvent = container.querySelector<HTMLElement>(
+      '[data-message-id="event-1"]'
+    )!
+    vi.spyOn(firstEvent, "getBoundingClientRect").mockReturnValue({
+      ...new DOMRect(),
+      top: -100,
+      bottom: -20,
+    })
+    vi.spyOn(secondEvent, "getBoundingClientRect").mockReturnValue({
+      ...new DOMRect(),
+      top: -20,
+      bottom: 50,
+    })
+    const position = transcriptPositions.capture(container, false)
+    expect(position.anchor).toEqual({ messageId: "event-1", offset: -20 })
+    expect(transcriptPositions.target(container, position)).toBe(0)
+    fireEvent.click(group)
+    expect(screen.queryByText("Build completed")).toBeNull()
+    const anchor = group.closest<HTMLElement>("[data-message-id]")!
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({
+      ...new DOMRect(),
+      top: 20,
+      bottom: 100,
+    })
+    expect(
+      transcriptPositions.capture(container, false).anchor?.messageId
+    ).toBe("event-0")
+    expect(transcriptPositions.target(container, position)).toBe(20)
+    expect(
+      transcriptPositions.target(container, {
+        ...position,
+        anchor: { messageId: "event-0", offset: -600 },
+      })
+    ).toBe(20)
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({
+      ...new DOMRect(),
+      top: -15,
+      bottom: 65,
+    })
+    const collapsedPosition = transcriptPositions.capture(container, false)
+    expect(collapsedPosition.anchor).toEqual({
+      messageId: "event-0",
+      offset: -15,
+      collapsedGroup: true,
+    })
+    expect(transcriptPositions.target(container, collapsedPosition)).toBe(0)
+  })
+
   it("copies the displayed thread URL with the dashboard base path on another page", async () => {
     vi.stubEnv("BASE_URL", "/robin/")
     const writeText = vi.fn().mockResolvedValue(undefined)
@@ -74,12 +169,16 @@ describe("Messages", () => {
       />,
       { wrapper }
     )
+    const failedMessage = screen.getByRole("button", {
+      name: "Failed to send · Copy debug details",
+    })
+    expect(failedMessage.textContent).toBe("Failed to send")
+    fireEvent.focus(failedMessage)
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "the message could not be started"
+    )
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "Failed to send · the message could not be started · Copy debug details",
-        })
-      )
+      fireEvent.click(failedMessage)
     })
     expect(writeText).toHaveBeenCalledWith(
       JSON.stringify(
@@ -169,7 +268,7 @@ describe("Messages", () => {
       name: "View message from Alice in Slack",
     })
     expect(link.getAttribute("href")).toBe(
-      "https://slack.com/archives/C123/p1787165487000034"
+      "/dashboard/api/slack/open?channel=C123&message_ts=1787165487.000034"
     )
     expect(link.getAttribute("target")).toBe("_blank")
     expect(screen.getByRole("img", { name: "Slack" })).toBeTruthy()

@@ -435,8 +435,8 @@ ENV.var(
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
 ENV.var(
     "SEGMENT_BROWSER_WRITE_KEY",
-    "Optional public Segment browser source write key, served to the web and desktop UI. "
-    "Unset disables Segment; use a separate source for each deployment environment.",
+    "Optional public Segment source write key for browser and backend capture, served to "
+    "the web and desktop UI. Unset disables Segment; use a separate source per environment.",
     default="",
 )
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
@@ -525,6 +525,30 @@ ENV.var(
     "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
     "Deadline for capturing a builder sandbox as a workspace's snapshot.",
     aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
+)
+
+# --- Object storage ----------------------------------------------------------------------------
+ENV.var(
+    "OBJECT_STORE_URL",
+    "Endpoint of the object storage that keeps large files, such as app attachments: "
+    "https://storage.googleapis.com for GCS (its XML API, with an HMAC key), or an S3, R2 or "
+    "MinIO endpoint. Unset, PostgreSQL keeps every file.",
+)
+ENV.var("OBJECT_STORE_BUCKET", "Bucket the object storage keeps those files in.")
+ENV.var(
+    "OBJECT_STORE_REGION",
+    "Region requests to the object storage are signed for: the bucket's region on S3; GCS takes "
+    "auto, the default.",
+    default="auto",
+)
+ENV.var(
+    "OBJECT_STORE_ACCESS_KEY_ID",
+    "Access key for the object storage; on GCS, the access ID of a service account's HMAC key.",
+)
+ENV.var(
+    "OBJECT_STORE_SECRET_ACCESS_KEY",
+    "Secret of OBJECT_STORE_ACCESS_KEY_ID.",
+    secret=True,
 )
 
 # --- Debugging -------------------------------------------------------

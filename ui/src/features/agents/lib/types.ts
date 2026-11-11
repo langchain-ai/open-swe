@@ -186,6 +186,13 @@ export interface ImageChunk {
   fileName?: string
 }
 
+/** What a page around a thread puts in its composer; a new `key` puts it there again. */
+export interface ComposerDraft {
+  key: number
+  text: string
+  images?: ReadonlyArray<ImageChunk>
+}
+
 /**
  * An image the transcript references rather than inlines: the log stores
  * metadata plus either an attachment id addressing bytes on our own API, or a
@@ -373,31 +380,6 @@ export interface AgentBackgroundCommand {
   started_at: number | null
 }
 
-/** One thing a Goal mode thread waits on to wake it again. */
-export interface AgentGoalWait {
-  kind: "wakeup" | "command" | "monitor" | "event" | "review"
-  until: string | null
-  detail: string | null
-}
-
-/** Where a Goal mode thread's work stands (`openswe/threads/goal.py`). */
-export interface AgentThreadGoal {
-  state: "working" | "waiting" | "waiting_on_user" | "paused" | "complete"
-  reason:
-    | "blocked"
-    | "ready"
-    | "stopped"
-    | "requested"
-    | "no_progress"
-    | "failing_commands"
-    | "error"
-    | null
-  objective: string | null
-  ask: string | null
-  waits: Array<AgentGoalWait>
-  updated_at_ms: number
-}
-
 export interface AgentThreadMonitor {
   monitor_id: string
   description: string
@@ -469,6 +451,7 @@ export interface WorkflowDiffStats {
 }
 
 export interface WorkflowPushApproval {
+  coordinatorStatus?: "approved" | "rejected" | null
   fingerprint: string
   status: WorkflowApprovalStatus
   repo: string
@@ -612,6 +595,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  pendingWorkflowApproval?: boolean
   waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>

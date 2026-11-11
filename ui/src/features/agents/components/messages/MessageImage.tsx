@@ -1,3 +1,9 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@langchain/macaw-components/Dialog"
+import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
 
@@ -49,15 +55,44 @@ function useImageSource(chunk: AnyImageChunk): {
   return { src: chunk.url, failed }
 }
 
-/** One image from a message, whatever form the transcript recorded it in. */
+/** One attachment from a message: an image, or a named chip for any other file. */
 export function MessageImage({
   chunk,
   className,
+  fill = false,
 }: {
   chunk: AnyImageChunk
   className?: string
+  fill?: boolean
+}) {
+  if (!chunk.mimeType || chunk.mimeType.startsWith("image/"))
+    return (
+      <MessageImageContent chunk={chunk} className={className} fill={fill} />
+    )
+  return <AttachedFile name={chunk.fileName || "file"} />
+}
+
+/** A non-image attachment, shown by name. */
+export function AttachedFile({ name }: { name: string }) {
+  return (
+    <div className="flex h-16 max-w-48 items-center gap-space-2 rounded-lg border border-default bg-surface-level-2 px-space-3 text-xs text-secondary">
+      <FileTextIcon className="size-4 shrink-0 text-icon-secondary" />
+      <span className="truncate">{name}</span>
+    </div>
+  )
+}
+
+function MessageImageContent({
+  chunk,
+  className,
+  fill,
+}: {
+  chunk: AnyImageChunk
+  className?: string
+  fill: boolean
 }) {
   const { src, failed } = useImageSource(chunk)
+  const [expanded, setExpanded] = useState(false)
   const label = chunk.fileName || "image"
 
   if (failed || !src)
@@ -74,10 +109,35 @@ export function MessageImage({
       </div>
     )
   return (
-    <img
-      src={src}
-      alt={label}
-      className={cn(className, "duration-slow animate-in fade-in")}
-    />
+    <>
+      <button
+        type="button"
+        aria-label={`Expand ${label}`}
+        onClick={() => setExpanded(true)}
+        className={cn(
+          "block cursor-zoom-in border-0 bg-transparent p-0 text-left",
+          fill ? "w-full" : "w-fit max-w-full"
+        )}
+      >
+        <img
+          src={src}
+          alt={label}
+          className={cn(className, "duration-slow animate-in fade-in")}
+        />
+      </button>
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent
+          className="h-[calc(100dvh-2rem)] w-[95vw] max-w-[95vw]"
+          childrenClassName="flex-1 items-center justify-center"
+        >
+          <DialogTitle className="sr-only">{label}</DialogTitle>
+          <img
+            src={src}
+            alt={label}
+            className="h-full min-h-0 w-full object-contain"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

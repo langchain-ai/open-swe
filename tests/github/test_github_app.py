@@ -221,7 +221,7 @@ async def test_langsmith_run_cannot_borrow_a_cached_installation_token(
         return await github_app.get_github_app_installation_token()
 
     with pytest.raises(PermissionError, match="cannot use GitHub App credentials"):
-        await in_graph_context({"configurable": {"auth_provider": "langsmith"}}, mint)
+        await in_graph_context({"configurable": {"github_linked": False}}, mint)
 
 
 async def test_forced_refresh_keeps_a_concurrently_minted_token(

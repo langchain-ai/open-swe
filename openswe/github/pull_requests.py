@@ -26,7 +26,7 @@ key callers address a PR by.
 """
 
 import logging
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
@@ -44,7 +44,9 @@ from sqlalchemy import (
     inspect,
     or_,
     select,
+    text,
     tuple_,
+    update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -125,6 +127,29 @@ class ReviewLink(Base):
         )
 
 
+class Requester(Base):
+    """Someone who asked Robin for a pull request it authored as itself; never removed."""
+
+    __tablename__ = "pull_request_requester"
+    __table_args__ = (
+        Index("pull_request_requester_key", "pull_request_id", text("lower(login)"), unique=True),
+    )
+
+    pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
+    # The GitHub login the review policy matches, kept even when no user resolves.
+    login: Mapped[str]
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
 class PullRequest(Base):
     __tablename__ = "pull_request"
     __table_args__ = (
@@ -163,10 +188,17 @@ class PullRequest(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
     author_github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    # The person who asked for a pull request Open SWE authored as itself, in an Ask channel.
     author_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     resolves_thread: Mapped[bool] = mapped_column(default=False)
+    # The head Robin's auto-approval last approved, which stands in for a second person.
+    auto_approved_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    # Opened by Robin as itself before requesters were kept, with no requester ever found.
+    requester_unknown: Mapped[bool] = mapped_column(
+        server_default="false", default=False, init=False
+    )
     additions: Mapped[int | None] = mapped_column(default=None)
     deletions: Mapped[int | None] = mapped_column(default=None)
     changed_files: Mapped[int | None] = mapped_column(default=None)
@@ -204,8 +236,6 @@ class PullRequest(Base):
     @classmethod
     async def author_user_id_of(cls, pull_request_id: UUID) -> UUID | None:
         """The Open SWE person who opened that stored PR, or ``None``."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(select(cls.author_user_id).where(cls.id == pull_request_id))
 
@@ -292,7 +322,7 @@ class PullRequest(Base):
     ) -> dict[tuple[str, int], DiffStats]:
         """Stored line counts keyed by lowercased ``(repo_full_name, number)``."""
         keys = [(repo_full_name.lower(), number) for repo_full_name, number in prs]
-        if not keys or not postgres.configured():
+        if not keys:
             return {}
         async with postgres.session() as session:
             rows = await session.scalars(
@@ -371,6 +401,75 @@ class PullRequest(Base):
     async def ensure(self) -> Self:
         """The stored row, created bare when missing, leaving GitHub-owned columns alone."""
         return await self._write(overwrite=False)
+
+    async def add_requesters(self, people: Mapping[str, UUID | None]) -> None:
+        """Add who asked for this pull request, all or none, creating its row when missing."""
+        if not people:
+            return
+        row = await self.ensure()
+        async with postgres.session() as session:
+            await session.execute(
+                insert(Requester)
+                .values(
+                    [
+                        {
+                            "id": uuid7(),
+                            "pull_request_id": row.id,
+                            "login": login,
+                            "user_id": user_id,
+                            "created_by": user_id,
+                            "updated_by": user_id,
+                        }
+                        for login, user_id in people.items()
+                    ]
+                )
+                .on_conflict_do_nothing()
+            )
+
+    @classmethod
+    async def requesters(cls, owner: str, repo: str, number: int) -> tuple[set[str], set[int]]:
+        """The GitHub logins, and the numeric ids where known, of everyone who asked."""
+        row = await cls.get(owner, repo, number)
+        if row is None:
+            return set(), set()
+        async with postgres.session() as session:
+            rows = (
+                await session.execute(
+                    select(Requester.login, Requester.user_id).where(
+                        Requester.pull_request_id == row.id
+                    )
+                )
+            ).all()
+        logins = {login.lower() for login, _ in rows}
+        ids: set[int] = set()
+        for _, user_id in rows:
+            # A renamed account is still the same person.
+            if user_id is not None and (user := await User.get(user_id)):
+                if user.github_login:
+                    logins.add(user.github_login.lower())
+                if user.github_id is not None:
+                    ids.add(user.github_id)
+        return logins, ids
+
+    @classmethod
+    async def record_auto_approval(cls, owner: str, repo: str, number: int, head_sha: str) -> None:
+        """Remember the head Robin's auto-approval approved; ``""`` when it no longer approves."""
+        row = await cls(owner=owner, repo=repo, number=number).ensure()
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls).where(cls.id == row.id).values(auto_approved_head_sha=head_sha)
+            )
+
+    @classmethod
+    async def open_for_thread(cls, thread_id: str) -> list[Self]:
+        """The open pull requests linked to ``thread_id``."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls)
+                .join(ThreadLink)
+                .where(ThreadLink.thread_id == thread_id, cls.state.in_(("open", "draft")))
+            )
+            return list(rows.unique())
 
     async def link_thread(self, thread_id: str, *, source: str = "") -> Self:
         """Associate a thread with this PR, as primary when it has none yet."""

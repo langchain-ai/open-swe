@@ -11,7 +11,12 @@ How output becomes events:
 - `filter` is a separate shell command that reads those lines on stdin.
   Each line it prints is event output; it is line-buffered for you, so `grep`, `awk` and `sed` need no flush flags.
   With no filter every raw line is event output.
-- Lines printed within 200ms of each other arrive as one event, which names the raw line it starts at.
+- Lines printed within 200ms of each other are one burst, which names the raw line it starts at.
+- The first burst arrives as an event at once.
+  After each event the monitor waits before sending the next: 2s after the first, then twice as long after each one (4s, 8s, 16s, …).
+  Once it has been quiet for twice its current wait, the wait goes back to 2s.
+  Bursts printed during a wait are held and arrive together as one event that lists each of them.
+  An event shows at most 100 lines and says how many more it held.
 
 Pick the tool by how many notifications you need:
 - One, when a command finishes: use `background_execute`.
@@ -20,13 +25,13 @@ Pick the tool by how many notifications you need:
   `command` is then a check: it runs every `interval` seconds until it exits 0, and its output at that moment is the one event, after which the monitor ends.
   For example, a server up: `command="curl -fsS localhost:3000/health"`, `interval=5`; a file written: `command="test -s out/report.json"`, `interval=10`.
   For CI, notice individual failures promptly and use a bounded wait that resumes even if notifications are missing.
-  Write no polling loop yourself: in Goal mode `execute` and `background_execute` refuse commands that wait by sleeping.
+  Write no polling loop yourself.
 
 Silence is not success.
 A filter that only matches the happy path stays silent through a crash or a hang.
 Match every terminal state you would act on (`Traceback|Error|FAILED|Killed|exited`), and broaden the filter rather than narrow it when unsure.
 
-A monitor ends when its command exits, its filter exits, it reaches its timeout, you stop it, or it gets too noisy: more than 40 events in 2 minutes or 200 in total.
+A monitor ends when its command exits, its filter exits, it reaches its timeout, you stop it, or it gets too noisy: once 10 of its events in a row were held by a wait, without it going quiet in between, it stops and you are told why.
 
 Each human message opens one allowance for this thread's monitors:
 - 10 monitor starts.

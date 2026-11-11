@@ -3,7 +3,7 @@
 import shlex
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, model_validator
 
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
@@ -44,10 +44,27 @@ class MonitorState(BaseModel):
     """A glob of the raw log segments, oldest first by name."""
 
 
-class MonitorEvent(BaseModel):
-    seq: int
+class MonitorBurst(BaseModel):
     at_raw_line: int
     lines: list[str]
+
+
+class MonitorEvent(BaseModel):
+    """The bursts a monitor emitted, held together while it waited between events."""
+
+    seq: int
+    bursts: list[MonitorBurst]
+    omitted_lines: int = 0
+    """Lines held past the event's limit and left out of it."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_burst(cls, data: object) -> object:
+        # Runners started by an earlier script write a single burst inline.
+        if isinstance(data, dict) and "bursts" not in data and "lines" in data:
+            burst = {"at_raw_line": data.get("at_raw_line", 0), "lines": data["lines"]}
+            return {**data, "bursts": [burst]}
+        return data
 
 
 class MonitorEnd(BaseModel):

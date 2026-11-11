@@ -7,10 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack.http import SlackRequestError
-from openswe.slack.records import SlackRun, SlackThread
+from openswe.slack.records import SlackThread
 
 slack_reply_tool = importlib.import_module("openswe.slack.tools.reply")
-live_activity = importlib.import_module("openswe.slack.live_activity")
 
 
 @pytest.fixture(autouse=True)
@@ -564,83 +563,3 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
 
     assert result["moved_to_dashboard"] is False
     assert result["retry"] is True
-
-
-@pytest.mark.usefixtures("registry_db")
-async def test_live_message_moves_below_progress_and_becomes_the_final_reply(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _Client()
-    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_config",
-        lambda: {
-            "run_id": "run-1",
-            "configurable": {
-                "thread_id": "thread-one",
-                "slack_live_activity": True,
-                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
-            },
-        },
-    )
-    await SlackRun.set_live_message("C1", "1.0", "run-1", "1.1")
-    post = AsyncMock(return_value="1.2")
-    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
-    edit = AsyncMock()
-    monkeypatch.setattr(slack_reply_tool, "update_slack_thread_reply", edit)
-    deleted = AsyncMock(return_value=True)
-    monkeypatch.setattr(live_activity, "delete_slack_message", deleted)
-    monkeypatch.setattr(
-        live_activity, "post_slack_thread_message_with_ts", AsyncMock(return_value="1.3")
-    )
-
-    progress = await slack_reply_tool.slack_reply("On it", "progress")
-
-    assert progress["message_ts"] == "1.2"
-    deleted.assert_awaited_once_with("C1", "1.1")
-    assert await SlackRun.live_message("C1", "run-1") == "1.3"
-
-    final = await slack_reply_tool.slack_reply("Done", "final")
-
-    assert final["message_ts"] == "1.3"
-    assert edit.await_args is not None
-    assert edit.await_args.args == ("C1", "1.0", "1.3", "Done")
-    post.assert_awaited_once()
-    assert await SlackRun.live_message("C1", "run-1") is None
-
-
-@pytest.mark.usefixtures("registry_db")
-async def test_progress_reply_succeeds_when_the_live_message_cannot_move(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _Client()
-    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_config",
-        lambda: {
-            "run_id": "run-1",
-            "configurable": {
-                "thread_id": "thread-one",
-                "slack_live_activity": True,
-                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
-            },
-        },
-    )
-    await SlackRun.set_live_message("C1", "1.0", "run-1", "1.1")
-    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", AsyncMock(return_value="1.2"))
-    deleted = AsyncMock(return_value=True)
-    monkeypatch.setattr(live_activity, "delete_slack_message", deleted)
-    monkeypatch.setattr(
-        live_activity,
-        "post_slack_thread_message_with_ts",
-        AsyncMock(side_effect=SlackRequestError("rate_limited")),
-    )
-
-    progress = await slack_reply_tool.slack_reply("On it", "progress")
-
-    assert progress["success"] is True
-    assert progress["message_ts"] == "1.2"
-    deleted.assert_not_awaited()
-    assert await SlackRun.live_message("C1", "run-1") == "1.1"

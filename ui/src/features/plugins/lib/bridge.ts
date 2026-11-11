@@ -6,11 +6,13 @@
  * Cap'n Web exposes a target's prototype methods and nothing else.
  */
 import type {
+  AttachmentType,
   CollectionApi,
   ChatScope,
   CommitWire,
   CursorWire,
   DocumentScope,
+  DraftImage,
   GitHubRepositoryApi,
   HostApi,
   HostContext,
@@ -20,12 +22,15 @@ import type {
   JsonValue,
   PluginPermission,
   PullRequestDraft,
+  PullRequestRole,
+  PullRequestSearch,
   QueryWire,
   RepositoryPickOptions,
   RoomApi,
   RoomEvent,
   RoomScope,
   SharedRepository,
+  StoredAttachment,
   StoredDocument,
   StoredJson,
   Subscription,
@@ -34,6 +39,12 @@ import type {
 import { RpcTarget } from "capnweb"
 import type { RpcStub } from "capnweb"
 
+import {
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_COUNT,
+  SUPPORTED_IMAGE_TYPES,
+} from "@/features/agents/components/composer/ChatComposer"
+import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   DocumentTarget,
   InstalledPlugin,
@@ -116,8 +127,8 @@ export interface BridgeHost {
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   /** Chooses the chat the dock shows. */
   chooseChat: (chat: ChatTarget) => void
-  /** Opens the dock, with `draft` in its composer. */
-  openChat: (draft: string | null) => void
+  /** Opens the dock, with `draft` and `images` in its composer. */
+  openChat: (draft: string | null, images: Array<ImageChunk>) => void
   /** What the person has open, as the plugin describes it, for the agent's next messages. */
   shareContext: (context: SharedContext) => void
   /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
@@ -277,6 +288,16 @@ function cursor(value: unknown, name: string): CursorWire | undefined {
   }
 }
 const ROOM = /^[A-Za-z0-9._:@/-]{1,200}$/
+const ATTACHMENT_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/
+const ATTACHMENT_TYPES = new Set<string>([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "video/webm",
+  "video/mp4",
+])
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 const BRANCH = /^[A-Za-z0-9._/-]{1,200}$/
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const FILE_PATH = /^[^\\]+$/
@@ -288,6 +309,63 @@ function repoPath(value: unknown, name = "path"): string {
 
 const repositoryName = (value: unknown, name = "repository") =>
   pathName(value, name, REPOSITORY).toLowerCase()
+
+function pullNumber(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > 2 ** 31 - 1
+  )
+    invalid("pull must be a pull request number")
+  return value
+}
+
+function pullRole(value: unknown): PullRequestRole {
+  if (value !== "review-requested" && value !== "author")
+    invalid('role must be "review-requested" or "author"')
+  return value
+}
+
+function attachmentType(value: unknown): AttachmentType {
+  if (typeof value !== "string" || !ATTACHMENT_TYPES.has(value))
+    invalid(
+      "an attachment must be a PNG, JPEG, WebP or GIF image, or a WebM or MP4 video"
+    )
+  return value as AttachmentType
+}
+
+function attachmentBytes(value: unknown): Uint8Array {
+  if (!(value instanceof Uint8Array)) invalid("bytes must be a Uint8Array")
+  if (value.byteLength === 0 || value.byteLength > MAX_ATTACHMENT_BYTES)
+    invalid(`an attachment is 1 to ${MAX_ATTACHMENT_BYTES} bytes`)
+  return value
+}
+
+// The dock's composer takes no more than it would from the person.
+const MAX_DRAFT_IMAGE_BASE64 = Math.ceil(MAX_IMAGE_BYTES / 3) * 4
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
+
+function draftImages(value: unknown): Array<ImageChunk> {
+  // Plugins built before draft images send none.
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.length > MAX_IMAGE_COUNT)
+    invalid(`images must be a list of at most ${MAX_IMAGE_COUNT}`)
+  return value.map((item: unknown, index): ImageChunk => {
+    const image: Partial<DraftImage> = record(item, `images[${index}]`)
+    const mimeType = text(image.mimeType, "mimeType", 20)
+    if (!SUPPORTED_IMAGE_TYPES.has(mimeType))
+      invalid("images must be PNG, JPEG, WebP or GIF")
+    const base64 = text(image.base64, "base64", MAX_DRAFT_IMAGE_BASE64)
+    if (!BASE64.test(base64)) invalid("base64 must be base64-encoded bytes")
+    return {
+      kind: "image",
+      base64,
+      mimeType,
+      fileName: text(image.name, "name", 200),
+    }
+  })
+}
 
 function scopeOf(value: unknown): string | null {
   const scope = value === undefined ? {} : record(value, "scope")
@@ -717,6 +795,12 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     )
   }
 
+  searchPulls(role: PullRequestRole): Promise<PullRequestSearch> {
+    return this.#budget.run(() =>
+      pluginsApi.searchPulls(this.#host().plugin.id, pullRole(role))
+    )
+  }
+
   provideTools(
     json: string,
     run: (tool: string, argumentsJson: string) => Promise<string>
@@ -788,10 +872,13 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     })
   }
 
-  openChat(draft: string | null): Promise<void> {
+  openChat(draft: string | null, images?: Array<DraftImage>): Promise<void> {
     return this.#budget.run(() => {
       this.#require("agent")
-      this.#host().openChat(optionalText(draft, "draft", 20_000) ?? null)
+      this.#host().openChat(
+        optionalText(draft, "draft", 20_000) ?? null,
+        draftImages(images)
+      )
     })
   }
 
@@ -935,6 +1022,46 @@ class CollectionTarget extends RpcTarget implements CollectionApi {
     })
   }
 
+  attach(
+    key: string,
+    name: string,
+    bytes: Uint8Array,
+    contentType: AttachmentType
+  ): Promise<StoredAttachment> {
+    return this.#budget.run(() =>
+      pluginsApi.attach(
+        this.#host().plugin.id,
+        this.#target,
+        pathName(key, "key", DOCUMENT_KEY),
+        pathName(name, "name", ATTACHMENT_NAME),
+        attachmentBytes(bytes),
+        attachmentType(contentType)
+      )
+    )
+  }
+
+  attachment(key: string, name: string): Promise<Blob | null> {
+    return this.#budget.run(() =>
+      pluginsApi.attachment(
+        this.#host().plugin.id,
+        this.#target,
+        pathName(key, "key", DOCUMENT_KEY),
+        pathName(name, "name", ATTACHMENT_NAME)
+      )
+    )
+  }
+
+  detach(key: string, name: string): Promise<void> {
+    return this.#budget.run(() =>
+      pluginsApi.detach(
+        this.#host().plugin.id,
+        this.#target,
+        pathName(key, "key", DOCUMENT_KEY),
+        pathName(name, "name", ATTACHMENT_NAME)
+      )
+    )
+  }
+
   watch(onChange: () => void): Promise<Subscription> {
     return this.#budget.run(() => {
       const stop = subscription<undefined>(
@@ -1065,6 +1192,12 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
         ),
       })
     })
+  }
+
+  pull(number: number) {
+    return this.#budget.run(() =>
+      pluginsApi.pull(this.#plugin, this.#repository, pullNumber(number))
+    )
   }
 
   findPull(head: string) {

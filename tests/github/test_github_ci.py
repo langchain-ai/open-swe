@@ -58,7 +58,11 @@ async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
         _client: object, _method: str, url: str, params: dict[str, str] | None = None, **_: object
     ) -> httpx2.Response:
         if "/rules/" in url:
-            return _response(url, rules_pages[(params or {})["page"]])
+            page = (params or {})["page"]
+            response = _response(url, rules_pages[page])
+            if page == "1":
+                response.headers["Link"] = f'<{url}?page=2>; rel="next"'
+            return response
         return _response(url, branch)
 
     monkeypatch.setattr(github_http, "github_request", request)

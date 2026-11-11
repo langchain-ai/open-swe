@@ -123,7 +123,9 @@ export function pluginDocument(
     `<meta http-equiv="Content-Security-Policy" content="${PLUGIN_CSP}">` +
     `<meta name="${NONCE_META}" content="${nonce}">` +
     `<style>:root{color-scheme:${theme}}</style>` +
-    `<script>${WEBRTC_REMOVAL}\n${CAPNWEB_RUNTIME}</script>` +
+    // Both scripts are parenthesized calls, so a bare newline would make the
+    // second the argument of the first's result.
+    `<script>${WEBRTC_REMOVAL};\n${CAPNWEB_RUNTIME}</script>` +
     html.replace(/^\s*<!doctype[^>]*>/i, "")
   )
 }
