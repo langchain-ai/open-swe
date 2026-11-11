@@ -251,13 +251,7 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
         "status": "busy",
         "metadata": {"source": "slack", "graph_id": "agent"},
     }
-    setup.threads["duplicate"] = {
-        "thread_id": "duplicate",
-        "status": "idle",
-        "updated_at": "2099-01-01",
-        "metadata": {"source": "dashboard"},
-    }
-    FakeRegistry.thread_ids = ["duplicate", "slack-thread"]
+    FakeRegistry.thread_ids = ["slack-thread", "existing"]
 
     assert await pr_fixes.pull_request_thread_running(
         "acme", "app", 12, "alice"
@@ -271,3 +265,25 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     pr_fixes.dispatch_agent_run.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     setup.client.threads.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", ["idle", "busy"])
+async def test_a_thread_linked_later_never_replaces_the_one_that_opened_the_pr(setup, status):
+    setup.threads["opener"] = {
+        "thread_id": "opener",
+        "status": "idle",
+        "updated_at": "2026-11-10T12:00:00Z",
+        "metadata": {"source": "slack", "graph_id": "agent"},
+    }
+    setup.threads["github-comment"] = {
+        "thread_id": "github-comment",
+        "status": status,
+        "updated_at": "2099-01-01",
+        "metadata": {"source": "github", "graph_id": "agent"},
+    }
+    FakeRegistry.thread_ids = ["opener", "github-comment"]
+
+    for intent in (OPEN, FIX):
+        thread = await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+        assert thread.thread_id == "opener"
+    pr_fixes.create_dashboard_thread_record.assert_not_awaited()

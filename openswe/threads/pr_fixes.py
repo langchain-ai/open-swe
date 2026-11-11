@@ -247,6 +247,12 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
 async def find_pr_threads(
     owner: str, repo: str, number: int, login: str, email: str | None, *, unlisted: bool = False
 ) -> list[Thread]:
+    """The PR's threads ``login`` may post to, its primary thread first.
+
+    The primary thread is the conversation that opened the PR, so every PR action
+    continues it; a thread linked later, such as one a GitHub comment started,
+    comes first only when the caller can't post to the primary.
+    """
     client = langgraph_client()
     candidates: dict[str, Thread] = {}
     for thread_id in await _pr_thread_ids(owner, repo, number):
@@ -266,11 +272,7 @@ async def find_pr_threads(
         except HTTPException:
             continue
         candidates[thread_id] = thread
-    return sorted(
-        candidates.values(),
-        key=lambda thread: (thread.get("status") == "busy", str(thread.get("updated_at", ""))),
-        reverse=True,
-    )
+    return list(candidates.values())
 
 
 def _pr_thread_lock_key(login: str, url: str) -> str:
