@@ -16,6 +16,7 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue, TypeAdapter
 
 from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.principal import DashboardPrincipal
@@ -95,6 +96,10 @@ class ThreadStoreOverClient(ThreadStore):
 
     async def state(self, thread_id: str) -> dict[str, Any] | None:
         return await proxy.langgraph_client().threads.get_state(thread_id)
+
+    async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
+        state = await proxy.langgraph_client().threads.get_state(thread.thread_id)
+        return TypeAdapter(dict[str, JsonValue]).validate_python(dict(state))
 
     async def command(
         self, thread_id: str, body: bytes, *, user_id: str | None = None

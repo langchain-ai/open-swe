@@ -17,6 +17,7 @@ from openswe.threads import (
 )
 from openswe.tools import threads as tools
 from openswe.ui_invalidations.topics import Topic
+from tests.conftest import serve_threads_from
 
 _ADMINS = {"admin", "admin@example.com"}
 
@@ -45,6 +46,7 @@ def private_thread(monkeypatch, request):
     )
     for module in (access, handlers, listing, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(
         handlers, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"])
     )

@@ -10,6 +10,7 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from langgraph.constants import END
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue
 
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.github.http import GitHubClient
@@ -26,7 +27,7 @@ from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
 from openswe.threads.identity import ThreadIdentity
-from openswe.threads.index import STOPPED_AT_KEY
+from openswe.threads.index import STOPPED_AT_KEY, IndexedThread
 from openswe.threads.listing import (
     attach_task_workers,
     list_unresolved_dashboard_threads,
@@ -746,34 +747,30 @@ async def get_dashboard_thread_state(
     *,
     email: str | None = None,
     timings: dict[str, float] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, JsonValue]:
     record = timings if timings is not None else {}
-    client = langgraph_client()
     with phase(record, "thread_get"):
-        try:
-            thread = await client.threads.get(thread_id)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
-    thread, latest_run_status, _ = await _refresh_latest_run_metadata(
-        client, thread, timings=record
-    )
-    metadata = thread_metadata(thread)
-    with phase(record, "get_state"):
-        state = await client.threads.get_state(thread_id)
-    result = as_json_object(state)
+        thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(thread.metadata, login, email)
+
+    async def latest_run() -> IndexedThread:
+        with phase(record, "runs_list"):
+            return await THREADS.with_latest_run(thread)
+
+    async def state() -> dict[str, JsonValue]:
+        with phase(record, "get_state"):
+            return await THREADS.state_of(thread)
+
+    current, result = await asyncio.gather(latest_run(), state())
+    run_status = current.metadata.get("latest_run_status")
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a
     # run was just started out-of-band (our REST run-create), the latest
     # checkpoint can still be the previous finished one with `next == []`,
     # which the SDK reads as idle and never opens the stream. Drop `next`
     # while a run is pending/running so the SDK treats the thread as active.
-    metadata_run_status = metadata.get("latest_run_status")
-    if (
-        _thread_is_busy(thread)
-        or latest_run_status in {"pending", "running"}
-        or metadata_run_status in {"pending", "running"}
-    ):
+    if thread.status == "busy" or run_status in {"pending", "running"}:
         result.pop("next", None)
     return result

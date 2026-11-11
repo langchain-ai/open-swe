@@ -224,10 +224,48 @@ class ThreadStore:
         thread = await self.get(thread_id)
         if thread is None:
             return None
+        return await self.state_of(thread)
+
+    async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
+        """The state of a thread already read from the index, as its runtime keeps it."""
         if thread.runtime == "mda" and channel_of(thread.metadata) is None:
             # The channel created its threads there; the backend's own may need it.
-            await RUNTIMES.mda_runtime.ensure_remote_thread(thread_id)
-        return await RUNTIMES.runs_on(thread.runtime).state(thread_id)
+            await RUNTIMES.mda_runtime.ensure_remote_thread(thread.thread_id)
+        return await RUNTIMES.runs_on(thread.runtime).state(thread.thread_id)
+
+    async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
+        """The thread with its latest run's id and status in its metadata, as its runtime reports them.
+
+        A changed run is recorded in the index too. When the runtime can't be read, the
+        thread comes back as the index has it.
+        """
+        try:
+            run = await RUNTIMES.runs_on(thread.runtime).latest_run(thread.thread_id)
+        except Exception:
+            logger.warning(
+                "Could not read a thread's latest run",
+                extra={"thread_id": thread.thread_id},
+                exc_info=True,
+            )
+            return thread
+        if run is None:
+            return thread
+        latest: dict[str, JsonValue] = {
+            "latest_run_id": run.run_id,
+            "latest_run_status": run.status,
+        }
+        if all(thread.metadata.get(key) == value for key, value in latest.items()):
+            return thread
+        try:
+            await self.update(thread.thread_id, latest)
+        except Exception:
+            # The run read still decides how the thread reads.
+            logger.warning(
+                "Could not record a thread's latest run",
+                extra={"thread_id": thread.thread_id},
+                exc_info=True,
+            )
+        return thread.model_copy(update={"metadata": {**thread.metadata, **latest}})
 
     async def command(
         self, thread_id: str, body: bytes, *, user_id: str | None = None
