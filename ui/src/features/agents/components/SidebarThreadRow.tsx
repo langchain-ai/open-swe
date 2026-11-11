@@ -44,6 +44,7 @@ import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDia
 import { parsePullRequestReference } from "@/features/reviews/search"
 import { RenameThreadDialog } from "@/features/agents/components/RenameThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import { DropdownMenuItem } from "@/components/MenuItem"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
@@ -368,6 +369,8 @@ export function SidebarThreadRow({
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
+  const selection = useSidebarThreadSelection()
+  const selected = selection?.selected.has(item.id) ?? false
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
   const setViewed = useSetAgentThreadViewed()
@@ -431,12 +434,18 @@ export function SidebarThreadRow({
       event.preventDefault()
       return
     }
+    if (selection?.click(event, item)) return
     markViewed()
     onNavigate?.()
   }
 
   const rowContent = (
     <>
+      {selected && (
+        <span className="text-brand text-xs" aria-label="Selected thread">
+          ✓
+        </span>
+      )}
       {hasSubagents && (
         <DisclosureCaret
           expanded={!subagentsCollapsed}
@@ -474,7 +483,7 @@ export function SidebarThreadRow({
   )
 
   const rowProps = sidebarRowProps({
-    active: rowIsActive,
+    active: selected || rowIsActive,
     archived,
     indent,
     depth: 0,
@@ -485,11 +494,14 @@ export function SidebarThreadRow({
     <Link
       {...reviewPageRoute(review)}
       onClick={(event) => {
-        noteReviewOpenedFromSidebar(review)
         handleNavigate(event)
+        if (!event.defaultPrevented) noteReviewOpenedFromSidebar(review)
       }}
       onKeyDown={openContextMenuFromKeyboard}
       {...rowProps}
+      data-selectable-thread={item.id}
+      data-thread-title={item.title}
+      aria-label={selected ? `${item.title}, selected` : item.title}
     >
       {rowContent}
     </Link>
@@ -500,6 +512,9 @@ export function SidebarThreadRow({
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
       {...rowProps}
+      data-selectable-thread={item.id}
+      data-thread-title={item.title}
+      aria-label={selected ? `${item.title}, selected` : item.title}
     >
       {rowContent}
     </Link>
