@@ -7,6 +7,8 @@ import {
 } from "@/features/agents/lib/queries"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { AgentsApiError } from "@/features/agents/lib/api"
+import { fetchTranscript } from "./api"
 import type { TranscriptEventHandlers } from "./api"
 import type { StoredEvent } from "./types"
 import { useThreadTranscript } from "./useThreadTranscript"
@@ -15,7 +17,7 @@ const stream = vi.hoisted(() => ({
   handlers: null as TranscriptEventHandlers | null,
 }))
 vi.mock("./api", () => ({
-  fetchTranscript: async (id: string) => ({
+  fetchTranscript: vi.fn(async (id: string) => ({
     thread_id: id,
     version: 0,
     thread: { status: "idle" },
@@ -24,7 +26,7 @@ vi.mock("./api", () => ({
     tool_calls: [],
     notices: [],
     older_cursor: null,
-  }),
+  })),
   openTranscriptEvents: (
     _id: string,
     _after: number,
@@ -36,8 +38,79 @@ vi.mock("./api", () => ({
 }))
 afterEach(() => {
   cleanup()
+  vi.mocked(fetchTranscript).mockReset()
+  stream.handlers = null
   vi.useRealTimers()
 })
+
+it("recovers initial hydration after a temporary service outage", async () => {
+  vi.useFakeTimers()
+  vi.mocked(fetchTranscript).mockRejectedValueOnce(
+    new AgentsApiError(503, "Service Unavailable")
+  )
+  const client = new QueryClient()
+  const view = renderHook(() => useThreadTranscript("outage-recovery"), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
+  await act(async () => {})
+  expect(view.result.current.isHydrating).toBe(true)
+  expect(view.result.current.error).toBeNull()
+  expect(stream.handlers).toBeNull()
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_000)
+    await view.result.current.hydration
+  })
+  expect(view.result.current.state?.threadId).toBe("outage-recovery")
+  expect(view.result.current.isHydrating).toBe(false)
+  expect(view.result.current.error).toBeNull()
+  expect(stream.handlers).not.toBeNull()
+})
+
+it("cancels a pending hydration retry when the view unmounts", async () => {
+  vi.useFakeTimers()
+  vi.mocked(fetchTranscript).mockRejectedValueOnce(
+    new AgentsApiError(503, "Service Unavailable")
+  )
+  const client = new QueryClient()
+  const view = renderHook(() => useThreadTranscript("outage-unmounted"), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
+  await act(async () => {})
+  view.unmount()
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(7_000)
+  })
+  expect(fetchTranscript).toHaveBeenCalledTimes(1)
+  expect(stream.handlers).toBeNull()
+})
+
+it.each([403, 503])(
+  "surfaces HTTP %s after only eligible retries",
+  async (status) => {
+    vi.useFakeTimers()
+    const error = new AgentsApiError(status, "Unavailable")
+    vi.mocked(fetchTranscript).mockRejectedValue(error)
+    const client = new QueryClient()
+    const view = renderHook(() => useThreadTranscript(`failure-${status}`), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_000)
+      await expect(view.result.current.hydration).rejects.toBe(error)
+    })
+    expect(fetchTranscript).toHaveBeenCalledTimes(status === 503 ? 4 : 1)
+    expect(view.result.current.error).toBe(error)
+    expect(view.result.current.isHydrating).toBe(false)
+    expect(stream.handlers).toBeNull()
+    vi.mocked(fetchTranscript).mockReset()
+  }
+)
 
 it("publishes first text immediately and flushes buffered text on completion", async () => {
   vi.useFakeTimers()

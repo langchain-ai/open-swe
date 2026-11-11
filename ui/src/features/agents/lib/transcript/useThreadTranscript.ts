@@ -27,6 +27,7 @@ import {
 } from "@/lib/perf/threadLoad"
 import { runTranscriptBuilt } from "@/lib/perf/streaming"
 import { perfNow } from "@/lib/perf/trace"
+import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { fetchOlderTurns, fetchTranscript, openTranscriptEvents } from "./api"
 import {
   applyEvent,
@@ -308,11 +309,28 @@ export function useThreadTranscript(
           if (disposed) return
           publish(loaded)
         }
+        attempt = 0
+        onConnected()
         threadHydrated(threadId)
         hydration.resolve()
         if (!disposed) subscribe()
       } catch (loadError) {
         if (disposed) return
+        if (
+          loadError instanceof DashboardRequestError &&
+          [0, 502, 503, 504].includes(loadError.status) &&
+          attempt < 3
+        ) {
+          attempt += 1
+          const delay = reconnectDelayMs(attempt)
+          onReconnect({ attempt, delayMs: delay })
+          retry = setTimeout(() => {
+            retry = null
+            if (!disposed) void start()
+          }, delay)
+          return
+        }
+        onConnected()
         setError(loadError)
         threadHydrationFailed(threadId)
         hydration.reject(loadError)
