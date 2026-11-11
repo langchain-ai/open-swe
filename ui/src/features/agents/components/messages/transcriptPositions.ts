@@ -4,7 +4,7 @@ const MAX_POSITIONS = 200
 export interface TranscriptPosition {
   top: number
   atBottom: boolean
-  anchor: { messageId: string; offset: number } | null
+  anchor: { messageId: string; offset: number; collapsedGroup?: boolean } | null
 }
 
 class TranscriptPositions {
@@ -49,6 +49,10 @@ class TranscriptPositions {
             anchor = {
               messageId: rawAnchor.messageId,
               offset: rawAnchor.offset,
+              ...("collapsedGroup" in rawAnchor &&
+              rawAnchor.collapsedGroup === true
+                ? { collapsedGroup: true }
+                : {}),
             }
           }
           this.positions.set(entry[0], {
@@ -102,6 +106,7 @@ class TranscriptPositions {
         anchor = {
           messageId: message.dataset.messageId!,
           offset: rect.top - viewportTop,
+          ...(message.dataset.messageIds ? { collapsedGroup: true } : {}),
         }
         break
       }
@@ -111,15 +116,26 @@ class TranscriptPositions {
 
   target(el: HTMLElement, position: TranscriptPosition): number | null {
     if (!position.anchor) return position.top
-    const message = el.querySelector<HTMLElement>(
-      `[data-message-id="${CSS.escape(position.anchor.messageId)}"]`
+    const messageId = position.anchor.messageId
+    const exact = el.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(messageId)}"]`
     )
+    const message =
+      exact ??
+      [...el.querySelectorAll<HTMLElement>("[data-message-ids]")].find(
+        (group) =>
+          (JSON.parse(group.dataset.messageIds!) as string[]).includes(
+            messageId
+          )
+      )
     if (!message) return null
     return (
       el.scrollTop +
       message.getBoundingClientRect().top -
       el.getBoundingClientRect().top -
-      position.anchor.offset
+      (!!message.dataset.messageIds === !!position.anchor.collapsedGroup
+        ? position.anchor.offset
+        : 0)
     )
   }
 }
