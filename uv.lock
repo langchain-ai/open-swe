@@ -759,7 +759,7 @@ wheels = [
 
 [[package]]
 name = "exa-py"
-version = "2.27.0"
+version = "2.28.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpcore" },
@@ -770,9 +770,9 @@ dependencies = [
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/70/51a9f2192a3433459757a62f94c5123dd3df61a153c2fbe7b452a901e123/exa_py-2.27.0.tar.gz", hash = "sha256:629f835f2c06551e56d0f2020fb49dabcd6cbd0b10e513c4c33f50a6cc5948d9", size = 115489, upload-time = "2026-11-01T02:50:08.571Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/a2/715db84134b2bbd4da26fb13080914819e572bbb211063bf5ad5c9693a48/exa_py-2.28.0.tar.gz", hash = "sha256:e835facb38fda3875837ecc875cae1f69de27f5782fa7f6be1f4fcd0b2933214", size = 117524, upload-time = "2026-11-06T21:02:37.666Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/9c/ce69a23b27163447ca7a23ea248457be14d7fa28779d1312ef7778bc3ad8/exa_py-2.27.0-py3-none-any.whl", hash = "sha256:9aa8199fb1936831b425c9fdc2f07b5ae8f7f76472f0a299e3dd4789cfe3910f", size = 142108, upload-time = "2026-11-01T02:50:07.012Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/a9/6115797dbbdac131748dc057b806165ab9ac2658b0295de769c9b546a110/exa_py-2.28.0-py3-none-any.whl", hash = "sha256:ae4a4140e1721872d2915a5ba93f7ccea80961013e965eb6bf8ea1896eb8f471", size = 144953, upload-time = "2026-11-06T21:02:36.435Z" },
 ]
 
 [[package]]
@@ -795,7 +795,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.162.0"
+version = "0.162.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -805,9 +805,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/eb/2cf8c80abf09b2800aef0a83b41066fbfda8ee5495b7a08b9d1af40f7046/fastapi-0.162.0.tar.gz", hash = "sha256:6a22c1e2e6e32e0633ee7e170f00009a29b8228b16feb219ee42f32fd8d88a8f", size = 527867, upload-time = "2026-10-23T18:47:33.264Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/53/f6fed628a0c3d6a284125a93f9145b02ecc2c394735a878b5ad9938c8e17/fastapi-0.162.2.tar.gz", hash = "sha256:9ebd2a69b579141315b2447d8e3f518e6fd909abd6c01cac5cc6b06d5c8841f4", size = 530366, upload-time = "2026-11-07T15:41:39.838Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/4f/3f2c25c9b43970b5e9a08beb5e04776247edea684ddc0930f4f02f0bb6cb/fastapi-0.162.0-py3-none-any.whl", hash = "sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c", size = 148912, upload-time = "2026-10-23T18:47:31.734Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/fb/0dc0f819163bc6b7f9e6802d7d0b1ac180fbbe4e75dbd10655c6a4d77796/fastapi-0.162.2-py3-none-any.whl", hash = "sha256:d0584f9662317e01140df94c64f4bed1d8b059fe35496e30c9c92f70e6e5ff15", size = 151671, upload-time = "2026-11-07T15:41:38.509Z" },
 ]
 
 [[package]]
@@ -887,7 +887,7 @@ wheels = [
 
 [[package]]
 name = "fireworks-ai"
-version = "1.2.32"
+version = "1.2.33"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -900,9 +900,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fe/bd/ca3e13158ad4800c29dbc8e25975600aa466997b34f4f982b757cb349764/fireworks_ai-1.2.32.tar.gz", hash = "sha256:252ba4c4c759358202142f00b454ad23e0fc42db35045563bc515f3e3c995822", size = 850315, upload-time = "2026-11-05T20:33:36.189Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/8c/775ea4471aad765b41034939361eae05c50c5eda81a97f58faf1d73c5445/fireworks_ai-1.2.33.tar.gz", hash = "sha256:f09a4975abdad7e174fa2146de24ccadfc081284e86cfc94c5e50ae098974159", size = 880596, upload-time = "2026-11-08T08:02:26.352Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/a1/fcba506ddf8a87dfd6b98bf797576296e03d64685553146e378b82f5a8cb/fireworks_ai-1.2.32-py3-none-any.whl", hash = "sha256:2bd057cef1cb1c1ebd011697d247086b213135226d301b5c214272d28ee5563b", size = 799671, upload-time = "2026-11-05T20:33:34.608Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/13/e7447617db68f522ada5b3bb26781c4db93b0a344b059ba291f05520dd2b/fireworks_ai-1.2.33-py3-none-any.whl", hash = "sha256:0b7a440ec78de02f87cd2ea88e130d67ed82f5607b2b82d7d9685ea8fe25aaf4", size = 829469, upload-time = "2026-11-08T08:02:24.293Z" },
 ]
 
 [[package]]
