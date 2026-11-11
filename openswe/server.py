@@ -1869,11 +1869,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # the pick is still recorded on the run. The other arm runs the pick.
     # Every kind of message is in the experiment: channel threads, DMs and `/oswe`
     # questions alike.
-    routed_arm = (
-        adaptive_model_routing
-        and cfg.source != "incidents_agent"
-        and _model_routing_mode(thread_id) == "auto"
-    )
+    in_routing_experiment = adaptive_model_routing and cfg.source != "incidents_agent"
+    routed_arm = in_routing_experiment and _model_routing_mode(thread_id) == "auto"
     user_model_choice = (
         (cfg.agent_model_id, cfg.agent_effort)
         if cfg.model_selection == "explicit" and cfg.agent_model_id
@@ -2242,6 +2239,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         hidden_tools=sorted(excluded_tools),
         routing=RoutingRules(
             mode=model_routing_mode,
+            # The control arm still has its request classified, so both arms' traces carry
+            # a task type to compare them by.
+            shadow=in_routing_experiment and not routed_arm,
             route_model_ids=route_model_ids,
             route_efforts={route: effort for route, (_, effort) in routing_defaults.items()},
         ),

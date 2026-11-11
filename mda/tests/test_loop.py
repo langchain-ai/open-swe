@@ -432,7 +432,7 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
         # Answers only once preparing has begun: the two run side by side.
         await asyncio.wait_for(preparing.wait(), timeout=1)
         classified.append(RouteClassifier.latest_task(messages))
-        return Route("fast")
+        return Route("fast", task_type="lookup", complexity="routine")
 
     monkeypatch.setattr(RouteClassifier, "classify", classify)
     rules = LoopRules(
@@ -489,8 +489,9 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
     await graph.ainvoke({"messages": [("user", "Rename the flag")]})
 
     assert classified == ["Rename the flag"]
-    # The trace records the route the classifier chose.
+    # The trace records the route the classifier chose, and what Jev said the request is.
     assert {"model_route": "fast"} in traced
+    assert {"jev_task_type": "lookup", "jev_complexity": "routine"} in traced
     started = next(body for name, body in calls if name == "run_started")
     assert (started["model_route"], started["model_id"], started["effort"]) == (
         "fast",
@@ -539,6 +540,82 @@ async def test_a_thread_that_kept_default_before_routing_is_classified(
     assert classifying is not None
     assert (await loop.routed(held, [], classifying))["model_route"] == "performance"
     assert backend.run.route == "performance"
+
+
+async def test_the_control_arm_classifies_its_first_request_for_the_trace_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classified: list[str] = []
+
+    async def classify(_self: RouteClassifier, messages: list[BaseMessage]) -> Route:
+        classified.append(RouteClassifier.latest_task(messages))
+        return Route("performance", task_type="design", complexity="involved")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, calls = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Design the cache", id="human-1")
+    state = _state(human)
+    held = state[STATE_KEY]
+    assert isinstance(held, dict)
+
+    classifying = loop.classify_ahead(state)
+    assert classifying is not None
+    update = await loop.routed(held, [human], classifying)
+
+    # The trace gets Jev's answers; the run keeps its own model.
+    assert backend.run.classified == {"jev_task_type": "design", "jev_complexity": "involved"}
+    assert update == {"jev_shadowed": True, "model_route": "default"}
+    assert backend.run.route == "default"
+    assert classified == ["Design the cache"]
+    assert calls == []
+    # A later turn of the thread is not classified again.
+    later = _state(human, **update)
+    assert loop.classify_ahead(later) is None
+
+
+async def test_a_failed_shadow_classification_leaves_the_run_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
+    loop = RunLoop(backend)
+    held: dict[str, JsonValue] = {}
+
+    assert await loop.routed(held, [HumanMessage(content="Fix it", id="human-1")], None) == {
+        "model_route": "default"
+    }
+    assert backend.run.classified == {}
+
+
+async def test_the_control_arm_classifies_again_after_jev_gives_no_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The first is what the classifier returns when Jev is unavailable: no task type.
+    answers = iter([Route("default", persist=False), Route("balanced", task_type="lookup")])
+
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        return next(answers)
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix it", id="human-1")
+
+    unanswered = await loop.routed({}, [human], None)
+
+    # The thread is not marked shadowed, so its next turn asks again and labels the trace.
+    assert unanswered == {"model_route": "default"}
+    assert backend.run.classified == {}
+    later = _state(human, **unanswered)
+    held = later[STATE_KEY]
+    assert isinstance(held, dict)
+    answered = await loop.routed(held, [human], loop.classify_ahead(later))
+    assert answered == {"jev_shadowed": True, "model_route": "default"}
+    assert backend.run.classified == {"jev_task_type": "lookup"}
 
 
 async def test_a_route_kept_for_one_run_still_reaches_its_subagents(

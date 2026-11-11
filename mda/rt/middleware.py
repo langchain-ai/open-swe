@@ -421,6 +421,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # The route the classifier chose, next to the model a person picked on the trace.
             if (route := self._backend.run.route) not in (None, "default"):
                 trace.update({"model_route": route})
+            # What Jev said the request is, on both arms of the routing experiment.
+            if classified := self._backend.run.classified:
+                trace.update(classified)
         finally:
             opening.cancel()
             if classifying is not None:

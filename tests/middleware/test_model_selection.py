@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from openswe.agent_api.run_state import as_messages
-from openswe.input_messages import human_input
+from openswe.input_messages import human_input, system_input
 from openswe.middleware.model_selection import (
     ModelSelectionMiddleware,
     ModelSelectionState,
@@ -19,6 +19,15 @@ def _said(text: str) -> HumanMessage:
     """What a person wrote, as the backend records it."""
     [message] = as_messages(
         [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
+    )
+    assert isinstance(message, HumanMessage)
+    return message
+
+
+def _sent(text: str, sender: str) -> HumanMessage:
+    """An event a system sent the run, as the backend records it."""
+    [message] = as_messages(
+        [system_input(text, {"sender_id": sender, "surface": "automation", "kind": "system"})]
     )
     assert isinstance(message, HumanMessage)
     return message
@@ -50,6 +59,30 @@ async def test_route_is_stored_in_state(
 
     assert state["model_route"] == "fast"
     jev.assert_awaited_once_with("Update the README")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("messages", "task"),
+    [
+        # A run no person started is classified by the latest event sent to it.
+        (
+            [_sent("Old event", "system:schedule:s1"), _sent("Audit deps", "system:schedule:s1")],
+            "Audit deps",
+        ),
+        # A person's request wins over an event after it.
+        ([_said("Rename the flag"), _sent("CI finished", "system:ci")], "Rename the flag"),
+    ],
+)
+async def test_classifies_the_latest_request_or_event(
+    monkeypatch: pytest.MonkeyPatch, messages: list[HumanMessage], task: str
+) -> None:
+    jev = AsyncMock(return_value=RouteSelection("balanced"))
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
+
+    await _middleware().abefore_model(cast(Any, {"messages": messages}), MagicMock())
+
+    jev.assert_awaited_once_with(task)
 
 
 @pytest.mark.asyncio

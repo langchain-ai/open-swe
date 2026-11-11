@@ -23,17 +23,18 @@ PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
 
 
-def _latest_human_task(messages: Sequence[object]) -> str:
-    """What a person last wrote; context and system messages around it are skipped."""
+def _latest_task(messages: Sequence[object]) -> str:
+    """What a person last wrote, skipping the context around it; for a run no person
+    started (a schedule, a background event), the latest event sent to it."""
+    event = ""
     for message in reversed(messages):
-        if (
-            isinstance(message, HumanMessage)
-            and (provenance := Provenance.of(message)) is not None
-            and provenance.human
-            and (authored := input_message_text(message.content))
-        ):
+        if not isinstance(message, HumanMessage) or (provenance := Provenance.of(message)) is None:
+            continue
+        if provenance.human and (authored := input_message_text(message.content)):
             return authored
-    return ""
+        if not event and provenance.kind == "system":
+            event = input_message_text(message.content) or ""
+    return event
 
 
 @dataclass(frozen=True)
@@ -49,8 +50,8 @@ async def _select_jev_route(task: str) -> RouteSelection:
 
 
 async def classify_route(messages: Sequence[object]) -> RouteSelection:
-    """The route the person's latest request takes, as the classifier reads it."""
-    return await _select_jev_route(_latest_human_task(messages))
+    """The route the latest request takes, as the classifier reads it."""
+    return await _select_jev_route(_latest_task(messages))
 
 
 class ModelSelectionState(AgentState):

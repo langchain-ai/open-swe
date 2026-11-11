@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
-from rt.input_messages import human_input
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, convert_to_messages
+from rt.input_messages import RunMessage, human_input, system_input
 from rt.routing import Route, RouteClassifier
 
 
@@ -67,11 +67,48 @@ def test_the_task_is_the_persons_own_request_not_the_context_after_it() -> None:
     assert RouteClassifier.latest_task([HumanMessage(content="Plain text")]) == "Plain text"
 
 
+def _message(built: RunMessage) -> BaseMessage:
+    """A run input message, as the run's state holds it."""
+    [message] = convert_to_messages([dict(built)])
+    return message
+
+
+def _system(text: str, sender: str) -> BaseMessage:
+    return _message(system_input(text, {"sender_id": sender, "surface": "web", "kind": "system"}))
+
+
+def test_a_run_no_person_started_is_classified_by_its_latest_event() -> None:
+    # A schedule's run carries only what the schedule sent, which is its task.
+    messages = [
+        HumanMessage(
+            content='<dynamic-context kind="system" id="system:schedule:s1">Daily</dynamic-context>'
+        ),
+        _system("Earlier event", "system:schedule:s1"),
+        _system("Audit the dependencies", "system:schedule:s1"),
+    ]
+
+    assert RouteClassifier.latest_task(messages) == "Audit the dependencies"
+
+
+def test_a_persons_request_wins_over_a_later_event() -> None:
+    request = human_input(
+        "Rename the flag", {"sender_id": "slack:U1", "surface": "slack", "kind": "human"}
+    )
+    messages = [
+        _message(request),
+        _system("CI finished", "system:ci"),
+    ]
+
+    assert RouteClassifier.latest_task(messages) == "Rename the flag"
+
+
 async def test_a_confident_choice_is_kept_for_the_thread() -> None:
     route = await RouteClassifier().classify([HumanMessage(content="Rename the flag")])
 
-    # A quick question runs on Balanced.
+    # A quick question runs on Balanced, and the trace records what Jev said it is: here
+    # its task type, since "lookup" is no complexity.
     assert route == Route("balanced")
+    assert route.trace_metadata == {"jev_task_type": "lookup"}
     [asked] = _Classifier.asked
     assert asked["state"] == "Rename the flag"
     assert asked["config"] == {"tags": ["nostream"]}

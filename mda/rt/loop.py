@@ -88,6 +88,9 @@ _SUMMARIZATION_EVENT: Final = "_summarization_event"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
+# Held state: the routing experiment's control arm already classified the thread's first
+# request for its trace.
+_SHADOWED: Final = "jev_shadowed"
 # A token is replaced this long before it expires. The backend never hands out one with
 # less left, so a replacement is not due again at once.
 _GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
@@ -483,8 +486,9 @@ class RunLoop:
 
     def classify_ahead(self, state: Mapping[str, object]) -> asyncio.Task[Route] | None:
         """Start classifying the turn's route while the run prepares, where the thread's
-        held state leaves its route to the classifier."""
-        if not self._classifies(_held(state)):
+        held state leaves its route to the classifier or its trace awaits a shadow answer."""
+        held = _held(state)
+        if not (self._classifies(held) or self._shadows(held)):
             return None
         return asyncio.ensure_future(self._classifier.classify(_messages(state)))
 
@@ -499,6 +503,13 @@ class RunLoop:
             and held.get("model_route_attempted_for") != run_id()
         )
 
+    def _shadows(self, held: Mapping[str, object]) -> bool:
+        """Whether the turn classifies a control-arm thread's request for its trace alone."""
+        rules = self.rules.routing
+        return (
+            rules is not None and rules.shadow and rules.mode != "auto" and not held.get(_SHADOWED)
+        )
+
     async def routed(
         self,
         held: Mapping[str, object],
@@ -511,15 +522,20 @@ class RunLoop:
         ``held`` is the state the run's preparation left, which may have changed what
         ``classify_ahead`` saw: a classification it no longer needs is stopped.
         """
+        shadowed: dict[str, JsonValue] = {}
+        if self._shadows(held):
+            # The classification is for the trace alone; the arm routes as it always does.
+            shadowed = await self._shadowed(messages, classifying)
+            classifying = None
         try:
             route = await self._route(held, messages, classifying)
         finally:
             if classifying is not None:
                 classifying.cancel()
         if route is None:
-            return {}
+            return shadowed
         self._backend.run.route = route.route
-        update = self._kept(route)
+        update = {**shadowed, **self._kept(route)}
         rules = self.rules.routing
         model_id = rules.route_model_ids.get(route.route) if rules is not None else None
         if rules is not None and route.route != "default" and model_id:
@@ -527,6 +543,20 @@ class RunLoop:
                 selected_model_id=model_id, selected_effort=rules.route_efforts.get(route.route)
             )
         return update
+
+    async def _shadowed(
+        self, messages: Sequence[BaseMessage], classifying: asyncio.Task[Route] | None
+    ) -> dict[str, JsonValue]:
+        """What the classifier would have said about a control-arm thread's first request,
+        for the trace; the run's model is untouched. A failure, or no task type from Jev,
+        leaves it for a later turn."""
+        try:
+            classified = await (classifying or self._classifier.classify(messages))
+        except Exception:
+            logger.warning("Could not classify the control-arm thread's request", exc_info=True)
+            return {}
+        self._backend.run.classified = classified.trace_metadata
+        return {_SHADOWED: True} if classified.task_type is not None else {}
 
     @staticmethod
     def _kept(route: Route) -> dict[str, JsonValue]:
@@ -562,6 +592,7 @@ class RunLoop:
         else:
             classified = await (classifying or self._classifier.classify(messages))
             route, persist = classified.route, classified.persist
+            self._backend.run.classified = classified.trace_metadata
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:

@@ -9,12 +9,26 @@ which work runs on Performance changes the mapping, not the questions.
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Final
 
 from langchain_typesafe import Choice
 
 from runtime_api.catalog import RouteName
 from runtime_api.classifier import DEFAULT_JEV, Jev, JevDecision
+
+
+@dataclass(frozen=True)
+class TaskDecision:
+    """What Jev said about a request, and the route it takes."""
+
+    # None when the task type is unknown.
+    route: RouteName | None
+    # False when an unsure answer decided the route: it holds for this run alone.
+    persist: bool
+    # Jev's own choices, sure or not; None where it gave none.
+    task_type: str | None = None
+    complexity: str | None = None
 
 
 class TaskRoute:
@@ -87,6 +101,18 @@ class TaskRoute:
     ) -> tuple[RouteName | None, bool]:
         """The route ``task`` takes, and whether the thread keeps it: a route an unsure
         answer decided holds for this run alone."""
+        decision = await cls.decide(task, prompt=prompt, jev=jev)
+        return decision.route, decision.persist
+
+    @classmethod
+    async def decide(
+        cls,
+        task: str,
+        *,
+        prompt: Callable[[str], str],
+        jev: Jev = DEFAULT_JEV,
+    ) -> TaskDecision:
+        """The route ``task`` takes, with the answers that decided it."""
         decisions = {"task_type": JevDecision(), "complexity": JevDecision()}
         answers = await jev.choose(
             cls.excerpt(task), questions=cls.questions(prompt), decisions=decisions
@@ -96,4 +122,9 @@ class TaskRoute:
             answers["task_type"] not in cls.OPEN_ENDED_PERFORMANCE_TASKS
             or decisions["complexity"].outcome == "accepted"
         )
-        return route, route is not None and sure
+        return TaskDecision(
+            route=route,
+            persist=route is not None and sure,
+            task_type=decisions["task_type"].choice,
+            complexity=decisions["complexity"].choice,
+        )

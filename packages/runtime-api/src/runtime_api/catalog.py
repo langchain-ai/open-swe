@@ -251,6 +251,9 @@ class RoutingRules(BaseModel):
 
     # None keeps the default route; "fast" never asks the classifier.
     mode: Literal["auto", "fast"] | None = None
+    # The routing experiment's control arm: the classifier still reads the thread's first
+    # request so its trace records the task type, but nothing is routed by it.
+    shadow: bool = False
     # The model each route stands for, which the dashboard shows, and the effort it runs at.
     route_model_ids: dict[str, str] = {}
     route_efforts: dict[str, str | None] = {}

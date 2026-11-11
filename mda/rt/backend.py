@@ -269,6 +269,8 @@ class Run:
         self.outbox = Outbox(self.backend)
         # The route the run's model calls take, once the run starts; its subagents follow it.
         self.route: str | None = None
+        # Jev's answers about the run's request, for its trace, once the classifier ran.
+        self.classified: dict[str, str] = {}
         self._locals: dict[object, object] = {}
 
     def local[T](self, key: object, make: Callable[[], T]) -> T:
