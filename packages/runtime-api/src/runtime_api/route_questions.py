@@ -37,6 +37,17 @@ class TaskRoute:
     # run on Performance; building or fixing does only when the approach is still open.
     PERFORMANCE_TASKS: Final = frozenset({"design", "explain"})
     OPEN_ENDED_PERFORMANCE_TASKS: Final = frozenset({"feature", "bugfix"})
+    # How much of a long request the classifier reads: its start and its end, so a
+    # question that comes before pasted context (a Slack question before its channel
+    # history) and an ask that comes after it both reach it.
+    EXCERPT_CHARS: Final = 4_000
+
+    @classmethod
+    def excerpt(cls, task: str) -> str:
+        """The part of ``task`` the classifier reads."""
+        if len(task) <= 2 * cls.EXCERPT_CHARS:
+            return task
+        return f"{task[: cls.EXCERPT_CHARS]}\n…\n{task[-cls.EXCERPT_CHARS :]}"
 
     @classmethod
     def questions(cls, prompt: Callable[[str], str]) -> dict[str, Choice]:
@@ -79,7 +90,10 @@ class TaskRoute:
         answer decided holds for this run alone."""
         decisions = {"task_type": JevDecision(), "complexity": JevDecision()}
         answers = await select_jev_choices(
-            task, questions=cls.questions(prompt), decisions=decisions, transport=transport
+            cls.excerpt(task),
+            questions=cls.questions(prompt),
+            decisions=decisions,
+            transport=transport,
         )
         route = cls.route_for(answers["task_type"], answers["complexity"])
         sure = decisions["task_type"].outcome == "accepted" and (

@@ -418,6 +418,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             prepared.update.update(self._loop.prepared(prepared))
             held = {**state.get(STATE_KEY, {}), **prepared.update}
             prepared.update.update(await self._loop.routed(held, state["messages"], classifying))
+            # The route the classifier chose, next to the model a person picked on the trace.
+            if (route := self._backend.run.route) not in (None, "default"):
+                trace.update({"model_route": route})
         finally:
             opening.cancel()
             if classifying is not None:

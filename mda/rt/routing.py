@@ -10,7 +10,6 @@ keeps its own for the runs it answers from their plan. Both ask the questions in
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
 
 from langchain_core.messages import HumanMessage
 from runtime_api.provenance import Provenance
@@ -18,9 +17,6 @@ from runtime_api.route_questions import TaskRoute
 
 from rt.input_messages import input_message_text
 from rt.prompts import prompt
-
-# The classifier reads the end of a long request.
-_TASK_CHARS: Final = 8_000
 
 
 @dataclass(frozen=True)
@@ -63,9 +59,7 @@ class RouteClassifier:
     async def classify(self, messages: Sequence[object]) -> Route:
         """The route the person's latest request takes; ``default`` for this run alone when
         the classifier cannot say."""
-        chosen, persist = await TaskRoute.classify(
-            self.latest_task(messages)[-_TASK_CHARS:], prompt=prompt
-        )
+        chosen, persist = await TaskRoute.classify(self.latest_task(messages), prompt=prompt)
         if chosen is None:
             return Route("default", persist=False)
         return Route(chosen, persist=persist)

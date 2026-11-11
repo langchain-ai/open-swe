@@ -50,7 +50,7 @@ async def _select_jev_route(task: str) -> RouteSelection:
 
 async def classify_route(messages: Sequence[object]) -> RouteSelection:
     """The route the person's latest request takes, as the classifier reads it."""
-    return await _select_jev_route(_latest_human_task(messages)[-8_000:])
+    return await _select_jev_route(_latest_human_task(messages))
 
 
 class ModelSelectionState(AgentState):

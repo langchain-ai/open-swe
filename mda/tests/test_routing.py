@@ -151,3 +151,18 @@ async def test_an_unsure_complexity_keeps_a_feature_on_balanced_for_this_run_alo
     route = await RouteClassifier().classify([HumanMessage(content="Add a flag")])
 
     assert route == Route("balanced", persist=False)
+
+
+async def test_a_long_request_is_read_from_its_start_and_its_end() -> None:
+    question = "Why is the cache cold?"
+    history = "channel history " * 1_000
+
+    await RouteClassifier().classify([HumanMessage(content=f"{question}\n{history}")])
+
+    [asked] = _Classifier.asked
+    state = asked["state"]
+    assert isinstance(state, str)
+    # A Slack question comes before its channel history; the classifier still reads it.
+    assert state.startswith(question)
+    assert state.endswith(history[-100:])
+    assert len(state) < len(question) + len(history)

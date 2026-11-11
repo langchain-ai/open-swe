@@ -1865,12 +1865,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # The routed arm ignores every model a person picked (the composer's choice, their
     # preferred default, a pin saved on the thread, or one asked for in a message);
     # the pick is still recorded on the run. The other arm runs the pick.
+    # Every kind of message is in the experiment: channel threads, DMs and `/oswe`
+    # questions alike.
     routed_arm = (
         adaptive_model_routing
-        and not slack_ask_mode
         and cfg.source != "incidents_agent"
-        # A concierge DM always answers on its person's own model.
-        and not _slack_concierge_run(cfg)
         and _model_routing_mode(thread_id) == "auto"
     )
     user_model_choice = (
@@ -1908,10 +1907,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             settings_changed = True
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
-    # A concierge DM always answers on its person's own model, so it never routes.
-    if _slack_concierge_run(cfg):
-        adaptive_model_routing = False
-
     if cfg.source == "incidents_agent":
         adaptive_model_routing = False
         if not cfg.agent_model_id:
@@ -1919,9 +1914,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             subagent_model_id, subagent_effort = routing_defaults["performance"]
 
     # Auto never falls back outside its tiers: an uncertain route uses Balanced.
-    if routed_arm or (
-        adaptive_model_routing and not slack_ask_mode and _model_routing_mode(thread_id) == "auto"
-    ):
+    if routed_arm or (adaptive_model_routing and _model_routing_mode(thread_id) == "auto"):
         if (subagent_model_id, subagent_effort) == (model_id, profile_effort):
             subagent_model_id, subagent_effort = routing_defaults["balanced"]
         model_id, profile_effort = routing_defaults["balanced"]
@@ -2009,11 +2002,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     if image_model_override is not None:
         model_id, profile_effort = image_model_override
         subagent_model_id, subagent_effort = image_model_override
-
-    # A `/oswe` question runs on the asker's own default model, and never routes
-    # adaptively: one question gets one answer, so there is nothing to route.
-    if slack_ask_mode:
-        adaptive_model_routing = False
 
     model_routing_mode = _model_routing_mode(thread_id) if adaptive_model_routing else None
     config["metadata"] = {

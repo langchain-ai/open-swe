@@ -829,7 +829,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         assert prepare._requested_models is None
 
 
-async def test_a_concierge_dm_keeps_its_model_in_the_routed_arm(
+async def test_a_concierge_dm_is_routed_in_the_routed_arm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
@@ -842,9 +842,10 @@ async def test_a_concierge_dm_keeps_its_model_in_the_routed_arm(
     )
     captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
 
-    assert _main_model(captured).model_id == "anthropic:claude-opus-5-5"
+    # A DM is in the experiment like any other message: the route decides, not the pick.
+    assert _main_model(captured).model_id == "openai:gpt-6.1-sol"
     routing = cast(ToolSurface, captured["surface"]).loop.routing
-    assert routing is None or routing.mode is None
+    assert routing is not None and routing.mode == "auto"
 
 
 @pytest.mark.parametrize("routed", [True, False])
@@ -876,7 +877,7 @@ async def test_routing_ignores_a_picked_model_but_records_it(
 
 
 @pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
-async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
+async def test_slack_question_is_routed_after_dashboard_handoff(
     monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, langsmith_users
 ) -> None:
     langsmith_users.add("octocat")
@@ -901,9 +902,9 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
         )
         captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
         routing = cast(ToolSurface, captured["surface"]).loop.routing
-        # A Slack question keeps the default route; the dashboard's is routed.
+        # A Slack question is routed like any other message.
         assert routing is not None
-        assert routing.mode == ("auto" if source == "dashboard" else None)
+        assert routing.mode == "auto"
 
 
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model(

@@ -1175,6 +1175,13 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
             # What the planner decides for the run, such as the sender's draft preference.
             config["configurable"]["draft_prs"] = False
+            config["metadata"] = {
+                **config.get("metadata", {}),
+                "model_routing_applied": True,
+                "model_routing_mode": "auto",
+                "user_model_choice": "anthropic:claude-opus-5-5",
+                "user_effort_choice": "high",
+            }
             search = integration("mcp_search")
             search.metadata = {
                 "mcp_provenance": MCPToolProvenance(
@@ -1210,6 +1217,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     metadata = catalog["trace_metadata"]
     assert isinstance(metadata, dict)
     assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
+    # The trace records the model its person picked, and nothing routing already tags.
+    assert "model_routing_mode" not in metadata
+    assert (metadata["user_model_choice"], metadata["user_effort_choice"]) == (
+        "anthropic:claude-opus-5-5",
+        "high",
+    )
     assert catalog["trace_tags"] == ["model_routing:inactive"]
     operations = catalog["operations"]
     assert isinstance(operations, list)

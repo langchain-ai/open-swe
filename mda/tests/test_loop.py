@@ -20,6 +20,7 @@ from rt.middleware import BackendRunMiddleware
 from rt.routing import Route, RouteClassifier
 from rt.run_tools import RunTools
 from rt.tools import STATE_KEY
+from rt.tracing import TurnTrace
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
     JOINED_TASK_CONTEXT,
@@ -470,6 +471,14 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
 
     monkeypatch.setattr("rt.middleware.build_model", build)
     monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _event: None)
+    traced: list[Mapping[str, JsonValue]] = []
+    update = TurnTrace.update
+
+    def record(trace: TurnTrace, metadata: Mapping[str, JsonValue]) -> None:
+        traced.append(dict(metadata))
+        update(trace, metadata)
+
+    monkeypatch.setattr(TurnTrace, "update", record)
     backend.run.invocation_id = "turn"
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
@@ -479,6 +488,8 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
     await graph.ainvoke({"messages": [("user", "Rename the flag")]})
 
     assert classified == ["Rename the flag"]
+    # The trace records the route the classifier chose.
+    assert {"model_route": "fast"} in traced
     started = next(body for name, body in calls if name == "run_started")
     assert (started["model_route"], started["model_id"], started["effort"]) == (
         "fast",

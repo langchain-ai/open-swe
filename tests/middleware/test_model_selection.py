@@ -176,7 +176,8 @@ async def test_jev_routes_or_falls_back(
     assert requests[0].url == "https://gateway.example.com/v1/systemone"
     assert requests[0].headers["Authorization"] == "Bearer gateway-key"
     payload = json.loads(requests[0].read())
-    assert payload["state"] == "x" * 8_000
+    # A long request reaches the classifier as its start and its end.
+    assert payload["state"] == f"{'x' * 4_000}\n…\n{'x' * 4_000}"
     assert payload["model"] == "typesafe/jev-1.13.0"
     assert sorted(payload["questions"]) == ["complexity", "task_type"]
     state.update(await middleware.abefore_model(state, MagicMock()))

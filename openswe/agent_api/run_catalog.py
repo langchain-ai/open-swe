@@ -52,6 +52,9 @@ from openswe.server import (
 from openswe.threads.access import agent_version_metadata
 from openswe.utils.thread_reads import shared_thread_reads
 
+# The model a person picked, which the planner records on the run's config, so a trace
+# compares it with the model routing chose.
+_ROUTING_TRACE_KEYS: Final = ("user_model_choice", "user_effort_choice")
 # MDA's own deep agent runs subagents and code.
 _SYNC_SUBAGENT_TOOL: Final = "task"
 _MDA_TOOLS: Final = frozenset({_SYNC_SUBAGENT_TOOL, "eval"})
@@ -247,9 +250,14 @@ class RunCatalog:
             None if sandbox is None else SandboxSpec.model_validate(sandbox.model_dump(mode="json"))
         )
         catalog = self.build()
+        metadata = self.config.get("metadata") or {}
         return catalog.model_copy(
             update={
-                "trace_metadata": {**trace_actor(self.config), **agent_version_metadata()},
+                "trace_metadata": {
+                    **trace_actor(self.config),
+                    **agent_version_metadata(),
+                    **{key: metadata[key] for key in _ROUTING_TRACE_KEYS if key in metadata},
+                },
                 "trace_tags": catalog.loop.trace_tags,
                 "sandbox": spec,
                 "operations": [
