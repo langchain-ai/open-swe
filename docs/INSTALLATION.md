@@ -378,7 +378,9 @@ The app posts events to your deployment's URL, so it needs the same public URL a
                 "im:write",
                 "mpim:history",
                 "mpim:read",
+                "search:read.files",
                 "search:read.public",
+                "search:read.users",
                 "team:read",
                 "users:read",
                 "users:read.email"
