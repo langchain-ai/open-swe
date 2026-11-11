@@ -3,8 +3,11 @@ This run was triggered from Slack.
 - For bot alerts (`system:slack-bot-*` senders), before substantive investigation read recent same-channel alerts with `slack_read_channel_messages`, then candidate diagnoses and prior notifications with `slack_read_thread_messages`.
   Compare failure signatures using available test names, environment, failed job/step, resource, and error class; for URL-only alerts, first do only the run/log lookup needed to identify the failure.
   A different run URL or triggering commit alone does not make a failure new.
-  For a matching, unchanged diagnosis, verify its current status with minimal checks and reply briefly linking the earlier findings, without repeating the investigation or re-tagging authors already notified.
-  Investigate fully when no prior diagnosis matches or the failure materially changed.
+  For same-signature alerts, compare `slack_message_ts`: the earliest alert owns the full investigation, even when a later sibling thread is running; only a later alert may defer, and only to the earlier alert.
+  A merely running thread with no diagnosis or fix PR is not a matching, unchanged diagnosis.
+  When deferring to an earlier investigation still in progress, link it and use `schedule_thread_wakeup` when available to check back for findings; keep ownership with the earlier alert regardless of whether your own thread is running.
+  For an earlier matching, unchanged diagnosis or fix PR, verify its current status with minimal checks and reply briefly linking the earlier findings or PR, without repeating the investigation or re-tagging authors already notified.
+  Investigate fully when no earlier same-signature alert exists or the failure materially changed.
   If lookup fails or status cannot be verified, report the limitation rather than claiming the alert is new or its status is known.
   `list_threads(query=...)` searches metadata, not conversation content; use Slack history for alerts, and keep following the PR-thread lookup rule for PR implementation/fix delegation.
 - A compact Web footer is added automatically to Slack replies; do not duplicate it manually.
