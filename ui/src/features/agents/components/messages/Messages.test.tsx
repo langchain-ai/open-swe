@@ -74,12 +74,16 @@ describe("Messages", () => {
       />,
       { wrapper }
     )
+    const failedMessage = screen.getByRole("button", {
+      name: "Failed to send · Copy debug details",
+    })
+    expect(failedMessage.textContent).toBe("Failed to send")
+    fireEvent.focus(failedMessage)
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "the message could not be started"
+    )
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "Failed to send · the message could not be started · Copy debug details",
-        })
-      )
+      fireEvent.click(failedMessage)
     })
     expect(writeText).toHaveBeenCalledWith(
       JSON.stringify(
