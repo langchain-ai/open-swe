@@ -111,6 +111,7 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
+import { usePlugins } from "@/features/plugins/lib/queries"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -196,6 +197,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
+  const plugins = usePlugins()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -727,6 +729,10 @@ export function AgentsSidebar({
     pinnedQuery.isError ||
     recentsQuery.isError ||
     (repoMode && sidebarReposQuery.isError)
+  // The skeleton stands in for the sections, so they mount once it goes rather than sliding up under it.
+  const skeleton = cloudPending && allItems.length === 0
+  // Plugin rows join the nav above everything else, so the list stays hidden until they are known.
+  const navPending = plugins.isPending
   const isEmpty =
     !cloudPending &&
     filteredPinnedItems.length === 0 &&
@@ -828,14 +834,17 @@ export function AgentsSidebar({
         )}
         <div
           ref={scrollViewport}
-          className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2"
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
+            navPending && "invisible"
+          )}
           onScroll={measureScrollEdges}
         >
           <SidebarNav
             className={isDesktop ? "pb-space-3" : "pb-space-4"}
             onNavigate={layout.closeOnMobile}
           />
-          {cloudPending && allItems.length === 0 && <ThreadListSkeleton />}
+          {skeleton && <ThreadListSkeleton />}
           {cloudError && (
             <ThreadSourceError
               label="Cloud threads unavailable"
@@ -884,7 +893,7 @@ export function AgentsSidebar({
             </section>
           )}
 
-          {repoMode && (
+          {repoMode && !skeleton && (
             <section className="mb-space-3">
               <SidebarSectionHeader
                 label={workspaceMode ? "Workspaces" : "Projects"}
@@ -936,6 +945,7 @@ export function AgentsSidebar({
           )}
 
           {!repoMode &&
+            !skeleton &&
             recentGroups.map((group, index) => (
               <section key={group.key} className="mb-space-3">
                 <SidebarSectionHeader

@@ -135,7 +135,9 @@ export function AgentsHome({
     null
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
-  const { projects } = useProjects({ enabled: cloudEnabled })
+  const { projects, isPending: projectsPending } = useProjects({
+    enabled: cloudEnabled,
+  })
   const folderProject = useFolderProject()
   const localThreads = useLocalThreads()
   const [projectId, setProjectId] = useState<string | null>(
@@ -772,6 +774,11 @@ export function AgentsHome({
                 onSelectionChange={handleSelectionChange}
                 repos={workspaceRepos}
                 selectedRepo={repo}
+                targetPending={
+                  (cloudEnabled && projectsPending) ||
+                  profileQuery.isLoading ||
+                  reposQuery.isLoading
+                }
                 onRepoChange={optimisticDraftThread ? undefined : selectRepo}
                 gitHubLinkUser={gitHubLinkUser}
                 runTarget={runTarget}

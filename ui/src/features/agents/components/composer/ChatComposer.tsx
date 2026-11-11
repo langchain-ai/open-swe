@@ -226,6 +226,8 @@ export interface ChatComposerProps {
   /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
+  /** While the repository or project to preselect is still loading; its picker holds its place, hidden, rather than swapping labels in view. */
+  targetPending?: boolean
   onRepoChange?: (repo: string | null) => void
   /** The signed-in person while they must link GitHub; the repo picker then asks them to. */
   gitHubLinkUser?: SessionUser
@@ -438,6 +440,7 @@ export const ChatComposer = memo(function ChatComposer({
   onSelectLocalRepoBranch,
   projects = [],
   selectedProjectId = null,
+  targetPending = false,
   onProjectChange,
   onCreateProject,
   workspaceOptions = [],
@@ -985,15 +988,17 @@ export const ChatComposer = memo(function ChatComposer({
         />
       )}
       {runTarget !== "local" && onProjectChange && onCreateProject && (
-        <ProjectSelector
-          onCreate={onCreateProject}
-          onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
-          onSelect={onProjectChange}
-          projects={projects}
-          repos={gitHubLinkUser ? undefined : repos}
-          selectedId={selectedProjectId}
-          selectedRepo={selectedRepo}
-        />
+        <div className={cn("contents", targetPending && "invisible")}>
+          <ProjectSelector
+            onCreate={onCreateProject}
+            onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
+            onSelect={onProjectChange}
+            projects={projects}
+            repos={gitHubLinkUser ? undefined : repos}
+            selectedId={selectedProjectId}
+            selectedRepo={selectedRepo}
+          />
+        </div>
       )}
       {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
         <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
