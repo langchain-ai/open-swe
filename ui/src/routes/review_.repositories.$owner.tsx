@@ -2,12 +2,13 @@ import { FuzzySearch } from "@/lib/fuzzySearch"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 
 import { AppShell } from "@/components/AppShell"
 import { api } from "@/lib/api"
@@ -73,27 +74,28 @@ function RepositoriesOwnerPage() {
     },
   })
 
-  const ownerRepos = useMemo(
-    () =>
-      (repos.data?.repositories ?? [])
-        .filter((r) => r.full_name.split("/")[0] === owner)
-        .sort((a, b) => a.full_name.localeCompare(b.full_name)),
-    [repos.data?.repositories, owner]
-  )
-
-  const autoReviewSet = useMemo(
-    () => new Set(autoReview.data?.repos ?? []),
-    [autoReview.data?.repos]
-  )
+  const ownerRepos = (repos.data?.repositories ?? [])
+    .filter((r) => r.full_name.split("/")[0] === owner)
+    .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  const autoReviewSet = new Set(autoReview.data?.repos ?? [])
+  const settingsUnavailable = autoReview.data === undefined
+  const availableRepos = settingsUnavailable ? [] : ownerRepos
 
   const [searchPosition, setSearchPosition] = useState({ owner, search: "" })
   const search = searchPosition.owner === owner ? searchPosition.search : ""
+  const [enabledOnly, setEnabledOnly] = useState(false)
   const query = search.trim().toLowerCase()
+  const visibleRepos = enabledOnly
+    ? availableRepos.filter(
+        (repo) =>
+          autoReviewSet.has(repo.full_name) || toggling.has(repo.full_name)
+      )
+    : availableRepos
   const filteredRepos = query
-    ? new FuzzySearch(query).rank(ownerRepos, (repo) => repo.full_name)
-    : ownerRepos
+    ? new FuzzySearch(query).rank(visibleRepos, (repo) => repo.full_name)
+    : visibleRepos
 
-  const pageKey = `${owner}:${query}`
+  const pageKey = `${owner}:${query}:${enabledOnly}`
   const [pagePosition, setPagePosition] = useState({ key: pageKey, page: 0 })
   const page = pagePosition.key === pageKey ? pagePosition.page : 0
   const setPage = (next: (current: number) => number) => {
@@ -143,29 +145,63 @@ function RepositoriesOwnerPage() {
           >
             Repositories
           </Text>
-          <span className="text-xs text-secondary">
-            {autoReviewCount}/{ownerRepos.length} run automatically
-          </span>
+          {!settingsUnavailable && (
+            <span className="text-xs text-secondary">
+              {autoReviewCount}/{ownerRepos.length} run automatically
+            </span>
+          )}
         </div>
-        <Input
-          size="md"
-          leftIcon={MagnifyingGlassRegularIcon}
-          value={search}
-          onChange={(next) => setSearchPosition({ owner, search: next })}
-          placeholder="Search repositories…"
-          aria-label="Search repositories"
-        />
+        <div className="flex flex-wrap items-center gap-space-3">
+          <div className="min-w-0 flex-1 basis-64">
+            <Input
+              size="md"
+              leftIcon={MagnifyingGlassRegularIcon}
+              value={search}
+              onChange={(next) => setSearchPosition({ owner, search: next })}
+              placeholder="Search repositories…"
+              aria-label="Search repositories"
+            />
+          </div>
+          <Checkbox
+            size="sm"
+            label="Enabled only"
+            checked={enabledOnly}
+            onCheckedChange={(checked) => setEnabledOnly(checked === true)}
+          />
+        </div>
         <div className="rounded-lg border border-default bg-surface-level-1">
           {loading && (
             <div className="p-space-4">
               <Skeleton className="h-32 w-full" />
             </div>
           )}
-          {!loading && filteredRepos.length === 0 && (
+          {!loading && autoReview.isError && (
+            <div role="alert" className="space-y-space-3 p-space-4">
+              <Text variant="sm" color="secondary">
+                {settingsUnavailable
+                  ? "Could not load automatic review settings. Try again to see which repositories are enabled."
+                  : "Could not refresh automatic review settings. Showing the last available settings."}
+              </Text>
+              <Button
+                size="xs"
+                color="secondary"
+                variant="outlined"
+                disabled={autoReview.isFetching}
+                onClick={() => void autoReview.refetch()}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+          {!loading && !settingsUnavailable && filteredRepos.length === 0 && (
             <p className="px-space-4 py-space-3 text-xs text-secondary">
               {ownerRepos.length === 0
                 ? "No repositories found for this installation."
-                : "No repositories match your search."}
+                : enabledOnly
+                  ? query
+                    ? "No enabled repositories match your search."
+                    : "No repositories have automatic reviews enabled."
+                  : "No repositories match your search."}
             </p>
           )}
           <ul className="divide-y divide-default">
