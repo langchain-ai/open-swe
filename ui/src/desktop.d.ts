@@ -172,6 +172,8 @@ declare global {
       taskWorkspaces?: boolean
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>
+      /** Missing before desktop builds that open app pages in the system browser. */
+      openInBrowser?: (path: string) => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{

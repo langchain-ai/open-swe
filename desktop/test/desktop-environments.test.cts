@@ -82,3 +82,33 @@ test("asks again right after a failed request", async () => {
   ]);
   assert.equal(requests.length, 2);
 });
+
+test("builds dashboard page links on the advertised base URL", () => {
+  const page = DesktopEnvironments.dashboardPageUrl;
+  assert.equal(
+    page(
+      { dashboard_base_url: "https://robin.example/robin" },
+      "https://api.example/",
+      "/agents/abc",
+    ),
+    "https://robin.example/robin/agents/abc",
+  );
+  assert.equal(
+    page(null, "https://api.example/mount/", "/agents/abc"),
+    "https://api.example/mount/agents/abc",
+  );
+  assert.equal(
+    page({ dashboard_base_url: "file:///etc" }, "https://api.example", "/x"),
+    "https://api.example/x",
+  );
+  assert.throws(() => page(null, "https://api.example", "//evil.example/x"));
+  assert.throws(() => page(null, "https://api.example", "agents/abc"));
+});
+
+test("falls back to the backend when the environments request fails", async () => {
+  const { environments } = backend([new Error("offline")]);
+  assert.equal(
+    await environments.dashboardPageUrl("https://api.example/", "/agents/a"),
+    "https://api.example/agents/a",
+  );
+});

@@ -44,6 +44,36 @@ export class DesktopEnvironments {
     });
   }
 
+  /** `path` on the dashboard's public base URL, falling back to `backendUrl`; keeps any base path prefix. */
+  static dashboardPageUrl(
+    payload: unknown,
+    backendUrl: string,
+    path: string,
+  ): string {
+    if (!path.startsWith("/") || path.startsWith("//"))
+      throw new Error("Invalid dashboard path");
+    const advertised = (payload as { dashboard_base_url?: unknown } | null)
+      ?.dashboard_base_url;
+    let base = new URL(backendUrl);
+    if (typeof advertised === "string" && URL.canParse(advertised)) {
+      const candidate = new URL(advertised);
+      if (["http:", "https:"].includes(candidate.protocol)) base = candidate;
+    }
+    base.search = "";
+    base.hash = "";
+    if (!base.pathname.endsWith("/")) base.pathname += "/";
+    const target = new URL(path.slice(1), base);
+    if (target.origin !== base.origin)
+      throw new Error("Invalid dashboard path");
+    return target.toString();
+  }
+
+  /** `path` on the dashboard `backendUrl` advertises, or on `backendUrl` when it cannot say. */
+  async dashboardPageUrl(backendUrl: string, path: string): Promise<string> {
+    const payload = await this.response(backendUrl).catch(() => null);
+    return DesktopEnvironments.dashboardPageUrl(payload, backendUrl, path);
+  }
+
   /** The backend's answer, asked again once the last one is older than `maxAgeMs`. */
   response(backendUrl: string): Promise<unknown> {
     const cached = this.cached.get(backendUrl);

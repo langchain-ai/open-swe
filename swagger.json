@@ -2530,6 +2530,17 @@
       },
       "DesktopEnvironments": {
         "properties": {
+          "dashboard_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dashboard Base Url"
+          },
           "dashboard_origins": {
             "items": {
               "type": "string"

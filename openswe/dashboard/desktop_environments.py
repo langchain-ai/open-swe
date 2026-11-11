@@ -11,7 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from openswe.config import ENV
-from openswe.utils.dashboard_links import PublicOrigin
+from openswe.utils.dashboard_links import PublicOrigin, dashboard_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ class DesktopEnvironments(BaseModel):
     environments: list[DesktopEnvironment]
     # The dashboard's own origin first, then its aliases (``DASHBOARD_ALIAS_URLS``).
     dashboard_origins: list[str]
+    # The dashboard's public base URL, path prefix included; None when there is no dashboard.
+    dashboard_base_url: str | None = None
 
 
 def alternative_environments() -> list[DesktopEnvironment]:
@@ -54,5 +56,7 @@ def alternative_environments() -> list[DesktopEnvironment]:
 @router.get("/desktop/environments")
 async def api_desktop_environments() -> DesktopEnvironments:
     return DesktopEnvironments(
-        environments=alternative_environments(), dashboard_origins=PublicOrigin.all()
+        environments=alternative_environments(),
+        dashboard_origins=PublicOrigin.all(),
+        dashboard_base_url=dashboard_base_url() or None,
     )
