@@ -180,6 +180,60 @@ async def test_auto_merge_requires_github_confirmation(payload: dict[str, object
     assert error.value.status_code == (422 if "errors" in payload else 502)
 
 
+@pytest.mark.parametrize("auto_merge", [False, True])
+async def test_merge_and_auto_merge_fall_back_to_each_other(auto_merge: bool) -> None:
+    calls: list[str] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        if request.method == "PUT":
+            calls.append("merge")
+            if auto_merge:
+                return response({"merged": True})
+            return response({"message": "Repository rule violations found"}, 405)
+        calls.append("auto-merge")
+        if auto_merge:
+            return response({"errors": [{"message": "Pull request is in clean status"}]})
+        return response(
+            {
+                "data": {
+                    "enablePullRequestAutoMerge": {
+                        "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}
+                    }
+                }
+            }
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        result = await actions.act_on_pull_request(
+            pull,
+            actions.MergeAction(
+                action="merge", sha="a" * 40, merge_method="merge", auto_merge=auto_merge
+            ),
+        )
+    assert result.done and result.auto_merge is not auto_merge
+    assert calls == (["auto-merge", "merge"] if auto_merge else ["merge", "auto-merge"])
+
+
+async def test_a_refused_merge_reports_githubs_refusal_when_auto_merge_also_fails() -> None:
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        if request.method == "PUT":
+            return response({"message": "Merge commits are not allowed"}, 405)
+        return response({"errors": [{"message": "Auto-merge is not allowed"}]})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException, match="Merge commits are not allowed") as error:
+            await actions.act_on_pull_request(
+                pull, actions.MergeAction(action="merge", sha="a" * 40, merge_method="merge")
+            )
+    assert error.value.status_code == 405
+
+
 async def test_auto_merge_refuses_a_changed_head() -> None:
     def github(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"

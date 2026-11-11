@@ -37,6 +37,7 @@ CHECKS = TypeAdapter(list[CachedCheck])
 class BranchRules:
     checks: set[RequiredCheck]
     requires_conversation_resolution: bool | None
+    required_approving_reviews: int | None = None
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,7 @@ class BranchConfig:
                 row = (
                     await conn.execute(
                         text(
-                            "SELECT c.checks, c.requires_conversation_resolution, c.conversation_rule_updated_at, c.updated_at FROM branch_config c "
+                            "SELECT c.checks, c.requires_conversation_resolution, c.required_approving_reviews, c.conversation_rule_updated_at, c.updated_at FROM branch_config c "
                             "JOIN repository r ON r.id = c.repository_id "
                             "WHERE r.key = :repo AND c.branch = :branch"
                         ),
@@ -62,9 +63,11 @@ class BranchConfig:
                 cached = BranchRules(
                     {RequiredCheck(c.name, c.app_id) for c in CHECKS.validate_python(row.checks)},
                     row.requires_conversation_resolution,
+                    row.required_approving_reviews,
                 )
                 if (
                     cached.requires_conversation_resolution is not None
+                    and cached.required_approving_reviews is not None
                     and row.conversation_rule_updated_at is not None
                     and datetime.now(UTC) - row.conversation_rule_updated_at < CACHE_TTL
                     and datetime.now(UTC) - row.updated_at < CACHE_TTL
@@ -93,7 +96,7 @@ class BranchConfig:
                 required = await RequiredCheck.for_branch(
                     repo, self.branch, include_review_checks=True
                 )
-                resolution_required, rule_error = await self._conversation_rule(repo)
+                rules = await self._pull_request_rules(repo)
         except GitHubAppUnavailable:
             logger.info(
                 "Using viewer credentials for required-check refresh",
@@ -107,18 +110,19 @@ class BranchConfig:
                 required = await RequiredCheck.for_branch(
                     repo, self.branch, include_review_checks=True
                 )
-                resolution_required, rule_error = await self._conversation_rule(repo)
+                rules = await self._pull_request_rules(repo)
         if required is None:
             raise RuntimeError("Required checks unavailable")
+        resolution_required, approvals, rule_error = rules
         checks = json.dumps([{"name": check.name, "app_id": check.app_id} for check in required])
         async with session() as conn:
             repository_id = await Repository.ensure_id(conn, self.repo)
             await conn.execute(
                 text(
-                    "INSERT INTO branch_config (id, repository_id, branch, checks, requires_conversation_resolution, conversation_rule_updated_at) "
-                    "VALUES (:id, :repository_id, :branch, CAST(:checks AS jsonb), :resolution_required, CASE WHEN CAST(:resolution_required AS boolean) IS NOT NULL THEN clock_timestamp() END) "
+                    "INSERT INTO branch_config (id, repository_id, branch, checks, requires_conversation_resolution, required_approving_reviews, conversation_rule_updated_at) "
+                    "VALUES (:id, :repository_id, :branch, CAST(:checks AS jsonb), :resolution_required, :approvals, CASE WHEN CAST(:resolution_required AS boolean) IS NOT NULL THEN clock_timestamp() END) "
                     "ON CONFLICT (repository_id, branch) DO UPDATE "
-                    "SET checks = EXCLUDED.checks, requires_conversation_resolution = COALESCE(EXCLUDED.requires_conversation_resolution, branch_config.requires_conversation_resolution), conversation_rule_updated_at = COALESCE(EXCLUDED.conversation_rule_updated_at, branch_config.conversation_rule_updated_at), updated_at = clock_timestamp(), updated_by = NULL"
+                    "SET checks = EXCLUDED.checks, requires_conversation_resolution = COALESCE(EXCLUDED.requires_conversation_resolution, branch_config.requires_conversation_resolution), required_approving_reviews = COALESCE(EXCLUDED.required_approving_reviews, branch_config.required_approving_reviews), conversation_rule_updated_at = COALESCE(EXCLUDED.conversation_rule_updated_at, branch_config.conversation_rule_updated_at), updated_at = clock_timestamp(), updated_by = NULL"
                 ),
                 {
                     "id": uuid7(),
@@ -126,18 +130,25 @@ class BranchConfig:
                     "branch": self.branch,
                     "checks": checks,
                     "resolution_required": resolution_required,
+                    "approvals": approvals,
                 },
             )
             await Topic.REQUIRED_CHECKS.invalidate(conn, key=self.repo.lower())
         if rule_error is not None:
             raise rule_error
 
-    async def _conversation_rule(self, repo: RepoClient) -> tuple[bool | None, Exception | None]:
+    async def _pull_request_rules(
+        self, repo: RepoClient
+    ) -> tuple[bool | None, int | None, Exception | None]:
         try:
-            return await repo.requires_conversation_resolution(self.branch), None
+            return (
+                await repo.requires_conversation_resolution(self.branch),
+                await repo.required_approving_reviews(self.branch),
+                None,
+            )
         except (httpx2.HTTPError, GraphQLError, ValueError) as exc:
-            logger.warning("Conversation rule refresh failed", exc_info=True)
-            return None, exc
+            logger.warning("Pull request rule refresh failed", exc_info=True)
+            return None, None, exc
 
 
 async def refresh_required_checks(job: Job) -> None:

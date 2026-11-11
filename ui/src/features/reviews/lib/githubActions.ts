@@ -4,6 +4,7 @@ import {
   type OpenPullRequest,
   type PullRequestActionName,
 } from "@/lib/api"
+import { mergesLater } from "./status"
 
 export interface ActionLabels {
   idle: string
@@ -16,9 +17,11 @@ export interface ActionLabels {
 export interface GithubAction {
   labels: ActionLabels
   /** Past tense, applied to one PR reference or to a counted phrase. */
-  succeeded: (subject: string, pr: OpenPullRequest) => string
+  /** `queued` is true when GitHub queued auto-merge instead of merging. */
+  succeeded: (subject: string, queued: boolean) => string
   failed: (subject: string) => string
-  run: (pr: OpenPullRequest, input: GithubActionInput) => Promise<void>
+  /** Resolves to whether a merge was queued as auto-merge. */
+  run: (pr: OpenPullRequest, input: GithubActionInput) => Promise<boolean>
 }
 
 export interface GithubActionInput {
@@ -36,14 +39,18 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       done: null,
       retry: "Retry merge",
     },
-    succeeded: (subject, pr) =>
-      pr.ci === "pending" && pr.mergeState === "blocked"
-        ? `Auto-merge enabled for ${subject}`
-        : `Merged ${subject}`,
+    succeeded: (subject, queued) =>
+      queued ? `Auto-merge enabled for ${subject}` : `Merged ${subject}`,
     failed: (subject) => `Could not merge ${subject}`,
     run: async (pr, { method, resolveConversations = false }) => {
       if (!method) throw new Error("Choose a merge method.")
-      await api.mergePullRequest(pr, method, resolveConversations)
+      const result = await api.mergePullRequest(
+        pr,
+        method,
+        resolveConversations,
+        mergesLater(pr)
+      )
+      return result.auto_merge === true
     },
   },
   close: {
@@ -57,6 +64,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     failed: (subject) => `Could not close ${subject}`,
     run: async (pr, { reason }) => {
       await api.closePullRequest(pr, reason)
+      return false
     },
   },
   "update-branch": {
@@ -70,6 +78,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     failed: (subject) => `Could not update ${subject}`,
     run: async (pr) => {
       await api.updatePullRequestBranch(pr)
+      return false
     },
   },
   "mark-ready": {
@@ -83,6 +92,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     failed: (subject) => `Could not mark ${subject} ready`,
     run: async (pr) => {
       await api.markPullRequestReady(pr)
+      return false
     },
   },
 }

@@ -1078,6 +1078,10 @@ class PullRequestClient:
             config = await BranchConfig(self.repo.full_name, base_ref).read(self.repo.github.login)
             if config is not None:
                 result.conversation_resolution_required = config.requires_conversation_resolution
+                # GitHub's reviewDecision is often null under rulesets, so count approvals too.
+                if reviewers is not None and config.required_approving_reviews:
+                    approvals = sum(reviewer.state == "approved" for reviewer in reviewers)
+                    result.review_required |= approvals < config.required_approving_reviews
         if runs is None or statuses is None:
             return result
         failed, _, _ = _normalize_checks(runs, statuses)

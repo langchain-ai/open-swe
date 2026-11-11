@@ -892,6 +892,29 @@ class RepoClient:
         rule = ref.get("refUpdateRule") if isinstance(ref, Mapping) else None
         return isinstance(rule, Mapping) and rule.get("requiresConversationResolution") is True
 
+    async def required_approving_reviews(self, branch: str) -> int:
+        """The most approvals a ruleset or classic protection on ``branch`` requires."""
+        counts = [
+            parameters.get("required_approving_review_count")
+            for rule in await self.branch_rules(branch)
+            if rule.get("type") == "pull_request"
+            and isinstance(parameters := rule.get("parameters"), Mapping)
+        ]
+        data = await self.graphql(
+            """query($owner:String!,$repo:String!,$ref:String!) {
+              repository(owner:$owner,name:$repo) {
+                ref(qualifiedName:$ref) { refUpdateRule { requiredApprovingReviewCount } }
+              }
+            }""",
+            {"ref": f"refs/heads/{branch}"},
+        )
+        repository = data.get("repository")
+        ref = repository.get("ref") if isinstance(repository, Mapping) else None
+        rule = ref.get("refUpdateRule") if isinstance(ref, Mapping) else None
+        if isinstance(rule, Mapping):
+            counts.append(rule.get("requiredApprovingReviewCount"))
+        return max((count for count in counts if isinstance(count, int)), default=0)
+
     async def commits(
         self,
         *,

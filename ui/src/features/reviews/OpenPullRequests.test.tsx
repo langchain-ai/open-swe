@@ -331,6 +331,7 @@ describe("My PRs", () => {
     expect(api.mergePullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
       "squash",
+      false,
       false
     )
     finish({ action: "merge", done: true })
@@ -380,7 +381,8 @@ describe("My PRs", () => {
         expect(api.mergePullRequest).toHaveBeenCalledWith(
           expect.objectContaining({ number: 1 }),
           "squash",
-          mergeState === "blocked"
+          mergeState === "blocked",
+          false
         )
       )
     }
@@ -427,7 +429,8 @@ describe("My PRs", () => {
         expect(api.mergePullRequest).toHaveBeenCalledWith(
           expect.objectContaining({ number: 1 }),
           "squash",
-          true
+          true,
+          autoMerge
         )
       )
     }
@@ -447,11 +450,35 @@ describe("My PRs", () => {
     vi.mocked(api.mergePullRequest).mockResolvedValue({
       action: "merge",
       done: true,
+      auto_merge: true,
     })
     mount()
     await screen.findByText("Change 1")
     await chooseMergeMethod(1, "Squash merge")
     fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Auto-merge enabled" })
+    ).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Auto-merge enabled for acme/app#1"
+    )
+  })
+
+  it("keeps the PR open when GitHub queues auto-merge for a direct merge", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { reviewDecision: "approved" })],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+      auto_merge: true,
+    })
+    mount()
+    await screen.findByText("Change 1")
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(screen.getByRole("button", { name: "Squash and merge" }))
     expect(
       await screen.findByRole("button", { name: "Auto-merge enabled" })
     ).toBeTruthy()
@@ -788,7 +815,7 @@ describe("My PRs", () => {
     expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
   })
 
-  it("dims the merge and names a required check that never reported", async () => {
+  it("offers auto-merge and names a required check that never reported", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -804,10 +831,9 @@ describe("My PRs", () => {
     expect(
       within(card).getByText("Merge blocked: Lint Final Results never reported")
     ).toBeTruthy()
-    expect(within(card).getByRole("button", { name: MERGE })).toHaveProperty(
-      "disabled",
-      true
-    )
+    expect(
+      within(card).getByRole("button", { name: "Enable auto-merge" })
+    ).toHaveProperty("disabled", false)
     expect(
       within(card).getByRole("button", { name: "Update branch" })
     ).toBeTruthy()
@@ -870,7 +896,7 @@ describe("My PRs", () => {
     ["pending", true],
     ["none", true],
   ] as const)(
-    "gates merging on required checks (%s, %s), not optional CI",
+    "waits for required checks (%s, %s), not optional CI, before merging",
     async (ci, requiredChecksPassing) => {
       vi.mocked(api.openPullRequests).mockResolvedValue({
         ...payload,
@@ -881,16 +907,12 @@ describe("My PRs", () => {
       mount()
       await screen.findByText("Change 1")
       const button = await screen.findByRole("button", {
-        name: "Squash and merge",
+        name:
+          requiredChecksPassing === true
+            ? "Squash and merge"
+            : "Enable auto-merge",
       })
-      await waitFor(() =>
-        expect(button).toHaveProperty(
-          "disabled",
-          requiredChecksPassing !== true
-        )
-      )
-      if (requiredChecksPassing !== true) fireEvent.click(button)
-      expect(api.mergePullRequest).not.toHaveBeenCalled()
+      await waitFor(() => expect(button).toHaveProperty("disabled", false))
     }
   )
 
@@ -981,6 +1003,7 @@ describe("My PRs", () => {
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
         "squash",
+        false,
         false
       )
     )
@@ -1012,6 +1035,7 @@ describe("My PRs", () => {
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
         "rebase",
+        false,
         false
       )
     )

@@ -23,7 +23,8 @@ export function usePullRequestAction({
   pr: OpenPullRequest
   action: PullRequestActionName
   apply?: () => () => void
-  onDone?: () => void
+  /** `queued` is true when a merge was queued as auto-merge. */
+  onDone?: (queued: boolean) => void
   method?: MergeMethod
 }) {
   const { run, succeeded, failed } = githubActions[action]
@@ -33,9 +34,10 @@ export function usePullRequestAction({
     meta: { errorTitle: failed(pullRequestKey(pr)) },
     onMutate: () => ({ undo: apply?.() }),
     onError: (_error, _input, context) => context?.undo?.(),
-    onSuccess: () => {
-      toast.success(succeeded(pullRequestKey(pr), pr))
-      onDone?.()
+    onSuccess: (queued, _input, context) => {
+      if (queued) context?.undo?.()
+      toast.success(succeeded(pullRequestKey(pr), queued))
+      onDone?.(queued)
     },
     retry: false,
   })

@@ -100,7 +100,16 @@ export function canUpdateBranch(pr: OpenPullRequest) {
   )
 }
 
+/** GitHub can't merge it yet, so the merge button queues auto-merge instead. */
+export function mergesLater(pr: OpenPullRequest) {
+  return (
+    pr.reviewRequired ||
+    pr.requiredChecksPassing !== true ||
+    (pr.mergeState === "blocked" && pr.ci === "pending")
+  )
+}
+
 export function canAttemptMerge(pr: OpenPullRequest) {
-  if (pr.draft === true || pr.reviewRequired) return false
+  if (pr.draft === true) return false
   return pr.mergeable !== false && pr.mergeState !== "dirty"
 }

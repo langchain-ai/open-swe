@@ -156,6 +156,36 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     assert result.required_checks_passing is required_passing
 
 
+@pytest.mark.parametrize(("state", "review_required"), [("commented", True), ("approved", False)])
+async def test_ruleset_approval_is_required_when_github_omits_the_review_decision(
+    monkeypatch, state, review_required
+):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": "blocked",
+        "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
+    }
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient,
+        "reviewers",
+        AsyncMock(return_value=[prs.PullRequestReviewer(user_id=10, login="bot", state=state)]),
+    )
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
+    )
+    monkeypatch.setattr(
+        prs.BranchConfig, "read", AsyncMock(return_value=BranchRules(set(), True, 1))
+    )
+    result = await _client(1).load(wanted={"open"})
+    assert result is not None
+    assert result.review_required is review_required
+
+
 @pytest.mark.parametrize(
     ("conclusion", "ci", "failures", "inconclusive", "required_passing"),
     [

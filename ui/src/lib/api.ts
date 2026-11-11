@@ -1215,6 +1215,7 @@ export type PullRequestActionRequest =
 export interface PullRequestActionResult {
   action: PullRequestActionName
   done: boolean
+  auto_merge?: boolean
 }
 
 export type PullRequestThreadIntent =
@@ -2016,15 +2017,14 @@ export const api = {
   mergePullRequest: (
     pr: OpenPullRequest,
     method: MergeMethod,
-    resolveConversations = false
+    resolveConversations = false,
+    autoMerge = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
-      ...(pr.ci === "pending" && pr.mergeState === "blocked"
-        ? { auto_merge: true }
-        : {}),
+      ...(autoMerge ? { auto_merge: true } : {}),
       ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (

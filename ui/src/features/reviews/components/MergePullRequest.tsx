@@ -14,6 +14,7 @@ import {
   readPreferredMergeMethod,
   writePreferredMergeMethod,
 } from "../lib/mergeMethod"
+import { mergesLater } from "../lib/status"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
 
 /** GitHub's merge button: one click merges; the caret picks how. */
@@ -55,26 +56,27 @@ export function MergePullRequest({
       (candidate): candidate is MergeMethod =>
         !!candidate && options.includes(candidate)
     ) ?? null
-  const autoMerge = pr.ci === "pending" && pr.mergeState === "blocked"
+  const autoMerge = mergesLater(pr)
   const merge = usePullRequestAction({
     pr,
     action: "merge",
     method: method ?? undefined,
     apply: autoMerge ? undefined : apply,
-    onDone: () => {
+    onDone: (queued) => {
       if (method) writePreferredMergeMethod(method)
-      if (!autoMerge) onMerged?.()
+      if (!queued) onMerged?.()
     },
   })
   const busy = merge.isPending || merge.isSuccess || pr.autoMerge === true
-  const labels = autoMerge
-    ? {
-        idle: "Enable auto-merge",
-        pending: "Enabling auto-merge…",
-        done: "Auto-merge enabled",
-        retry: "Retry auto-merge",
-      }
-    : githubActions.merge.labels
+  const labels =
+    autoMerge || merge.data === true
+      ? {
+          idle: "Enable auto-merge",
+          pending: "Enabling auto-merge…",
+          done: "Auto-merge enabled",
+          retry: "Retry auto-merge",
+        }
+      : githubActions.merge.labels
   const state = actionLabel(labels, merge)
   const rulesUnknown = pr.conversationResolutionRequired == null
   const blocking =
@@ -91,12 +93,7 @@ export function MergePullRequest({
   return (
     <>
       <SplitButton
-        disabled={
-          !pr.headSha ||
-          (!autoMerge && pr.requiredChecksPassing !== true) ||
-          busy ||
-          allowed.isPending
-        }
+        disabled={!pr.headSha || busy || allowed.isPending}
         onClick={start}
         menuLabel={`Merge method for PR #${pr.number}`}
         menuDisabled={busy}
