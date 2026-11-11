@@ -7,7 +7,6 @@ stateless.
 """
 
 # ruff: noqa: E402, PLC2701
-import hashlib
 import logging
 import time
 import warnings
@@ -21,8 +20,6 @@ from runtime_api.provenance import Provenance
 from openswe.config import ENV
 
 logger = logging.getLogger(__name__)
-
-_MODEL_ROUTING_SPLIT = 0.5
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
@@ -123,6 +120,7 @@ from openswe.model_request import (
     infer_requested_model,
     model_selection_trace,
 )
+from openswe.model_routing import RoutingArm
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
@@ -1149,10 +1147,9 @@ def _slack_concierge_run(cfg: RunConfig) -> bool:
     )
 
 
-def _model_routing_mode(thread_id: str) -> RoutingMode:
-    digest = hashlib.sha256(thread_id.encode()).hexdigest()
-    bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
-    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "fast"
+def _model_routing_mode(thread_id: str) -> RoutingMode | None:
+    """The thread's arm: ``auto`` routes through the classifier, None runs the model its person picked."""
+    return "auto" if RoutingArm.hashes_routed(thread_id) else None
 
 
 def _make_model_or_defer(
@@ -1865,8 +1862,27 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     adaptive_model_routing = settings.model_routing_enabled if settings else False
+    # The routed arm ignores every model a person picked (the composer's choice, their
+    # preferred default, a pin saved on the thread, or one asked for in a message);
+    # the pick is still recorded on the run. The other arm runs the pick.
+    routed_arm = (
+        adaptive_model_routing
+        and not slack_ask_mode
+        and cfg.source != "incidents_agent"
+        # A concierge DM always answers on its person's own model.
+        and not _slack_concierge_run(cfg)
+        and _model_routing_mode(thread_id) == "auto"
+    )
+    user_model_choice = (
+        (cfg.agent_model_id, cfg.agent_effort)
+        if cfg.model_selection == "explicit" and cfg.agent_model_id
+        else None
+    )
+    if routed_arm and thread_settings.get("requested_model") is not None:
+        thread_settings["requested_model"] = None
+        settings_changed = True
     stored_model = thread_settings.get("model_id")
-    if isinstance(stored_model, str) and not reset_model_selection:
+    if not routed_arm and isinstance(stored_model, str) and not reset_model_selection:
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
@@ -1874,7 +1890,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.model_selection == "explicit":
+    if routed_arm:
+        pass  # Nothing a person picked applies; the route decides.
+    elif cfg.model_selection == "explicit":
         adaptive_model_routing = False
         thread_settings["requested_model"] = None
         thread_settings["model_handoff_complete"] = True
@@ -1890,27 +1908,40 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             settings_changed = True
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
+    # A concierge DM always answers on its person's own model, so it never routes.
+    if _slack_concierge_run(cfg):
+        adaptive_model_routing = False
+
     if cfg.source == "incidents_agent":
         adaptive_model_routing = False
         if not cfg.agent_model_id:
             model_id, profile_effort = routing_defaults["performance"]
             subagent_model_id, subagent_effort = routing_defaults["performance"]
 
-    # Auto never falls back outside its tiers: an uncertain route uses Fast.
-    if adaptive_model_routing and not slack_ask_mode:
+    # Auto never falls back outside its tiers: an uncertain route uses Balanced.
+    if routed_arm or (
+        adaptive_model_routing and not slack_ask_mode and _model_routing_mode(thread_id) == "auto"
+    ):
         if (subagent_model_id, subagent_effort) == (model_id, profile_effort):
-            subagent_model_id, subagent_effort = routing_defaults["fast"]
-        model_id, profile_effort = routing_defaults["fast"]
+            subagent_model_id, subagent_effort = routing_defaults["balanced"]
+        model_id, profile_effort = routing_defaults["balanced"]
 
     # Capability fallbacks can temporarily replace a pinned text-only model.
     image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
+    image_fallback = cfg.model_override_reason == "image_input" and not model_supports_images(
+        model_id
+    )
     if (
         (
-            not thread_settings.get("requested_model")
-            or cfg.model_selection == "explicit"
-            or (cfg.model_override_reason == "image_input" and not model_supports_images(model_id))
+            image_fallback
+            if routed_arm
+            else (
+                not thread_settings.get("requested_model")
+                or cfg.model_selection == "explicit"
+                or image_fallback
+            )
         )
         and isinstance(per_thread_model, str)
         and (not reset_model_selection or cfg.model_override_reason == "image_input")
@@ -1989,6 +2020,12 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        # What the person picked, recorded even where routing ignored it.
+        **(
+            {"user_model_choice": user_model_choice[0], "user_effort_choice": user_model_choice[1]}
+            if user_model_choice
+            else {}
+        ),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -2127,6 +2164,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
+        and not routed_arm
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
         and incident_session is None

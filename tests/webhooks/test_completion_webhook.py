@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openswe import completion
+from openswe import completion, session_cost
 from openswe.message_queue import QueuedMessage
 from openswe.review import run_failure
 from openswe.slack import thinking as slack_thinking
@@ -377,27 +377,27 @@ async def test_leftover_follow_ups_get_one_pickup_run(
 
 
 @pytest.mark.asyncio
-async def test_success_status_deduplicates_cost_refresh(
+async def test_success_status_settles_without_scheduling_cost_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    metadata = _slack_metadata()
-    metadata["session_cost_refresh_scheduled_run_ids"] = ["run-1"]
-    client = _FakeClient(metadata)
+    client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     schedule = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
+    monkeypatch.setattr(session_cost, "schedule_session_cost_refresh", schedule)
 
     result = await completion.handle_run_completion(
         {
             "thread_id": "t1",
             "run_id": "run-1",
             "status": "success",
-            "metadata": {"prepare_run_id": "prepare-1"},
+            "metadata": {"invocation_id": "invocation-1"},
         }
     )
 
-    assert result["status"] == "ignored"
+    # Slack shows no run cost, so a settled run schedules nothing to refresh it.
+    assert result == {"status": "ok", "reason": "run settled"}
     schedule.assert_not_awaited()
+    assert not any("session_cost" in key for update in client.threads.updates for key in update)
 
 
 @pytest.mark.asyncio

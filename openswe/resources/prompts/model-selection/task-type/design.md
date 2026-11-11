@@ -1,0 +1,1 @@
+Design, planning, or judgment calls: architecture, system or API design, a migration or rollout plan, how to structure or split a large change, weighing approaches, "what would it take" or "how should we", or work that mainly needs taste, such as product or user-experience decisions, naming and API shape, or choosing between reasonable options.

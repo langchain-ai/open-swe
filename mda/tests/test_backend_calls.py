@@ -1227,7 +1227,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     }
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = _run_backend(
-        invocation_id="turn", catalog=Catalog(trace_metadata=actor, inbox=_INBOX)
+        invocation_id="turn",
+        catalog=Catalog(trace_metadata=actor, trace_tags=["model_routing:active"], inbox=_INBOX),
     )
     git = turn_git(backend.run)
 
@@ -1317,6 +1318,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert reconciled[root_id]["environment"] == "production"
     assert "created_by" not in reconciled[root_id]
     assert parent.metadata["created_by"] == "system"
+    root_tags = next(patch["tags"] for run_id, patch in updates if run_id == root_id)
+    assert isinstance(root_tags, list)
+    assert "model_routing:active" in root_tags
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
     final["ls_git_branch"] = "Next/turn"

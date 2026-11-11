@@ -250,6 +250,7 @@ class RunCatalog:
         return catalog.model_copy(
             update={
                 "trace_metadata": {**trace_actor(self.config), **agent_version_metadata()},
+                "trace_tags": catalog.loop.trace_tags,
                 "sandbox": spec,
                 "operations": [
                     operation.model_copy(

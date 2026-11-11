@@ -7,13 +7,14 @@ from langchain.agents.middleware.types import AgentState, OmitFromOutput
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from runtime_api.catalog import ROUTES, RouteName, kept_route
+from runtime_api.catalog import RouteName, kept_route
 from runtime_api.provenance import Provenance
+from runtime_api.route_questions import TaskRoute
 
 from openswe.input_messages import input_message_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +36,16 @@ def _latest_human_task(messages: Sequence[object]) -> str:
     return ""
 
 
-def _route_criteria() -> dict[RouteName, str]:
-    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
-
-
 @dataclass(frozen=True)
 class RouteSelection:
     route: SelectedRoute
-    classifier: JevDecision | None = None
-
-    @property
-    def persist(self) -> bool:
-        return self.classifier is None or self.classifier.outcome == "accepted"
+    # False when the classifier was unsure: the route holds for this run alone.
+    persist: bool = True
 
 
 async def _select_jev_route(task: str) -> RouteSelection:
-    decision = JevDecision()
-    route = await select_jev_choice(
-        task,
-        question="route",
-        instructions=prompt("model-selection/instructions"),
-        criteria=_route_criteria(),
-        decision=decision,
-    )
-    return RouteSelection(route or "default", decision)
+    route, persist = await TaskRoute.classify(task, prompt=prompt, transport=pooled_transport())
+    return RouteSelection(route or "default", persist)
 
 
 async def classify_route(messages: Sequence[object]) -> RouteSelection:
@@ -114,7 +101,9 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return RouteSelection("default")
         if self._routing_mode is None:
             return RouteSelection("default")
-        if model_route := kept_route(state.get("model_route")):
+        model_route = kept_route(state.get("model_route"))
+        # A thread that ran before routing kept `default`; once routed, it is classified.
+        if model_route and not (self._routing_mode == "auto" and model_route == "default"):
             return RouteSelection(model_route)
         if self._routing_mode == "fast":
             return RouteSelection("fast")

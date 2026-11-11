@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
 
 from langchain.agents.middleware import TracePolicy, omit_payload
@@ -98,6 +98,11 @@ class TurnTrace:
             self.root.metadata.update({**metadata, **_deployment_provenance()})
             if self.root.metadata.get("created_by") == "system":
                 self.root.metadata.pop("created_by")
+
+    def tag(self, tags: Sequence[str]) -> None:
+        """Add ``tags`` to the turn's root trace."""
+        if self.root is not None and tags:
+            self.root.tags = [*(self.root.tags or []), *tags]
 
     def record_model(self, model_id: str) -> None:
         """Tag the turn with its most recently attempted model, without relabeling child calls."""

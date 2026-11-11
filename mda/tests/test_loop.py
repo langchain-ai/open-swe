@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents import create_agent
@@ -17,6 +18,7 @@ from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
 from rt.routing import Route, RouteClassifier
+from rt.run_tools import RunTools
 from rt.tools import STATE_KEY
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
@@ -502,6 +504,53 @@ async def test_a_thread_with_a_kept_route_is_not_classified_again(
     held = state[STATE_KEY]
     assert isinstance(held, dict)
     assert await loop.routed(held, [], None) == {"model_route": "balanced"}
+    # The run's subagents follow the route it took.
+    assert backend.run.route == "balanced"
+
+
+async def test_a_thread_that_kept_default_before_routing_is_classified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        return Route("performance")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _event: None)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    state = _state(HumanMessage(content="Design it", id="human-1"), model_route="default")
+    held = state[STATE_KEY]
+    assert isinstance(held, dict)
+
+    classifying = loop.classify_ahead(state)
+
+    assert classifying is not None
+    assert (await loop.routed(held, [], classifying))["model_route"] == "performance"
+    assert backend.run.route == "performance"
+
+
+async def test_a_route_kept_for_one_run_still_reaches_its_subagents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    # An unsure answer routed this run to Balanced without keeping it for the thread.
+    backend.run.route = "balanced"
+
+    await loop.before_model(_state(HumanMessage(content="Add a flag", id="human-1")))
+
+    assert backend.run.route == "balanced"
+
+
+def test_a_subagent_call_takes_the_runs_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("rt.run_tools.build_model", lambda spec, **_: spec.model_id)
+    tools = RunTools(Catalog(models=_MODELS), MagicMock(), MagicMock())
+
+    assert tools.subagent_model_for("fast") == _FAST.model_id
+    assert tools.subagent_model_for("default") == _MAIN.model_id
+    assert tools.subagent_model_for(None) == _MAIN.model_id
+    # A route the catalog has no model for keeps the run's subagent model.
+    assert tools.subagent_model_for("performance") == _MAIN.model_id
 
 
 @pytest.mark.parametrize(

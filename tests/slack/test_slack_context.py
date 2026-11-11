@@ -1469,49 +1469,19 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
     assert run_create["kwargs"]["multitask_strategy"] == "enqueue"
 
 
-@pytest.mark.parametrize(
-    ("run_cost", "expected_cost"),
-    [(0.42, "$0.42"), (0.001, "<$0.01 ($0.42)")],
-)
-def test_pending_cost_marks_latest_reply_until_cost_arrives(
-    run_cost: float, expected_cost: str
-) -> None:
+def test_slack_footer_shows_neither_model_nor_cost() -> None:
     url = "https://app.example/agents/t1"
-    usage = RunUsageSummary(models=("model-a",), total_tokens=123)
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123, session_cost_usd=0.42)
+    footer = f"<{url}|Open in Web>"
     blocks = slack_utils._with_slack_web_link_context_block(
         "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
     )
     text = slack_utils.append_slack_web_link_footer("Done", url, usage)
-    assert "calculating cost" not in text
 
-    pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
-    assert pending_text.endswith("model-a • calculating cost...")
-    assert pending_blocks is not None
-    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost...")
-
-    # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
-    assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
-        pending_text,
-        pending_blocks,
-    )
-    final_text, final_blocks = slack_utils.with_slack_session_cost(
-        pending_text, pending_blocks, 0.42, run_cost=run_cost
-    )
-    assert final_text.endswith(f"model-a • {expected_cost}")
-    assert final_blocks is not None
-    assert final_blocks[-1]["elements"][0]["text"].endswith(f"model-a • {expected_cost}")
-    assert slack_utils.with_slack_session_cost(
-        final_text, final_blocks, 0.42, run_cost=run_cost
-    ) == (
-        final_text,
-        final_blocks,
-    )
-
-    # Messages without a web footer (e.g. interim acknowledgements) stay untouched.
-    assert slack_utils.with_slack_pending_session_cost("Working on it", None) == (
-        "Working on it",
-        None,
-    )
+    assert slack_utils.format_slack_run_usage(usage) == ""
+    assert text == f"Done {footer}"
+    assert blocks is not None
+    assert blocks[-1]["elements"][0]["text"] == footer
 
 
 @pytest.mark.parametrize("first_message", [True, False])
@@ -1590,5 +1560,6 @@ async def test_performance_directive_switches_unless_quoted(
         assert configurable["agent_model_id"] == "openai:gpt-6-astra"
         assert configurable["model_selection"] == "explicit"
         assert notice.call_args.args[:2] == ("C123", "U123")
-        assert "openai:gpt-6-astra" in notice.call_args.args[2]
+        # Slack never names the model.
+        assert notice.call_args.args[2] == "Switched to the performance model."
         assert notice.call_args.kwargs["thread_ts"] == "1700000000.000100"

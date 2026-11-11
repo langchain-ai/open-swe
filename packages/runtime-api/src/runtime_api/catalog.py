@@ -311,6 +311,12 @@ class LoopRules(BaseModel):
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
 
+    @property
+    def trace_tags(self) -> list[str]:
+        """The tags the run's trace carries: whether the classifier routes its model calls."""
+        active = self.routing is not None and self.routing.mode == "auto"
+        return [f"model_routing:{'active' if active else 'inactive'}"]
+
 
 class BrowserSpec(BaseModel):
     """A review's browser, which opens pages the pull request's author controls."""
@@ -334,6 +340,7 @@ class Catalog(BaseModel):
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
+    trace_tags: list[str] = []
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.

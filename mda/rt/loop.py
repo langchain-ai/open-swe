@@ -401,6 +401,10 @@ class RunLoop:
         if route is not None:
             update.update(self._kept(route))
         current = {**held, **update}
+        # Subagents follow the route too, including on a run resumed without preparing; a
+        # route kept for this run alone is already on the run.
+        if (kept := kept_route(current.get("model_route"))) is not None:
+            self._backend.run.route = kept
         model = None if self._models is None else model_for(self._models, current)
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         if self.rules.client_prompt:
@@ -483,7 +487,7 @@ class RunLoop:
             rules is not None
             and rules.mode == "auto"
             and not (isinstance(requested, str) and requested)
-            and kept_route(held.get("model_route")) is None
+            and kept_route(held.get("model_route")) in (None, "default")
             and held.get("model_route_attempted_for") != run_id()
         )
 
@@ -506,6 +510,7 @@ class RunLoop:
                 classifying.cancel()
         if route is None:
             return {}
+        self._backend.run.route = route.route
         update = self._kept(route)
         rules = self.rules.routing
         model_id = rules.route_model_ids.get(route.route) if rules is not None else None
@@ -539,7 +544,8 @@ class RunLoop:
             route = "default"
         elif rules.mode is None:
             route = "default"
-        elif stored is not None:
+        elif stored is not None and not (rules.mode == "auto" and stored == "default"):
+            # A thread that ran before routing kept `default`; once routed, it is classified.
             route = stored
         elif rules.mode == "fast":
             route = "fast"

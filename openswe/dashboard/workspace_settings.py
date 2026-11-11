@@ -106,7 +106,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
     # Tri-state adaptive model routing toggle: True/False is authoritative. None
-    # on the instance is off (routing is opt-in); None on a workspace inherits.
+    # on the instance is on; None on a workspace inherits.
     model_routing_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -362,7 +362,8 @@ def _default_settings() -> dict[str, Any]:
         "review_browser_domains": [],
         "review_browser_session_tool": None,
         "featured_apps": [],
-        "model_routing_enabled": None,
+        # On by default; the settings show it on until an admin turns it off.
+        "model_routing_enabled": True,
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
@@ -376,12 +377,12 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
-        "default_agent_routing_fast_model": "openai:gpt-6-luna",
-        "default_agent_routing_fast_reasoning_effort": "high",
+        "default_agent_routing_fast_model": "openai:gpt-6.1-sol",
+        "default_agent_routing_fast_reasoning_effort": "medium",
         "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
-        "default_agent_routing_performance_model": "openai:gpt-6-astra",
-        "default_agent_routing_performance_reasoning_effort": "low",
+        "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
+        "default_agent_routing_performance_reasoning_effort": "high",
         "default_repo": _env_default_repo(),
         "default_reviewer_model": fallback_model,
         "default_reviewer_reasoning_effort": fallback_effort,
@@ -811,7 +812,7 @@ class WorkspaceSettings(Mapping[str, Any]):
     @property
     def model_routing_enabled(self) -> bool:
         value = self.get("model_routing_enabled")
-        return value if isinstance(value, bool) else False
+        return value if isinstance(value, bool) else True
 
     @property
     def gateway_enabled(self) -> bool | None:

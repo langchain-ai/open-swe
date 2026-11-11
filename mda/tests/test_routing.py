@@ -18,9 +18,11 @@ class _Response:
 
 
 class _Classifier:
-    """The gateway's classifier, answering every question with ``answer``."""
+    """The gateway's classifier, answering each question from ``answers``, or every question
+    with ``answer``."""
 
-    answer: _Answer | Exception = _Answer("fast", 0.9)
+    answer: _Answer | Exception = _Answer("lookup", 0.9)
+    answers: dict[str, _Answer] = {}
     asked: list[dict[str, object]] = []
 
     def __init__(self, *, model: str, api_key: str, base_url: str, async_client: object) -> None:
@@ -31,7 +33,11 @@ class _Classifier:
         _Classifier.asked.append({**request, "config": config, "base_url": self.base_url})
         if isinstance(_Classifier.answer, Exception):
             raise _Classifier.answer
-        return _Response({"route": _Classifier.answer})
+        questions = request["questions"]
+        assert isinstance(questions, dict)
+        return _Response(
+            {name: _Classifier.answers.get(name, _Classifier.answer) for name in questions}
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +45,8 @@ def _gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.invalid/")
     monkeypatch.setattr("runtime_api.classifier.TypeSafeClassifier", _Classifier)
-    monkeypatch.setattr(_Classifier, "answer", _Answer("fast", 0.9))
+    monkeypatch.setattr(_Classifier, "answer", _Answer("lookup", 0.9))
+    monkeypatch.setattr(_Classifier, "answers", {})
     monkeypatch.setattr(_Classifier, "asked", [])
 
 
@@ -63,25 +70,26 @@ def test_the_task_is_the_persons_own_request_not_the_context_after_it() -> None:
 async def test_a_confident_choice_is_kept_for_the_thread() -> None:
     route = await RouteClassifier().classify([HumanMessage(content="Rename the flag")])
 
-    assert route == Route("fast")
+    # A quick question runs on Balanced.
+    assert route == Route("balanced")
     [asked] = _Classifier.asked
     assert asked["state"] == "Rename the flag"
     assert asked["config"] == {"tags": ["nostream"]}
     assert asked["base_url"] == "https://gateway.invalid"
     questions = asked["questions"]
     assert isinstance(questions, dict)
-    assert sorted(questions["route"].criteria) == ["balanced", "fast", "performance"]
+    assert sorted(questions) == ["complexity", "task_type"]
 
 
 @pytest.mark.parametrize(
     "answer",
     [
-        _Answer("fast", 0.4),
-        _Answer("fast", float("nan")),
+        _Answer("design", 0.4),
+        _Answer("design", float("nan")),
         _Answer("cheapest", 0.9),
         RuntimeError("gateway down"),
     ],
-    ids=["unsure", "nan", "unknown-route", "failed"],
+    ids=["unsure", "nan", "unknown-task-type", "failed"],
 )
 async def test_a_route_the_classifier_cannot_give_is_the_default_for_this_run_alone(
     monkeypatch: pytest.MonkeyPatch, answer: _Answer | Exception
@@ -103,3 +111,43 @@ async def test_without_a_gateway_key_the_classifier_is_not_asked(
 
     assert route == Route("default", persist=False)
     assert _Classifier.asked == []
+
+
+@pytest.mark.parametrize(
+    ("task_type", "complexity", "expected"),
+    [
+        ("design", "routine", "performance"),
+        ("explain", "routine", "performance"),
+        ("feature", "open_ended", "performance"),
+        ("bugfix", "open_ended", "performance"),
+        ("feature", "involved", "balanced"),
+        ("pr_maintenance", "open_ended", "balanced"),
+        ("lookup", "open_ended", "balanced"),
+    ],
+)
+async def test_the_task_type_and_complexity_pick_the_route(
+    monkeypatch: pytest.MonkeyPatch, task_type: str, complexity: str, expected: str
+) -> None:
+    monkeypatch.setattr(
+        _Classifier,
+        "answers",
+        {"task_type": _Answer(task_type, 0.9), "complexity": _Answer(complexity, 0.9)},
+    )
+
+    route = await RouteClassifier().classify([HumanMessage(content="Do the thing")])
+
+    assert route == Route(expected)
+
+
+async def test_an_unsure_complexity_keeps_a_feature_on_balanced_for_this_run_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _Classifier,
+        "answers",
+        {"task_type": _Answer("feature", 0.9), "complexity": _Answer("open_ended", 0.3)},
+    )
+
+    route = await RouteClassifier().classify([HumanMessage(content="Add a flag")])
+
+    assert route == Route("balanced", persist=False)

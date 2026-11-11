@@ -376,6 +376,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         trace = turn_trace(self._backend.run)
         trace.start()
         trace.update(self._trace_metadata())
+        trace.tag(self._backend.run.catalog.trace_tags)
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
             thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))

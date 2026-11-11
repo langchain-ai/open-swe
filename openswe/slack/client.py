@@ -613,28 +613,14 @@ def _slack_thread_dashboard_url(
     return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
 
 
-def _safe_model_label(model: str) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
-    return sanitized.rsplit("/", 1)[-1][:48].strip("-")
-
-
 SLACK_COST_PENDING_LABEL = "calculating cost..."
 _PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
-    if usage is None:
-        return ""
-    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
-    model_text = " + ".join(labels[:3])
-    if len(labels) > 3:
-        model_text = f"{model_text} +{len(labels) - 3}"
-    if model_text and usage.reasoning_effort:
-        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
-    parts = [model_text] if model_text else []
-    if usage.session_cost_usd is not None:
-        parts.append(format_slack_session_cost(usage.session_cost_usd))
-    return " • ".join(parts)
+    """Slack shows neither the models a run used nor its cost; the dashboard does."""
+    del usage
+    return ""
 
 
 _SESSION_COST_LABEL_RE = re.compile(
