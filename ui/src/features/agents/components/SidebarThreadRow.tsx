@@ -554,7 +554,7 @@ export function SidebarThreadRow({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="min-w-[10rem]"
+                className="min-w-[10rem] border-default bg-elevated"
                 onClickCapture={(event) => {
                   menuNavigated.current = Boolean(
                     (event.target as HTMLElement).closest("a[href]")
@@ -576,7 +576,7 @@ export function SidebarThreadRow({
             </DropdownMenu>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-[10rem]">
+        <ContextMenuContent className="min-w-[10rem] border-default bg-elevated">
           {menuItems("context")}
         </ContextMenuContent>
       </ContextMenu>

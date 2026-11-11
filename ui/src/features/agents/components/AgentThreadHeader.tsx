@@ -309,7 +309,7 @@ export function AgentThreadHeader({
                   align="start"
                   sideOffset={4}
                   onCloseAutoFocus={keepRenameFocus}
-                  className="min-w-[10rem]"
+                  className="min-w-[10rem] border-default bg-elevated"
                 >
                   {menuItems("dropdown", thread)}
                 </DropdownMenuContent>
@@ -361,7 +361,7 @@ export function AgentThreadHeader({
         <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
         <ContextMenuContent
           onCloseAutoFocus={keepRenameFocus}
-          className="min-w-[10rem]"
+          className="min-w-[10rem] border-default bg-elevated"
         >
           {menuItems("context", thread)}
         </ContextMenuContent>
