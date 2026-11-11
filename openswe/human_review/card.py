@@ -96,11 +96,12 @@ def _stats(
 
 
 def accept_button(request: HumanReviewRequest) -> ButtonElement:
-    """What a picked reviewer clicks to take the review; the answer links the pull request."""
+    """Accept the review and open the pull request."""
     return button(
         "Accept",
         action_id="open_swe_option_select_accept",
         value=_button_value("review", request),
+        url=request.pull_request.url,
         style="primary",
     )
 
@@ -124,11 +125,11 @@ PICK_BUTTON_IDS = frozenset(
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
-        # The answer links the pull request: Trigger Server forwards no URL button's click.
         button(
             "I'll review",
             action_id="open_swe_option_select_review",
             value=_button_value("review", request),
+            url=request.pull_request.url,
             style="primary",
         ),
         button(

@@ -1690,8 +1690,23 @@ async def test_a_modal_trigger_server_opened_closes_when_handed_to_it(
             "user": {"id": "U1"},
             "view": {"callback_id": "human_review_decline", "private_metadata": "{}"},
         },
+        {
+            "type": "block_actions",
+            "actions": [{"action_id": "open_swe_option_select_review", "type": "button"}],
+        },
+        {
+            "type": "block_actions",
+            "actions": [{"action_id": "open_swe_option_select_accept", "type": "button"}],
+        },
     ],
-    ids=["explain this", "options load", "code channel view", "backend-opened modal"],
+    ids=[
+        "explain this",
+        "options load",
+        "code channel view",
+        "backend-opened modal",
+        "review signup link",
+        "review acceptance link",
+    ],
 )
 async def test_explain_this_code_channel_views_and_the_backends_modals_stay_here(
     monkeypatch: pytest.MonkeyPatch, payload: dict[str, JsonValue]

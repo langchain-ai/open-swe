@@ -1301,11 +1301,15 @@ async def slack_interactivity(
 
 
 def _answered_here(interaction: SlackInteraction) -> bool:
-    """Explain this, code channel views and the options they load, and modals the backend
-    opened itself: Trigger Server takes none of them."""
+    """Handle review links, backend modals and code channel views without Trigger Server."""
     if interaction.type in {"message_action", "block_suggestion"}:
         return True
     if interaction.container.type == "code_channel_view":
+        return True
+    if interaction.type == "block_actions" and any(
+        action.action_id in {"open_swe_option_select_review", "open_swe_option_select_accept"}
+        for action in interaction.actions
+    ):
         return True
     if interaction.type != "view_submission":
         return False

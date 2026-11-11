@@ -413,8 +413,9 @@ test.describe("Human review in Slack", () => {
     const review = (card.blocks ?? [])
       .flatMap((block) => block.elements ?? [])
       .find((element) => element.action_id === "open_swe_option_select_review");
-    // Trigger Server forwards no URL button's click, so the answer links the PR instead.
-    expect(review?.url).toBeUndefined();
+    expect(review?.url).toBe(
+      `${(process.env.E2E_UI_SERVER ?? "http://127.0.0.1:3100").replace(/\/$/, "")}/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
+    );
     await shootCard(page, "open");
     await loginAs(page, ALICE);
     await page.goto(
