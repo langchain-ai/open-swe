@@ -41,6 +41,7 @@ export function toolKind(name: string): ToolKind {
   if (lowered.startsWith("mcp_")) return "other"
   if (lowered === "task") return "task"
   if (lowered === "eval") return "code"
+  if (lowered === "background_execute") return "background"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
   if (lowered === "connect_managed_tools") return "managed-tools"

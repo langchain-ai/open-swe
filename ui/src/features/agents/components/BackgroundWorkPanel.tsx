@@ -7,6 +7,7 @@ import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindo
 import { useEffect, useRef, useState } from "react"
 import type { ComponentType, ReactNode } from "react"
 
+import { formatShellCommand } from "@/features/agents/components/chat/toolExecutionDisplay"
 import {
   useAgentThreadBackgroundOutput,
   useAgentThreadBackgroundWork,
@@ -143,7 +144,7 @@ function Row({
           >
             {title}
           </span>
-          {command && command !== title && !open && (
+          {command && formatShellCommand(command) !== title && !open && (
             <code className="truncate font-mono text-xs text-secondary">
               {command}
             </code>
@@ -267,7 +268,9 @@ function CommandRow({
   return (
     <Row
       output={{ threadId, taskId: command.task_id }}
-      title={command.command ?? command.task_id}
+      title={
+        command.command ? formatShellCommand(command.command) : command.task_id
+      }
       command={command.command}
       summary={started(command.started_at) ?? "Running"}
       details={[]}
