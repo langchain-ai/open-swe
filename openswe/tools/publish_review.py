@@ -12,6 +12,7 @@ from pydantic import JsonValue, TypeAdapter
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
@@ -500,6 +501,8 @@ async def _publish_review_async(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
     )
+    # Robin can't approve a pull request it authored; its decision stands in for the approval.
+    self_approved = False
     request_changes = bool(config_errors)
     # GitHub forbids approving or requesting changes on your own pull request; comment instead.
     for _ in range(2):
@@ -531,6 +534,7 @@ async def _publish_review_async(
             and isinstance(review_response, dict)
             and review_response.get("_error_kind") == "self_review"
         ):
+            self_approved = approved
             approved = request_changes = False
         else:
             break
@@ -631,6 +635,10 @@ async def _publish_review_async(
         keep_review_id=approval_id,
         scope_to_review_id=review_id,
     )
+    kept = approval_id is not None or (
+        self_approved and not unresolvable_findings and isinstance(review_id, int)
+    )
+    await PullRequestApproval.record_auto_approval(owner, repo, pr_number, head_sha if kept else "")
     if not config_errors:
         await _withdraw_open_swe_change_requests(
             owner=owner, repo=repo, pr_number=pr_number, token=token

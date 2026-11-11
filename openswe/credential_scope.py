@@ -104,8 +104,8 @@ class GitHubCredentialScope:
         return "personal" if self.login is not None else "system"
 
     @classmethod
-    async def is_public_ask(cls) -> bool:
-        _, metadata = await _thread_scope()
+    async def is_public_ask(cls, config: Mapping[str, Any] | None = None) -> bool:
+        _, metadata = await _thread_scope(config)
         slack = SourceContext.from_metadata(metadata).slack_thread
         return (
             metadata.get("visibility", "public") == "public"

@@ -984,6 +984,9 @@ class RepoClient:
             raise ValueError("GitHub answered the new pull request without an object")
         return payload
 
+    async def create_check_run(self, run: Mapping[str, object]) -> object:
+        return await self.post("check-runs", run)
+
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 

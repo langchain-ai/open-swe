@@ -28,6 +28,8 @@ from openswe.background_tasks import monitor_background_tasks
 from openswe.event_claims import PURGE_JOB as EVENT_CLAIM_PURGE
 from openswe.event_claims import PURGE_SCHEDULE as EVENT_CLAIM_SCHEDULE
 from openswe.github.app import get_github_app_installation_token
+from openswe.github.approval_policy import EVALUATE_JOB as APPROVAL_EVALUATE
+from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.branch_config import REFRESH_JOB as REQUIRED_CHECK_REFRESH
 from openswe.github.branch_config import refresh_required_checks
 from openswe.github.checks import REVIEW_CHECK_TIMEOUT_JOB
@@ -205,6 +207,11 @@ async def _human_review_deadline(job: Job) -> object:
     if request_id is None or step is None:
         return None
     return await run_deadline(request_id, step)
+
+
+@WORKER.register(APPROVAL_EVALUATE)
+async def _approval_evaluate(job: Job) -> None:
+    await PullRequestApproval.evaluate_job(job)
 
 
 @WORKER.register(HUMAN_REVIEW_SETTLE)

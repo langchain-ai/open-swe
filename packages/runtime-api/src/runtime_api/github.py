@@ -114,6 +114,8 @@ type GitHubWorkName = Literal[
     "review_push",
     "ci_event",
     "record_completed_review",
+    # The ``Robin Approves`` check is posted again on a pull request's head.
+    "evaluate_approval_policy",
 ]
 
 

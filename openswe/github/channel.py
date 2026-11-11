@@ -50,6 +50,7 @@ from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.github.app import INSTALLATIONS
+from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.comments import OPEN_SWE_TAGS
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.github.work import delivery_work
@@ -286,6 +287,7 @@ def _tasks(
         "review_push": lambda: service.process_github_push_event(payload),
         "ci_event": lambda: service.process_github_ci_event(payload, event, delivery_id),
         "record_completed_review": lambda: CompletedReview.record(payload),
+        "evaluate_approval_policy": lambda: PullRequestApproval.evaluate_payload(payload),
     }
 
 

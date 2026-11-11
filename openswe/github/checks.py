@@ -27,6 +27,8 @@ __all__ = ["github_headers"]
 logger = logging.getLogger(__name__)
 
 REVIEW_CHECK_RUN_NAME = "Robin Review"
+# Robin's merge gate: required by a repository's rulesets, failing while Robin holds a PR back.
+APPROVAL_CHECK_RUN_NAME = "Robin Approves"
 REVIEW_CHECK_TIMEOUT_JOB: Final = "review_check_timeout"
 # A review still open this long is hung; settle it so it never blocks the PR.
 REVIEW_CHECK_TIMEOUT: Final = timedelta(hours=1)

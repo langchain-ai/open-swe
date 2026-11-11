@@ -733,11 +733,18 @@ def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_
     assert asyncio.run(profiles.has_access_token_record("johannes117")) is True
 
 
-@pytest.mark.parametrize("allowed", [True, False])
-def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed):
+@pytest.mark.parametrize(
+    ("allowed", "check_required"), [(True, True), (False, True), (True, False)]
+)
+def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed, check_required):
     _set_config(monkeypatch, {"thread_id": "thread-1", "github_login": "alice", "draft_prs": False})
     _stub_token(monkeypatch)
     monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        opr.Repository, "requires_approval_check", AsyncMock(return_value=check_required)
+    )
+    record_requester = AsyncMock(return_value=True)
+    monkeypatch.setattr(opr.PullRequestApproval, "record_requesters", record_requester)
     monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="app-token")
@@ -753,7 +760,7 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed)
         return "requester-token", "user"
 
     monkeypatch.setattr(opr, "_resolve_pr_author_token", requester_token)
-    asyncio.run(
+    result = asyncio.run(
         opr._open_pull_request(
             owner="langchain-ai",
             repo="open-swe",
@@ -765,13 +772,16 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed)
             author="other-participant",
         )
     )
-    if allowed:
+    if allowed and check_required:
         assert client.post_calls[0]["headers"]["Authorization"] == "Bearer app-token"
         assert client.post_calls[0]["json"]["draft"] is True
         assert "Requested by @alice" in client.post_calls[0]["json"]["body"]
         assert "other than the requester" in client.post_calls[0]["json"]["body"]
+        record_requester.assert_awaited_once_with("langchain-ai", "open-swe", 1, {"alice"})
     else:
         assert not client.post_calls
+    if not check_required:
+        assert "Robin Approves" in result["error"]
 
 
 @pytest.mark.asyncio

@@ -23,9 +23,12 @@ from openswe.credential_scope import (
     private_credential_login,
 )
 from openswe.github.app import get_github_app_installation_token
+from openswe.github.approval_policy import PullRequestApproval
+from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.comments import derive_pr_state
 from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.github.repositories import Repository
 from openswe.github.token import GitHubUserAuthRequired
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
@@ -1164,8 +1167,15 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
+        requester = None
+        requesters: set[str] = set()
         if kind == "user" and ask_channel:
             requester = await pr_author_login(author)
+            requesters = {
+                login
+                for login in (requester, RunConfig.from_runtime().github_login)
+                if isinstance(login, str) and login
+            }
             token = await get_github_app_installation_token()
             kind = "bot"
             if not token:
@@ -1194,6 +1204,30 @@ async def _open_pull_request(
             )
             if preflight_failure is not None:
                 return preflight_failure
+            if await Repository.requires_approval_check(owner, repo, base) is not True and (
+                (existing := await _find_existing_pr(client, token, owner, repo, head)) is None
+                or (existing.get("user") or {}).get("type") == "Bot"
+                or (existing.get("base") or {}).get("ref") != base
+            ):
+                return _failure_payload(
+                    code="approval_check_not_required",
+                    owner=owner,
+                    repo=repo,
+                    head=head,
+                    base=base,
+                    token_kind=kind,
+                    http_status=None,
+                    reason=(
+                        f"{owner}/{repo} does not require the `{APPROVAL_CHECK_RUN_NAME}` check on "
+                        f"{base}, so Robin will not author this pull request as itself"
+                    ),
+                    likely_cause=(
+                        f"the repository's rulesets do not require `{APPROVAL_CHECK_RUN_NAME}`, "
+                        "so Robin's merge gate couldn't stop the requester approving their own change"
+                    ),
+                    branch_pushed=True,
+                    failed_step="approval_check",
+                )
             body += (
                 f"\n\nRequested by @{requester} via an Ask channel. "
                 "A human other than the requester must validate and approve this change. "
@@ -1247,6 +1281,39 @@ async def _open_pull_request(
                     creation_response=pr,
                     run_state=state,
                 )
+                number = pr.get("number")
+                if (
+                    requesters
+                    and isinstance(number, int)
+                    and not await PullRequestApproval.record_requesters(
+                        owner, repo, number, requesters
+                    )
+                ):
+                    # Unrecorded requesters could approve their own change, so it can't stay open.
+                    closed = await client.patch(
+                        f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{number}",
+                        headers=_auth_headers(token),
+                        json={"state": "closed"},
+                    )
+                    reason = (
+                        "Robin could not record who requested the pull request, so it closed it"
+                        if closed.status_code == 200  # noqa: PLR2004
+                        else f"Robin could not record who requested #{number} and could not "
+                        "close it; close it by hand, since its requester could approve it"
+                    )
+                    return _failure_payload(
+                        code="requester_unrecorded",
+                        owner=owner,
+                        repo=repo,
+                        head=head,
+                        base=base,
+                        token_kind=kind,
+                        http_status=None,
+                        reason=reason,
+                        likely_cause="the database write failed; try again",
+                        branch_pushed=True,
+                        failed_step="record_requesters",
+                    )
             return {
                 "success": True,
                 "created": True,
@@ -1274,6 +1341,27 @@ async def _open_pull_request(
                     record_opening=False,
                     run_state=state,
                 )
+                number = existing.get("number")
+                if (
+                    requesters
+                    and isinstance(number, int)
+                    and not await PullRequestApproval.record_requesters(
+                        owner, repo, number, requesters
+                    )
+                ):
+                    return _failure_payload(
+                        code="requester_unrecorded",
+                        owner=owner,
+                        repo=repo,
+                        head=head,
+                        base=base,
+                        token_kind=kind,
+                        http_status=None,
+                        reason="Robin could not record who requested the pull request",
+                        likely_cause="the database write failed; try again",
+                        branch_pushed=True,
+                        failed_step="record_requesters",
+                    )
                 return {
                     "success": True,
                     "created": False,
