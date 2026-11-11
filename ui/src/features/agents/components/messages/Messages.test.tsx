@@ -18,6 +18,7 @@ import { Messages } from "./Messages"
 import { transcriptPositions } from "./transcriptPositions"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
+import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 vi.mock("@/lib/appCommands", () => ({
   useAppCommand: () => undefined,
@@ -540,6 +541,154 @@ describe("Messages", () => {
     expect(screen.getByText("Check the latest deployment")).toBeTruthy()
     fireEvent.click(toggle)
     expect(screen.queryByText("Check the latest deployment")).toBeNull()
+  })
+
+  it("folds runs that woke and ended without a reply into one row", () => {
+    const monitor = (
+      id: string,
+      at: string,
+      sender = { id: "system:monitor", name: "Monitor" }
+    ) => ({
+      id,
+      author: "user" as const,
+      timestamp: at,
+      structuredSenderKind: "system" as const,
+      structuredSenderId: sender.id,
+      structuredSenderName: sender.name,
+      chunks: [{ kind: "text" as const, text: `Wake ${id}` }],
+    })
+    const silentRun = (
+      id: string,
+      startedAt: string,
+      at: string,
+      call: Partial<ToolExecutionChunk> = {}
+    ) => ({
+      id,
+      author: "agent" as const,
+      startedAt,
+      timestamp: at,
+      chunks: [
+        {
+          kind: "tool-execution" as const,
+          toolCallId: `${id}-call`,
+          toolName: "check_pr",
+          toolKind: "other" as const,
+          title: "Check PR",
+          status: "completed" as const,
+          output: "still pending",
+          ...call,
+        },
+      ],
+    })
+    render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          // A notice no run answers stays in view.
+          {
+            id: "moved",
+            author: "user",
+            timestamp: "2026-09-03T09:59:00.000Z",
+            structuredSenderKind: "system",
+            structuredSenderId: "system:sandbox-handoff",
+            structuredSenderName: "Moved to the cloud",
+            chunks: [{ kind: "text", text: "Moved this thread to the cloud." }],
+          },
+          monitor("wake-1", "2026-09-03T10:00:00.000Z"),
+          silentRun(
+            "run-1",
+            "2026-09-03T10:00:00.000Z",
+            "2026-09-03T10:01:00.000Z"
+          ),
+          monitor("wake-2", "2026-09-03T10:05:00.000Z", {
+            id: "system:background-task",
+            name: "Background task",
+          }),
+          silentRun(
+            "run-2",
+            "2026-09-03T10:05:00.000Z",
+            "2026-09-03T10:08:00.000Z"
+          ),
+          monitor("wake-3", "2026-09-03T10:10:00.000Z"),
+          {
+            id: "run-3",
+            author: "agent",
+            timestamp: "2026-09-03T10:11:00.000Z",
+            chunks: [{ kind: "text", text: "CI is green." }],
+          },
+          // A call waiting on approval keeps its run, and the one before it,
+          // out of a fold.
+          monitor("wake-4", "2026-09-03T10:20:00.000Z"),
+          silentRun(
+            "run-4",
+            "2026-09-03T10:20:00.000Z",
+            "2026-09-03T10:21:00.000Z"
+          ),
+          monitor("wake-5", "2026-09-03T10:25:00.000Z"),
+          silentRun(
+            "run-5",
+            "2026-09-03T10:25:00.000Z",
+            "2026-09-03T10:26:00.000Z",
+            { status: "pending" }
+          ),
+          monitor("wake-6", "2026-09-03T10:30:00.000Z"),
+          silentRun(
+            "run-6",
+            "2026-09-03T10:30:00.000Z",
+            "2026-09-03T10:31:00.000Z",
+            { toolKind: "read", status: "error", output: "Check failed" }
+          ),
+          monitor("wake-7", "2026-09-03T10:35:00.000Z"),
+          silentRun(
+            "run-7",
+            "2026-09-03T10:35:00.000Z",
+            "2026-09-03T10:36:00.000Z"
+          ),
+          monitor("wake-8", "2026-09-03T10:40:00.000Z"),
+          silentRun(
+            "run-8",
+            "2026-09-03T10:40:00.000Z",
+            "2026-09-03T10:41:00.000Z",
+            {
+              toolKind: "code",
+              calls: [
+                {
+                  kind: "tool-execution",
+                  toolCallId: "nested-failed-call",
+                  toolName: "check_pr",
+                  toolKind: "other",
+                  title: "Check PR",
+                  status: "error",
+                  output: "Nested check failed",
+                },
+              ],
+            }
+          ),
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const fold = screen.getByRole("button", {
+      name: "2 runs without a reply · 4m 0s · 2 actions · woken by Monitor, Background task",
+    })
+    expect(
+      screen.getAllByRole("button", { name: /runs without a reply/ })
+    ).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "Monitor" })).toHaveLength(6)
+    expect(screen.getByText("CI is green.")).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Moved to the cloud" })
+    ).toBeTruthy()
+
+    fireEvent.click(fold)
+    expect(fold.getAttribute("aria-expanded")).toBe("true")
+    expect(screen.getAllByRole("button", { name: "Monitor" })).toHaveLength(7)
+    expect(screen.getByRole("button", { name: "Background task" })).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Worked for 1m 0s · 2 actions" })
+    )
+    expect(screen.getByLabelText("Tool call failed")).toBeTruthy()
   })
 
   it("shows run activity while a stream is starting with no messages", () => {

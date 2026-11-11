@@ -13,11 +13,14 @@ import { ElapsedSeconds } from "@/features/agents/components/messages/ElapsedSec
  */
 export function TurnFoldRow({
   label,
+  detail,
   active,
   expanded,
   onToggle,
 }: {
   label: string
+  /** Quieter text after the label, such as what woke a stretch of runs. */
+  detail?: string
   active: boolean
   expanded: boolean
   onToggle: () => void
@@ -36,7 +39,7 @@ export function TurnFoldRow({
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label={label}
+        aria-label={detail ? `${label} · ${detail}` : label}
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
@@ -47,6 +50,11 @@ export function TurnFoldRow({
           {label}
         </span>
         {active && <ElapsedSeconds />}
+        {detail && (
+          <span className="min-w-0 shrink-[2] truncate text-tertiary">
+            · {detail}
+          </span>
+        )}
         <Caret size={12} weight="bold" aria-hidden className="shrink-0" />
       </Button>
     </div>

@@ -1,6 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
-import { memo, useEffect, useMemo, useRef } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConversationFind } from "./ConversationFind"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
@@ -9,6 +9,9 @@ import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
+import { TurnFoldRow } from "./timeline/foldRows"
+import { groupQuietRuns } from "./quietRuns"
+import type { QuietStretch, TranscriptEntry } from "./quietRuns"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { SentReply, UserMessage } from "./UserMessage"
@@ -17,6 +20,7 @@ import type { Message } from "@/features/agents/lib/types"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
+import { formatElapsed } from "@/lib/utils"
 import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
@@ -100,6 +104,37 @@ function QueuedMessages({
   )
 }
 
+type MessageEntry = Extract<TranscriptEntry, { type: "message" }>
+type DisplayEntry =
+  | TranscriptEntry
+  | { type: "events"; events: [MessageEntry, ...Array<MessageEntry>] }
+
+function isEventListener(message: Message): boolean {
+  return (
+    message.structuredSenderKind === "system" &&
+    message.structuredSenderId === "system:event-subscription" &&
+    !message.taskEvent
+  )
+}
+
+function quietStretchLabel(stretch: QuietStretch): string {
+  const parts = [`${stretch.runCount} runs without a reply`]
+  if (stretch.durationMs !== null && stretch.durationMs >= 1000)
+    parts.push(formatElapsed(stretch.durationMs))
+  if (stretch.actionCount > 0)
+    parts.push(
+      `${stretch.actionCount} action${stretch.actionCount === 1 ? "" : "s"}`
+    )
+  return parts.join(" · ")
+}
+
+function quietStretchTriggers(stretch: QuietStretch): string | undefined {
+  if (stretch.triggers.length === 0) return undefined
+  return `woken by ${stretch.triggers
+    .map(([name, count]) => (count > 1 ? `${name} ×${count}` : name))
+    .join(", ")}`
+}
+
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
@@ -147,20 +182,6 @@ export const Messages = memo(function MessagesComponent({
     () => messages.filter((message) => !message.hidden),
     [messages]
   )
-  const messageGroups = visibleMessages.reduce<
-    Array<{ message: Message; events: Array<Message> }>
-  >((groups, message) => {
-    const previous = groups.at(-1)
-    if (
-      message.structuredSenderKind === "system" &&
-      message.structuredSenderId === "system:event-subscription" &&
-      !message.taskEvent
-    ) {
-      if (previous?.events.length) previous.events.push(message)
-      else groups.push({ message, events: [message] })
-    } else groups.push({ message, events: [] })
-    return groups
-  }, [])
   const costsByTurn = useMemo(
     () => turnCosts(visibleMessages, runCosts),
     [visibleMessages, runCosts]
@@ -184,6 +205,36 @@ export const Messages = memo(function MessagesComponent({
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
   const repoPath = localRepo?.path
+  const transcriptEntries = useMemo(
+    () =>
+      groupQuietRuns(
+        visibleMessages,
+        isStreaming ? visibleMessages.at(-1)?.id : undefined
+      ),
+    [visibleMessages, isStreaming]
+  )
+  // Back-to-back event listener messages left in view share one chip.
+  const displayEntries = useMemo(
+    () =>
+      transcriptEntries.reduce<Array<DisplayEntry>>((entries, entry) => {
+        if (entry.type !== "message" || !isEventListener(entry.message)) {
+          entries.push(entry)
+          return entries
+        }
+        const previous = entries.at(-1)
+        if (previous?.type === "events") previous.events.push(entry)
+        else entries.push({ type: "events", events: [entry] })
+        return entries
+      }, []),
+    [transcriptEntries]
+  )
+  const [expandedStretches, setExpandedStretches] = useState<
+    Record<string, boolean>
+  >({})
+  const toggleStretch = useCallback((key: string) => {
+    setExpandedStretches((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
+  }, [])
+
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
@@ -201,6 +252,37 @@ export const Messages = memo(function MessagesComponent({
     (lastMessage.optimistic || !lastMessage.timestampIsFallback)
       ? Date.parse(lastMessage.timestamp)
       : undefined
+
+  const renderMessage = (message: Message, index: number) => {
+    const isLastMessage = index === visibleMessages.length - 1
+    const messageIsStreaming = isStreaming && isLastMessage
+    const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+
+    if (
+      message.author === "user" ||
+      message.structuredSenderKind === "system"
+    ) {
+      return (
+        <UserMessage key={message.id} message={message} threadId={threadId} />
+      )
+    }
+
+    return (
+      <AgentTurn
+        key={message.id}
+        message={message}
+        isStreaming={messageIsStreaming && !isOffloading}
+        isMarkdownLive={messageIsMarkdownLive}
+        repoPath={repoPath}
+        activityLabel={messageIsStreaming ? activityLabel : undefined}
+        costUsd={costsByTurn.get(message.id)}
+        onApprove={onApprove}
+        onReject={onReject}
+        onAutoApprove={onAutoApprove}
+        onOpenFile={onOpenFile}
+      />
+    )
+  }
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -247,24 +329,26 @@ export const Messages = memo(function MessagesComponent({
             )}
             {visibleMessages.length === 0 && emptyState}
             <div ref={transcriptRef}>
-              {messageGroups.map(({ message, events }, index) => {
-                const isLastMessage = index === messageGroups.length - 1
-                const messageIsStreaming = isStreaming && isLastMessage
-                const messageIsMarkdownLive =
-                  message.id === liveMarkdownMessageId
-
-                if (events.length > 1) {
+              {displayEntries.map((entry) => {
+                if (entry.type === "message")
+                  return renderMessage(entry.message, entry.index)
+                if (entry.type === "events") {
+                  const [first] = entry.events
+                  if (entry.events.length === 1)
+                    return renderMessage(first.message, first.index)
                   return (
-                    <div key={message.id} className="my-space-4">
+                    <div key={first.message.id} className="my-space-4">
                       <ExpandableMessageChip
-                        messageIds={events.map((event) => event.id)}
-                        label={`${events.length} events`}
-                        accessibleLabel={`${events.length} event listener messages`}
+                        messageIds={entry.events.map(
+                          ({ message }) => message.id
+                        )}
+                        label={`${entry.events.length} events`}
+                        accessibleLabel={`${entry.events.length} event listener messages`}
                       >
-                        {events.map((event) => (
+                        {entry.events.map(({ message }) => (
                           <UserMessage
-                            key={event.id}
-                            message={event}
+                            key={message.id}
+                            message={message}
                             threadId={threadId}
                           />
                         ))}
@@ -272,36 +356,36 @@ export const Messages = memo(function MessagesComponent({
                     </div>
                   )
                 }
-
-                if (
-                  message.author === "user" ||
-                  message.structuredSenderKind === "system"
-                ) {
-                  return (
-                    <UserMessage
-                      key={message.id}
-                      message={message}
-                      threadId={threadId}
-                    />
-                  )
-                }
-
+                const { stretch } = entry
+                const expanded = expandedStretches[stretch.key] ?? false
                 return (
-                  <AgentTurn
-                    key={message.id}
-                    message={message}
-                    isStreaming={messageIsStreaming && !isOffloading}
-                    isMarkdownLive={messageIsMarkdownLive}
-                    repoPath={repoPath}
-                    activityLabel={
-                      messageIsStreaming ? activityLabel : undefined
-                    }
-                    costUsd={costsByTurn.get(message.id)}
-                    onApprove={onApprove}
-                    onReject={onReject}
-                    onAutoApprove={onAutoApprove}
-                    onOpenFile={onOpenFile}
-                  />
+                  <div
+                    key={stretch.key}
+                    className="my-space-2"
+                    data-testid="quiet-stretch"
+                  >
+                    {/* Saved reading positions anchor on message ids. */}
+                    {!expanded &&
+                      stretch.messages.map((message) => (
+                        <span
+                          key={message.id}
+                          aria-hidden
+                          className="block h-0"
+                          data-message-id={message.id}
+                        />
+                      ))}
+                    <TurnFoldRow
+                      label={quietStretchLabel(stretch)}
+                      detail={quietStretchTriggers(stretch)}
+                      active={false}
+                      expanded={expanded}
+                      onToggle={() => toggleStretch(stretch.key)}
+                    />
+                    {expanded &&
+                      stretch.messages.map((message) =>
+                        renderMessage(message, -1)
+                      )}
+                  </div>
                 )
               })}
             </div>
