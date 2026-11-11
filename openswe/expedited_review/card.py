@@ -289,6 +289,7 @@ def open_card(
     diff_image_id: str | None = None,
     choices: list[ChannelChoice] | None = None,
     thread_url: str | None = None,
+    author_login: str = "",
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open card; an approved one collapses to one line.
 
@@ -300,8 +301,11 @@ def open_card(
     if approval.approved and not approval.awaiting_ready:
         label = pr.label
         heading = f"Expedited review: {_vote_summary(approval)}"
-        return f"{heading} — {pr.url}", [
-            section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
+        author_label = f" — Author {escape(author_login)}" if author_login else ""
+        return f"{heading} — {pr.url}{author_label}", [
+            section(
+                f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}{author_label}"
+            )
         ]
     header = _header(approval, title, author)
     if thread_url:
@@ -324,6 +328,7 @@ def closed_card(
     files: list[ChangedFile],
     outcome: str,
     diff_image_id: str | None = None,
+    author_login: str = "",
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn.
 
@@ -332,8 +337,11 @@ def closed_card(
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
         icon = ":merged: " if approval.state == "merged" else ""
-        return f"{icon}Expedited review: {outcome} — {pr.url}", [
-            section(f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(title)}")
+        author_label = f" — Author {escape(author_login)}" if author_login else ""
+        return f"{icon}Expedited review: {outcome} — {pr.url}{author_label}", [
+            section(
+                f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(title)}{author_label}"
+            )
         ]
     blocks: list[Block] = [
         *_header(approval, title, author),

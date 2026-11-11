@@ -138,6 +138,7 @@ async def test_new_thread_card_is_its_own_root_and_is_not_reposted(
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
     monkeypatch.setattr(lifecycle.ReviewCard, "_channel_choices", AsyncMock(return_value=[]))
     monkeypatch.setattr(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada"))
+    monkeypatch.setattr(HumanReviewRequest, "author_login", AsyncMock(return_value="ada"))
     monkeypatch.setattr(lifecycle.expedited_card, "open_card", lambda *a, **kw: ("Card", []))
     monkeypatch.setattr(HumanReviewRequest, "save", AsyncMock())
     refreshed = AsyncMock()

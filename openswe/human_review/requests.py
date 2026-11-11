@@ -218,6 +218,11 @@ class HumanReviewRequest(Base):
         author = await User.get(pr.author_user_id) if pr.author_user_id else None
         return slack_mention(author, pr.author or "the author")
 
+    async def author_login(self) -> str:
+        pr = self.pull_request
+        author = await User.get(pr.author_user_id) if pr.author_user_id else None
+        return (author.github_login if author else "") or pr.author
+
     def is_author(self, user_id: UUID, login: str) -> bool:
         pr = self.pull_request
         if pr.author_user_id is not None:
