@@ -63,6 +63,8 @@ _FORWARDED_ATTACHMENT_MAX_COUNT: Final = 10
 _FORWARDED_ATTACHMENT_MAX_DEPTH: Final = 4
 _FORWARDED_ATTACHMENT_MAX_NODES: Final = 50
 _FORWARDED_ATTACHMENT_TEXT_MAX_CHARS: Final = 8000
+# Slack adds a pasted message link's preview a moment after the message is posted.
+_UNFURL_WAITS: Final = (1.0, 2.0)
 _MESSAGE_TS_RE: Final = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 _USER_MENTION_RE: Final = re.compile(r"<@([UW][A-Z0-9]+)>")
 _CHANNEL_MENTION_RE: Final = re.compile(r"<#([CG][A-Z0-9]+)\|?>")
@@ -1073,6 +1075,71 @@ async def _linked_message(url: str, current_channel_id: str) -> SlackMessage | N
     return resolved
 
 
+def _forwarded_sources(messages: Iterable[Mapping[str, Any]]) -> set[tuple[str, str]]:
+    """The Slack messages the forwarded or unfurled attachments of ``messages`` already show."""
+    return {
+        parsed
+        for message in messages
+        for attachment in _list_of_dicts(message.get("attachments"))
+        if _is_forwarded_attachment(attachment)
+        and isinstance(source := attachment.get("from_url"), str)
+        and (parsed := _message_url(source))
+    }
+
+
+async def await_link_unfurls(channel_id: str, thread_ts: str, message: SlackMessage) -> None:
+    """Wait briefly for Slack to unfurl the message links ``message`` holds, and take the
+    previews it adds: the posted copy has none yet, and a link into a DM or private
+    channel is never followed, so the preview is all the agent can see of it."""
+    links = {
+        parsed
+        for match in _MESSAGE_URL_RE.finditer(str(message.get("text") or ""))
+        if (parsed := _message_url(match.group(0)))
+    }
+    message_ts = str(message.get("ts") or "")
+    if not message_ts:
+        return
+    # A link ``resolved_links`` can follow needs no preview, and may never get one.
+    hidden: set[tuple[str, str]] = set()
+    for link in links - _forwarded_sources([message]):
+        if link[0] == channel_id:
+            continue
+        channel = await channel_details(link[0])
+        if channel is None or not _is_public(channel):
+            hidden.add(link)
+    if not hidden:
+        return
+    for delay in _UNFURL_WAITS:
+        await asyncio.sleep(delay)
+        payload = await _api(
+            "conversations.replies",
+            {
+                "channel": channel_id,
+                "ts": thread_ts or message_ts,
+                "latest": message_ts,
+                "oldest": message_ts,
+                "inclusive": "true",
+                "limit": 2,
+            },
+        )
+        found = payload.get("messages") if payload is not None else None
+        current = next(
+            (
+                item
+                for item in (found if isinstance(found, list) else [])
+                if isinstance(item, dict) and str(item.get("ts")) == message_ts
+            ),
+            None,
+        )
+        if current is None:
+            continue
+        previews = _forwarded_sources([current])
+        if previews - _forwarded_sources([message]):
+            message["attachments"] = current.get("attachments")
+        if hidden <= previews:
+            return
+
+
 async def resolved_links(
     messages: Sequence[Mapping[str, Any]],
     user_names_by_id: Mapping[str, str],
@@ -1086,12 +1153,16 @@ async def resolved_links(
     if not links:
         return "", []
 
+    shown = _forwarded_sources(messages)
     parts: list[str] = []
     linked_images: list[str] = []
     for link in dict.fromkeys(links):
         try:
             resolved = await _linked_message(link, channel_id)
-            if resolved:
+            if resolved and _message_url(link) in shown:
+                # Its preview already quotes it; only its images are missing.
+                linked_images.extend(slack_image_file_urls(resolved))
+            elif resolved:
                 author_id = resolved.get("user", "")
                 author = user_names_by_id.get(author_id, author_id)
                 if author_id and author == author_id:
@@ -1099,7 +1170,7 @@ async def resolved_links(
                 text = resolved.get("text", "(empty message)")
                 parts.append(f"**{link}**\n  Author: {author}\n  Message: {text}")
                 linked_images.extend(slack_image_file_urls(resolved))
-            else:
+            elif _message_url(link) not in shown:
                 parts.append(f"**{link}**\n  (Could not fetch — bot may not have access)")
         except Exception:
             logger.exception("Failed to resolve a Slack link")

@@ -446,6 +446,88 @@ async def test_a_link_into_another_channel_is_followed_only_when_that_channel_is
     ]
 
 
+async def test_a_pasted_dm_link_is_read_from_the_preview_slack_adds(
+    slack: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Slack unfurls a pasted link after the message is posted; the DM itself is never read."""
+    link = "https://acme.slack.com/archives/D3/p1776281321762831"
+    preview = {"is_msg_unfurl": True, "from_url": link, "author_name": "Robin", "text": "card"}
+    reads = iter(
+        [
+            {"messages": [{"ts": "4.0"}, {"ts": "5.0"}]},
+            {"messages": [{"ts": "4.0"}, {"ts": "5.0", "attachments": [preview]}]},
+        ]
+    )
+    slack(
+        {
+            "conversations.replies": lambda body: next(reads),
+            "conversations.info": {"channel": {"is_channel": False, "is_im": True}},
+        }
+    )
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(slack_prompt.asyncio, "sleep", no_wait)
+    message = {"ts": "5.0", "text": f"we removed these <{link}|{link}>"}
+
+    await slack_prompt.await_link_unfurls("C1", "4.0", message)
+
+    assert message["attachments"] == [preview]
+
+    assert await slack_prompt.resolved_links([message], {}, channel_id="C1") == ("", [])
+
+
+async def test_previews_slack_did_add_are_kept_when_another_never_arrives(
+    slack: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shown, missing = (
+        "https://acme.slack.com/archives/D3/p1776281321762831",
+        "https://acme.slack.com/archives/D4/p1776281321762832",
+    )
+    preview = {"is_msg_unfurl": True, "from_url": shown, "text": "card"}
+    slack(
+        {
+            "conversations.replies": {"messages": [{"ts": "5.0", "attachments": [preview]}]},
+            "conversations.info": {"channel": {"is_channel": False, "is_im": True}},
+        }
+    )
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(slack_prompt.asyncio, "sleep", no_wait)
+    message = {"ts": "5.0", "text": f"{shown} {missing}"}
+
+    await slack_prompt.await_link_unfurls("C1", "4.0", message)
+
+    assert message["attachments"] == [preview]
+
+
+async def test_a_link_robin_can_read_does_not_wait_for_a_preview(slack: Any) -> None:
+    api = slack({})
+    message = {"ts": "5.0", "text": "see https://acme.slack.com/archives/C1/p1776281321762831"}
+
+    await slack_prompt.await_link_unfurls("C1", "4.0", message)
+
+    assert api.calls == []
+
+
+async def test_a_previewed_readable_link_adds_only_its_images(slack: Any) -> None:
+    link = "https://acme.slack.com/archives/C1/p1776281321762831"
+    image = {"mimetype": "image/png", "url_private": "https://files.slack.com/x.png"}
+    slack({"conversations.history": {"messages": [{"ts": "1.0", "text": "hi", "files": [image]}]}})
+    message = {
+        "text": link,
+        "attachments": [{"is_msg_unfurl": True, "from_url": link, "text": "hi"}],
+    }
+
+    assert await slack_prompt.resolved_links([message], {}, channel_id="C1") == (
+        "",
+        ["https://files.slack.com/x.png"],
+    )
+
+
 async def test_a_permalink_names_the_message(slack: Any) -> None:
     slack({"chat.getPermalink": {"permalink": "https://acme.slack.com/archives/C1/p1"}})
     assert await slack_prompt.permalink("C1", "1.0") == "https://acme.slack.com/archives/C1/p1"

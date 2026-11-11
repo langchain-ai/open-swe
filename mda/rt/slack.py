@@ -343,6 +343,11 @@ async def _start_turn(
         )
     elif message.attachments and not current.get("attachments"):
         current["attachments"] = message.attachments
+    await slack_prompt.await_link_unfurls(
+        message.channel_id,
+        context_ts,
+        current if current is not None else history[-1],
+    )
     # What the conversation's thread holds. A concierge DM's runs go on another thread,
     # whose state the handler can't read.
     state = None if facts.concierge else await thread.get_state()
