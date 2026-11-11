@@ -642,6 +642,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_sou
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("thread_kind", ["agent", "channel", "legacy"])
 @pytest.mark.parametrize(
     ("state", "body", "inline_feedback", "tagged", "should_dispatch"),
     [
@@ -662,8 +663,29 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
     inline_feedback: bool,
     tagged: bool,
     should_dispatch: bool,
+    thread_kind: str,
 ) -> None:
+    channel_owned = thread_kind == "channel"
     thread_id = "00000000-0000-0000-0000-000000000001"
+    pr_thread_id = github_webhooks.pr_comment_thread_id("langchain-ai", "open-swe", 3127)
+    successor_id = "00000000-0000-0000-0000-000000000002"
+    legacy = thread_kind == "legacy"
+    if legacy:
+        monkeypatch.setattr(
+            github_webhooks.index, "live_thread_id", AsyncMock(return_value=successor_id)
+        )
+        monkeypatch.setattr(
+            github_webhooks.index, "current_thread_id", AsyncMock(return_value=thread_id)
+        )
+    succeed = AsyncMock(return_value=successor_id if legacy else thread_id)
+    monkeypatch.setattr(github_webhooks.succession, "succeed", succeed)
+    monkeypatch.setattr(github_webhooks.THREADS, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(github_webhooks.THREADS, "create", AsyncMock())
+    channel = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "_channel_takes", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_webhooks, "_channel_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_webhooks.index, "get", AsyncMock(return_value=None))
+    metadata = {"channel": "slack"} if channel_owned else {}
     comments: list[dict[str, object]] = [
         {
             "type": "review",
@@ -704,8 +726,13 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
             )
         ),
     )
-    monkeypatch.setattr(PullRequest, "link_thread", AsyncMock())
-    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", AsyncMock(return_value={}))
+    link = AsyncMock()
+    monkeypatch.setattr(PullRequest, "link_thread", link)
+    monkeypatch.setattr(
+        webhook_common,
+        "get_thread_metadata_safe",
+        AsyncMock(side_effect=lambda tid: None if legacy and tid == successor_id else metadata),
+    )
     monkeypatch.setattr(webhook_common, "authorize_github_thread", AsyncMock(return_value={}))
     monkeypatch.setattr(
         webhook_common, "get_or_resolve_thread_github_token", AsyncMock(return_value="token")
@@ -732,16 +759,25 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
         },
         "pull_request_review",
         agent_thread_id=None if tagged else thread_id,
+        channel=channel,
     )
 
     fetch_comments.assert_awaited_once()
     if should_dispatch:
         react.assert_awaited_once()
         dispatch.assert_awaited_once()
-        assert dispatch.call_args.args[0] == thread_id
+        expected_thread = pr_thread_id if channel_owned else successor_id if legacy else thread_id
+        assert dispatch.call_args.args[0] == expected_thread
+        if legacy:
+            succeed.assert_awaited_once_with(thread_id)
+        if channel_owned:
+            channel.adopt.assert_awaited_once()
     else:
         react.assert_not_awaited()
         dispatch.assert_not_awaited()
+        channel.adopt.assert_not_awaited()
+        succeed.assert_not_awaited()
+        link.assert_not_awaited()
 
 
 @pytest.mark.parametrize(("workspace", "runs_in"), [("core", "core"), (None, "oss")])

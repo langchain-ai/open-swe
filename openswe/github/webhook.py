@@ -56,7 +56,6 @@ from openswe.thread_ids import (
     thread_id_from_branch,
 )
 from openswe.threads import index, succession
-from openswe.threads.creation import create_thread
 from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
@@ -1199,6 +1198,7 @@ async def process_github_pr_comment(
         )
         return
     thread_id = await index.live_thread_id(derived_thread_id)
+    current_thread_id = await index.current_thread_id(derived_thread_id)
     pr_thread_id = (
         pr_comment_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
         if pr_number
@@ -1206,77 +1206,8 @@ async def process_github_pr_comment(
     )
     on_channel = thread_id == pr_thread_id and await _channel_takes(channel, thread_id)
     new_on_channel = on_channel and await index.get(thread_id) is None
-    if on_channel and channel is not None:
-        await channel.adopt(thread_id, {"branch_name": branch_name})
-    # The agent's own thread exists; a PR thread or a successor may not yet.
-    elif thread_id != own_thread_id:
-        common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
-        langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-        try:
-            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
-        except Exception as exc:  # noqa: BLE001
-            if common.is_not_found_error(exc):
-                await create_thread(
-                    langgraph_client,
-                    thread_id,
-                    title=f"PR #{pr_number}",
-                    if_exists="do_nothing",
-                    metadata={"branch_name": branch_name},
-                )
-            else:
-                common.logger.warning(
-                    "Failed to persist branch_name metadata for thread %s", thread_id
-                )
-
-    # A channel (Linear, GitHub issues) starts the runs on its own threads, so
-    # feedback on a PR its conversation opened continues on the PR's own thread.
-    channel_metadata = None if on_channel else await common.get_thread_metadata_safe(thread_id)
-    continues_thread: str | None = None
-    if channel_metadata is not None and channel_of(channel_metadata):
-        if not pr_number:
-            return
-        # The PR thread starts with the conversation's history, so only who may prompt
-        # the conversation continues it, as when its own thread took the feedback.
-        if common.thread_is_private(channel_metadata) and not common.thread_is_promptable(
-            channel_metadata, github_login
-        ):
-            return
-        continues_thread = thread_id
-        thread_id = pr_comment_thread_id(
-            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
-        )
-        # It also keeps the conversation's visibility and owner, so a private
-        # conversation's history stays as private on the PR's thread.
-        inherited = {
-            key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
-        }
-        metadata: dict[str, JsonValue] = {
-            "branch_name": branch_name,
-            CONTINUES_THREAD_KEY: continues_thread,
-            **inherited,
-        }
-        on_channel = await _channel_takes(channel, thread_id)
-        if on_channel and channel is not None:
-            new_on_channel = await index.get(thread_id) is None
-            await channel.adopt(thread_id, metadata)
-        else:
-            await THREADS.create(thread_id, title=f"PR #{pr_number}", metadata=metadata)
-
-    repo = Repo.parse(repo_config)
-    if pr_number and repo is not None and repo.owner and repo.name:
-        try:
-            await PullRequest(owner=repo.owner, repo=repo.name, number=pr_number).link_thread(
-                thread_id, source="github_pr_comment"
-            )
-        except Exception:  # noqa: BLE001
-            common.logger.warning(
-                "Failed to link PR comment thread to its pull request",
-                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
-                exc_info=True,
-            )
-
     if agent_thread_id is not None:
-        agent_metadata = await common.get_thread_metadata_safe(thread_id)
+        agent_metadata = await common.get_thread_metadata_safe(current_thread_id)
         if agent_metadata is None:
             common.logger.info(
                 "Ignoring untagged PR comment for a missing agent thread",
@@ -1289,7 +1220,7 @@ async def process_github_pr_comment(
             return
     email = await User.email_for_login(github_login) or ""
     if email:
-        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
+        thread_metadata = await common.authorize_github_thread(current_thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
@@ -1376,6 +1307,66 @@ async def process_github_pr_comment(
         and not any(item.get("type") == "review_comment" for item in comments)
     ):
         return
+
+    thread_id = await succession.succeed(derived_thread_id)
+    if on_channel and channel is not None:
+        await channel.adopt(thread_id, {"branch_name": branch_name})
+    # The agent's own thread exists; a PR thread or a successor may not yet.
+    elif thread_id != own_thread_id:
+        common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
+        if await THREADS.get(thread_id) is None:
+            await THREADS.create(
+                thread_id, title=f"PR #{pr_number}", metadata={"branch_name": branch_name}
+            )
+        else:
+            await THREADS.update(thread_id, {"branch_name": branch_name})
+
+    # A channel (Linear, GitHub issues) starts the runs on its own threads, so
+    # feedback on a PR its conversation opened continues on the PR's own thread.
+    channel_metadata = None if on_channel else await common.get_thread_metadata_safe(thread_id)
+    continues_thread: str | None = None
+    if channel_metadata is not None and channel_of(channel_metadata):
+        if not pr_number:
+            return
+        # The PR thread starts with the conversation's history, so only who may prompt
+        # the conversation continues it, as when its own thread took the feedback.
+        if common.thread_is_private(channel_metadata) and not common.thread_is_promptable(
+            channel_metadata, github_login
+        ):
+            return
+        continues_thread = thread_id
+        thread_id = pr_comment_thread_id(
+            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+        )
+        # It also keeps the conversation's visibility and owner, so a private
+        # conversation's history stays as private on the PR's thread.
+        inherited = {
+            key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
+        }
+        metadata: dict[str, JsonValue] = {
+            "branch_name": branch_name,
+            CONTINUES_THREAD_KEY: continues_thread,
+            **inherited,
+        }
+        on_channel = await _channel_takes(channel, thread_id)
+        if on_channel and channel is not None:
+            new_on_channel = await index.get(thread_id) is None
+            await channel.adopt(thread_id, metadata)
+        else:
+            await THREADS.create(thread_id, title=f"PR #{pr_number}", metadata=metadata)
+
+    repo = Repo.parse(repo_config)
+    if pr_number and repo is not None and repo.owner and repo.name:
+        try:
+            await PullRequest(owner=repo.owner, repo=repo.name, number=pr_number).link_thread(
+                thread_id, source="github_pr_comment"
+            )
+        except Exception:  # noqa: BLE001
+            common.logger.warning(
+                "Failed to link PR comment thread to its pull request",
+                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
+                exc_info=True,
+            )
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
