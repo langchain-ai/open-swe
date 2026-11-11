@@ -1,6 +1,7 @@
 Design QA keeps before and after screenshots of a pull request's frontend, which reviewers compare side by side.
 
-Capture only when the diff changes what people see in a web frontend and a preview of this pull request is up: a deployment or a bot's comment on the pull request links it.
+Capture only when the diff changes what people see in a web frontend and a preview of this pull request serves its head commit: a deployment for that commit, or a bot's comment on the pull request saying the preview is deployed, links it.
+A link while the preview is still building or deploying doesn't count: it can still serve an earlier commit, or nothing.
 Otherwise do nothing for Design QA, and don't mention it.
 
 1. Find the preview, and its base: the site built from the default branch that shares the preview's data.

@@ -736,6 +736,9 @@ An app's [review step](PLUGINS.md#review-steps) has pull request reviews do work
 1. Add the app in a workspace's **Settings → Review → Apps in reviews**.
    Only reviews of private repositories follow it.
    Reviews follow the release that was newest when it was added; when its owner releases again, **Update** there moves reviews to the new one.
+1. Under **Preview checks** there, name the checks that pass only once a pull request's preview serves its head commit, one per line, as the pull request's checks list shows them, such as a deploy workflow's `wait-for-dns` job.
+   A review usually finishes before the preview is up; when one of these passes for a pull request, Robin does the apps' review steps against the preview.
+   Pick a check that is skipped when no preview is built, and the GitHub App must receive `check_run` events.
 1. Say where the previews' base site is in the workspace's review guidelines, so the review knows where to take "before" screenshots.
 
 </details>

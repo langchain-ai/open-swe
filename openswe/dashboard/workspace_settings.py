@@ -92,6 +92,10 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_apps: list[AppRelease] | None = Field(default=None, max_length=20)
     """The apps whose review step reviews follow, each at the release an admin approved;
     managed with ``manage_review_apps``."""
+    review_app_preview_checks: list[str] | None = Field(default=None, max_length=10)
+    """Checks, by name, such as a deploy workflow's last job, whose success for a pull
+    request's head means its preview serves that commit: a review that works for apps then
+    does that work on it; managed with ``manage_review_apps``."""
     # Where the browser of a review that works for apps may sign in, each domain with its
     # subdomains, and the instance or workspace MCP tool that signs it in, as
     # <connection>/<tool>. Only the instance record's values are read: they decide where
@@ -193,6 +197,16 @@ class WorkspaceSettingsUpdate(BaseModel):
                 f"an app is an app id, the id of its release, and owner/repo names: {exc}"
             ) from None
         return list(chosen.values())
+
+    @field_validator("review_app_preview_checks")
+    @classmethod
+    def _preview_checks(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        names = list(dict.fromkeys(name.strip() for name in v if name.strip()))
+        if any(len(name) > 200 for name in names):
+            raise ValueError("a preview check is a name of at most 200 characters")
+        return names
 
     @field_validator("review_browser_domains")
     @classmethod
@@ -359,6 +373,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "review_apps": [],
+        "review_app_preview_checks": [],
         "review_browser_domains": [],
         "review_browser_session_tool": None,
         "featured_apps": [],
@@ -773,6 +788,16 @@ class WorkspaceSettings(Mapping[str, Any]):
     def review_trace_links_enabled(self) -> bool:
         """Whether GitHub review bodies should include a LangSmith trace link."""
         return bool(self.get("review_trace_links", True))
+
+    @property
+    def review_app_preview_checks(self) -> frozenset[str]:
+        """The checks, by name, whose success means a pull request's preview serves its head."""
+        value = self.get("review_app_preview_checks")
+        return (
+            frozenset(v for v in value if isinstance(v, str))
+            if isinstance(value, list)
+            else frozenset()
+        )
 
     @property
     def review_app_releases(self) -> dict[UUID, UUID]:

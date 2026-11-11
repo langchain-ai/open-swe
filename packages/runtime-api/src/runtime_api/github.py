@@ -101,6 +101,8 @@ type GitHubWorkName = Literal[
     "notify_pr_updated",
     "review_fork_push",
     "settle_review_on_close",
+    # A pull request closed: its apps-only runs for a deployed preview stop (``PreviewReady``).
+    "stop_preview_runs_on_close",
     # A pull request closed: what reviews saved to apps for it is deleted.
     "delete_app_documents_on_close",
     "settle_human_reviews",
@@ -113,6 +115,9 @@ type GitHubWorkName = Literal[
     "review_pull_request",
     "review_push",
     "ci_event",
+    # A check finished: when it's one that means a pull request's preview is deployed,
+    # reviews that work for apps do that work on the preview.
+    "review_apps_on_preview",
     "record_completed_review",
     # The ``Robin Approves`` check is posted again on a pull request's head.
     "evaluate_approval_policy",

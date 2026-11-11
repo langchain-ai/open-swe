@@ -94,6 +94,22 @@ async def test_reviews_follow_the_release_an_admin_added_until_they_add_it_again
     assert updated == [{**_described(second), "browser": True, "newer_release_number": None}]
 
 
+async def test_preview_checks_are_set_and_read_keeping_other_settings() -> None:
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="Keep me"))
+
+    saved = await manage_review_apps(
+        "set_preview_checks",
+        preview_checks=[" Build and Deploy Frontend Preview ", ".github/workflows/preview.yml"],
+    )
+
+    expected = [".github/workflows/preview.yml", "Build and Deploy Frontend Preview"]
+    assert saved["preview_checks"] == expected
+    assert (await manage_review_apps("read"))["preview_checks"] == expected
+    assert (await get_workspace_settings())["org_guidelines"] == "Keep me"
+    with pytest.raises(ValueError, match="set_preview_checks"):
+        await manage_review_apps("read", preview_checks=[])
+
+
 async def test_only_an_app_with_a_review_step_can_be_added() -> None:
     release = await _release("docs", review=False)
 

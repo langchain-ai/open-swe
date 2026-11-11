@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Switch } from "@langchain/macaw-components/Switch"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import type { App } from "@/features/plugins/lib/api"
@@ -125,8 +126,73 @@ export function ReviewAppsSettings({
             control={null}
           />
         )}
+        <PreviewChecks
+          // A newly saved list starts a fresh draft.
+          key={(settings.saved?.review_app_preview_checks ?? []).join("\n")}
+          settings={settings}
+          editable={editable}
+        />
       </div>
     </SettingsSection>
+  )
+}
+
+/**
+ * The checks whose success means a pull request's preview serves its head
+ * commit, so the review does its apps' work then, not only while it reviews.
+ */
+function PreviewChecks({
+  settings,
+  editable,
+}: {
+  settings: ScopedSettings
+  editable: boolean
+}) {
+  const [draft, setDraft] = useState(
+    (settings.saved?.review_app_preview_checks ?? []).join("\n")
+  )
+  // One per line: check names hold spaces, and a matrix job's commas.
+  const checks = draft
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean)
+  const dirty =
+    checks.join("\n") !==
+    (settings.data?.review_app_preview_checks ?? []).join("\n")
+  return (
+    <div>
+      <TierRow
+        settings={settings}
+        fields={["review_app_preview_checks"]}
+        label="Preview checks"
+        description="A review usually finishes before a pull request's preview is up. When one of these checks passes for a pull request, Robin does the apps' work on its preview."
+        control={null}
+      />
+      <div className="flex flex-col gap-space-2 px-space-4 pb-space-4">
+        <Textarea
+          aria-label="Preview checks"
+          size="md"
+          placeholder="wait-for-dns"
+          hintText="One check name per line, as the pull request's checks list shows it: a job that passes only once the preview serves the pull request's head commit, and is skipped when there's no preview."
+          value={draft}
+          onChange={setDraft}
+          disabled={!editable}
+        />
+        <div className="flex items-center gap-space-2">
+          <Button
+            size="xs"
+            color="primary"
+            disabled={!editable || !dirty}
+            onClick={() => settings.save({ review_app_preview_checks: checks })}
+          >
+            Save checks
+          </Button>
+          {dirty && (
+            <span className="text-xs text-secondary">Unsaved changes</span>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

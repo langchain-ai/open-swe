@@ -56,6 +56,9 @@ def delivery_work(
             work.append("review_push")
     elif event in GITHUB_CI_EVENTS:
         work.append("ci_event")
+        if event == "check_run" and action == "completed":
+            # It may say a pull request's preview is deployed (``PreviewReady``).
+            work.append("review_apps_on_preview")
     elif event == "pull_request_review_thread":
         if action in REVIEW_THREAD_ACTIONS:
             work.append("sync_review_thread")
@@ -85,7 +88,11 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts) -> list[GitHubWorkNam
     if action in APPROVAL_POLICY_ACTIONS:
         work.append("evaluate_approval_policy")
     if action == "closed":
-        work += ["settle_review_on_close", "delete_app_documents_on_close"]
+        work += [
+            "settle_review_on_close",
+            "stop_preview_runs_on_close",
+            "delete_app_documents_on_close",
+        ]
     elif action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("settle_human_reviews")
     if action in GH_PR_WATCH_TOGGLE_ACTIONS:

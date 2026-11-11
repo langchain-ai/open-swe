@@ -343,6 +343,13 @@ class RunConfig(BaseModel):
         return self.eval is True or self.reviewer_eval is True
 
     @property
+    def posts_only_new_findings(self) -> bool:
+        """Whether a review run's ``publish_review`` posts only the findings first seen at its
+        head: a re-review, or a run for a newly deployed preview, which adds what its apps'
+        work turns up to the commit's review."""
+        return bool(self.re_review) or self.reviewer_event == "preview_ready"
+
+    @property
     def review_destination(self) -> ReviewDestination:
         """Where a review run's ``publish_review`` goes."""
         if self.is_eval:

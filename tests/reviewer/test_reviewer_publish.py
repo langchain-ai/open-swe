@@ -210,6 +210,91 @@ async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
     set_meta.assert_not_awaited()
 
 
+async def test_a_run_for_a_deployed_preview_ranks_only_the_findings_it_added() -> None:
+    from openswe.tools.publish_review import publish_review
+
+    head = "b" * 40
+    # The code review recorded one at this head and left it unpublished, below its threshold.
+    findings = [
+        _f(id="f_review", sha=head, file="a.py", start_line=1, end_line=1),
+        _f(id="f_visual", sha=head, file="b.py", start_line=2, end_line=2),
+    ]
+    with (
+        patch(
+            "openswe.tools.publish_review.get_config",
+            return_value=_eval_config(reviewer_event="preview_ready", head_sha=head),
+        ),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+    ):
+        result = await publish_review(
+            ranking=[], state={"review_earlier_finding_ids": ["f_review"]}
+        )
+
+    assert result["expected_finding_ids"] == ["f_visual"]
+
+
+async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_nothing_else() -> (
+    None
+):
+    from openswe.tools.publish_review import _publish_review_async
+
+    head = "a" * 40
+    findings = [
+        _f(id="f_review", sha=head, file="a.py", start_line=1, end_line=1),
+        _f(id="f_visual", sha=head, file="b.py", start_line=2, end_line=2),
+    ]
+    post_review = AsyncMock(return_value={"id": 99})
+    with (
+        patch("openswe.run_config.get_config", return_value={"configurable": {"thread_id": "tid"}}),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review._record_review_publication", AsyncMock()),
+        patch(
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("openswe.tools.publish_review._store_thread_ids_on_findings", AsyncMock()),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as recorded,
+        patch(
+            "openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()
+        ) as withdrawn,
+        patch(
+            "openswe.tools.publish_review.PullRequestApproval.record_auto_approval", AsyncMock()
+        ) as approval,
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()) as settled,
+        patch("openswe.tools.publish_review.PullRequest.link_review", AsyncMock()) as linked,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha=head,
+            token="t",
+            severity_threshold="medium",
+            is_re_review=True,
+            assessment=_assessment(head),
+            apps_only=True,
+            state={
+                "review_approval_policy": "Docs only",
+                # The code review's to act on, not the preview run's.
+                "review_config_errors": ["`.open-swe/settings.json` is not valid JSON"],
+                "review_earlier_finding_ids": ["f_review"],
+            },
+        )
+
+    assert result["review_id"] == 99
+    assert post_review.await_args is not None
+    kwargs = post_review.await_args.kwargs
+    assert kwargs["event"] == "COMMENT"
+    assert [comment["path"] for comment in kwargs["inline_comments"]] == ["b.py"]
+    # The code review's verdict, approvals, check and recorded commit stay its own.
+    for untouched in (withdrawn, approval, settled, linked, recorded):
+        untouched.assert_not_awaited()
+
+
 async def test_publish_review_refuses_when_called_alongside_other_tools() -> None:
     from langchain_core.messages import AIMessage
 

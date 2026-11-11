@@ -115,6 +115,21 @@ it("lets an admin turn off an app they can no longer see", () => {
   expect(save).toHaveBeenCalledWith({ review_apps: [] })
 })
 
+it("saves the checks that mean a preview is deployed, one per line", () => {
+  apps.data = []
+  const save = vi.fn()
+  render(<ReviewAppsSettings settings={scoped([], save)} editable />)
+
+  fireEvent.change(screen.getByLabelText("Preview checks"), {
+    target: { value: " wait-for-dns \n\ndeploy (preview, us-east)\n" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save checks" }))
+
+  expect(save).toHaveBeenCalledWith({
+    review_app_preview_checks: ["wait-for-dns", "deploy (preview, us-east)"],
+  })
+})
+
 it("saves where the review browser signs in, and the tool that signs it in", () => {
   const save = vi.fn()
   render(<ReviewBrowserSettings settings={scoped([], save)} editable />)

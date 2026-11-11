@@ -20,7 +20,7 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from html import escape
 from typing import Any, Literal, TypedDict
 
@@ -349,12 +349,16 @@ class PublishSelection:
         re_review: bool,
         head_sha: str,
         severity_threshold: Severity = "medium",
+        earlier: Collection[str] = (),
     ) -> None:
+        """``earlier`` names findings this publish leaves alone, such as the code review's
+        when a run for a deployed preview publishes only what its apps' work turned up."""
         self.unpublished = [
             finding
             for finding in findings
             if not self._published(finding, destination)
             and (not re_review or finding.get("first_seen_sha") == head_sha)
+            and finding.get("id") not in earlier
         ]
         self.severity_threshold: Severity = severity_threshold
 

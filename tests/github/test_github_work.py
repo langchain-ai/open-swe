@@ -138,6 +138,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
                 "track_pull_request_state",
                 "track_pull_request_usage",
                 "settle_review_on_close",
+                "stop_preview_runs_on_close",
                 "delete_app_documents_on_close",
                 "update_reviewer_watch",
             ),
@@ -154,7 +155,17 @@ def _review(action: str = "submitted", body: str = "") -> dict:
         pytest.param(
             "push", {}, _facts(auto_review=False), ("wake_merge_queue",), id="push-without-review"
         ),
-        pytest.param("check_run", {"action": "completed"}, _FACTS, ("ci_event",), id="ci"),
+        pytest.param(
+            "check_run",
+            {"action": "completed"},
+            _FACTS,
+            ("ci_event", "review_apps_on_preview"),
+            id="check-finished",
+        ),
+        pytest.param("check_run", {"action": "created"}, _FACTS, ("ci_event",), id="check-started"),
+        pytest.param(
+            "workflow_run", {"action": "completed"}, _FACTS, ("ci_event",), id="workflow-finished"
+        ),
         pytest.param("status", {}, _facts(allowed=False), (), id="ci-outside-the-allowlist"),
         pytest.param(
             "pull_request_review",

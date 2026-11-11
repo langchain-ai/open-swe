@@ -108,9 +108,10 @@ async def publish_review(
 
     config = get_config()
     cfg = RunConfig.from_config(config)
+    apps_only = cfg.reviewer_event == "preview_ready"
     pr_number = cfg.pr_number
     head_sha = cfg.head_sha
-    is_re_review = bool(cfg.re_review)
+    is_re_review = cfg.posts_only_new_findings
 
     if not cfg.repo:
         return {"success": False, "error": "Missing repo info in run config"}
@@ -120,7 +121,7 @@ async def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     try:
-        if ranking_error := await _record_ranking(ranking, cfg):
+        if ranking_error := await _record_ranking(ranking, cfg, state):
             return ranking_error
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -164,6 +165,7 @@ async def publish_review(
             trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
             assessment=assessment,
+            apps_only=apps_only,
         )
         events = ReviewEvents.from_config(cfg)
         if events is not None:
@@ -195,19 +197,24 @@ def _has_sibling_tool_calls(state: dict[str, Any] | None) -> bool:
     return bool(messages) and len(getattr(messages[-1], "tool_calls", None) or []) > 1
 
 
-async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:
+async def _record_ranking(
+    ranking: list[str], cfg: RunConfig, state: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     """Store the reviewer's best-first order over the findings this publish would post.
 
     Returns a tool error instead when ``ranking`` is not exactly that set, once each.
     """
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
-    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
+    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.posts_only_new_findings else ""
     selection = PublishSelection(
         findings,
         destination=cfg.review_destination,
-        re_review=bool(cfg.re_review),
+        re_review=cfg.posts_only_new_findings,
         head_sha=head_sha,
+        earlier=_state_errors(state, "review_earlier_finding_ids")
+        if cfg.reviewer_event == "preview_ready"
+        else (),
     )
     expected = [finding["id"] for finding in selection.rankable]
     known = {finding["id"] for finding in findings}
@@ -318,12 +325,19 @@ async def _publish_review_async(
     state: dict[str, Any] | None = None,
     assessment: ReviewAssessment | None = None,
     base_sha: str = "",
+    apps_only: bool = False,
 ) -> dict[str, Any]:
+    """Post the review. ``apps_only``, for a run on a newly deployed preview, posts only the
+    findings that run added, as a comment, and changes nothing else: the code review's
+    verdict, approvals, check and recorded commit stay its own."""
     thread_id = get_thread_id_from_runtime()
     dry_run = True
     policy: object = None
     approval_errors = _state_errors(state, "review_approval_errors")
     config_errors = _state_errors(state, "review_config_errors")
+    if apps_only:
+        approval_errors = config_errors = []
+        assessment = None
     if config_errors:
         assessment = None
     if assessment is not None:
@@ -398,6 +412,7 @@ async def _publish_review_async(
         re_review=is_re_review,
         head_sha=head_sha,
         severity_threshold=severity_threshold,
+        earlier=_state_errors(state, "review_earlier_finding_ids") if apps_only else (),
     )
     open_unpublished = selection.open
     in_diff_unpublished = selection.in_diff
@@ -421,6 +436,14 @@ async def _publish_review_async(
             continue
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
+
+    if apps_only and not inline_comments:
+        return {
+            "success": True,
+            "review_id": None,
+            "surfaced_count": 0,
+            "skipped_empty_re_review": True,
+        }
 
     # With nothing new to surface, skip the "no issues found" summary if Open
     # SWE has already reviewed this PR — the user already saw the previous
@@ -627,22 +650,25 @@ async def _publish_review_async(
     approval_id = (
         review_id if approved and not unresolvable_findings and isinstance(review_id, int) else None
     )
-    await _withdraw_open_swe_approvals(
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        keep_review_id=approval_id,
-        scope_to_review_id=review_id,
-    )
-    kept = approval_id is not None or (
-        self_approved and not unresolvable_findings and isinstance(review_id, int)
-    )
-    await PullRequestApproval.record_auto_approval(owner, repo, pr_number, head_sha if kept else "")
-    if not config_errors:
-        await _withdraw_open_swe_change_requests(
-            owner=owner, repo=repo, pr_number=pr_number, token=token
+    if not apps_only:
+        await _withdraw_open_swe_approvals(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            keep_review_id=approval_id,
+            scope_to_review_id=review_id,
         )
+        kept = approval_id is not None or (
+            self_approved and not unresolvable_findings and isinstance(review_id, int)
+        )
+        await PullRequestApproval.record_auto_approval(
+            owner, repo, pr_number, head_sha if kept else ""
+        )
+        if not config_errors:
+            await _withdraw_open_swe_change_requests(
+                owner=owner, repo=repo, pr_number=pr_number, token=token
+            )
 
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
@@ -724,6 +750,17 @@ async def _publish_review_async(
         token=token,
         findings=await list_findings_async(thread_id),
     )
+
+    if apps_only:
+        added: dict[str, Any] = {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "resolved_thread_count": resolved_thread_count,
+        }
+        if unresolvable_findings:
+            added["unresolvable_findings"] = unresolvable_findings
+        return added
 
     try:
         await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(

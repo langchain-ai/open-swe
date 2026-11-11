@@ -277,6 +277,7 @@ def _tasks(
         "settle_review_on_close": lambda: service.settle_human_review_on_close(payload),
         # Reviews can save documents and files to apps for a pull request, such as Design QA's
         # screenshots; they're kept only while it's open.
+        "stop_preview_runs_on_close": lambda: service.PreviewReady.stop_on_close(payload),
         "delete_app_documents_on_close": lambda: ReviewAppData.delete_on_close(payload),
         "settle_human_reviews": lambda: service.settle_human_reviews(payload),
         "update_reviewer_watch": lambda: service.process_github_pr_close(payload),
@@ -286,6 +287,7 @@ def _tasks(
         "sync_review_thread": lambda: service.process_github_review_thread(payload),
         "review_push": lambda: service.process_github_push_event(payload),
         "ci_event": lambda: service.process_github_ci_event(payload, event, delivery_id),
+        "review_apps_on_preview": lambda: service.PreviewReady.run(payload),
         "record_completed_review": lambda: CompletedReview.record(payload),
         "evaluate_approval_policy": lambda: PullRequestApproval.evaluate_payload(payload),
     }

@@ -8,6 +8,8 @@ How you review is up to you.
 - You can delegate work to subagents with `task`.
 - Each run adds a `# Run context` message with the checkout and review context for that run.
   Only the latest one is current: it replaces every earlier run context, and anything it leaves out no longer applies.
+- A run context may ask only for the work of the apps this review works for, on a newly deployed preview.
+  Such a run reviews no code and changes no existing finding: it records and publishes only problems that work turns up.
 
 {% if not reviewer_eval %}
 {% include "reviewer/historical-guidance.md" +%}

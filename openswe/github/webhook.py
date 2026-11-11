@@ -5,12 +5,14 @@ object (``common.X``) so tests that monkeypatch them keep working.
 """
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
 import httpx
 from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
+from openswe import event_claims
 from openswe.baby_sit import handle_ci_webhook
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
@@ -32,6 +34,8 @@ from openswe.input_messages import (
     system_input,
     system_introduction,
 )
+from openswe.jobs import queue
+from openswe.jobs.queue import Job
 from openswe.prompts import prompt
 from openswe.review.approvals import (
     ApprovalPolicy,
@@ -56,6 +60,7 @@ from openswe.thread_ids import (
     thread_id_from_branch,
 )
 from openswe.threads import index, succession
+from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
@@ -970,6 +975,291 @@ async def _process_github_head_update(
     await ReviewShadow.follow(
         RunConfig.parse(configurable), kickoff=re_review_prompt, pr_title=pr_title
     )
+
+
+class PreviewReady:
+    """A pull request's preview is deployed: a review that works for apps does that work
+    now, on the commit the preview serves.
+
+    A review runs as soon as a pull request opens or changes, usually before its preview is
+    up, so apps whose review step browses the preview would otherwise miss it. The checks
+    whose success means a preview serves its pull request's head, such as a deploy
+    workflow's last job, are named in ``review_app_preview_checks``; a skipped one, as on a
+    pull request that builds no preview, starts nothing. When one passes for an open pull
+    request of a private repository Robin reviews automatically, whose head is still that
+    commit and whose review works for an app that browses, Robin queues a reviewer run on
+    the pull request's review thread that does only the apps' work (``reviewer_event``
+    ``"preview_ready"``) and publishes only findings that work turns up. Each named check
+    starts its own run for a commit, so a pull request with several previews gets one run
+    once each is up.
+
+    A queued job (``JOB``) starts the run and comes back to it. It reads what it started
+    from the thread's runs, marked with the commit and check (``MARK``), so a retried job
+    never starts a second one: any other reviewer run on the thread cancels a queued or
+    running one, so the run starts again, up to ``MOST_RUNS`` times, until one finishes.
+    A preview can deploy before Robin has reviewed the pull request, or while it's a
+    draft, so the job looks again every ``WAIT``, up to ``MOST_WAITS`` times.
+    """
+
+    CLAIMS: Final = "review_apps_on_preview"
+    JOB: Final = "review_apps_on_preview"
+    # The run metadata naming the commit and check a run is for.
+    MARK: Final = "review_apps_preview"
+    # How long after queuing a run Robin looks at whether it finished.
+    FOLLOW_UP: Final = timedelta(minutes=20)
+    MOST_RUNS: Final = 3
+    WAIT: Final = timedelta(minutes=5)
+    MOST_WAITS: Final = 12
+
+    @staticmethod
+    async def run(payload: Mapping[str, Any]) -> None:
+        """A check finished: when it's one that means previews are deployed, queue the job
+        for each pull request whose head it checked, once per commit."""
+        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+
+        check = payload.get("check_run")
+        repo = payload.get("repository")
+        if not isinstance(check, dict) or not isinstance(repo, dict):
+            return
+        head_sha = check.get("head_sha")
+        numbers = [
+            pull["number"]
+            for pull in check.get("pull_requests") or []
+            if isinstance(pull, dict) and isinstance(pull.get("number"), int)
+        ]
+        check_name = check.get("name")
+        if (
+            check.get("conclusion") != "success"
+            or not isinstance(check_name, str)
+            or not isinstance(head_sha, str)
+            or not numbers
+            # Only reviews of private repositories work for apps (``ReviewApps.of``).
+            or repo.get("private") is not True
+        ):
+            return
+        owner = (repo.get("owner") or {}).get("login", "")
+        name = repo.get("name", "")
+        if not owner or not name:
+            return
+        repo_config = {"owner": owner, "name": name}
+        if not common.is_repo_allowed(repo_config):
+            return
+        settings = await cached_workspace_settings(
+            await common.workspace_for_repo_config(repo_config)
+        )
+        if (
+            not settings.review_app_releases
+            or check_name not in settings.review_app_preview_checks
+            or not await common.is_repo_auto_review_enabled(repo_config)
+        ):
+            return
+        for number in numbers:
+            key = f"{owner}/{name}#{number}@{head_sha}:{check_name}".lower()
+            if not await event_claims.claim(PreviewReady.CLAIMS, key, ttl=timedelta(days=7)):
+                continue
+            try:
+                await queue.schedule(
+                    PreviewReady.JOB,
+                    {
+                        "owner": owner,
+                        "repo": name,
+                        "number": number,
+                        "head_sha": head_sha,
+                        "check": check_name,
+                        "repo_private": common.repo_private_from_payload(dict(payload)),
+                        "repo_id": common.repo_id_from_payload(dict(payload)),
+                    },
+                    key=f"{PreviewReady.JOB}:{key}",
+                )
+            except BaseException:
+                await event_claims.release(PreviewReady.CLAIMS, key)
+                raise
+
+    @staticmethod
+    async def stop_on_close(payload: Mapping[str, Any]) -> None:
+        """A pull request closed: cancel its apps-only runs still queued or running. What one
+        saves after the close is deleted as it lands (``ReviewApps.save``), and the job
+        starts none again for a closed pull request."""
+        event = PullRequestEvent.parse(payload)
+        identity = event.identity if event is not None else None
+        if identity is None:
+            return
+        thread_id = await index.current_thread_id(reviewer_thread_id(*identity))
+        thread = await index.get(thread_id)
+        if thread is None:
+            return
+        runs = RUNTIMES.runs_on(thread.runtime).client.runs
+        for status in ("pending", "running"):
+            for run in await runs.list(thread_id, status=status, limit=100):
+                if (run.get("metadata") or {}).get("reviewer_event") == "preview_ready":
+                    await runs.cancel(thread_id, run["run_id"])
+
+    @classmethod
+    async def start_job(cls, job: Job) -> None:
+        """The queued job: start the commit's run for its check, or look at the one it
+        started and start it again when another reviewer run cancelled it. Raises, so the
+        queue retries, when GitHub or LangGraph fails."""
+        payload = job.payload
+        owner, repo, number, head_sha, check = (
+            payload.get(field) for field in ("owner", "repo", "number", "head_sha", "check")
+        )
+        if not (
+            isinstance(owner, str)
+            and isinstance(repo, str)
+            and isinstance(number, int)
+            and isinstance(head_sha, str)
+            and isinstance(check, str)
+        ):
+            return
+        repo_config = {"owner": owner, "name": repo}
+        repo_private = payload.get("repo_private")
+        repo_private = repo_private if isinstance(repo_private, bool) else None
+        repo_id = payload.get("repo_id")
+        app_token, _ = await common.reviewer_token_for_repo(
+            repo_config,
+            repo_private=repo_private,
+            repo_id=repo_id if isinstance(repo_id, int) else None,
+        )
+        if not app_token:
+            raise RuntimeError("No GitHub token to read the pull request")
+        pr_ref = GitHubPrRef(
+            owner=owner,
+            repo=repo,
+            number=number,
+            url=f"https://github.com/{owner}/{repo}/pull/{number}",
+        )
+        pr = await common.fetch_github_pr_metadata(pr_ref, token=app_token)
+        if pr is None:
+            raise RuntimeError("Could not read the pull request")
+        if pr.get("state") != "open" or (pr.get("head") or {}).get("sha") != head_sha:
+            # Closed, or pushed to since: that commit's preview is no longer current, even
+            # while the job waits for a review.
+            return
+        thread_id = await index.current_thread_id(reviewer_thread_id(owner, repo, number))
+        thread = await index.get(thread_id)
+        metadata = await common.get_thread_metadata_safe(thread_id)
+        if (
+            thread is None
+            or metadata is None
+            or metadata.get("kind") != common.REVIEWER_THREAD_KIND
+            or pr.get("draft")
+        ):
+            # Robin hasn't reviewed it yet, as when its preview deployed first, or it's a draft.
+            await cls._wait(job)
+            return
+        mark = f"{head_sha}:{check}"
+        runs = RUNTIMES.runs_on(thread.runtime).client.runs
+        started = [
+            run
+            for run in await runs.list(thread_id, limit=50)
+            if (run.get("metadata") or {}).get(cls.MARK) == mark
+        ]
+        if any(run.get("status") in ("pending", "running") for run in started):
+            await cls._again(job, payload, cls.FOLLOW_UP)
+            return
+        if any(run.get("status") == "success" for run in started) or len(started) >= (
+            cls.MOST_RUNS
+        ):
+            return
+        queued = await cls._start(
+            thread_id, repo_config, number, pr, mark=mark, repo_private=repo_private
+        )
+        if queued is None:
+            return
+        latest = await common.fetch_github_pr_metadata(pr_ref, token=app_token)
+        if latest is not None and latest.get("state") != "open":
+            # It closed as the run was queued, so closing's own cancel (``stop_on_close``) may
+            # have looked before the run was there. A run queued on a ``local`` thread's
+            # successor is on Managed Deep Agents (``succession``).
+            queued_thread, queued_run = queued
+            on = runs if queued_thread == thread_id else RUNTIMES.mda.client.runs
+            await on.cancel(queued_thread, queued_run)
+            return
+        await cls._again(job, payload, cls.FOLLOW_UP)
+
+    @classmethod
+    async def _wait(cls, job: Job) -> None:
+        """Look again in ``WAIT``, until the job has waited ``MOST_WAITS`` times."""
+        waits = job.payload.get("waits")
+        waits = waits if isinstance(waits, int) else 0
+        if waits < cls.MOST_WAITS:
+            await cls._again(job, {**job.payload, "waits": waits + 1}, cls.WAIT)
+
+    @classmethod
+    async def _again(cls, job: Job, payload: Mapping[str, JsonValue], delay: timedelta) -> None:
+        """Run the job again after ``delay``: queued again under its key, it replaces this one."""
+        await queue.schedule(cls.JOB, dict(payload), due_at=datetime.now(UTC) + delay, key=job.key)
+
+    @classmethod
+    async def _start(
+        cls,
+        thread_id: str,
+        repo_config: dict[str, str],
+        number: int,
+        pr: Mapping[str, Any],
+        *,
+        mark: str,
+        repo_private: bool | None,
+    ) -> tuple[str, str] | None:
+        """Queue the commit's apps-only run on the review thread of ``pr``, open and ready at
+        that commit: the thread and run it queued, or ``None`` when no app the review works
+        for looks at the preview."""
+        # Imported here: it loads the agent stack, which the web app never imports.
+        from openswe.review_apps.apps import ReviewApps
+
+        head_sha = (pr.get("head") or {}).get("sha", "")
+        base_sha = (pr.get("base") or {}).get("sha", "")
+        pr_url = (
+            pr.get("html_url", "")
+            or f"https://github.com/{repo_config['owner']}/{repo_config['name']}/pull/{number}"
+        )
+        configurable = await common.build_reviewer_configurable(
+            source="github_preview",
+            github_login="",
+            github_user_id=None,
+            repo_config=repo_config,
+            pr_number=number,
+            pr_url=pr_url,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            branch_name=(pr.get("head") or {}).get("ref", ""),
+            repo_private=repo_private,
+            # Not a re-review: with no reviewed commit to start from, the run's diff is the
+            # pull request's own, from its merge base.
+            re_review=False,
+        )
+        configurable["reviewer_event"] = "preview_ready"
+        apps = await ReviewApps.of(RunConfig.parse(configurable))
+        if apps is None or not apps.browses:
+            # No app this review works for looks at the preview.
+            return None
+        thread_id = await succession.succeed(thread_id)
+        # Not stored as the thread's current reviewer run: a review it queues behind still
+        # owns the check and settles it if it fails.
+        run = await common.dispatch_agent_run(
+            thread_id,
+            None,
+            configurable,
+            source="github_preview",
+            thread_title=None,
+            input=_github_webhook_run_input(
+                prompt("reviewer/preview-ready-kickoff"),
+                data=_pr_data(repo_config, number, pr_url, base_sha, head_sha),
+            ),
+            assistant_id="reviewer",
+            # So the job finds what it started, and closing the pull request cancels it.
+            metadata={
+                **common.AGENT_VERSION_METADATA,
+                "reviewer_event": "preview_ready",
+                cls.MARK: mark,
+            },
+            # After a review in progress, never in place of it.
+            multitask_strategy="enqueue",
+        )
+        run_id = run.get("run_id") if isinstance(run, dict) else None
+        if not isinstance(run_id, str):
+            raise RuntimeError("LangGraph returned no run id")
+        return thread_id, run_id
 
 
 async def process_github_ci_event(

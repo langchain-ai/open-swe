@@ -464,6 +464,8 @@ export interface WorkspaceSettings {
   review_trace_links: boolean
   /** The apps whose review step reviews of private repositories follow, each at the release an admin approved. */
   review_apps?: Array<AppRelease> | null
+  /** Checks, by name, whose success means a pull request's preview serves its head commit. */
+  review_app_preview_checks?: Array<string> | null
   /** Instance only: listed apps added to everyone's web UI, each at the release an admin approved. */
   featured_apps?: Array<FeaturedApp> | null
   /** Instance only: the domains, each with its subdomains, a review's browser may sign in to. */

@@ -22,7 +22,7 @@ import re
 import uuid
 import warnings
 from functools import partial
-from typing import Any, NamedTuple, NotRequired, cast
+from typing import Any, Final, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +476,9 @@ class PrepareReviewerRunState(PrepareRunState):
     review_approval_policy: NotRequired[str | None]
     review_approval_errors: NotRequired[list[str]]
     review_config_errors: NotRequired[list[str]]
+    # A run for a deployed preview: the findings there were when it started, which its
+    # publish leaves to the review that recorded them.
+    review_earlier_finding_ids: NotRequired[list[str] | None]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
@@ -877,6 +880,7 @@ async def prepare_reviewer_run(
     approval_policy = policy.render() if policy is not None else None
 
     review_context = ""
+    earlier_finding_ids: list[str] | None = None
     if pr_number is not None:
         if reviewer_event == "finding_reply":
             existing_findings = await list_findings_async(thread_id)
@@ -892,6 +896,19 @@ async def prepare_reviewer_run(
                 pr_title=pr_title,
                 pr_body=pr_body,
                 existing_threads_block=existing_threads_block,
+            )
+        elif reviewer_event == "preview_ready":
+            earlier_finding_ids = [
+                finding["id"] for finding in await list_findings_async(thread_id)
+            ]
+            review_context = prompt(
+                "reviewer/preview-ready-context",
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+                pr_url=pr_url,
+                head_sha=head_sha,
+                overview=_format_pr_overview(pr_title, pr_body),
             )
         elif is_re_review and last_reviewed_sha:
             existing_findings = await list_findings_async(thread_id)
@@ -964,6 +981,7 @@ async def prepare_reviewer_run(
         "review_approval_policy": approval_policy,
         "review_approval_errors": policy.errors if policy is not None else [],
         "review_config_errors": config_errors,
+        "review_earlier_finding_ids": earlier_finding_ids,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }
@@ -1040,6 +1058,19 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
     )
 
 
+# A run for a newly deployed preview does only the apps' work (``reviewer_event``
+# ``"preview_ready"``): it can add and publish findings that work turns up, but gets nothing
+# that changes the review's existing findings, replies on the pull request or suggests tasks.
+PREVIEW_READY_EXCLUDED_TOOLS: Final = frozenset(
+    {
+        "update_finding",
+        "resolve_finding_thread",
+        "reply_to_finding_thread",
+        "suggest_task",
+    }
+)
+
+
 def reviewer_tools() -> list[BaseTool]:
     """The reviewer's tools, wherever the graph that calls them runs."""
     return apply_tool_descriptions(
@@ -1084,7 +1115,9 @@ async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None
     if (app_tools := await ReviewAppTools.of_run(cfg)) is not None:
         await app_tools.offer(surface)
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
-    surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
+    surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS | (
+        PREVIEW_READY_EXCLUDED_TOOLS if cfg.reviewer_event == "preview_ready" else frozenset()
+    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

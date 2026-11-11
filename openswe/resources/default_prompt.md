@@ -11,6 +11,7 @@ Default agent model and reasoning effort come from workspace settings, changed b
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
 Apps in reviews have reviews of private repositories also do an app's review step, such as saving screenshots of a frontend pull request's preview to Design QA; an admin adds them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_apps`.
+Their **Preview checks**, set in the same places or with `manage_review_apps` (`set_preview_checks`), are the checks whose success means a pull request's preview serves its head commit: when one passes, Robin does the apps' review steps against that preview, publishing only problems that work turns up.
 Only an instance admin sets where their browser signs in, the domains and the MCP tool that signs it in, under **Review browser** in **Defaults** (`/admin`); no workspace overrides it, and no tool changes it.
 An instance admin adds a listed app to everyone's sidebar under **Apps for everyone** in **Defaults** (`/admin`), approving its permissions for them and sharing the repositories they name with each person who can read them; people can't remove it while it's on, and no tool changes it.
 

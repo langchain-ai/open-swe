@@ -36,6 +36,7 @@ from openswe.github.checks import REVIEW_CHECK_TIMEOUT_JOB
 from openswe.github.quota import SAMPLE_JOB as GITHUB_QUOTA_SAMPLE
 from openswe.github.quota import SAMPLE_SCHEDULE as GITHUB_QUOTA_SCHEDULE
 from openswe.github.quota import InstallationQuota
+from openswe.github.webhook import PreviewReady
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.settling import SETTLE_JOB as HUMAN_REVIEW_SETTLE
 from openswe.human_review.settling import SettleTarget
@@ -212,6 +213,11 @@ async def _human_review_deadline(job: Job) -> object:
 @WORKER.register(APPROVAL_EVALUATE)
 async def _approval_evaluate(job: Job) -> None:
     await PullRequestApproval.evaluate_job(job)
+
+
+@WORKER.register(PreviewReady.JOB)
+async def _review_apps_on_preview(job: Job) -> None:
+    await PreviewReady.start_job(job)
 
 
 @WORKER.register(HUMAN_REVIEW_SETTLE)

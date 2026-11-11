@@ -11971,6 +11971,21 @@
             ],
             "title": "Pr Summaries"
           },
+          "review_app_preview_checks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review App Preview Checks"
+          },
           "review_apps": {
             "anyOf": [
               {

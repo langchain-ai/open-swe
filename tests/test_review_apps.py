@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -8,17 +9,22 @@ import pytest
 from deepagents.backends.protocol import FileDownloadResponse
 from langchain_core.tools import BaseTool, StructuredTool
 from PIL import Image
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from runtime_api.catalog import McpServerSpec
 from runtime_api.connections import ConnectionRef
 
 from openswe import reviewer
 from openswe.agent_api.reviewer import ReviewerKind
+from openswe.dashboard import workspace_settings_cache
 from openswe.dashboard.workspace_settings import WorkspaceSettings, WorkspaceSettingsUpdate
+from openswe.github.webhook import PreviewReady
+from openswe.jobs import queue as job_queue
+from openswe.jobs.queue import Job
 from openswe.mcp.runtime import MCPTools
 from openswe.plugins.manifest import PluginManifest, ReviewStep
 from openswe.plugins.records import AppVersion, DocumentScope, PluginApps, PluginDocuments
 from openswe.prompts import prompt
+from openswe.review.diff import review_diff_range
 from openswe.review_apps import apps as review_apps_module
 from openswe.review_apps import browser as review_browser_module
 from openswe.review_apps.apps import ReviewApp, ReviewApps, SandboxFile
@@ -26,8 +32,12 @@ from openswe.review_apps.browser import ReviewBrowser
 from openswe.review_apps.cleanup import ReviewAppData
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.threads import index as thread_index
+from openswe.threads import runtimes as thread_runtimes
+from openswe.threads import succession as thread_succession
 from openswe.tools import review_apps as review_app_tools
 from openswe.users import User
+from openswe.webhooks import common as webhook_common
 from tests.agent.test_agent_assembly_context import _base_config
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
@@ -359,6 +369,403 @@ def test_review_browser_settings_take_domains_and_one_connection_tool(
         WorkspaceSettingsUpdate.model_validate(values)
 
 
+def test_preview_checks_are_kept_whole_once_each() -> None:
+    update = WorkspaceSettingsUpdate.model_validate(
+        {"review_app_preview_checks": [" Deploy Preview ", "Deploy Preview", " "]}
+    )
+    assert update.review_app_preview_checks == ["Deploy Preview"]
+    with pytest.raises(ValidationError):
+        WorkspaceSettingsUpdate.model_validate({"review_app_preview_checks": ["x" * 201]})
+
+
+_PREVIEW_CHECK = "wait-for-dns"
+_BASE, _HEAD = "a" * 40, "b" * 40
+
+
+def _check_passed(
+    *, name: str = _PREVIEW_CHECK, conclusion: str = "success", private: bool = True
+) -> dict[str, object]:
+    """GitHub's ``check_run`` completion for acme/widgets#7 at its head."""
+    return {
+        "action": "completed",
+        "check_run": {
+            "name": name,
+            "conclusion": conclusion,
+            "head_sha": _HEAD,
+            "pull_requests": [{"number": 7, "head": {"sha": _HEAD}}],
+        },
+        "repository": {"id": 1, "owner": {"login": "acme"}, "name": "widgets", "private": private},
+    }
+
+
+class _Preview:
+    """acme/widgets#7, open at ``_HEAD`` and reviewed by Robin, in a workspace whose reviews
+    work for an app that browses, with the job queue and the review thread's runs in memory."""
+
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        checks: tuple[str, ...] = (_PREVIEW_CHECK,),
+        apps: bool = True,
+        browses: bool = True,
+        auto_review: bool = True,
+        reviewed: bool = True,
+        **pull: object,
+    ) -> None:
+        pinned = [{"app": str(uuid4()), "release": str(uuid4())}] if apps else []
+        settings = WorkspaceSettings(
+            {"review_apps": pinned, "review_app_preview_checks": list(checks)}
+        )
+        monkeypatch.setattr(
+            workspace_settings_cache,
+            "cached_workspace_settings",
+            AsyncMock(return_value=settings),
+        )
+        monkeypatch.setattr(webhook_common, "is_repo_allowed", lambda _repo: True)
+        monkeypatch.setattr(
+            webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=auto_review)
+        )
+        monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=_apps(browser=browses)))
+        monkeypatch.setattr(
+            webhook_common, "workspace_for_repo_config", AsyncMock(return_value="w")
+        )
+        self.reviewed = reviewed
+        monkeypatch.setattr(thread_index, "get", self._thread)
+        monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", self._thread_metadata)
+        monkeypatch.setattr(
+            webhook_common, "reviewer_token_for_repo", AsyncMock(return_value=("token", None))
+        )
+        self.pull: dict[str, object] = {
+            "state": "open",
+            "draft": False,
+            "html_url": "https://github.com/acme/widgets/pull/7",
+            "head": {"sha": _HEAD, "ref": "feature"},
+            "base": {"sha": _BASE},
+            **pull,
+        }
+        monkeypatch.setattr(
+            webhook_common,
+            "fetch_github_pr_metadata",
+            AsyncMock(side_effect=lambda _ref, *, token: dict(self.pull)),
+        )
+        # The review thread's runs, newest first, as LangGraph lists them.
+        self.runs: list[dict[str, JsonValue]] = []
+        self.cancel_each_run = False
+        runs = Mock()
+        runs.list = AsyncMock(side_effect=self._list)
+        runs.cancel = AsyncMock()
+        self.cancelled = runs.cancel
+        monkeypatch.setattr(
+            thread_runtimes.RUNTIMES, "runs_on", lambda _runtime: Mock(client=Mock(runs=runs))
+        )
+        self.dispatch = AsyncMock(side_effect=self._dispatch)
+        monkeypatch.setattr(webhook_common, "dispatch_agent_run", self.dispatch)
+        self.jobs: dict[str | None, Job] = {}
+        monkeypatch.setattr(job_queue, "schedule", self._schedule)
+
+    async def _thread(self, thread_id: str) -> Mock | None:
+        return Mock(runtime="mda") if self.reviewed else None
+
+    async def _thread_metadata(self, thread_id: str) -> dict[str, object] | None:
+        return {"kind": webhook_common.REVIEWER_THREAD_KIND} if self.reviewed else None
+
+    async def _list(
+        self, thread_id: str, *, status: str | None = None, limit: int = 10
+    ) -> list[dict[str, JsonValue]]:
+        return [run for run in self.runs if status is None or run["status"] == status][:limit]
+
+    async def _dispatch(self, *args: object, **kwargs: object) -> dict[str, JsonValue]:
+        metadata = kwargs["metadata"]
+        assert isinstance(metadata, dict)
+        run: dict[str, JsonValue] = {
+            "run_id": f"run-{len(self.runs) + 1}",
+            "status": "interrupted" if self.cancel_each_run else "pending",
+            "metadata": metadata,
+        }
+        self.runs.insert(0, run)
+        return run
+
+    def settle(self, status: str) -> None:
+        """The newest run reaches ``status``."""
+        self.runs[0]["status"] = status
+
+    async def _schedule(
+        self,
+        kind: str,
+        payload: dict[str, JsonValue] | None = None,
+        *,
+        due_at: datetime | None = None,
+        key: str | None = None,
+    ) -> Job:
+        # One job per key, as the queue keeps them.
+        now = datetime.now(UTC)
+        job = Job(
+            id=uuid4(),
+            kind=kind,
+            payload=dict(payload or {}),
+            due_at=due_at or now,
+            cron=None,
+            timezone="UTC",
+            key=key,
+            metadata={},
+            attempts=0,
+            created_at=now,
+        )
+        self.jobs[key] = job
+        return job
+
+    async def work(self) -> None:
+        """Run the job queued longest, as the worker does when it's due."""
+        await PreviewReady.start_job(self.jobs.pop(next(iter(self.jobs))))
+
+    async def drain(self) -> None:
+        """Run jobs until none is queued, as a worker would over the following hours."""
+        for _ in range(50):
+            if not self.jobs:
+                return
+            await self.work()
+        raise AssertionError("the job never stopped")
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_deployed_preview_has_the_review_do_its_apps_work_once_per_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+
+    await PreviewReady.run(_check_passed())
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+
+    preview.dispatch.assert_awaited_once()
+    assert preview.dispatch.await_args is not None
+    args, kwargs = preview.dispatch.await_args
+    cfg = RunConfig.parse(args[2])
+    assert cfg.reviewer_event == "preview_ready"
+    # The pull request's own diff, from its merge base.
+    assert review_diff_range(
+        base_sha=cfg.base_sha or "",
+        head_sha=cfg.head_sha or "",
+        last_reviewed_sha=cfg.last_reviewed_sha or "",
+        re_review=bool(cfg.re_review),
+    ) == (_BASE, _HEAD, True)
+    # Behind a review in progress, never in place of it.
+    assert kwargs["multitask_strategy"] == "enqueue"
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+@pytest.mark.parametrize(
+    ("check", "context"),
+    [
+        pytest.param({"name": "lint"}, {}, id="another-check"),
+        pytest.param({"conclusion": "skipped"}, {}, id="no-preview-built"),
+        pytest.param({"private": False}, {}, id="public-repository"),
+        pytest.param({}, {"apps": False}, id="no-apps"),
+        pytest.param({}, {"browses": False}, id="no-app-browses"),
+        pytest.param({}, {"auto_review": False}, id="auto-review-off"),
+        pytest.param({}, {"reviewed": False}, id="never-reviewed"),
+        pytest.param({}, {"head": {"sha": "c" * 40, "ref": "feature"}}, id="pushed-since"),
+        pytest.param({}, {"state": "closed"}, id="closed"),
+        pytest.param({}, {"draft": True}, id="stays-a-draft"),
+    ],
+)
+async def test_a_preview_that_isnt_the_pull_requests_current_one_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch, check: dict[str, object], context: dict[str, object]
+) -> None:
+    preview = _Preview(monkeypatch, **context)
+
+    await PreviewReady.run(_check_passed(**check))
+    await preview.drain()
+
+    preview.dispatch.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_preview_up_before_robin_reviews_starts_once_the_review_does(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch, reviewed=False)
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+    preview.dispatch.assert_not_awaited()
+
+    preview.reviewed = True
+    await preview.work()
+
+    preview.dispatch.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_pull_request_closed_while_waiting_for_its_review_is_let_go(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch, reviewed=False)
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+    assert preview.jobs
+
+    preview.pull["state"] = "closed"
+    await preview.work()
+
+    assert not preview.jobs
+    preview.dispatch.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_run_queued_as_its_pull_request_closed_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    queue_run = preview._dispatch
+
+    async def closing(*args: object, **kwargs: object) -> dict[str, JsonValue]:
+        # The close lands while the run is queued, after closing's own cancel looked.
+        preview.pull["state"] = "closed"
+        return await queue_run(*args, **kwargs)
+
+    preview.dispatch.side_effect = closing
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+
+    assert [call.args[1] for call in preview.cancelled.await_args_list] == ["run-1"]
+    assert not preview.jobs
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_run_queued_on_a_successor_thread_is_cancelled_where_it_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    # The review thread is from before Managed Deep Agents: the run goes to its successor.
+    monkeypatch.setattr(thread_succession, "succeed", AsyncMock(return_value="successor"))
+    mda_runs = Mock(cancel=AsyncMock())
+    monkeypatch.setattr(
+        type(thread_runtimes.RUNTIMES),
+        "mda",
+        property(lambda _runtimes: Mock(client=Mock(runs=mda_runs))),
+    )
+    queue_run = preview._dispatch
+
+    async def closing(*args: object, **kwargs: object) -> dict[str, JsonValue]:
+        preview.pull["state"] = "closed"
+        return await queue_run(*args, **kwargs)
+
+    preview.dispatch.side_effect = closing
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+
+    mda_runs.cancel.assert_awaited_once_with("successor", "run-1")
+    preview.cancelled.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_each_named_check_starts_its_own_run_once_its_preview_is_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch, checks=("wait-for-dns", "wait-for-api"))
+
+    await PreviewReady.run(_check_passed(name="wait-for-dns"))
+    await PreviewReady.run(_check_passed(name="wait-for-api"))
+    await PreviewReady.run(_check_passed(name="wait-for-api"))
+    await preview.work()
+    await preview.work()
+
+    assert preview.dispatch.await_count == 2
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_closing_a_pull_request_stops_its_preview_runs_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+    preview.runs.append({"run_id": "review", "status": "pending", "metadata": {}})
+
+    await PreviewReady.stop_on_close(
+        {
+            "action": "closed",
+            "repository": {"full_name": "acme/widgets"},
+            "pull_request": {"number": 7},
+        }
+    )
+
+    assert [call.args[1] for call in preview.cancelled.await_args_list] == ["run-1"]
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_preview_run_another_reviewer_run_cancelled_starts_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+
+    preview.settle("running")
+    await preview.work()
+    assert preview.dispatch.await_count == 1
+    # A finding reply interrupted it.
+    preview.settle("interrupted")
+    await preview.work()
+    assert preview.dispatch.await_count == 2
+    preview.settle("success")
+    await preview.work()
+
+    assert preview.dispatch.await_count == 2
+    assert not preview.jobs
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_commit_gets_a_bounded_number_of_preview_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    preview.cancel_each_run = True
+
+    await PreviewReady.run(_check_passed())
+    await preview.drain()
+
+    assert preview.dispatch.await_count == PreviewReady.MOST_RUNS
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_retried_job_never_starts_a_second_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    preview = _Preview(monkeypatch)
+    await PreviewReady.run(_check_passed())
+    job = preview.jobs.pop(next(iter(preview.jobs)))
+    queued = preview._schedule
+    # The run starts, but queuing the look after it fails, so the queue retries the job.
+    monkeypatch.setattr(job_queue, "schedule", AsyncMock(side_effect=RuntimeError("down")))
+    with pytest.raises(RuntimeError):
+        await PreviewReady.start_job(job)
+    monkeypatch.setattr(job_queue, "schedule", queued)
+
+    await PreviewReady.start_job(job)
+
+    preview.dispatch.assert_awaited_once()
+    assert preview.jobs
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_preview_run_that_failed_to_start_is_retried_by_the_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    dispatch = preview._dispatch
+    preview.dispatch.side_effect = RuntimeError("LangGraph is down")
+    await PreviewReady.run(_check_passed())
+    job = preview.jobs.pop(next(iter(preview.jobs)))
+
+    # The job raises, so the queue runs it again later.
+    with pytest.raises(RuntimeError):
+        await PreviewReady.start_job(job)
+    preview.dispatch.side_effect = dispatch
+    await PreviewReady.start_job(job)
+
+    assert len(preview.runs) == 1
+
+
 async def _published(
     review: dict[str, object] | None, collections: dict[str, object] | None = None
 ) -> AppVersion:
@@ -477,6 +884,36 @@ async def test_only_a_review_that_works_for_apps_gets_their_tools_and_browser(
     assert (await kind.tool(config, "save_app_document") is not None) is works
     assert await kind.tool(config, "ops__query") is None
     assert await kind.tool(config, "add_finding") is not None
+
+
+@pytest.mark.usefixtures("registry_db", "saved_thread_scope")
+@pytest.mark.parametrize("event", [None, "preview_ready"])
+async def test_a_run_for_a_deployed_preview_cannot_change_the_reviews_findings(
+    monkeypatch: pytest.MonkeyPatch, event: str | None
+) -> None:
+    _instance_settings(monkeypatch)
+    monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=_apps(browser=False)))
+    monkeypatch.setattr(
+        reviewer, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
+    )
+    config = _base_config()
+    config["configurable"].update(
+        {
+            "repo": {"owner": "acme", "name": "widgets"},
+            "pr_number": 7,
+            "head_sha": "b" * 40,
+            "reviewer_event": event,
+        }
+    )
+    surface = ToolSurface()
+
+    await reviewer.reviewer_catalog(config, surface)
+    await surface.prepare()
+
+    assert {"save_app_document", "add_finding", "publish_review"} <= surface.tools.keys()
+    # It can add what its apps' work turns up, but not change the review's findings.
+    changes_findings = {"update_finding", "resolve_finding_thread", "reply_to_finding_thread"}
+    assert changes_findings.isdisjoint(surface.tools) is (event == "preview_ready")
 
 
 @pytest.mark.usefixtures("registry_db")
