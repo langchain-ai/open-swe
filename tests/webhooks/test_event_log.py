@@ -2,7 +2,7 @@ import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import httpx
@@ -486,3 +486,29 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
                 await conn.execute(text("SELECT thread_ts, pr_url FROM slack_pull_request_link"))
             ).one()
         assert tuple(link) == ("1786573300.000000", "https://github.com/acme/widgets/pull/7")
+
+
+async def test_dropped_events_are_not_stored(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset({"slack:message"}))
+    claim = AsyncMock()
+    monkeypatch.setattr(event_log.event_claims, "claim", claim)
+
+    assert await event_log.EventLog.record_once(
+        MagicMock(), b"{}", "slack", event_type="message", delivery_id="d-1"
+    )
+    assert await event_log.EventLog.record(MagicMock(), b"{}", "slack", event_type="message")
+    claim.assert_not_awaited()
+
+
+async def test_dropped_events_match_their_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset({"github:check_run.completed"}))
+
+    assert event_log.EventLog.dropped("github", "check_run", action="completed")
+    assert not event_log.EventLog.dropped("github", "check_run", action="created")
+    assert await event_log.EventLog.record(
+        MagicMock(headers={}), b'{"action": "completed"}', "github", event_type="check_run"
+    )

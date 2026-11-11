@@ -103,6 +103,11 @@ _OUTSIDE_THE_ALLOWLIST: Final = GitHubDeliveryFacts(
 
 def _allowed(delivery: GitHubDelivery, refs: EventRefs) -> bool:
     """Whether the repository allowlist takes the delivery, with a log line when not."""
+    action = delivery.payload.get("action")
+    if EventLog.dropped(
+        "github", delivery.event, delivery.delivery_id, action if isinstance(action, str) else ""
+    ):
+        return False
     # The owner alone, as installation events name it, passes when any of its repositories do.
     named_repo = {"owner": refs.github_owner, "name": refs.github_repository.partition("/")[2]}
     if refs.github_owner and not common.is_repo_allowed(named_repo):

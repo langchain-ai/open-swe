@@ -536,3 +536,11 @@ def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
     monkeypatch.setattr(event_claims, "release", claims.release)
     monkeypatch.setattr(event_claims, "held", claims.is_held)
     return claims
+
+
+@pytest.fixture(autouse=True)
+def _no_dropped_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests see every event; the ones about ``DROPPED_EVENTS`` set it themselves."""
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset())

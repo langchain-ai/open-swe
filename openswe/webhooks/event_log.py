@@ -6,6 +6,7 @@ Sources in ``ADMIN_ONLY_SOURCES`` are listed and subscribable only from admin th
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
@@ -37,6 +38,18 @@ _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 # Longer than any sender keeps retrying one delivery.
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
+
+# ``source:event_type`` pairs, comma-separated, logged and dropped before the event log.
+# Incident mitigation: CI deliveries overwhelm the database, so they are dropped by default.
+DROPPED_EVENTS: frozenset[str] = frozenset(
+    event.strip()
+    for event in os.getenv(
+        "DROPPED_EVENTS",
+        "github:check_run,github:check_suite,github:status,github:workflow_run",
+    ).split(",")
+    if event.strip()
+)
+
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
@@ -273,6 +286,32 @@ class _LinearDelivery(BaseModel):
 
 
 class EventLog:
+    @staticmethod
+    def dropped(source: str, event_type: str, delivery_id: str = "", action: str = "") -> bool:
+        """Whether ``DROPPED_EVENTS`` drops the event, by its type or its type and action,
+        with a log line when it does."""
+        names = {f"{source}:{event_type}"}
+        if action:
+            names.add(f"{source}:{event_type}.{action}")
+        if names.isdisjoint(DROPPED_EVENTS):
+            return False
+        logger.info(
+            "Dropping event of a dropped event type",
+            extra={
+                "webhook_source": source,
+                "webhook_event_type": event_type,
+                "webhook_action": action,
+                "webhook_delivery": delivery_id,
+            },
+        )
+        return True
+
+    @staticmethod
+    def _action(request: Request, body: bytes) -> str:
+        payload = EventLog._decode(request, body)
+        action = payload.get("action") if isinstance(payload, dict) else None
+        return action if isinstance(action, str) else ""
+
     @classmethod
     async def record(
         cls,
@@ -289,8 +328,11 @@ class EventLog:
         """Log, then wake subscribed threads.
 
         Never raises. False means the row was not stored, so a caller that must
-        not drop the delivery can ask the sender to retry.
+        not drop the delivery can ask the sender to retry. A dropped event is not stored
+        and counts as handled.
         """
+        if cls.dropped(source, event_type, delivery_id, cls._action(request, body)):
+            return True
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 
@@ -393,6 +435,8 @@ class EventLog:
         again. A delivery that was not stored gives its claim back, so its next
         try records it. Never raises; False means the row was not stored.
         """
+        if cls.dropped(source, event_type, delivery_id, cls._action(request, body)):
+            return True
         scope = f"{_TABLE}:{source}"
         claimed = False
         try:
