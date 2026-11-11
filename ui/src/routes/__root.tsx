@@ -29,6 +29,7 @@ import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
 import { PageCommandRunner } from "@/features/agents/components/PageCommandRunner"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -110,7 +111,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         )}
         <HeadContent />
       </head>
-      <body>
+      <body onClickCapture={githubUrls.openModifiedLink}>
         {typeof window !== "undefined" &&
           window.openSweDesktop && (
             // Rendered first so later no-drag elements carve out of it; the

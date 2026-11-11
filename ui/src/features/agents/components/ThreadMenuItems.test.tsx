@@ -30,8 +30,9 @@ const clipboardDescriptor = Object.getOwnPropertyDescriptor(
   "clipboard"
 )
 
-afterEach(() => {
+afterEach(async () => {
   cleanup()
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
   if (clipboardDescriptor) {
     Object.defineProperty(navigator, "clipboard", clipboardDescriptor)
   } else {
