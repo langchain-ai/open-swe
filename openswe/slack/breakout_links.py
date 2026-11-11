@@ -12,8 +12,12 @@ from openswe.slack.request import SlackRequest
 from openswe.utils.dashboard_links import dashboard_thread_url
 
 
-def breakout_root_blocks(text: str, dashboard_url: str | None) -> list[Block]:
+def breakout_root_blocks(
+    text: str, dashboard_url: str | None, details: str | None = None
+) -> list[Block]:
     blocks: list[Block] = [section(text)]
+    if details:
+        blocks.append({**section(details), "expand": False})
     footer = format_slack_web_link_footer(dashboard_url)
     if footer:
         blocks.append(context(footer))

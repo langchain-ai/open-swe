@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 import uuid
@@ -24,7 +23,6 @@ from openswe.slack.client import (
     fetch_slack_thread_messages,
     get_active_slack_thread,
     get_slack_permalink,
-    post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SlackRequestError
@@ -54,7 +52,7 @@ from openswe.webhooks.common import (
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
-_VISIBLE_INSTRUCTIONS_MAX_CHARS = 2800
+_VISIBLE_INSTRUCTIONS_MAX_CHARS = 2700
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _CHANNEL_ID_PATTERN = r"^[CGD][A-Z0-9]+$"
 logger = logging.getLogger(__name__)
@@ -75,19 +73,6 @@ def _failure_hint(slack_error: str | None) -> str:
     if slack_error and slack_error.startswith("http_error:"):
         return "Slack posting hit an HTTP error; retry once."
     return "Slack post failed; retry once with concise instructions."
-
-
-def _rate_limit_delay(slack_error: str | None) -> float | None:
-    if slack_error == "rate_limited":
-        return 1
-    prefix = "rate_limited: "
-    if not slack_error or not slack_error.startswith(prefix):
-        return None
-    try:
-        delay = float(slack_error.removeprefix(prefix))
-    except ValueError:
-        return None
-    return delay if 0 <= delay <= 60 else None
 
 
 def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str, Any]:
@@ -409,11 +394,16 @@ async def slack_breakout_thread(
         f"<@{requester}>" if requester else "",
     )
     root_text = " · ".join(part for part in root_parts if part)
+    details = _thread_details(clean_instructions, repo)
     try:
         message_ts = await post_slack_top_level_message_with_ts(
             clean_channel_id,
-            append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),
-            blocks=block_payload(breakout_root_blocks(root_text, dashboard_thread_url(thread_id))),
+            append_slack_web_link_footer(
+                f"{root_text}\n\n{details}", dashboard_thread_url(thread_id)
+            ),
+            blocks=block_payload(
+                breakout_root_blocks(root_text, dashboard_thread_url(thread_id), details)
+            ),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -425,32 +415,6 @@ async def slack_breakout_thread(
             "hint": _failure_hint(exc.code),
         }
 
-    posted = [message_ts]
-    for attempt in range(2):
-        try:
-            details_ts = await post_slack_thread_reply_with_ts(
-                clean_channel_id,
-                message_ts,
-                _thread_details(clean_instructions, repo),
-                agent_thread_id=thread_id,
-                unfurl_links=False,
-                unfurl_media=False,
-            )
-            posted.append(details_ts)
-            break
-        except SlackRequestError as exc:
-            delay = _rate_limit_delay(exc.code)
-            if attempt or delay is None:
-                if not await delete_slack_message(clean_channel_id, message_ts):
-                    return _stranded_breakout(message_ts)
-                return {
-                    "success": False,
-                    "error": exc.code,
-                    "slack_error": exc.code,
-                    "hint": _failure_hint(exc.code),
-                }
-            await asyncio.sleep(delay)
-
     await bind_slack_thread_id(clean_channel_id, message_ts, thread_id)
     if via_mda:
         try:
@@ -461,9 +425,8 @@ async def slack_breakout_thread(
                 extra={"agent_thread_id": thread_id},
                 exc_info=True,
             )
-            for ts in reversed(posted):
-                if not await delete_slack_message(clean_channel_id, ts):
-                    return _stranded_breakout(message_ts)
+            if not await delete_slack_message(clean_channel_id, message_ts):
+                return _stranded_breakout(message_ts)
             await delete_slack_thread_associations(
                 clean_channel_id, message_ts, expected_thread_id=thread_id
             )

@@ -45,6 +45,7 @@ type TextObject = PlainText | Mrkdwn
 class SectionBlock(TypedDict):
     type: Literal["section"]
     text: TextObject
+    expand: NotRequired[bool]
 
 
 class MarkdownBlock(TypedDict):
