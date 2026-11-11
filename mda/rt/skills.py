@@ -103,7 +103,7 @@ class SkillFiles(BackendProtocol):
                 listed = await call(self._backend, SKILLS, asked)
                 files = {skill.path: skill.content for skill in listed.files}
                 if BUNDLED_SKILLS in self._backend.run.catalog.skill_sources:
-                    files.update(_bundled())
+                    files.update(await asyncio.to_thread(_bundled))
                 listing.files = _Listed(
                     {path: create_file_data(content) for path, content in files.items()}
                 )
