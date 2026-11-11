@@ -1679,6 +1679,32 @@ async def test_a_review_installs_sign_in_sessions_only_for_its_own_domains(
     assert any("signs in only to its base and preview" in answer for answer in answers)
 
 
+@pytest.mark.parametrize("empty_window", [False, True])
+async def test_sign_in_uses_the_threads_tab_without_chrome_focus(empty_window: bool) -> None:
+    from rt.browser import ReportedBrowserMiddleware
+
+    page = MagicMock(goto=AsyncMock(), evaluate=AsyncMock())
+    context = MagicMock(
+        active_page=AsyncMock(return_value=None),
+        pages=AsyncMock(return_value=[] if empty_window else [page]),
+        new_page=AsyncMock(return_value=page),
+    )
+    session = MagicMock()
+    session.stagehand.browser.context = context
+    middleware = ReportedBrowserMiddleware(MagicMock(), graph="agent")
+
+    result = await middleware._install(
+        "beta.smith.langchain.com", "sb-test-auth-token", {"access_token": "test-token"}, session
+    )
+
+    assert result == "Session installed."
+    assert page.goto.await_args_list[-1].args == ("https://beta.smith.langchain.com",)
+    script = page.evaluate.await_args.args[0]
+    assert 'location.origin !== "https://beta.smith.langchain.com"' in script
+    assert 'localStorage.setItem("sb-test-auth-token"' in script
+    assert "test-token" in script
+
+
 @pytest.mark.parametrize("cancel", ["none", "task", "masked"])
 async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_terminal(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel: str

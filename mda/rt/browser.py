@@ -123,9 +123,9 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     async def _install(
         self, host: str, key: str, value: dict[str, JsonValue], session: _Session
     ) -> str:
-        page = await session.stagehand.browser.context.active_page()
-        if page is None:
-            raise ValueError("No active browser page")
+        context = session.stagehand.browser.context
+        pages = await context.pages()
+        page = pages[-1] if pages else await context.new_page()
         await page.goto(f"https://{host}")
         await page.evaluate(
             f"(() => {{ if (location.origin !== {json.dumps('https://' + host)}) "
