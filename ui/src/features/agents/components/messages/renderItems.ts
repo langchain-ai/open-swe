@@ -145,38 +145,20 @@ export type WorkTailEntry =
       key: string
       heading: string | null
       body: string
-      lines: number
     }
-  | { kind: "tool"; key: string; chunk: ToolExecutionChunk; lines: 1 }
+  | { kind: "tool"; key: string; chunk: ToolExecutionChunk }
 
-/**
- * The most recent stretch of a live run within a fixed budget of lines, so a
- * folded run shows what it is doing without its full log. A tool call takes
- * one line; a thought takes its heading and up to three lines of its latest
- * paragraph. Calls waiting on approval are left out: the fold shows those in
- * full.
- */
+/** The latest thought and tool call, leaving history inside the work fold. */
 export class WorkTail {
-  static readonly MAX_LINES = 10
-  static readonly THOUGHT_LINES = 3
-  /** A conservative line width for estimating how far a passage wraps. */
-  static readonly CHARS_PER_LINE = 80
-
-  /** Oldest first: the newest entries that fit the budget together. */
   readonly entries: Array<WorkTailEntry>
-  /** The entry just before `entries`, sliding out as the next one comes in. */
-  readonly previous: WorkTailEntry | null
 
   constructor(items: Array<RenderItem>) {
     const all = items.flatMap(WorkTail.entriesOf)
-    let used = 0
-    let first = all.length
-    while (first > 0 && used + all[first - 1]!.lines <= WorkTail.MAX_LINES) {
-      first -= 1
-      used += all[first]!.lines
-    }
-    this.entries = all.slice(first)
-    this.previous = all[first - 1] ?? null
+    const thought = all
+      .slice(-10)
+      .findLast((entry) => entry.kind === "reasoning")
+    const tool = all.findLast((entry) => entry.kind === "tool")
+    this.entries = [...(thought ? [thought] : []), ...(tool ? [tool] : [])]
   }
 
   private static entriesOf(this: void, item: RenderItem): Array<WorkTailEntry> {
@@ -185,17 +167,12 @@ export class WorkTail {
         if (item.chunk.kind !== "reasoning") return []
         const { heading, body } = new Thought(item.chunk.text).passage
         if (!heading && !body) return []
-        const bodyLines = Math.min(
-          WorkTail.THOUGHT_LINES,
-          Math.ceil(body.length / WorkTail.CHARS_PER_LINE)
-        )
         return [
           {
             kind: "reasoning",
             key: item.key,
             heading,
             body,
-            lines: (heading ? 1 : 0) + bodyLines,
           },
         ]
       }
@@ -229,7 +206,6 @@ export class WorkTail {
               kind: "tool" as const,
               key: chunk.toolCallId || `${itemKey}-${index}`,
               chunk,
-              lines: 1 as const,
             },
           ]
     )

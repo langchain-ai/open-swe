@@ -88,7 +88,8 @@ function EditWorkEntry({
   repoPath?: string
 }) {
   const diff = latestDiff(chunk)
-  if (!diff) return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
+  if (!diff || chunk.status === "error")
+    return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, repoPath)}

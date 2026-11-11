@@ -1,8 +1,14 @@
 /** @vitest-environment jsdom */
 
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { WorkTail, buildRenderItems } from "../renderItems"
 import { LiveWorkTail } from "./LiveWorkTail"
@@ -10,34 +16,122 @@ import type { Chunk } from "@/features/agents/lib/types"
 
 afterEach(() => cleanup())
 
-const tools: Array<Chunk> = Array.from({ length: 8 }, (_, index) => ({
-  kind: "tool-execution",
-  toolCallId: `read-${index}`,
-  title: "read_file",
-  toolKind: "read",
-  status: "completed",
-}))
-
-function tailWithThought(text: string): WorkTail {
-  return new WorkTail(buildRenderItems([...tools, { kind: "reasoning", text }]))
-}
-
 describe("LiveWorkTail", () => {
-  it("keeps its full height when a streaming thought starts a shorter paragraph", () => {
-    const longParagraph = "Now I'm reading the queue store. ".repeat(6)
-    const filled = tailWithThought(longParagraph)
-    expect(filled.previous).not.toBeNull()
+  it("shows the latest thought and lets the latest shell output expand on demand", async () => {
+    const loadOutput = vi.fn().mockResolvedValue("Focused tests passed")
+    const chunks: Array<Chunk> = [
+      { kind: "reasoning", text: "An earlier thought" },
+      {
+        kind: "tool-execution",
+        toolCallId: "old",
+        title: "read_file",
+        toolKind: "read",
+        status: "completed",
+      },
+      { kind: "reasoning", text: "Checking the focused tests" },
+      {
+        kind: "tool-execution",
+        toolCallId: "latest",
+        title: "execute",
+        toolKind: "execute",
+        status: "in_progress",
+        input: { command: "uv run pytest tests/human_review" },
+        loadOutput,
+      },
+    ]
+    const { rerender } = render(
+      <LiveWorkTail tail={new WorkTail(buildRenderItems(chunks))} />,
+      { wrapper: TooltipProvider }
+    )
 
-    const { rerender } = render(<LiveWorkTail tail={filled} />, {
-      wrapper: TooltipProvider,
-    })
-    const group = screen.getByRole("group", { name: "Recent activity" })
-    expect(group.style.height).toBe("12.5rem")
+    expect(screen.queryByText("An earlier thought")).toBeNull()
+    expect(screen.getByText("Checking the focused tests")).toBeTruthy()
+    const shell = screen.getByRole("button", { name: /Shell uv run pytest/ })
+    expect(shell.getAttribute("aria-expanded")).toBe("false")
+    expect(loadOutput).not.toHaveBeenCalled()
+    fireEvent.keyDown(shell, { key: "Enter" })
+    await waitFor(() =>
+      expect(screen.getByText("Focused tests passed")).toBeTruthy()
+    )
+    expect(shell.getAttribute("aria-expanded")).toBe("true")
 
-    const shorter = tailWithThought(`${longParagraph}\n\nOne more thing.`)
-    expect(shorter.previous).toBeNull()
-    rerender(<LiveWorkTail tail={shorter} />)
-
-    expect(group.style.height).toBe("12.5rem")
+    rerender(
+      <LiveWorkTail
+        tail={
+          new WorkTail(
+            buildRenderItems([
+              ...chunks,
+              {
+                kind: "tool-execution",
+                toolCallId: "next",
+                title: "execute",
+                toolKind: "execute",
+                status: "in_progress",
+                input: { command: "git diff --check" },
+              },
+            ])
+          )
+        }
+      />
+    )
+    expect(screen.queryByText("Focused tests passed")).toBeNull()
+    expect(
+      screen
+        .getByRole("button", { name: /Shell git diff/ })
+        .getAttribute("aria-expanded")
+    ).toBe("false")
   })
+
+  it.each(["completed", "error"] as const)(
+    "expands %s edits without hiding output or waiting indefinitely",
+    async (status) => {
+      const loadOutput = vi.fn().mockResolvedValue("Full edit output")
+      render(
+        <LiveWorkTail
+          tail={
+            new WorkTail(
+              buildRenderItems([
+                {
+                  kind: "tool-execution",
+                  toolCallId: "edit",
+                  title: "edit_file",
+                  toolKind: "edit",
+                  status,
+                  output: "Edit output preview",
+                  loadOutput,
+                  diffData: {
+                    filePath: "greet.ts",
+                    originalContent: "hello",
+                    newContent: "goodbye",
+                    isNewFile: false,
+                    isBinary: false,
+                    isTruncated: false,
+                    totalLines: 1,
+                  },
+                },
+              ])
+            )
+          }
+        />,
+        { wrapper: TooltipProvider }
+      )
+
+      const edit = screen.getByRole("button")
+      expect(edit.getAttribute("aria-expanded")).toBe("false")
+      fireEvent.click(edit)
+      expect(edit.getAttribute("aria-expanded")).toBe("true")
+      await waitFor(() =>
+        expect(loadOutput).toHaveBeenCalledTimes(status === "error" ? 1 : 0)
+      )
+      expect(screen.queryAllByText("greet.ts").length).toBe(
+        status === "error" ? 0 : 2
+      )
+      await waitFor(() =>
+        expect(screen.queryByText(/Loading.*output/)).toBeNull()
+      )
+      expect(Boolean(screen.queryByText("Full edit output"))).toBe(
+        status === "error"
+      )
+    }
+  )
 })

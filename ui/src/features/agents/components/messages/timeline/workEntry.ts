@@ -183,15 +183,13 @@ export function describeWorkEntry(
   repoPath?: string
 ): WorkEntryView {
   const diff = latestDiff(chunk)
-  if (diff) {
+  if (diff && chunk.status !== "error") {
     const heading =
-      chunk.status === "error"
-        ? "Failed to edit"
-        : chunk.status === "completed"
-          ? diff.isNewFile
-            ? "Created"
-            : "Edited"
-          : "Editing"
+      chunk.status === "completed"
+        ? diff.isNewFile
+          ? "Created"
+          : "Edited"
+        : "Editing"
     const pathDisplay = formatPathDisplayParts(heading, diff.filePath)
     return {
       icon: "square-pen",
