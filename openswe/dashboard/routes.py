@@ -40,6 +40,7 @@ from openswe.trace_flight.routes import router as trace_flight_router
 from openswe.transcript.routes import router as transcript_router
 from openswe.ui_invalidations.routes import router as ui_invalidations_router
 from openswe.users.routes import router as users_router
+from openswe.webhooks.routes import router as event_log_router
 from openswe.workspaces.routes import router as workspaces_router
 
 router = APIRouter(
@@ -71,6 +72,7 @@ router.include_router(agent_instructions_router)
 router.include_router(skills_router)
 router.include_router(analytics_router)
 router.include_router(audit_logs_router)
+router.include_router(event_log_router)
 router.include_router(schedules_router)
 router.include_router(projects_router)
 router.include_router(threads_router)

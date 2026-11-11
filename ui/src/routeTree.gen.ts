@@ -24,6 +24,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin_.audit-logs'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
+import { Route as AdminEventLogRouteImport } from './routes/admin_.event-log'
 import { Route as AdminIncidentsRouteImport } from './routes/admin_.incidents'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin_.integrations'
 import { Route as AdminOperationsRouteImport } from './routes/admin_.operations'
@@ -132,6 +133,11 @@ const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
 const AdminEvalsRoute = AdminEvalsRouteImport.update({
   id: '/admin_/evals',
   path: '/admin/evals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminEventLogRoute = AdminEventLogRouteImport.update({
+  id: '/admin_/event-log',
+  path: '/admin/event-log',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIncidentsRoute = AdminIncidentsRouteImport.update({
@@ -323,6 +329,7 @@ export interface FileRoutesByFullPath {
   '/workspaces': typeof WorkspacesRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
+  '/admin/event-log': typeof AdminEventLogRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/operations': typeof AdminOperationsRoute
@@ -371,6 +378,7 @@ export interface FileRoutesByTo {
   '/workspaces': typeof WorkspacesRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
+  '/admin/event-log': typeof AdminEventLogRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/operations': typeof AdminOperationsRoute
@@ -423,6 +431,7 @@ export interface FileRoutesById {
   '/workspaces': typeof WorkspacesRoute
   '/admin_/audit-logs': typeof AdminAuditLogsRoute
   '/admin_/evals': typeof AdminEvalsRoute
+  '/admin_/event-log': typeof AdminEventLogRoute
   '/admin_/incidents': typeof AdminIncidentsRoute
   '/admin_/integrations': typeof AdminIntegrationsRoute
   '/admin_/operations': typeof AdminOperationsRoute
@@ -476,6 +485,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/audit-logs'
     | '/admin/evals'
+    | '/admin/event-log'
     | '/admin/incidents'
     | '/admin/integrations'
     | '/admin/operations'
@@ -524,6 +534,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/audit-logs'
     | '/admin/evals'
+    | '/admin/event-log'
     | '/admin/incidents'
     | '/admin/integrations'
     | '/admin/operations'
@@ -575,6 +586,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin_/audit-logs'
     | '/admin_/evals'
+    | '/admin_/event-log'
     | '/admin_/incidents'
     | '/admin_/integrations'
     | '/admin_/operations'
@@ -627,6 +639,7 @@ export interface RootRouteChildren {
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
+  AdminEventLogRoute: typeof AdminEventLogRoute
   AdminIncidentsRoute: typeof AdminIncidentsRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminOperationsRoute: typeof AdminOperationsRoute
@@ -752,6 +765,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/evals'
       fullPath: '/admin/evals'
       preLoaderRoute: typeof AdminEvalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin_/event-log': {
+      id: '/admin_/event-log'
+      path: '/admin/event-log'
+      fullPath: '/admin/event-log'
+      preLoaderRoute: typeof AdminEventLogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin_/incidents': {
@@ -1072,6 +1092,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesRoute: WorkspacesRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminEvalsRoute: AdminEvalsRoute,
+  AdminEventLogRoute: AdminEventLogRoute,
   AdminIncidentsRoute: AdminIncidentsRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminOperationsRoute: AdminOperationsRoute,

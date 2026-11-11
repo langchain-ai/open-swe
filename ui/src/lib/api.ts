@@ -87,6 +87,49 @@ export interface ExpeditedExclusions {
   }[]
 }
 
+export interface EventLogFilters {
+  start_time: string
+  end_time: string
+  source?: string
+  event_type?: string
+  event_type_prefix?: string
+  delivery_id?: string
+  user_id?: string
+  workspace_id?: string
+  repository_id?: string
+  pull_request_id?: string
+}
+
+export interface LoggedEvent {
+  source: string
+  event_type: string
+  delivery_id: string
+  received_at: string
+  user_id: string | null
+  workspace_id: string | null
+  repository_id: string | null
+  pull_request_id: string | null
+  payload: unknown
+  visibility: "public" | "private" | "admin"
+  visible_to_user_id: string | null
+  user_name: string | null
+  workspace_name: string | null
+  repository_name: string | null
+  pull_request_name: string | null
+  pull_request_title: string | null
+}
+
+export interface EventLogUser {
+  id: string
+  display_name: string
+  logins: string
+}
+
+export interface EventLogPage {
+  items: LoggedEvent[]
+  cursor: string | null
+}
+
 export interface AuditLogsPage {
   items: AuditLog[]
   cursor: string | null
@@ -1903,6 +1946,15 @@ export const api = {
     if (cursor) params.set("cursor", cursor)
     return request<AuditLogsPage>(`/audit-logs?${params}`)
   },
+  searchEventLog: (filters: EventLogFilters, cursor?: string) => {
+    const params = new URLSearchParams({ ...filters, limit: "50" })
+    if (cursor) params.set("cursor", cursor)
+    return request<EventLogPage>(`/admin/event-log?${params}`)
+  },
+  searchEventLogUsers: (q: string) =>
+    request<EventLogUser[]>(
+      `/admin/event-log/users?q=${encodeURIComponent(q)}`
+    ),
   adminListUsers: (page = 1, pageSize = 20, search = "") =>
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
