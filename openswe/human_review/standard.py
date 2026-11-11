@@ -80,7 +80,7 @@ from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
-from openswe.slack.channels import SlackChannel
+from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     get_slack_user_info,
@@ -161,6 +161,7 @@ class RequestResult(BaseModel):
     claimed: bool = False
     auto_merge: bool = True
     supplementary_refusal: str = ""
+    retry_after_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,9 +259,22 @@ async def target_channel(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
             "`.open-swe/settings.json`, or name a Slack channel."
         )
-    channel = await SlackChannel.resolve(configured)
+    try:
+        channel = await SlackChannel.resolve(configured, raise_unavailable=True)
+    except ChannelLookupUnavailable as exc:
+        return RequestResult(
+            success=False,
+            error=(
+                "Slack channel verification is temporarily unavailable. "
+                f"Try requesting the review again in {exc.retry_after} seconds."
+            ),
+            retry_after_seconds=exc.retry_after,
+        )
     if channel is None:
-        return _failure(f"Slack channel {configured.strip()!r} was not found.")
+        return _failure(
+            f"Could not find or access the Slack review channel {configured.strip()!r}. "
+            "Check the configured channel and make sure Robin has access."
+        )
     return channel
 
 

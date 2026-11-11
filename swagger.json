@@ -7484,6 +7484,17 @@
             "title": "Requested Channel",
             "type": "string"
           },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
+          },
           "reused": {
             "default": false,
             "title": "Reused",

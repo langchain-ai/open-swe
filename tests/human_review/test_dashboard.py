@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
@@ -12,15 +13,58 @@ from openswe.github.http import GitHubClient, RepoFileUnreadableError
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
+from openswe.human_review import routes
 from openswe.human_review.dashboard import DashboardReviewRequest
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult
-from openswe.slack.channels import SlackChannel
+from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.users.models import UserIdentity
+
+
+@pytest.mark.parametrize("expedited", [True, False])
+@pytest.mark.parametrize("unavailable", [True, False])
+async def test_review_channel_lookup_failure_is_actionable(
+    monkeypatch: pytest.MonkeyPatch, expedited: bool, unavailable: bool
+) -> None:
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User()))
+    monkeypatch.setattr(routes, "require_repo_access_for_user", AsyncMock(return_value="token"))
+    monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.human_review.dashboard.get_workspace_settings",
+        AsyncMock(return_value=WorkspaceSettings({"expedited_review_enabled": expedited})),
+    )
+    monkeypatch.setattr(
+        "openswe.human_review.dashboard.review_blockers", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr("openswe.human_review.standard.review_blockers", AsyncMock(return_value=[]))
+    monkeypatch.setattr("openswe.human_review.standard.EventLog.append", AsyncMock())
+    monkeypatch.setattr(
+        SlackChannel,
+        "resolve",
+        AsyncMock(side_effect=ChannelLookupUnavailable(30))
+        if unavailable
+        else AsyncMock(return_value=None),
+    )
+    with (
+        patch.object(GitHubClient, "as_app", return_value=GitHubClient.connect(token="token")),
+        pytest.raises(HTTPException) as raised,
+    ):
+        await routes.api_request_human_review(
+            "lc", "repo", 7, routes.HumanReviewRequestBody(channel="reviews"), {"sub": "alice"}
+        )
+
+    assert raised.value.status_code == (503 if unavailable else 409)
+    if unavailable:
+        assert raised.value.headers == {"Retry-After": "30"}
+        assert "30 seconds" in raised.value.detail
+        assert "not found" not in raised.value.detail
+    else:
+        assert "'reviews'" in raised.value.detail
+        assert "make sure Robin has access" in raised.value.detail
 
 
 @pytest.mark.parametrize(

@@ -331,7 +331,7 @@ class SlackChannel(Base):
         return channel.context if channel is not None else SlackChannelContext(id=channel_id)
 
     @classmethod
-    async def _search(cls, name: str) -> Self | None:
+    async def _search(cls, name: str, *, raise_unavailable: bool = False) -> Self | None:
         """Page ``conversations.list`` for ``name``, saving every channel it walks past."""
         try:
             async with SlackClient.bot() as client:
@@ -350,10 +350,12 @@ class SlackChannel(Base):
             return None
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning("Slack channel list failed", extra={"slack_error": slack_error(exc)})
+            if raise_unavailable and (unavailable := ChannelLookupUnavailable.from_error(exc)):
+                raise unavailable from None
             return None
 
     @classmethod
-    async def resolve(cls, reference: str) -> Self | None:
+    async def resolve(cls, reference: str, *, raise_unavailable: bool = False) -> Self | None:
         """The channel for an id, a ``<#C…|name>`` mention, ``#name`` or ``name``."""
         value = reference.strip()
         if mention := _MENTION.fullmatch(value):
@@ -362,14 +364,18 @@ class SlackChannel(Base):
         if not value:
             return None
         if _ID_SHAPE.fullmatch(value):
-            return await cls.load(value)
+            return await cls.load(value, raise_unavailable=raise_unavailable)
         name = value.lower()
         if (known := await cls._row_named(name)) is not None:
             # A stale row may predate a rename, so confirm it before trusting the name.
-            current = known if known.fresh else await cls.load(known.id, use_cache=False)
+            current = (
+                known
+                if known.fresh
+                else await cls.load(known.id, use_cache=False, raise_unavailable=raise_unavailable)
+            )
             if current is not None and current.details.name.lower() == name:
                 return current
-        return await cls._search(name)
+        return await cls._search(name, raise_unavailable=raise_unavailable)
 
     async def join(self) -> bool:
         """Join this channel; a private one needs an invite instead."""
