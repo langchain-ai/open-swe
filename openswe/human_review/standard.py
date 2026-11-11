@@ -816,6 +816,11 @@ async def assign(
     if user is None:
         return _failure(f"@{github_login} is not a Robin user; pick someone who is.")
     if not replace:
+        if user.id not in await request.recent_channel_posters():
+            return _failure(
+                f"@{github_login} has not recently posted in this review request's Slack channel. "
+                "Only pick recent posters from that channel; if none qualify, leave it unassigned."
+            )
         if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
             return _failure(
                 f"@{github_login} opted out of automatic review picks; pick someone else."

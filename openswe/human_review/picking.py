@@ -395,6 +395,7 @@ async def _choose_reviewer(
     author = (pr.author or "").lower()
     logins = sorted(candidates.logins - {author})
     users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
+    posters = await request.recent_channel_posters()
     taken = {p.user_id for p in request.participants if p.decision != "expired"}
     missed = {p.user_id for p in request.participants if p.decision == "expired"}
     people: dict[str, User] = {}
@@ -402,6 +403,8 @@ async def _choose_reviewer(
     for login, user in zip(logins, users, strict=True):
         if user is None:
             skipped[login] = "no_open_swe_account"
+        elif user.id not in posters:
+            skipped[login] = "not_recent_channel_poster"
         elif _is_bot(login):
             skipped[login] = "bot"
         elif not await PROFILES.allows_auto_human_review(user.github_login or login):

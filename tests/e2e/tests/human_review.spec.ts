@@ -667,6 +667,13 @@ test.describe("Human review in Slack", () => {
     test.setTimeout(240_000);
     await setReviewChannel(request);
 
+    await control(request, "/mock/slack/send", {
+      channel: REVIEW_CHANNEL,
+      user: BOB.slack,
+      mention_bot: false,
+      text: "I work on the greeting code.",
+    });
+
     // Bob keeps his bot DM as one concierge conversation, which already exists.
     await control(request, "/control/user-preferences", {
       login: BOB.login,
@@ -828,6 +835,12 @@ test.describe("Human review in Slack", () => {
   }) => {
     test.setTimeout(120_000);
     await setReviewChannel(request);
+    await control(request, "/mock/slack/send", {
+      channel: REVIEW_CHANNEL,
+      user: BOB.slack,
+      mention_bot: false,
+      text: "I work on the greeting code.",
+    });
     // Alice owns everything but wrote the PR; Bob owns the directory it changes.
     await control(request, "/control/repo-file", {
       repo: `${REPO.owner}/${REPO.repo}`,
@@ -922,6 +935,14 @@ test.describe("Human review in Slack", () => {
   }) => {
     test.setTimeout(180_000);
     await setReviewChannel(request);
+    for (const person of [BOB, DANA]) {
+      await control(request, "/mock/slack/send", {
+        channel: REVIEW_CHANNEL,
+        user: person.slack,
+        mention_bot: false,
+        text: "I work on the greeting code.",
+      });
+    }
     await control(request, "/control/collaborator-permission", {
       login: DANA.login,
       permission: "write",

@@ -224,6 +224,9 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
         pull_request_id=pr.id, head_sha="abc", kind="standard", thread_id="picker"
     )
     request.pull_request = pr
+    monkeypatch.setattr(
+        HumanReviewRequest, "recent_channel_posters", AsyncMock(return_value={reviewer.id})
+    )
     user_records.seed("profile", "grace", {"auto_human_review_enabled": False})
     config: dict[str, object] = {
         "thread_id": "picker",
@@ -289,16 +292,17 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
 
 
 @pytest.mark.parametrize(
-    ("local_time", "out_of_office", "named", "allowed"),
+    ("local_time", "out_of_office", "named", "recent_poster", "allowed"),
     [
-        ("2026-10-22T03:00:00", False, False, False),
-        ("2026-10-22T09:00:00", False, False, True),
-        ("2026-10-22T12:00:00", True, False, False),
-        ("2026-10-22T03:00:00", False, True, True),
+        ("2026-10-22T03:00:00", False, False, True, False),
+        ("2026-10-22T09:00:00", False, False, True, True),
+        ("2026-10-22T12:00:00", True, False, True, False),
+        ("2026-10-22T03:00:00", False, True, False, True),
+        ("2026-10-22T09:00:00", False, False, False, False),
     ],
 )
 async def test_assignment_enforces_availability_before_contacting_reviewer(
-    local_time: str, out_of_office: bool, named: bool, allowed: bool
+    local_time: str, out_of_office: bool, named: bool, recent_poster: bool, allowed: bool
 ) -> None:
     from openswe.human_review import standard
     from openswe.human_review.people import Participant
@@ -321,6 +325,11 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         yield None, request
 
     with (
+        patch.object(
+            HumanReviewRequest,
+            "recent_channel_posters",
+            AsyncMock(return_value={user.id} if recent_poster else set()),
+        ),
         patch.object(standard, "datetime", wraps=datetime) as clock,
         patch.object(standard, "_github_approvers", AsyncMock(return_value=[])),
         patch.object(Coverage, "load", AsyncMock(return_value=None)),
@@ -352,7 +361,14 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         github_review.assert_awaited_once()
         dm.assert_awaited_once()
     else:
-        assert ("out of office" if out_of_office else "outside working hours") in result.error
+        expected = (
+            "has not recently posted"
+            if not recent_poster
+            else "out of office"
+            if out_of_office
+            else "outside working hours"
+        )
+        assert expected in result.error
         github_review.assert_not_awaited()
         dm.assert_not_awaited()
         schedule.assert_not_awaited()

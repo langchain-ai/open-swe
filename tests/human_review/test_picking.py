@@ -101,6 +101,7 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
     ("profile", "classification", "skip_reason"),
     [
         (None, None, "opted_out"),
+        (None, None, "not_recent_channel_poster"),
         ({"display_name": "Ada (oOo)"}, None, "out_of_office"),
         ({"display_name": "Ada", "real_name": "Ada Smith (OOO)"}, None, "out_of_office"),
         (
@@ -139,6 +140,15 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         ]
     )
     grace = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
+    monkeypatch.setattr(
+        HumanReviewRequest,
+        "recent_channel_posters",
+        AsyncMock(
+            return_value={grace.id}
+            if skip_reason == "not_recent_channel_poster"
+            else {ada.id, grace.id}
+        ),
+    )
     if skip_reason == "opted_out":
         user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
     monkeypatch.setattr(
@@ -171,6 +181,51 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         record for record in caplog.records if record.message == "Filtered reviewer candidates"
     )
     assert filtered.skipped == ({"ada": skip_reason} if skip_reason else {})
+
+
+@pytest.mark.parametrize("readable", [True, False])
+async def test_recent_channel_posters_include_replies_but_not_stale_posts_or_bots(
+    readable: bool,
+) -> None:
+    from datetime import timedelta
+
+    from openswe.slack.channels import SlackChannel
+    from openswe.slack.payloads import SlackMessage
+
+    now = datetime.now(UTC)
+    fresh = str(now.timestamp())
+    stale = str((now - timedelta(days=31)).timestamp())
+    ada = User(identities=[UserIdentity(provider="slack", external_id="U_ADA")])
+    grace = User(identities=[UserIdentity(provider="slack", external_id="U_GRACE")])
+    channel = MagicMock(spec=SlackChannel)
+    channel.id = "C_REVIEW"
+    channel.messages = AsyncMock(
+        return_value=[
+            SlackMessage(ts=fresh, user="U_ADA"),
+            SlackMessage(ts=stale, user="U_STALE", reply_count=1),
+            SlackMessage(ts=fresh, user="U_BOT", bot_id="B1"),
+        ]
+        if readable
+        else []
+    )
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", slack_channel_id=channel.id
+    )
+    users = {"U_ADA": ada, "U_GRACE": grace}
+    with (
+        patch.object(SlackChannel, "load", AsyncMock(return_value=channel)),
+        patch(
+            "openswe.human_review.requests.fetch_slack_thread_messages",
+            AsyncMock(return_value=[{"ts": fresh, "user": "U_GRACE"}]),
+        ),
+        patch.object(
+            User,
+            "for_identities",
+            AsyncMock(side_effect=lambda _, ids: {key: users[key] for key in ids}),
+        ),
+    ):
+        assert await request.recent_channel_posters() == ({ada.id, grace.id} if readable else set())
 
 
 async def test_remaining_owner_suggestions_share_one_github_history_read() -> None:
