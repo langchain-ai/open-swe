@@ -139,9 +139,12 @@ export function OwnershipPicker({
   const inThis = draft
     .map((id) => rows.get(id))
     .filter((item): item is PickerItem => !!item)
-  const rest = [...rows.values()].filter(
-    (item) => !draftSet.has(item.id) && matchesItem(item, search)
-  )
+  const relevance = new FuzzySearch(search)
+  const rest = [...rows.values()]
+    .filter((item) => !draftSet.has(item.id) && matchesItem(item, search))
+    .map((item) => ({ item, score: relevance.score(item.label, item.id) }))
+    .sort((left, right) => right.score - left.score)
+    .map(({ item }) => item)
   const available = rest.filter(
     (item) => !ownedElsewhere(item) && passesFilter(item)
   )

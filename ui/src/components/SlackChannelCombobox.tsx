@@ -14,7 +14,6 @@ import {
   normalizeSlackChannelId,
   rankSlackChannels,
   rememberSlackChannels,
-  slackChannelMatches,
   useRecentSlackChannels,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
@@ -126,9 +125,11 @@ function useChannelItems(
     return channel ? `#${channel.name}` : id
   }
   const filter = (ids: Array<string>, text: string) =>
-    ids.filter((id) =>
-      slackChannelMatches(byId.get(id) ?? { id, name: id }, text)
-    )
+    rankSlackChannels(
+      ids.map((id) => byId.get(id) ?? { id, name: id }),
+      text,
+      recentIds
+    ).map((channel) => channel.id)
   return {
     items,
     byId,
