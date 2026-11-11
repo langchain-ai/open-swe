@@ -36,6 +36,7 @@ from openswe.skill_store.routes import router as skills_router
 from openswe.slack.dashboard_routes import router as slack_router
 from openswe.tasks.routes import router as tasks_router
 from openswe.threads.routes import router as threads_router
+from openswe.trace_flight.routes import router as trace_flight_router
 from openswe.transcript.routes import router as transcript_router
 from openswe.ui_invalidations.routes import router as ui_invalidations_router
 from openswe.users.routes import router as users_router
@@ -81,6 +82,7 @@ router.include_router(claude_code_router)
 router.include_router(ui_invalidations_router)
 router.include_router(plugins_router)
 router.include_router(page_commands_router)
+router.include_router(trace_flight_router)
 router.include_router(merge_queue_router)
 
 router.include_router(notifications_router)

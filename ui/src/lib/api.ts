@@ -2190,6 +2190,53 @@ export const api = {
       body: JSON.stringify(body),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  traceFlightSeason: (signal?: AbortSignal) =>
+    request<TraceFlightSeason>("/trace-flight/season", { signal }),
+  traceFlightBest: () => request<TraceFlightBest | null>("/trace-flight/best"),
+  submitTraceFlightRun: (body: TraceFlightSubmission) =>
+    request<TraceFlightResult>("/trace-flight/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+}
+
+/** The open Trace Flight season: the rules and the course every run is played on. */
+export interface TraceFlightSeason {
+  seasonId: string
+  rulesVersion: number
+  seed: number
+}
+
+/** Your best run this season, as inputs the game replays into your trace. */
+export interface TraceFlightBest {
+  seed: number
+  endTick: number
+  endReason: string
+  flapDeltas: Array<number>
+  score: number
+}
+
+export interface TraceFlightRow {
+  rank: number
+  name: string
+  score: number
+  you: boolean
+}
+
+export interface TraceFlightSubmission {
+  seasonId: string
+  rulesVersion: number
+  endTick: number
+  endReason: string
+  flapDeltas: ReadonlyArray<number>
+}
+
+/** The score is the server's replay of the run, never one the client sent. */
+export interface TraceFlightResult {
+  score: number
+  previousBest: number | null
+  newBest: boolean
+  board: Array<TraceFlightRow>
 }
 
 export function loginUrl(redirectTo?: string): string {

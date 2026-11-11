@@ -76,6 +76,14 @@ type ProductEvents = {
     mode: "new_turn" | "queue" | "steer"
     has_attachments: boolean
   }
+  /** The hidden game on the new chat page; no per-flap events. */
+  trace_flight_opened: Record<string, never>
+  trace_flight_run_finished: {
+    score: number
+    level: number
+    end_reason: "death" | "quit" | "cap"
+  }
+  trace_flight_submit_rejected: { reason: string }
 }
 
 type SegmentClient = Pick<
@@ -255,6 +263,9 @@ export class ProductAnalytics {
         "agents_action_started",
         "agents_action_completed",
         "agents_feature_opened",
+        "trace_flight_opened",
+        "trace_flight_run_finished",
+        "trace_flight_submit_rejected",
       ].includes(name)
     )
       return

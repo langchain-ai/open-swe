@@ -1,0 +1,4 @@
+/* The lab's Vite root is this folder, so Tailwind's automatic scan stops here;
+   the game view and the rest of the feature live one level up. */
+@import "../../../../styles.css";
+@source "../..";

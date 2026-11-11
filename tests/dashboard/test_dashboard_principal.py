@@ -50,6 +50,22 @@ def test_session_identity_rejects_invalid_principals(session):
     assert exc.value.status_code == 401
 
 
+def test_a_langsmith_only_session_can_play_trace_flight_but_not_reach_github_features():
+    user_id = "00000000-0000-0000-0000-000000000001"
+    principal = DashboardPrincipal.from_session(
+        {
+            "provider": "langsmith",
+            "sub": f"user:{user_id}",
+            "user_id": user_id,
+            "langsmith_subject": "ls-1",
+        }
+    )
+    principal.authorize_path("/dashboard/api/trace-flight/runs", "POST")
+    with pytest.raises(HTTPException) as exc:
+        principal.authorize_path("/dashboard/api/workspaces", "POST")
+    assert exc.value.status_code == 403
+
+
 def test_github_thread_identity_preserves_attribution(monkeypatch):
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     principal = Principal.of_person({"provider": "github", "sub": " Alice "})

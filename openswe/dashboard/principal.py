@@ -75,6 +75,7 @@ class DashboardPrincipal:
             "slack/login",
             "slack/callback",
             "slack/desktop/exchange",
+            "trace-flight",
         )
         if any(relative == group or relative.startswith(group + "/") for group in personal):
             return

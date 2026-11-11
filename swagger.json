@@ -1164,6 +1164,42 @@
         "title": "BatchView",
         "type": "object"
       },
+      "BestView": {
+        "properties": {
+          "endReason": {
+            "title": "Endreason",
+            "type": "string"
+          },
+          "endTick": {
+            "title": "Endtick",
+            "type": "integer"
+          },
+          "flapDeltas": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Flapdeltas",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seed",
+          "endTick",
+          "endReason",
+          "flapDeltas",
+          "score"
+        ],
+        "title": "BestView",
+        "type": "object"
+      },
       "BlockSuggestionResponse": {
         "properties": {
           "options": {
@@ -3667,6 +3703,34 @@
           "selected"
         ],
         "title": "LabelChange",
+        "type": "object"
+      },
+      "LeaderRowView": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "you": {
+            "title": "You",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rank",
+          "name",
+          "score",
+          "you"
+        ],
+        "title": "LeaderRowView",
         "type": "object"
       },
       "LineComment": {
@@ -8943,6 +9007,44 @@
         "title": "RoomUpdateBody",
         "type": "object"
       },
+      "RunResultView": {
+        "properties": {
+          "board": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRowView"
+            },
+            "title": "Board",
+            "type": "array"
+          },
+          "newBest": {
+            "title": "Newbest",
+            "type": "boolean"
+          },
+          "previousBest": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousbest"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "score",
+          "previousBest",
+          "newBest",
+          "board"
+        ],
+        "title": "RunResultView",
+        "type": "object"
+      },
       "ScheduleCreateBody": {
         "properties": {
           "admin_thread": {
@@ -9177,6 +9279,30 @@
           }
         },
         "title": "ScheduleUpdateBody",
+        "type": "object"
+      },
+      "SeasonView": {
+        "properties": {
+          "rulesVersion": {
+            "title": "Rulesversion",
+            "type": "integer"
+          },
+          "seasonId": {
+            "format": "uuid",
+            "title": "Seasonid",
+            "type": "string"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seasonId",
+          "rulesVersion",
+          "seed"
+        ],
+        "title": "SeasonView",
         "type": "object"
       },
       "SessionCreateBody": {
@@ -28237,6 +28363,126 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/best": {
+      "get": {
+        "operationId": "api_best_dashboard_api_trace_flight_best_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BestView"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Best Dashboard Api Trace Flight Best Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Best",
+        "tags": [
+          "dashboard",
+          "trace-flight"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/leaderboard": {
+      "get": {
+        "operationId": "api_leaderboard_dashboard_api_trace_flight_leaderboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderRowView"
+                  },
+                  "title": "Response Api Leaderboard Dashboard Api Trace Flight Leaderboard Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Leaderboard",
+        "tags": [
+          "dashboard",
+          "trace-flight"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/runs": {
+      "post": {
+        "operationId": "api_submit_run_dashboard_api_trace_flight_runs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResultView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Submit Run",
+        "tags": [
+          "dashboard",
+          "trace-flight"
+        ]
+      }
+    },
+    "/dashboard/api/trace-flight/season": {
+      "get": {
+        "operationId": "api_season_dashboard_api_trace_flight_season_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeasonView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Season",
+        "tags": [
+          "dashboard",
+          "trace-flight"
         ]
       }
     },

@@ -173,6 +173,17 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
+    async def for_ids(cls, user_ids: Collection[UUID]) -> dict[UUID, Self]:
+        """The people with these ids, identities loaded; ids with no row are left out."""
+        if not user_ids:
+            return {}
+        async with postgres.session() as session:
+            users = await session.scalars(
+                cls._with_identities(select(cls)).where(cls.id.in_(user_ids))
+            )
+            return {user.id: user for user in users}
+
+    @classmethod
     async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
         """The person a dashboard session belongs to.
 
