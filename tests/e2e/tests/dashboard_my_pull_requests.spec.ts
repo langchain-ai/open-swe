@@ -343,7 +343,7 @@ test.describe("my pull requests", () => {
     await expectStatus(card(page, ok), "Approved");
 
     const fixButtons = (pr: SeededPullRequest) =>
-      card(page, pr).getByRole("button", { name: "Fix", exact: true });
+      card(page, pr).getByRole("button", { name: "Fix up", exact: true });
     const fix = fixButtons(broken);
     await expect(fix).toBeEnabled();
     await expect(fixButtons(broken)).toHaveCount(1);
@@ -364,7 +364,7 @@ test.describe("my pull requests", () => {
     const response = await dispatched;
     expect(response.status(), await response.text()).toBe(200);
     await expect(
-      page.getByText(`Fix queued for ${COMPANION}#${broken.number}`),
+      page.getByText(`Fix up queued for ${COMPANION}#${broken.number}`),
     ).toBeVisible();
   });
 

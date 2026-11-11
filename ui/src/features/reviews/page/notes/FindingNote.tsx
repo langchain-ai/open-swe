@@ -11,12 +11,10 @@ import { Button } from "@langchain/macaw-components/Button"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
-  askAboutFinding,
   findingGroupColor,
   findingGroupLabel,
   findingGroupTextColor,
   findingLocation,
-  fixFinding,
 } from "@/features/reviews/page/findings"
 import { InlineCode } from "@/features/reviews/page/inlineCode"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
@@ -48,7 +46,6 @@ export function FindingNote({
 }) {
   const expandedFinding = useReviewPage((state) => state.expandedFinding)
   const setExpandedFinding = useReviewPage((state) => state.setExpandedFinding)
-  const askInChat = useReviewPage((state) => state.askInChat)
   const open = expandedFinding === finding.id
   const settled = finding.status !== "open"
   const color = findingGroupColor[finding.group]
@@ -125,24 +122,6 @@ export function FindingNote({
             )}
             {thread && <FindingReplies pr={pr} thread={thread} />}
             <div className="mt-space-2 flex flex-wrap items-center gap-space-1">
-              <Button
-                size="sm"
-                color="secondary"
-                variant="outlined"
-                onClick={() => askInChat(askAboutFinding(finding))}
-              >
-                Ask Robin
-              </Button>
-              {!settled && (
-                <Button
-                  size="sm"
-                  color="secondary"
-                  variant="plain"
-                  onClick={() => askInChat(fixFinding(finding))}
-                >
-                  Fix it
-                </Button>
-              )}
               <Button
                 size="sm"
                 color="secondary"

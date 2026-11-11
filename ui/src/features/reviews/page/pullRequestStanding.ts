@@ -6,7 +6,6 @@ import {
   hasFailingChecks,
   isConflicted,
 } from "@/features/reviews/lib/status"
-import type { PullRequestThreadActionName } from "@/features/reviews/lib/threadActions"
 import { openFindingCounts } from "./findings"
 import { plural } from "./text"
 
@@ -23,7 +22,7 @@ export type NextStep =
   | { kind: "mark-ready" }
   | { kind: "request-review" }
   | { kind: "update-branch" }
-  | { kind: "agent"; action: PullRequestThreadActionName }
+  | { kind: "agent" }
 
 /** A supporting fact, and what clicking it opens. */
 export interface StandingDetail {
@@ -110,24 +109,21 @@ export function pullRequestStanding(
       tone: "blocked",
       headline: `Conflicts with ${detail.pr.base_ref}.`,
       details,
-      next: { kind: "agent", action: "fix" },
+      next: { kind: "agent" },
     }
   if (hasFailingChecks(status))
     return {
       tone: "blocked",
       headline: `${plural(status.failingChecks.length || 1, "check")} failing.`,
       details,
-      next: { kind: "agent", action: "fix" },
+      next: { kind: "agent" },
     }
   if (status.reviewDecision === "changes_requested")
     return {
       tone: "blocked",
       headline: "Changes requested.",
       details,
-      next:
-        isAuthor && conversations.current > 0
-          ? { kind: "agent", action: "address-comments" }
-          : null,
+      next: isAuthor && conversations.current > 0 ? { kind: "agent" } : null,
     }
   if (status.missingChecks.length)
     return {

@@ -45,18 +45,15 @@ import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestA
 import {
   canAttemptMerge,
   canUpdateBranch,
-  hasUnresolvedConversations,
   isConflicted,
 } from "@/features/reviews/lib/status"
 import { AgentMark } from "./AgentMark"
 import {
-  askAboutFinding,
   findingGroupColor,
   findingGroupLabel,
   findingLocation,
   findingGroupTextColor,
   findingTarget,
-  fixFinding,
   isAnchored,
   openFindingCounts,
   rankFindings,
@@ -197,12 +194,15 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             )}
           </div>
         </div>
+        {open && status && (
+          <PullRequestThreadAction pr={status} login={login} />
+        )}
       </div>
       {open && status && (
         <div className="divide-y border-t border-default">
-          <ChecksRow pr={pr} status={status} login={login} />
-          <ReviewsRow pr={pr} detail={detail} status={status} login={login} />
-          <BranchRow pr={pr} detail={detail} status={status} login={login} />
+          <ChecksRow pr={pr} status={status} />
+          <ReviewsRow pr={pr} detail={detail} status={status} />
+          <BranchRow pr={pr} detail={detail} status={status} />
           <OpenSweRow pr={pr} detail={detail} />
           {canAttemptMerge(status) && (
             <MergeRow pr={pr} status={status} baseRef={detail.pr.base_ref} />
@@ -250,13 +250,7 @@ export function NextStepAction({
   if (!next) return null
   switch (next.kind) {
     case "agent":
-      return (
-        <PullRequestThreadAction
-          pr={status}
-          login={login}
-          actions={[next.action]}
-        />
-      )
+      return <PullRequestThreadAction pr={status} login={login} />
     case "mark-ready":
       return isAuthor ? null : (
         <MarkPullRequestReady pr={status} onReady={refresh.status} />
@@ -412,11 +406,9 @@ const checkRank = { fail: 0, pending: 1, pass: 2, skip: 3 } as const
 function ChecksRow({
   pr,
   status,
-  login,
 }: {
   pr: PullRequestRef
   status: OpenPullRequest
-  login: string
 }) {
   const checksQuery = useQuery(reviewQueries.checks(pr))
   const checks = checksQuery.data ?? []
@@ -461,15 +453,6 @@ function ChecksRow({
         expandable={checks.length > 0}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
-        action={
-          status.ci === "failing" ? (
-            <PullRequestThreadAction
-              pr={status}
-              login={login}
-              actions={["fix"]}
-            />
-          ) : null
-        }
       >
         {loading ? <Skeleton className="h-3 w-40" /> : summary}
       </Row>
@@ -547,12 +530,10 @@ function ReviewsRow({
   pr,
   detail,
   status,
-  login,
 }: {
   pr: PullRequestRef
   detail: ReviewDetail
   status: OpenPullRequest
-  login: string
 }) {
   const showOpenConversations = useReviewPage(
     (state) => state.showOpenConversations
@@ -610,14 +591,6 @@ function ReviewsRow({
                 {unresolved} unresolved
               </Button>
             )}
-            {hasUnresolvedConversations(status) &&
-              (open ? open.current > 0 : unresolved > 0) && (
-                <PullRequestThreadAction
-                  pr={status}
-                  login={login}
-                  actions={["address-comments"]}
-                />
-              )}
             {status.draft === false && <RequestHumanReview pr={status} />}
           </>
         }
@@ -678,29 +651,17 @@ function BranchRow({
   pr,
   detail,
   status,
-  login,
 }: {
   pr: PullRequestRef
   detail: ReviewDetail
   status: OpenPullRequest
-  login: string
 }) {
   const refresh = useRefreshPullRequest(pr)
   // Each is its own row, so a conflicted draft still offers to mark it ready.
   return (
     <>
       {isConflicted(status) && (
-        <Row
-          icon={failIcon}
-          label="Branch"
-          action={
-            <PullRequestThreadAction
-              pr={status}
-              login={login}
-              actions={["fix"]}
-            />
-          }
-        >
+        <Row icon={failIcon} label="Branch">
           Conflicts with <BranchLink pr={pr} branch={detail.pr.base_ref} /> must
           be resolved
         </Row>
@@ -927,7 +888,6 @@ function OpenSweRow({
 
 function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
   const showFinding = useReviewPage((state) => state.showFinding)
-  const askInChat = useReviewPage((state) => state.askInChat)
   const [openId, setOpenId] = useState<string | null>(null)
   return (
     <ol className="flex flex-col">
@@ -993,26 +953,6 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 >
                   {findingLocation(finding)}
                 </Button>
-                <Button
-                  size="xs"
-                  variant="plain"
-                  color="secondary"
-                  aria-label={`Ask Robin about: ${finding.title}`}
-                  onClick={() => askInChat(askAboutFinding(finding))}
-                >
-                  Ask
-                </Button>
-                {!settled && (
-                  <Button
-                    size="xs"
-                    variant="plain"
-                    color="secondary"
-                    aria-label={`Ask Robin to fix: ${finding.title}`}
-                    onClick={() => askInChat(fixFinding(finding))}
-                  >
-                    Fix it
-                  </Button>
-                )}
               </span>
             </div>
             {open && (

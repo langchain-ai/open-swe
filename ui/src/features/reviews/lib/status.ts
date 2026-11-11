@@ -1,7 +1,6 @@
 import type { BadgeProps } from "@langchain/macaw-components/Badge"
 
 import type { OpenPullRequest } from "@/lib/api"
-import type { PullRequestThreadActionName } from "./threadActions"
 
 export function pullRequestKey(pr: { repo: string; number: number }) {
   return `${pr.repo}#${pr.number}`
@@ -83,17 +82,14 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
 }
 
-/** What Open SWE could fix on this PR: one fix for conflicts and checks, then comments. */
-export function pullRequestFixes(
-  pr: OpenPullRequest
-): Array<PullRequestThreadActionName> {
-  return [
-    ...(isConflicted(pr) || hasFailingChecks(pr) ? (["fix"] as const) : []),
-    ...(hasUnresolvedConversations(pr) ? (["address-comments"] as const) : []),
-  ]
+/** Whether the PR has something for the Fix up button to look at. */
+export function needsFixUp(pr: OpenPullRequest): boolean {
+  return (
+    isConflicted(pr) || hasFailingChecks(pr) || hasUnresolvedConversations(pr)
+  )
 }
 
-// A conflicted branch cannot be updated by GitHub; the Fix action covers it.
+// A conflicted branch cannot be updated by GitHub; Fix up covers it.
 export function canUpdateBranch(pr: OpenPullRequest) {
   return (
     Boolean(pr.headSha) && pr.mergeable !== false && pr.mergeState !== "dirty"

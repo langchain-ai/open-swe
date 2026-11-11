@@ -3193,6 +3193,31 @@
         "title": "FixIntent",
         "type": "object"
       },
+      "FixUpIntent": {
+        "description": "The one button that asks the agent to look a pull request over and fix what is clearly broken.",
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PullRequestFixContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intent": {
+            "const": "fix-up",
+            "title": "Intent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent"
+        ],
+        "title": "FixUpIntent",
+        "type": "object"
+      },
       "FunctionCallItem": {
         "description": "A call the client runs itself and answers with a ``function_call_output``.",
         "properties": {
@@ -21710,6 +21735,7 @@
                     "address-comments": "#/components/schemas/AddressCommentsIntent",
                     "comments": "#/components/schemas/CommentBatchIntent",
                     "fix": "#/components/schemas/FixIntent",
+                    "fix-up": "#/components/schemas/FixUpIntent",
                     "message": "#/components/schemas/MessageIntent",
                     "open": "#/components/schemas/OpenThreadIntent"
                   },
@@ -21724,6 +21750,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/FixIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FixUpIntent"
                   },
                   {
                     "$ref": "#/components/schemas/AddressCommentsIntent"

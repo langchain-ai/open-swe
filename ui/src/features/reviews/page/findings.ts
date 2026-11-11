@@ -73,18 +73,6 @@ export function rankFindings<T extends ReviewFinding>(
   )
 }
 
-function findingRef(finding: ReviewFinding): string {
-  return `\`${withLine(finding.file, finding.end_line)}\``
-}
-
-export function askAboutFinding(finding: ReviewFinding): string {
-  return `About Robin's finding "${finding.title}" at ${findingRef(finding)}: `
-}
-
-export function fixFinding(finding: ReviewFinding): string {
-  return `Fix Robin's finding "${finding.title}" at ${findingRef(finding)} on this branch.`
-}
-
 export function findingTarget(finding: AnchoredFinding): LineTarget {
   return {
     kind: "line",

@@ -1221,11 +1221,7 @@ export interface PullRequestActionResult {
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
   | { intent: "message"; title: string; message: string }
-  | {
-      intent: "fix"
-      context: OpenPullRequest | null
-    }
-  | { intent: "address-comments" }
+  | { intent: "fix-up"; context: OpenPullRequest | null }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
 
@@ -1984,10 +1980,8 @@ export const api = {
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
-  addressPullRequestComments: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
+  fixUpPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix-up", context: pr }),
   sendCommentsToAgent: (
     repo: string,
     number: number,

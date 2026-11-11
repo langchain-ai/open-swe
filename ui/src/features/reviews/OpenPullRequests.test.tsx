@@ -34,8 +34,7 @@ vi.mock("@/lib/api", () => ({
     pullRequestStatus: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
-    fixPullRequest: vi.fn(),
-    addressPullRequestComments: vi.fn(),
+    fixUpPullRequest: vi.fn(),
     pullRequestThreadStatus: vi.fn(),
     mergePullRequest: vi.fn(),
     closePullRequest: vi.fn(),
@@ -247,12 +246,12 @@ describe("My PRs", () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fixing",
+      name: "Fixing up",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole("button", { name: "Fix" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Fix up" })).toBeNull()
     fireEvent.click(button)
-    expect(api.fixPullRequest).not.toHaveBeenCalled()
+    expect(api.fixUpPullRequest).not.toHaveBeenCalled()
   })
 
   it("opens the associated coding thread with immediate loading feedback", async () => {
@@ -574,10 +573,10 @@ describe("My PRs", () => {
     expect(within(shown[2]!).queryByText("Conflicted")).toBeNull()
     const fixes = (card: HTMLElement) =>
       within(card)
-        .queryAllByRole("button", { name: "Fix" })
+        .queryAllByRole("button", { name: "Fix up" })
         .map((button) => button.textContent)
-    expect(fixes(shown[0]!)).toEqual(["Fix"])
-    expect(fixes(shown[1]!)).toEqual(["Fix"])
+    expect(fixes(shown[0]!)).toEqual(["Fix up"])
+    expect(fixes(shown[1]!)).toEqual(["Fix up"])
     expect(fixes(shown[2]!)).toEqual([])
   })
 
@@ -855,7 +854,7 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Failing")).toBeTruthy()
     expect(within(card).getByText("Browser E2E")).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: "Fix up" })).toBeTruthy()
     expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
@@ -1216,31 +1215,31 @@ describe("My PRs", () => {
 
   it("queues the fix in the background and keeps the button disabled after success", async () => {
     let resolve!: (value: PullRequestThreadResult) => void
-    vi.mocked(api.fixPullRequest).mockImplementation(
+    vi.mocked(api.fixUpPullRequest).mockImplementation(
       () =>
         new Promise((done) => {
           resolve = done
         })
     )
     mount()
-    fireEvent.click(await screen.findByRole("button", { name: "Fix" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Fix up" }))
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Fix queued",
+          name: "Fix up queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
-    expect(api.fixPullRequest).toHaveBeenCalledWith(
+    expect(api.fixUpPullRequest).toHaveBeenCalledWith(
       expect.objectContaining(payload.pullRequests[0]!)
     )
     resolve({ thread_id: "fix-thread", already_running: false })
     const queued = await screen.findByRole("button", {
-      name: "Fix queued",
+      name: "Fix up queued",
     })
     expect((queued as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(queued)
-    expect(api.fixPullRequest).toHaveBeenCalledTimes(1)
+    expect(api.fixUpPullRequest).toHaveBeenCalledTimes(1)
     expect(navigate).not.toHaveBeenCalled()
     expect(cards()).toHaveLength(2)
   })
@@ -1361,7 +1360,7 @@ describe("My PRs", () => {
     expect(
       within(shown[3]!).getByText("1 unresolved conversation")
     ).toBeTruthy()
-    const address = "Address comments"
+    const address = "Fix up"
     expect(
       await within(shown[0]!).findByRole("button", { name: address })
     ).toBeTruthy()
@@ -1383,7 +1382,7 @@ describe("My PRs", () => {
       pullRequests: [pull(1, { unresolvedThreads: 2 })],
     })
     let resolve!: (value: PullRequestThreadResult) => void
-    vi.mocked(api.addressPullRequestComments).mockImplementation(
+    vi.mocked(api.fixUpPullRequest).mockImplementation(
       () =>
         new Promise((done) => {
           resolve = done
@@ -1391,29 +1390,25 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.click(
-      await within(card).findByRole("button", { name: "Address comments" })
-    )
+    fireEvent.click(await within(card).findByRole("button", { name: "Fix up" }))
     expect(
       (
         (await within(card).findByRole("button", {
-          name: "Comment fixes queued",
+          name: "Fix up queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
-    expect(api.addressPullRequestComments).toHaveBeenCalledWith(
+    expect(api.fixUpPullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, unresolvedThreads: 2 })
     )
     resolve({ thread_id: "comments-thread", already_running: false })
     const queued = await within(card).findByRole("button", {
-      name: "Comment fixes queued",
+      name: "Fix up queued",
     })
     expect((queued as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(queued)
-    expect(api.addressPullRequestComments).toHaveBeenCalledTimes(1)
-    expect(toast.success).toHaveBeenCalledWith(
-      "Queued comment fixes for acme/app#1"
-    )
+    expect(api.fixUpPullRequest).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith("Fix up queued for acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
 
@@ -1422,21 +1417,17 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { unresolvedThreads: 1 })],
     })
-    vi.mocked(api.addressPullRequestComments).mockResolvedValue({
+    vi.mocked(api.fixUpPullRequest).mockResolvedValue({
       thread_id: "comments-thread",
       already_running: true,
     })
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.click(
-      await within(card).findByRole("button", { name: "Address comments" })
-    )
+    fireEvent.click(await within(card).findByRole("button", { name: "Fix up" }))
     expect(
-      await within(card).findByRole("button", { name: "Addressing comments" })
+      await within(card).findByRole("button", { name: "Fixing up" })
     ).toBeTruthy()
-    expect(toast.success).toHaveBeenCalledWith(
-      "Already addressing comments for acme/app#1"
-    )
+    expect(toast.success).toHaveBeenCalledWith("Already fixing up acme/app#1")
   })
 
   it("does not address comments while the associated thread is running", async () => {
@@ -1447,13 +1438,11 @@ describe("My PRs", () => {
     })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Addressing comments",
+      name: "Fixing up",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(
-      screen.queryByRole("button", { name: "Address comments" })
-    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Fix up" })).toBeNull()
     fireEvent.click(button)
-    expect(api.addressPullRequestComments).not.toHaveBeenCalled()
+    expect(api.fixUpPullRequest).not.toHaveBeenCalled()
   })
 })

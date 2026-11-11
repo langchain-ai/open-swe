@@ -267,6 +267,37 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     setup.client.threads.update.assert_not_awaited()
 
 
+async def test_fix_up_is_announced_as_a_button_click_with_open_findings(setup, monkeypatch):
+    finding = {
+        "title": "Off by one",
+        "severity": "high",
+        "file": "app.py",
+        "end_line": 3,
+        "description": "Loop skips the last item.",
+        "suggestion": None,
+    }
+    monkeypatch.setattr(
+        pr_fixes,
+        "list_findings",
+        AsyncMock(
+            return_value=[
+                {**finding, "status": "open"},
+                {**finding, "title": "Already fixed", "status": "resolved"},
+            ]
+        ),
+    )
+    await pr_fixes.start_pull_request_thread(
+        "acme", "app", 12, "alice", intent=pr_fixes.FixUpIntent(intent="fix-up")
+    )
+    call = pr_fixes.dispatch_agent_run.await_args
+    assert call.args[1] is None
+    message = call.kwargs["input"]["messages"][-1]["content"]
+    assert 'sender="system:pull-request-fix-up"' in message
+    assert "@alice clicked **Fix up**" in message
+    assert "Off by one" in message
+    assert "Already fixed" not in message
+
+
 @pytest.mark.parametrize("status", ["idle", "busy"])
 async def test_a_thread_linked_later_never_replaces_the_one_that_opened_the_pr(setup, status):
     setup.threads["opener"] = {
