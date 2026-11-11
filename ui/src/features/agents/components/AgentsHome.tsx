@@ -722,7 +722,11 @@ export function AgentsHome({
           title={optimisticDraftThread?.title}
           target={runTarget === "local" ? "This Mac" : "Cloud"}
           panelCollapsed={panelCollapsed}
-          visibility={runTarget === "cloud" ? visibility : undefined}
+          visibility={
+            runTarget === "cloud" && !preferences.isPending
+              ? visibility
+              : undefined
+          }
           onVisibilityChange={
             submittedDraft ? undefined : setVisibilityOverride
           }
@@ -775,7 +779,10 @@ export function AgentsHome({
                 repos={workspaceRepos}
                 selectedRepo={repo}
                 targetPending={
-                  (cloudEnabled && projectsPending) ||
+                  (cloudEnabled &&
+                    (projectsPending ||
+                      workspaceOptionsQuery.isPending ||
+                      preferences.isPending)) ||
                   profileQuery.isLoading ||
                   reposQuery.isLoading
                 }
