@@ -482,7 +482,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     ("tracking_failure", "worker", "private"),
     [(False, False, False), (True, False, False), (False, True, False), (False, False, True)],
 )
-async def test_reconcile_enqueues_one_claimed_completion(
+async def test_reconcile_batches_unread_claimed_completions(
     monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool, private: bool
 ) -> None:
     task = {
@@ -494,6 +494,8 @@ async def test_reconcile_enqueues_one_claimed_completion(
         "output_path": "/tmp/output.log",
         "notification": "pending",
     }
+    second = {**task, "task_id": "task-2"}
+    consumed = {**task, "task_id": "task-consumed", "notification": "done"}
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     client = AsyncMock()
@@ -537,16 +539,21 @@ async def test_reconcile_enqueues_one_claimed_completion(
             ),
         ),
         patch("openswe.background_tasks.connect_sandbox", AsyncMock(return_value=backend)),
-        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[task])),
+        patch(
+            "openswe.background_tasks._list_tasks", AsyncMock(return_value=[task, second, consumed])
+        ),
         patch("openswe.background_tasks._claim", AsyncMock(return_value=True)),
         patch("openswe.background_tasks._mark_delivered", AsyncMock()),
         patch("openswe.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
     ):
         result = await reconcile_background_tasks("thread-1")
 
-    assert result == {"status": "idle", "delivered": 1, "pending": 0}
+    assert result == {"status": "idle", "delivered": 2, "pending": 0}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
+    message = dispatch.await_args.args[1]
+    assert "task-1" in message and "task-2" in message
+    assert "task-consumed" not in message
     configurable = dispatch.await_args.args[2]
     source = "dashboard" if worker or private else "slack"
     assert configurable["source"] == source
@@ -586,6 +593,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
 
 async def test_reconcile_releases_claim_when_dispatch_fails() -> None:
     task = {"task_id": "task-1", "status": "completed", "notification": "pending"}
+    second = {**task, "task_id": "task-2"}
     client = AsyncMock()
     client.threads.get.return_value = {
         "metadata": {"sandbox_id": "sandbox-1", "running_background_tasks": []}
@@ -594,7 +602,7 @@ async def test_reconcile_releases_claim_when_dispatch_fails() -> None:
     with (
         patch("openswe.background_tasks._client", return_value=client),
         patch("openswe.background_tasks.connect_sandbox", AsyncMock(return_value=AsyncMock())),
-        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[task])),
+        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[task, second])),
         patch("openswe.background_tasks._claim", AsyncMock(return_value=True)),
         patch("openswe.background_tasks._unclaim", AsyncMock()) as unclaim,
         patch("openswe.background_tasks._mark_delivered", AsyncMock()) as mark_delivered,
@@ -605,8 +613,8 @@ async def test_reconcile_releases_claim_when_dispatch_fails() -> None:
     ):
         result = await reconcile_background_tasks("thread-1")
 
-    assert result == {"status": "running", "delivered": 0, "pending": 1}
-    unclaim.assert_awaited_once()
+    assert result == {"status": "running", "delivered": 0, "pending": 2}
+    assert {call.args[1] for call in unclaim.await_args_list} == {"task-1", "task-2"}
     mark_delivered.assert_not_awaited()
 
 
@@ -870,3 +878,89 @@ async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
     assert result["success"] is False
     assert "Missing sandbox_id in thread metadata for unprepared" in result["error"]
     connect.assert_not_awaited()
+
+
+class TestCompletionConsumption:
+    @pytest.mark.parametrize("observer", ["thread-a", "another-thread", None])
+    @pytest.mark.parametrize("terminal", [False, True])
+    async def test_only_terminal_status_read_by_owner_consumes_completion(
+        self, monkeypatch: pytest.MonkeyPatch, observer: str | None, terminal: bool
+    ) -> None:
+        module = importlib.import_module("openswe.tools.background_execute")
+        backend = LocalShellBackend(virtual_mode=False)
+        task_id = f"test-{uuid.uuid4().hex}"
+        directory = Path(TASK_ROOT, task_id)
+        directory.mkdir(parents=True)
+        output = directory / "output.log"
+        output.write_text("result")
+        state = {
+            "task_id": task_id,
+            "owner_thread_id": "thread-a",
+            "status": "completed" if terminal else "running",
+            "runner_pid": os.getpid(),
+            "output_path": str(output),
+        }
+        (directory / "state.json").write_text(json.dumps(state))
+        monkeypatch.setattr(module, "current_backend", lambda: (observer, backend))
+        try:
+            result = await module.task_status(task_id)
+            assert result["output"] == "result"
+            assert (directory / "notify.done").exists() == (terminal and observer == "thread-a")
+            client = AsyncMock()
+            client.threads.get.return_value = {
+                "metadata": {"sandbox_id": "sandbox-1", "running_background_tasks": []}
+            }
+            monkeypatch.setattr(background_tasks, "_client", lambda: client)
+            monkeypatch.setattr(
+                background_tasks, "connect_sandbox", AsyncMock(return_value=backend)
+            )
+            dispatch = AsyncMock()
+            monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+            monkeypatch.setattr(background_tasks, "refresh_slack_background_status", AsyncMock())
+            monkeypatch.setattr(
+                background_tasks, "update_background_task_state", AsyncMock(return_value={})
+            )
+            monkeypatch.setattr(
+                background_tasks,
+                "_list_tasks",
+                AsyncMock(
+                    return_value=[
+                        task
+                        for task in await module.list_tasks(backend)
+                        if task["task_id"] == task_id
+                    ]
+                ),
+            )
+            if not terminal:
+                await reconcile_background_tasks("thread-a")
+                dispatch.assert_not_awaited()
+                state["status"] = "completed"
+                (directory / "state.json").write_text(json.dumps(state))
+            monkeypatch.setattr(
+                background_tasks,
+                "_list_tasks",
+                AsyncMock(
+                    return_value=[
+                        task
+                        for task in await module.list_tasks(backend)
+                        if task["task_id"] == task_id
+                    ]
+                ),
+            )
+            await reconcile_background_tasks("thread-a")
+            assert dispatch.await_count == (0 if terminal and observer == "thread-a" else 1)
+            monkeypatch.setattr(
+                background_tasks,
+                "_list_tasks",
+                AsyncMock(
+                    return_value=[
+                        task
+                        for task in await module.list_tasks(backend)
+                        if task["task_id"] == task_id
+                    ]
+                ),
+            )
+            await reconcile_background_tasks("thread-a")
+            assert dispatch.await_count == (0 if terminal and observer == "thread-a" else 1)
+        finally:
+            shutil.rmtree(directory)

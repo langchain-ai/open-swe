@@ -139,6 +139,14 @@ class Task:
         )
         return state
 
+    def consume(self, state, observer_thread_id):
+        if (
+            observer_thread_id
+            and state.get("owner_thread_id") == observer_thread_id
+            and state.get("status") in {"completed", "failed", "timed_out", "stopped", "lost"}
+        ):
+            os.makedirs(os.path.join(self.dir, "notify.done"), exist_ok=True)
+
     def with_output(self, state):
         try:
             with open(state["output_path"], "rb") as handle:
@@ -405,7 +413,9 @@ def listing(_request):
 
 def status(request):
     task = known(request)
-    emit(task.with_output(public(task.load() or {})))
+    state = task.with_output(public(task.load() or {}))
+    task.consume(state, request.get("observer_thread_id"))
+    emit(state)
 
 
 def stop(request):

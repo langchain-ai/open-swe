@@ -1,6 +1,8 @@
 import gzip
 import json
+import shutil
 import socket
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -13,11 +15,14 @@ import pytest
 from deepagents.backends.local_shell import LocalShellBackend
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from pydantic import BaseModel, JsonValue
 from rt import public_http
 from rt.backend import OpenSweBackend, Run, RunContext, reporting, subagent_of
+from rt.file_tools import FileToolsMiddleware
 from rt.public_http import BlockedUrlError, request_public, truncated
+from rt.remote_files import RemoteFiles
 from rt.tools import STATE_KEY, operation_tool
 from runtime_api.catalog import Catalog, SandboxCreate, SandboxSpec, ToolSpec
 from runtime_api.endpoint import Delivery
@@ -324,3 +329,56 @@ async def test_a_large_response_goes_to_the_sandbox_mda_owns_or_the_backend_answ
     offloaded = "".join(json.loads(chunk)["text"] for chunk in chunks)
     assert json.loads(offloaded)["content"] == body
     assert len(offloaded) == answer["response_chars"]
+
+
+class TestBackgroundOutput:
+    state_path: Path
+    failed: bool
+
+    async def read(self, request: ToolCallRequest) -> ToolMessage:
+        self.state_path.write_text(
+            json.dumps({"owner_thread_id": "thread-1", "status": "completed"})
+        )
+        return ToolMessage(
+            content="Error: read failed" if self.failed else "1\tresult",
+            status="error" if self.failed else "success",
+            tool_call_id="call-1",
+        )
+
+    @pytest.mark.parametrize("status", ["completed", "running"])
+    @pytest.mark.parametrize("owner", ["thread-1", "another-thread", None])
+    @pytest.mark.parametrize("failed", [False, True])
+    async def test_only_successful_owner_read_of_terminal_output_consumes_completion(
+        self, status: str, owner: str | None, failed: bool
+    ) -> None:
+        directory = Path("/tmp/open-swe-background-tasks", f"test-{uuid.uuid4().hex}")
+        directory.mkdir(parents=True)
+        self.state_path = directory / "state.json"
+        self.state_path.write_text(json.dumps({"owner_thread_id": owner, "status": status}))
+        self.failed = failed
+        sandbox = LocalShellBackend(virtual_mode=False)
+        remote = MagicMock(spec=RemoteFiles)
+        remote.adownload_files = sandbox.adownload_files
+        remote.aexecute = sandbox.aexecute
+        middleware = FileToolsMiddleware(_run_backend(Catalog()), 10, remote_files=remote)
+        runtime = _runtime(sandbox=sandbox)
+        runtime.config = {"configurable": {"thread_id": "thread-1"}}
+        request = ToolCallRequest(
+            tool_call={
+                "name": "read_file",
+                "args": {"file_path": str(directory / "output.log")},
+                "id": "call-1",
+                "type": "tool_call",
+            },
+            tool=None,
+            state={"messages": []},
+            runtime=runtime,
+        )
+        try:
+            result = await middleware._read_task_output(request, self.read)
+            assert isinstance(result, ToolMessage)
+            assert (directory / "notify.done").exists() == (
+                status == "completed" and owner == "thread-1" and not failed
+            )
+        finally:
+            shutil.rmtree(directory)

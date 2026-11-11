@@ -22,6 +22,7 @@ import logging
 import posixpath
 import random
 import re
+import shlex
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial, wraps
@@ -37,7 +38,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith import get_current_run_tree
 from langsmith.sandbox import SandboxRetryableConnectionError
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
 from runtime_api.loop import REFRESH_GITHUB_PROXY, RefreshGitHubProxy
@@ -95,6 +96,11 @@ _GITHUB_REAUTHORIZED: Final = (
 )
 
 Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
+
+
+class _BackgroundTask(BaseModel):
+    owner_thread_id: str | None = None
+    status: str
 
 
 class FileToolsMiddleware(AgentMiddleware):
@@ -362,7 +368,50 @@ class FileToolsMiddleware(AgentMiddleware):
         ):
             if check is not None:
                 checked = partial(check.awrap_tool_call, handler=checked)
-        return await checked(request)
+        return await self._read_task_output(request, checked)
+
+    async def _read_task_output(
+        self, request: ToolCallRequest, handler: Handler
+    ) -> ToolMessage | Command:
+        """Consume output only when its owner successfully reads an already terminal task."""
+        path = _absolute(request.tool_call["args"].get("file_path"))
+        root = "/tmp/open-swe-background-tasks"
+        if (
+            request.tool_call["name"] != "read_file"
+            or path is None
+            or not re.fullmatch(re.escape(root) + r"/[A-Za-z0-9-]+/output\.log", path)
+        ):
+            return await handler(request)
+        directory = posixpath.dirname(path)
+        terminal = False
+        try:
+            files = await self._remote_files.adownload_files([directory + "/state.json"])
+            if len(files) == 1 and files[0].content is not None and not files[0].error:
+                task = _BackgroundTask.model_validate_json(files[0].content)
+                thread_id = (request.runtime.config.get("configurable") or {}).get("thread_id")
+                terminal = (
+                    task.owner_thread_id is not None
+                    and task.owner_thread_id == thread_id
+                    and task.status in {"completed", "failed", "timed_out", "stopped", "lost"}
+                )
+        except Exception:
+            logger.warning("Could not read background task state", exc_info=True)
+        result = await handler(request)
+        if (
+            terminal
+            and isinstance(result, ToolMessage)
+            and result.status == "success"
+            and not result.text.startswith("Error:")
+        ):
+            try:
+                marked = await self._remote_files.aexecute(
+                    f"mkdir -p {shlex.quote(directory + '/notify.done')}", timeout=10
+                )
+                if marked.exit_code != 0:
+                    raise RuntimeError("Could not persist background task consumption")
+            except Exception:
+                logger.warning("Could not consume background task output", exc_info=True)
+        return result
 
     async def _reauthorized(
         self, request: ToolCallRequest, handler: Handler
