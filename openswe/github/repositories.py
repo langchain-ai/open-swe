@@ -7,7 +7,7 @@ case-insensitively. ``full_name`` keeps the casing GitHub reported for display.
 
 import logging
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid7
 
@@ -17,12 +17,17 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
+from openswe.github.ci import RequiredCheck
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repo_names import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
+
+_APPROVAL_CHECK_TTL = timedelta(hours=1)
 
 
 class Repository(Base):
@@ -41,6 +46,9 @@ class Repository(Base):
     github_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     # Automatic review is opt-in; ``None`` means nobody has turned it on or off yet.
     review_enabled: Mapped[bool | None] = mapped_column(default=None, init=False)
+    # Whether the default branch requires the ``Robin Approves`` check, and when that was read.
+    approval_check_required: Mapped[bool | None] = mapped_column(default=None, init=False)
+    approval_check_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.full_name = normalize_repo_full_name(self.full_name)
@@ -87,6 +95,54 @@ class Repository(Base):
             await cls(full_name=full_name, default_branch=value).save()
             return value
         return ""
+
+    @classmethod
+    async def requires_approval_check(cls, owner: str, name: str, branch: str) -> bool | None:
+        """Whether ``branch`` requires ``Robin Approves`` from Robin's App; ``None`` if unknown.
+
+        The default branch's answer is cached on the row for an hour, and a stale answer
+        stands in while GitHub can't be read.
+        """
+        full_name = f"{owner}/{name}"
+        cacheable = branch == await cls.resolve_default_branch(owner, name)
+        row = await cls.get(full_name) if cacheable else None
+        if (
+            row is not None
+            and row.approval_check_required is not None
+            and row.approval_check_checked_at is not None
+            and datetime.now(UTC) - row.approval_check_checked_at < _APPROVAL_CHECK_TTL
+        ):
+            return row.approval_check_required
+        try:
+            async with GitHubClient.as_app(owner, name) as github:
+                checks = await RequiredCheck.for_branch(
+                    github.repo(owner, name), branch, include_review_checks=True
+                )
+        except GitHubAppUnavailable, httpx2.HTTPError:
+            logger.warning(
+                "Could not read the branch's required checks",
+                extra={"repo_full_name": full_name, "branch": branch},
+                exc_info=True,
+            )
+            checks = None
+        if checks is None:
+            return row.approval_check_required if row is not None else None
+        app_id = int(ENV.GITHUB_APP_ID.get() or 0)
+        required = any(
+            check.name == APPROVAL_CHECK_RUN_NAME and check.app_id == app_id for check in checks
+        )
+        if cacheable:
+            async with postgres.session() as session:
+                repository_id = await cls.ensure_id(session, full_name)
+                await session.execute(
+                    update(cls)
+                    .where(cls.id == repository_id)
+                    .values(
+                        approval_check_required=required,
+                        approval_check_checked_at=datetime.now(UTC),
+                    )
+                )
+        return required
 
     @classmethod
     async def all(cls) -> list[Self]:

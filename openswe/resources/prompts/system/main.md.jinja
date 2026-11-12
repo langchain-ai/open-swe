@@ -1,29 +1,17 @@
 {{ dashboard_context_section }}
 
-{% include "system/self-awareness.md" +%}
+{{ self_awareness_section }}
 
 {% if default_prompt_section %}
 {{ default_prompt_section }}
 
 {% endif %}
-{% if agent_workspace %}
-{% include "system/agent-workspace.md" +%}
-{% else %}
+{% include "system/general-work.md" +%}
+
 {% include "system/repository-setup.md.jinja" +%}
-{% endif %}
 
 {{ collaboration_section }}
 
-{% include "system/memory.md" +%}
-
-{% if agent_workspace %}
-### Software tasks only
-
-The following repository, dependency, and pull-request workflows apply only when the task requires software or repository changes.
-They do not apply to ordinary research, writing, analysis, documents, spreadsheets, or conversation.
-
-{% include "system/repository-setup.md.jinja" +%}
-{% endif %}
 {% include "system/task-execution.md" +%}
 
 {% include "system/dependencies.md" +%}

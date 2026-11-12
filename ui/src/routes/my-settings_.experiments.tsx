@@ -23,34 +23,14 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="concierge_mode"
           label="Concierge mode"
-          description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
-        />
-        <ProfileSwitchRow
-          field="pr_failure_reactions"
-          label="React to failing checks"
-          description="Add ⚠️ to watched pull request posts when checks fail on a pull request you own."
+          description="Your whole DM with Robin becomes one private thread it always answers in, instead of a new thread per message."
         />
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="goal_mode"
-          label="Goal mode"
-          description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
-        />
-        <ProfileSwitchRow
-          field="experimental_conditional_approval"
-          label="Conditional approval"
-          description="For pull requests you author, let Open SWE request approval of a succinct condition instead of showing the full diff when its review covers everything else. Off by default."
-        />
-        <ProfileSwitchRow
-          field="experimental_memory"
-          label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's memories, in place of your own memories it superseded."
-        />
-        <ProfileSwitchRow
           field="experimental_classify"
           label="Classify tool"
-          description="Open SWE can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
+          description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"

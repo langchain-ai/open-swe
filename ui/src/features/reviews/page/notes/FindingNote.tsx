@@ -11,11 +11,10 @@ import { Button } from "@langchain/macaw-components/Button"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
-  askAboutFinding,
   findingGroupColor,
   findingGroupLabel,
   findingGroupTextColor,
-  fixFinding,
+  findingLocation,
 } from "@/features/reviews/page/findings"
 import { InlineCode } from "@/features/reviews/page/inlineCode"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
@@ -47,7 +46,6 @@ export function FindingNote({
 }) {
   const expandedFinding = useReviewPage((state) => state.expandedFinding)
   const setExpandedFinding = useReviewPage((state) => state.setExpandedFinding)
-  const askInChat = useReviewPage((state) => state.askInChat)
   const open = expandedFinding === finding.id
   const settled = finding.status !== "open"
   const color = findingGroupColor[finding.group]
@@ -110,7 +108,10 @@ export function FindingNote({
           />
         </Button>
         {open && (
-          <div className="border-t border-subtle px-space-3 pt-space-2 pb-space-2">
+          <div
+            data-reply-part={`Robin finding at ${findingLocation(finding)}: ${finding.title}`}
+            className="border-t border-subtle px-space-3 pt-space-2 pb-space-2"
+          >
             <div className="text-xs leading-[1.6]">
               <Markdown content={findingMarkdown(finding)} />
             </div>
@@ -121,24 +122,6 @@ export function FindingNote({
             )}
             {thread && <FindingReplies pr={pr} thread={thread} />}
             <div className="mt-space-2 flex flex-wrap items-center gap-space-1">
-              <Button
-                size="sm"
-                color="secondary"
-                variant="outlined"
-                onClick={() => askInChat(askAboutFinding(finding))}
-              >
-                Ask Open SWE
-              </Button>
-              {!settled && (
-                <Button
-                  size="sm"
-                  color="secondary"
-                  variant="plain"
-                  onClick={() => askInChat(fixFinding(finding))}
-                >
-                  Fix it
-                </Button>
-              )}
               <Button
                 size="sm"
                 color="secondary"

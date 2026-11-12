@@ -20,6 +20,7 @@ from managed_deepagents._channels.http.endpoint import (
     EventEndpoint,
     is_event_endpoint,
 )
+from managed_deepagents._channels.reply import ChannelReplyResult
 from managed_deepagents._channels.runtime import create_runtime_channel, validate_message
 from managed_deepagents._channels.scalars import Nonblank  # noqa: TC001 - pydantic reads it
 from managed_deepagents._connections import (
@@ -82,7 +83,7 @@ class ResolvedIgnore(TypedDict):
 
 
 ResolveUserResult: TypeAlias = (
-    ResolvedAppUser | ResolvedIdentity | ResolvedReply | ResolvedIgnore | None
+    ResolvedAppUser | ResolvedIdentity | ResolvedReply | ChannelReplyResult | ResolvedIgnore | None
 )
 """Who a channel delivery runs as; ``None`` keeps the channel's own principal.
 
@@ -205,6 +206,17 @@ _RESULT = TypeAdapter(
 """A result ``resolve_user`` returns, or an endpoint answers, other than ``None``."""
 
 
+def _checked_result(result: object) -> _Result:
+    """A result, checked; an endpoint's answer is any JSON, and a function's is
+    checked the same way."""
+    if isinstance(result, ChannelReplyResult):
+        result = {"type": "reply", "message": result.message}
+    try:
+        return _RESULT.validate_python(result)
+    except ValidationError:
+        raise TypeError(_RESULT_SHAPE) from None
+
+
 def checked_resolve_user(
     owner: str, resolve_user: ResolveUser | EventEndpoint | None
 ) -> ChannelResolveUser | None:
@@ -243,11 +255,7 @@ async def resolve_channel_user(
             result = await result
     if result is None:
         return None
-    # An endpoint's answer is any JSON, and a function's is checked the same way.
-    try:
-        checked = _RESULT.validate_python(result)
-    except ValidationError:
-        raise TypeError(_RESULT_SHAPE) from None
+    checked = _checked_result(result)
     identity: ResolvePrincipalIdentity
     match checked:
         case _UserResult():
@@ -325,8 +333,9 @@ async def post_reply(
     transport: ChannelMessagingAdapter | None,
     delivery_key: str | None = None,
 ) -> None:
-    """Post ``resolve_user``'s reply through the path ``runtime.channel.post`` takes,
-    once per ``delivery_key``."""
+    """Post a reply, ``resolve_user``'s or a handler's, through the path
+    ``runtime.channel.post`` takes, once per ``delivery_key``. A channel without
+    ``post``, such as GitHub, only logs it."""
     if delivery_key is not None:
         if delivery_key in _replied_deliveries:
             return
@@ -337,12 +346,12 @@ async def post_reply(
         name=name, provider=provider, event=None, target=target, transport=transport
     ).post
     if post is None:
-        logger.warning("channel cannot post resolve_user's reply")
+        logger.warning("channel cannot post a reply")
         return
     try:
         await post(message)
     except Exception as error:  # noqa: BLE001 - a failed reply must not fail the delivery
-        logger.error("channel resolve_user reply failed (%s)", logger.safe_error_label(error))
+        logger.error("channel reply failed (%s)", logger.safe_error_label(error))
 
 
 def _app_user_identity(user_id: str) -> ResolvePrincipalIdentity:

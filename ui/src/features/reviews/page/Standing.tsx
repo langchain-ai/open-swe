@@ -24,9 +24,11 @@ import type {
   ReviewDetail,
   ReviewFinding,
 } from "@/lib/api"
+import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn, INHERITED_LINK } from "@/lib/utils"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -43,18 +45,15 @@ import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestA
 import {
   canAttemptMerge,
   canUpdateBranch,
-  hasUnresolvedConversations,
   isConflicted,
 } from "@/features/reviews/lib/status"
 import { AgentMark } from "./AgentMark"
 import {
-  askAboutFinding,
   findingGroupColor,
   findingGroupLabel,
   findingLocation,
   findingGroupTextColor,
   findingTarget,
-  fixFinding,
   isAnchored,
   openFindingCounts,
   rankFindings,
@@ -195,12 +194,15 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             )}
           </div>
         </div>
+        {open && status && (
+          <PullRequestThreadAction pr={status} login={login} />
+        )}
       </div>
       {open && status && (
         <div className="divide-y border-t border-default">
-          <ChecksRow checks={detail.checks} status={status} login={login} />
-          <ReviewsRow pr={pr} detail={detail} status={status} login={login} />
-          <BranchRow pr={pr} detail={detail} status={status} login={login} />
+          <ChecksRow pr={pr} status={status} />
+          <ReviewsRow pr={pr} detail={detail} status={status} />
+          <BranchRow pr={pr} detail={detail} status={status} />
           <OpenSweRow pr={pr} detail={detail} />
           {canAttemptMerge(status) && (
             <MergeRow pr={pr} status={status} baseRef={detail.pr.base_ref} />
@@ -248,13 +250,7 @@ export function NextStepAction({
   if (!next) return null
   switch (next.kind) {
     case "agent":
-      return (
-        <PullRequestThreadAction
-          pr={status}
-          login={login}
-          actions={[next.action]}
-        />
-      )
+      return <PullRequestThreadAction pr={status} login={login} />
     case "mark-ready":
       return isAuthor ? null : (
         <MarkPullRequestReady pr={status} onReady={refresh.status} />
@@ -272,6 +268,7 @@ function Row({
   icon,
   label,
   children,
+  summaryAction,
   action,
   expandable,
   expanded,
@@ -280,6 +277,8 @@ function Row({
   icon: ReactNode
   label: string
   children: ReactNode
+  /** Sits right after the summary text, outside the expand toggle. */
+  summaryAction?: ReactNode
   action?: ReactNode
   expandable?: boolean
   expanded?: boolean
@@ -306,25 +305,41 @@ function Row({
       </span>
     </>
   )
+  const main = expandable ? (
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-labelledby={`${labelId} ${summaryId}`}
+      type="button"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className={cn(
+        "-my-space-1 h-auto min-w-0 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent",
+        !summaryAction && "flex-1"
+      )}
+    >
+      {body}
+    </Button>
+  ) : (
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-space-3",
+        !summaryAction && "flex-1"
+      )}
+    >
+      {body}
+    </div>
+  )
   return (
     <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
-      {expandable ? (
-        <Button
-          color="secondary"
-          variant="plain"
-          size="sm"
-          aria-labelledby={`${labelId} ${summaryId}`}
-          type="button"
-          aria-expanded={expanded}
-          onClick={onToggle}
-          className="-my-space-1 h-auto min-w-0 flex-1 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
-        >
-          {body}
-        </Button>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-space-3">
-          {body}
+      {summaryAction ? (
+        <div className="flex min-w-0 flex-1 items-center gap-space-1">
+          {main}
+          <span className="flex shrink-0 items-center">{summaryAction}</span>
         </div>
+      ) : (
+        main
       )}
       {action && (
         <div className="flex shrink-0 items-center gap-space-2 empty:hidden">
@@ -389,14 +404,16 @@ function checkState(
 const checkRank = { fail: 0, pending: 1, pass: 2, skip: 3 } as const
 
 function ChecksRow({
-  checks,
+  pr,
   status,
-  login,
 }: {
-  checks: Array<ReviewCheckRun>
+  pr: PullRequestRef
   status: OpenPullRequest
-  login: string
 }) {
+  const checksQuery = useQuery(reviewQueries.checks(pr))
+  const checks = checksQuery.data ?? []
+  // Until the runs arrive, the status cache's CI state stands in for them.
+  const loading = checksQuery.isPending
   const [expanded, setExpanded] = useState(status.ci === "failing")
   const askInChat = useReviewPage((state) => state.askInChat)
   const states = checks.map(checkState)
@@ -426,7 +443,7 @@ function ChecksRow({
     <div>
       <Row
         icon={
-          failed
+          failed || (loading && status.ci === "failing")
             ? failIcon
             : pending || status.ci === "pending"
               ? pendingIcon
@@ -436,17 +453,8 @@ function ChecksRow({
         expandable={checks.length > 0}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
-        action={
-          status.ci === "failing" ? (
-            <PullRequestThreadAction
-              pr={status}
-              login={login}
-              actions={["fix"]}
-            />
-          ) : null
-        }
       >
-        {summary}
+        {loading ? <Skeleton className="h-3 w-40" /> : summary}
       </Row>
       {expanded && (
         <ul className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7">
@@ -505,7 +513,7 @@ function ChecksRow({
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  className="ml-auto h-auto border-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
                   Ask why
                 </Button>
@@ -522,12 +530,10 @@ function ReviewsRow({
   pr,
   detail,
   status,
-  login,
 }: {
   pr: PullRequestRef
   detail: ReviewDetail
   status: OpenPullRequest
-  login: string
 }) {
   const showOpenConversations = useReviewPage(
     (state) => state.showOpenConversations
@@ -585,14 +591,6 @@ function ReviewsRow({
                 {unresolved} unresolved
               </Button>
             )}
-            {hasUnresolvedConversations(status) &&
-              (open ? open.current > 0 : unresolved > 0) && (
-                <PullRequestThreadAction
-                  pr={status}
-                  login={login}
-                  actions={["address-comments"]}
-                />
-              )}
             {status.draft === false && <RequestHumanReview pr={status} />}
           </>
         }
@@ -653,30 +651,19 @@ function BranchRow({
   pr,
   detail,
   status,
-  login,
 }: {
   pr: PullRequestRef
   detail: ReviewDetail
   status: OpenPullRequest
-  login: string
 }) {
   const refresh = useRefreshPullRequest(pr)
   // Each is its own row, so a conflicted draft still offers to mark it ready.
   return (
     <>
       {isConflicted(status) && (
-        <Row
-          icon={failIcon}
-          label="Branch"
-          action={
-            <PullRequestThreadAction
-              pr={status}
-              login={login}
-              actions={["fix"]}
-            />
-          }
-        >
-          Conflicts with {detail.pr.base_ref} must be resolved
+        <Row icon={failIcon} label="Branch">
+          Conflicts with <BranchLink pr={pr} branch={detail.pr.base_ref} /> must
+          be resolved
         </Row>
       )}
       {status.mergeState === "behind" && canUpdateBranch(status) && (
@@ -687,7 +674,7 @@ function BranchRow({
             <UpdatePullRequestBranch pr={status} onUpdated={refresh.status} />
           }
         >
-          Behind {detail.pr.base_ref}
+          Behind <BranchLink pr={pr} branch={detail.pr.base_ref} />
         </Row>
       )}
       {status.draft && (
@@ -731,12 +718,30 @@ function MergeRow({
         />
       }
     >
-      {merged
-        ? "Merging…"
-        : status.mergeState === "unstable"
-          ? `Into ${baseRef}, though some checks aren't passing`
-          : `Into ${baseRef}`}
+      {merged ? (
+        "Merging…"
+      ) : (
+        <>
+          Into <BranchLink pr={pr} branch={baseRef} />
+          {status.mergeState === "unstable" &&
+            ", though some checks aren't passing"}
+        </>
+      )}
     </Row>
+  )
+}
+
+function BranchLink({ pr, branch }: { pr: PullRequestRef; branch: string }) {
+  return (
+    <MacawLink
+      variant="xs"
+      href={githubUrls.branch(pr, branch)}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(INHERITED_LINK, subtleLink)}
+    >
+      {branch}
+    </MacawLink>
   )
 }
 
@@ -760,7 +765,7 @@ function OpenSweRow({
   const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
-    meta: { errorTitle: "Couldn't start the Open SWE review" },
+    meta: { errorTitle: "Couldn't start the Robin review" },
     onSuccess: () => {
       queryClient.setQueryData(reviewQueries.detail(pr).queryKey, (old) =>
         old ? { ...old, status: "running" as const } : old
@@ -789,7 +794,7 @@ function OpenSweRow({
                 : verdict.decision === "would_approve"
                   ? "would approve"
                   : verdict.decision === "would_approve_conditionally"
-                    ? "would approve subject to human approval"
+                    ? "needs approval of one change"
                     : "needs human review"
               : null,
             bugs || flags
@@ -807,7 +812,20 @@ function OpenSweRow({
         icon={
           running ? <Spinner size="xs" /> : <AgentMark className="size-4" />
         }
-        label="Open SWE"
+        label="Robin"
+        summaryAction={
+          !running && detail.status === "error" && detail.review_error ? (
+            <CopyErrorButton
+              error={detail.review_error}
+              details={{
+                "Pull request": `${pr.owner}/${pr.repo}#${pr.number}`,
+                "Head commit": detail.head_sha,
+                "Review thread": detail.thread_id,
+                Trace: detail.trace_url,
+              }}
+            />
+          ) : undefined
+        }
         expandable={canExpand}
         expanded={expanded}
         onToggle={() => setChosen(!expanded)}
@@ -870,7 +888,6 @@ function OpenSweRow({
 
 function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
   const showFinding = useReviewPage((state) => state.showFinding)
-  const askInChat = useReviewPage((state) => state.askInChat)
   const [openId, setOpenId] = useState<string | null>(null)
   return (
     <ol className="flex flex-col">
@@ -936,30 +953,13 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 >
                   {findingLocation(finding)}
                 </Button>
-                <Button
-                  size="xs"
-                  variant="plain"
-                  color="secondary"
-                  aria-label={`Ask Open SWE about: ${finding.title}`}
-                  onClick={() => askInChat(askAboutFinding(finding))}
-                >
-                  Ask
-                </Button>
-                {!settled && (
-                  <Button
-                    size="xs"
-                    variant="plain"
-                    color="secondary"
-                    aria-label={`Ask Open SWE to fix: ${finding.title}`}
-                    onClick={() => askInChat(fixFinding(finding))}
-                  >
-                    Fix it
-                  </Button>
-                )}
               </span>
             </div>
             {open && (
-              <div className="markdown-body mt-space-1 max-w-prose text-xs text-secondary">
+              <div
+                data-reply-part={`Robin finding at ${findingLocation(finding)}: ${finding.title}`}
+                className="markdown-body mt-space-1 max-w-prose text-xs text-secondary"
+              >
                 <Markdown content={finding.description} />
                 {finding.resolution_note && (
                   <p className="mt-space-1 flex items-center gap-space-1">

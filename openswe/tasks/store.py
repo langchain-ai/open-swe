@@ -25,6 +25,11 @@ class WorkerAlreadyLaunchedError(PermissionError):
 
 
 class Task(Base):
+    """The work a person hands over: its coordinating thread, and any workers it
+    delegates to. Every agent thread coordinates one from its first run; ``delegated``
+    says whether it went on to delegate.
+    """
+
     __tablename__ = "task"
 
     title: Mapped[str]
@@ -71,7 +76,12 @@ class Task(Base):
                 ):
                     raise PermissionError("Only the coordinator can delegate")
                 if task.workspace_id != workspace_row.id:
-                    raise PermissionError("The thread no longer belongs to the task's workspace")
+                    if task.delegated:
+                        raise PermissionError(
+                            "The thread no longer belongs to the task's workspace"
+                        )
+                    task.workspace_id = workspace_row.id
+                    task.workspace = workspace_row
             existing = await session.get(TaskDelegation, worker_thread_id)
             if existing is not None:
                 if (
@@ -100,6 +110,13 @@ class Task(Base):
             )
             session.add(delegation)
             return task, delegation
+
+    @classmethod
+    async def of_thread(cls, thread_id: str) -> Task | None:
+        """The task ``thread_id`` works on, as coordinator or worker."""
+        async with postgres.session() as session:
+            membership = await session.get(TaskMembership, thread_id)
+            return None if membership is None else await session.get(cls, membership.task_id)
 
     @classmethod
     async def for_thread(cls, thread_id: str, *, title: str, workspace: str) -> Task:
@@ -152,8 +169,6 @@ class TaskMembership(Base):
 
     @classmethod
     async def context_for_thread(cls, thread_id: str) -> TaskContext | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             membership = await session.get(cls, thread_id)
             if membership is None:
@@ -162,6 +177,17 @@ class TaskMembership(Base):
             if task is None:
                 raise RuntimeError("Task membership has no task")
             return TaskContext(task, membership)
+
+    @classmethod
+    async def delegation_for_thread(cls, thread_id: str) -> TaskContext | None:
+        """The thread's place in a task that delegates: a worker's, or the coordinator's
+        of a task with workers. A thread working alone on its own task has none."""
+        context = await cls.context_for_thread(thread_id)
+        if context is None or (
+            context.membership.role == "coordinator" and not context.task.delegated
+        ):
+            return None
+        return context
 
 
 class TaskDelegation(Base):
@@ -183,8 +209,6 @@ class TaskDelegation(Base):
 
     @classmethod
     async def get(cls, worker_thread_id: str) -> TaskDelegation | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.get(cls, worker_thread_id)
 
@@ -216,12 +240,17 @@ class TaskDelegation(Base):
 
     @classmethod
     async def set_launch_error(cls, worker_thread_id: str, error: str | None) -> None:
+        from openswe.ui_invalidations.topics import Topic
+
         async with postgres.session() as session:
-            await session.execute(
+            coordinator_thread_id = await session.scalar(
                 update(cls)
                 .where(cls.worker_thread_id == worker_thread_id)
                 .values(launch_error=error)
+                .returning(cls.coordinator_thread_id)
             )
+        if coordinator_thread_id is not None:
+            await Topic.TASK_WORKERS.invalidate(key=coordinator_thread_id)
 
 
 @dataclass(frozen=True)
@@ -245,7 +274,7 @@ async def sidebar_memberships(
     thread_ids: Sequence[str], *, workers_of: bool = False
 ) -> dict[str, SidebarTaskMembership]:
     """Read authoritative task relationships in batches, without thread metadata."""
-    if not thread_ids or not postgres.configured():
+    if not thread_ids:
         return {}
     memberships: dict[str, SidebarTaskMembership] = {}
     async with postgres.session() as session:
@@ -271,7 +300,7 @@ async def sidebar_memberships(
             for membership, task, delegation in await session.execute(statement):
                 if task.coordinator_thread_id is None or (
                     membership.role == "coordinator"
-                    and membership.thread_id != task.coordinator_thread_id
+                    and (membership.thread_id != task.coordinator_thread_id or not task.delegated)
                 ):
                     continue
                 memberships[membership.thread_id] = SidebarTaskMembership(

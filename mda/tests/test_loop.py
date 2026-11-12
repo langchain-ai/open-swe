@@ -1,6 +1,8 @@
 import asyncio
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents import create_agent
@@ -17,16 +19,21 @@ from rt.automation_budget import AutomationBudgetMiddleware
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
+from rt.routing import Route, RouteClassifier
+from rt.run_tools import RunTools
 from rt.tools import STATE_KEY
+from rt.tracing import TurnTrace
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    JOINED_TASK_CONTEXT,
     Catalog,
+    CliResultRules,
     LoopRules,
     ModelSpec,
     ReplyRules,
     RoutingRules,
     RunModels,
-    WorkStateRules,
+    TaskContext,
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
@@ -34,13 +41,11 @@ from runtime_api.loop import (
     AutomationUsage,
     Done,
     GitHubProxyRefreshed,
-    IncidentContext,
     PhaseResult,
     Prepared,
-    Route,
-    Routed,
-    TaskContext,
 )
+from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY
+from runtime_api.models import chosen_model
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
@@ -138,32 +143,23 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
 
-async def test_an_incident_run_asks_for_its_incident_before_each_model_call(
+async def test_the_framing_of_the_clients_tools_follows_the_system_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backend, calls = _backend(
-        monkeypatch,
-        {"incident_context": IncidentContext(instructions="Investigate the incident.")},
-        LoopRules(incident=True),
-    )
+    rules = LoopRules(client_tools=True, client_prompt="The Docs plugin is open beside you.")
+    backend, _ = _backend(monkeypatch, {}, rules)
 
     planned = await RunLoop(backend).before_model(
-        _state(HumanMessage(content="What broke?", id="human-1"))
+        _state(HumanMessage(content="Tighten the intro", id="human-1"))
     )
 
     assert planned.call is not None
-    assert planned.call.system_prompt.endswith("Investigate the incident.")
-    [(name, body)] = calls
-    assert name == "incident_context"
-    assert [m.content for m in messages_from_dict(Routed.model_validate(body).humans)] == [
-        "What broke?"
-    ]
+    assert planned.call.system_prompt.endswith("The Docs plugin is open beside you.")
 
 
-async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
+async def test_a_refresh_asked_for_a_call_that_is_not_made_is_stopped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    failure = BackendCallError("context unavailable")
     backend, _ = _backend(monkeypatch, {}, LoopRules())
     loop = RunLoop(backend)
     started = asyncio.Event()
@@ -177,17 +173,13 @@ async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
             stopped.set()
         return {}
 
-    async def context() -> TaskContext:
-        await started.wait()
-        raise failure
-
     monkeypatch.setattr(loop, "_github_proxy", refresh)
-    monkeypatch.setattr(loop, "_task_context", context)
 
-    with pytest.raises(BackendCallError) as caught:
-        await loop.before_model(_state())
+    asked = loop.ask(_state())
+    assert asked is not None
+    await started.wait()
+    await asked.close()
 
-    assert caught.value is failure
     assert stopped.is_set()
 
 
@@ -201,11 +193,10 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         hidden_tools=["grep"],
         hidden_unless={"has_human_input": ["record_human_input"]},
         routing=RoutingRules(mode="fast", route_model_ids={"fast": _FAST.model_id}),
-        task_coordination=True,
+        task_context=TaskContext(instructions=role, message=context),
         refresh_github_proxy=True,
     )
     answers: dict[str, BaseModel | BackendCallError] = {
-        "task_context": TaskContext(instructions=role, message=context),
         "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
     }
     backend, calls = _backend(monkeypatch, answers, rules)
@@ -219,23 +210,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         rendered_thread_prompt="This thread's artifacts are here.",
     )
 
-    barrier = asyncio.Barrier(2)
-    post = backend.post
-
-    async def overlapping_post(
-        path: str,
-        body: dict[str, JsonValue],
-        *,
-        timeout: float,
-        delivery: Delivery,
-        headers: Mapping[str, str] | None = None,
-    ) -> JsonValue:
-        await asyncio.wait_for(barrier.wait(), timeout=1)
-        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
-
-    with monkeypatch.context() as preparation:
-        preparation.setattr(backend, "post", overlapping_post)
-        planned = await loop.before_model(state)
+    planned = await loop.before_model(state)
     await backend.outbox.drain()
 
     assert planned.call is not None
@@ -257,7 +232,8 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         role,
         context,
     ]
-    assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]
+    # The task's context came with the catalog: the backend is asked only for the token.
+    assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
     # The task's context and role the model still sees are not added again, and a token
     # with time left is not replaced.
@@ -272,14 +248,18 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert again.messages == []
     assert [name for name, _ in calls].count("refresh_github_proxy") == 1
 
-    # A new role joins the conversation and leaves the system prompt, and the cache with
-    # it, as it was.
-    worker = role.replace("You coordinate the task.", "You work on the task.")
-    answers["task_context"] = TaskContext(instructions=worker, message=context)
-    demoted = await loop.before_model(seen)
-    assert demoted.call is not None
-    assert demoted.call.system_prompt == planned.call.system_prompt
-    assert [message.content for message in messages_from_dict(demoted.messages)] == [worker]
+    # A task the thread joined mid-run, as its first worker's launch said, joins the
+    # conversation and leaves the system prompt, and the cache with it, as it was.
+    joined = '<dynamic-context kind="task" id="task-2">Ship login</dynamic-context>'
+    held = seen[STATE_KEY]
+    assert isinstance(held, dict)
+    moved = await loop.before_model({**seen, STATE_KEY: {**held, JOINED_TASK_CONTEXT: joined}})
+    assert moved.call is not None
+    assert moved.call.system_prompt == planned.call.system_prompt
+    assert [message.content for message in messages_from_dict(moved.messages)] == [joined]
+    assert [name for name, _ in calls] == ["refresh_github_proxy"]
+    # The next run's catalog carries it, so a new turn starts without it.
+    assert loop.starting()[JOINED_TASK_CONTEXT] is None
 
 
 async def test_a_run_context_summarized_away_is_sent_again(
@@ -344,13 +324,13 @@ async def test_a_run_context_summarized_away_is_sent_again(
     ]
 
 
-async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
+async def test_a_requested_model_is_chosen_here_as_the_backend_would(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    requested = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={"reasoning_effort": "high"})
+    requested = chosen_model("openai:gpt-6.1-sol", "high")
     backend, calls = _backend(
         monkeypatch,
-        {"model_choice": requested, "route_model": Route(route="default")},
+        {},
         LoopRules(routing=RoutingRules(mode="fast")),
     )
     events: list[object] = []
@@ -374,25 +354,23 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
         "route": "default",
         "model_id": requested.model_id,
     }
-    assert calls == [
-        (
-            "model_choice",
-            {"run_id": "run-1", "model_id": requested.model_id, "effort": "high"},
-        )
-    ]
+    # Its settings and fallback come from the shared table: the backend is not asked.
+    assert requested.fallback is not None
+    assert calls == []
 
 
 async def test_a_route_the_classifier_fell_back_to_is_not_kept(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    answers: dict[str, BaseModel | BackendCallError] = {
-        "route_model": Route(route="default", persist=False)
-    }
-    backend, calls = _backend(
-        monkeypatch,
-        answers,
-        LoopRules(routing=RoutingRules(mode="auto")),
-    )
+    routes = [Route("default", persist=False), Route("fast")]
+    classified: list[str] = []
+
+    async def classify(_self: RouteClassifier, messages: list[BaseMessage]) -> Route:
+        classified.append(RouteClassifier.latest_task(messages))
+        return routes.pop(0)
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, calls = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
     loop = RunLoop(backend)
     human = HumanMessage(content="Fix the login", id="human-1")
 
@@ -401,16 +379,238 @@ async def test_a_route_the_classifier_fell_back_to_is_not_kept(
 
     assert first.call is not None and first.call.model == _MAIN
     assert "model_route" not in first.update
-    assert [name for name, _ in calls] == ["route_model"]
+    assert classified == ["Fix the login"]
     assert second.call is not None and second.call.model == _MAIN
 
     monkeypatch.setattr("rt.loop.run_id", lambda: "run-2")
-    answers["route_model"] = Route(route="fast")
     recovered = await loop.before_model(_state(human, **first.update))
 
     assert recovered.call is not None and recovered.call.model == _FAST
     assert recovered.update["model_route"] == "fast"
-    assert [name for name, _ in calls] == ["route_model", "route_model"]
+    assert classified == ["Fix the login", "Fix the login"]
+    # The classifier runs here: the backend is never asked for a route.
+    assert calls == []
+
+
+async def test_a_new_threads_route_is_classified_while_the_run_prepares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preparing and classifying overlap, and the turn's start reports the routed model."""
+    preparing = asyncio.Event()
+    classified: list[str] = []
+
+    async def classify(_self: RouteClassifier, messages: list[BaseMessage]) -> Route:
+        # Answers only once preparing has begun: the two run side by side.
+        await asyncio.wait_for(preparing.wait(), timeout=1)
+        classified.append(RouteClassifier.latest_task(messages))
+        return Route("fast", task_type="lookup", complexity="routine")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    rules = LoopRules(
+        routing=RoutingRules(
+            mode="auto", route_model_ids={"fast": _FAST.model_id}, route_efforts={"fast": "low"}
+        )
+    )
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "prepare": Prepared(update={"selected_model_id": _MAIN.model_id}),
+            "run_started": Done(),
+            "run_ended": Done(),
+        },
+        rules,
+    )
+    post = backend.post
+
+    async def prepare_signalled(
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        if path.endswith("/prepare"):
+            preparing.set()
+        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
+
+    monkeypatch.setattr(backend, "post", prepare_signalled)
+    models: list[str] = []
+
+    def build(spec: ModelSpec, use_gateway: bool) -> FakeListChatModel:
+        models.append(spec.model_id)
+        return FakeListChatModel(responses=["Done."])
+
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _event: None)
+    traced: list[Mapping[str, JsonValue]] = []
+    update = TurnTrace.update
+
+    def record(trace: TurnTrace, metadata: Mapping[str, JsonValue]) -> None:
+        traced.append(dict(metadata))
+        update(trace, metadata)
+
+    monkeypatch.setattr(TurnTrace, "update", record)
+    backend.run.invocation_id = "turn"
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=[BackendRunMiddleware(backend)],
+    )
+
+    await graph.ainvoke({"messages": [("user", "Rename the flag")]})
+
+    assert classified == ["Rename the flag"]
+    # The trace records the route the classifier chose, and what Jev said the request is.
+    assert {"model_route": "fast"} in traced
+    assert {"jev_task_type": "lookup", "jev_complexity": "routine"} in traced
+    started = next(body for name, body in calls if name == "run_started")
+    assert (started["model_route"], started["model_id"], started["effort"]) == (
+        "fast",
+        _FAST.model_id,
+        "low",
+    )
+    assert models[-1] == _FAST.model_id
+    assert [name for name, _ in calls] == ["prepare", "run_started", "run_ended"]
+
+
+async def test_a_thread_with_a_kept_route_is_not_classified_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        raise AssertionError("A kept route is not classified again")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    state = _state(HumanMessage(content="Fix it", id="human-1"), model_route="balanced")
+
+    assert loop.classify_ahead(state) is None
+    held = state[STATE_KEY]
+    assert isinstance(held, dict)
+    assert await loop.routed(held, [], None) == {"model_route": "balanced"}
+    # The run's subagents follow the route it took.
+    assert backend.run.route == "balanced"
+
+
+async def test_a_thread_that_kept_default_before_routing_is_classified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        return Route("performance")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _event: None)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    state = _state(HumanMessage(content="Design it", id="human-1"), model_route="default")
+    held = state[STATE_KEY]
+    assert isinstance(held, dict)
+
+    classifying = loop.classify_ahead(state)
+
+    assert classifying is not None
+    assert (await loop.routed(held, [], classifying))["model_route"] == "performance"
+    assert backend.run.route == "performance"
+
+
+async def test_the_control_arm_classifies_its_first_request_for_the_trace_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classified: list[str] = []
+
+    async def classify(_self: RouteClassifier, messages: list[BaseMessage]) -> Route:
+        classified.append(RouteClassifier.latest_task(messages))
+        return Route("performance", task_type="design", complexity="involved")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, calls = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Design the cache", id="human-1")
+    state = _state(human)
+    held = state[STATE_KEY]
+    assert isinstance(held, dict)
+
+    classifying = loop.classify_ahead(state)
+    assert classifying is not None
+    update = await loop.routed(held, [human], classifying)
+
+    # The trace gets Jev's answers; the run keeps its own model.
+    assert backend.run.classified == {"jev_task_type": "design", "jev_complexity": "involved"}
+    assert update == {"jev_shadowed": True, "model_route": "default"}
+    assert backend.run.route == "default"
+    assert classified == ["Design the cache"]
+    assert calls == []
+    # A later turn of the thread is not classified again.
+    later = _state(human, **update)
+    assert loop.classify_ahead(later) is None
+
+
+async def test_a_failed_shadow_classification_leaves_the_run_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
+    loop = RunLoop(backend)
+    held: dict[str, JsonValue] = {}
+
+    assert await loop.routed(held, [HumanMessage(content="Fix it", id="human-1")], None) == {
+        "model_route": "default"
+    }
+    assert backend.run.classified == {}
+
+
+async def test_the_control_arm_classifies_again_after_jev_gives_no_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The first is what the classifier returns when Jev is unavailable: no task type.
+    answers = iter([Route("default", persist=False), Route("balanced", task_type="lookup")])
+
+    async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
+        return next(answers)
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix it", id="human-1")
+
+    unanswered = await loop.routed({}, [human], None)
+
+    # The thread is not marked shadowed, so its next turn asks again and labels the trace.
+    assert unanswered == {"model_route": "default"}
+    assert backend.run.classified == {}
+    later = _state(human, **unanswered)
+    held = later[STATE_KEY]
+    assert isinstance(held, dict)
+    answered = await loop.routed(held, [human], loop.classify_ahead(later))
+    assert answered == {"jev_shadowed": True, "model_route": "default"}
+    assert backend.run.classified == {"jev_task_type": "lookup"}
+
+
+async def test_a_route_kept_for_one_run_still_reaches_its_subagents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
+    loop = RunLoop(backend)
+    # An unsure answer routed this run to Balanced without keeping it for the thread.
+    backend.run.route = "balanced"
+
+    await loop.before_model(_state(HumanMessage(content="Add a flag", id="human-1")))
+
+    assert backend.run.route == "balanced"
+
+
+def test_a_subagent_call_takes_the_runs_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("rt.run_tools.build_model", lambda spec, **_: spec.model_id)
+    tools = RunTools(Catalog(models=_MODELS), MagicMock(), MagicMock())
+
+    assert tools.subagent_model_for("fast") == _FAST.model_id
+    assert tools.subagent_model_for("default") == _MAIN.model_id
+    assert tools.subagent_model_for(None) == _MAIN.model_id
+    # A route the catalog has no model for keeps the run's subagent model.
+    assert tools.subagent_model_for("performance") == _MAIN.model_id
 
 
 @pytest.mark.parametrize(
@@ -461,57 +661,26 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
-async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("surface", ["slack", "web"])
+async def test_an_answer_written_for_an_unreachable_model_is_final(
+    monkeypatch: pytest.MonkeyPatch, surface: str
 ) -> None:
-    guard = "system:work-state-guard"
-    nudge = (
-        f'<input-message sender="{guard}" surface="automation" kind="system">'
-        "Keep working.</input-message>"
-    )
-    rules = LoopRules(
-        reply=_REPLY,
-        work_state=WorkStateRules(
-            tool="report_work_state",
-            waits=["schedule_thread_wakeup"],
-            nudge=[nudge],
-            nudge_sender=guard,
-        ),
-    )
-    backend, _calls = _backend(monkeypatch, {}, rules)
+    """Asking again would wait out the same outage: it is posted as it is, no nudges."""
+    rules = LoopRules(reply=_REPLY, cli_result=CliResultRules(tool="cli_result", nudge=["Send it"]))
+    backend, calls = _backend(monkeypatch, {"reply_on_behalf": Done()}, rules)
     loop = RunLoop(backend)
     asked = HumanMessage(content="Fix it", id="human-1")
-    stopped = AIMessage(content="", id="ai-1")
-
-    def finished(tool: str) -> list[BaseMessage]:
-        call = AIMessage(content="", id="ai-0", tool_calls=[{"id": "c1", "name": tool, "args": {}}])
-        return [asked, call, ToolMessage(content='{"success": true}', tool_call_id="c1")]
-
-    nudged = await loop.after_model(_state(asked, stopped, reply_surface="web"))
-    again = await loop.after_model(
-        _state(
-            *finished("slack_no_reply_needed")[1:],
-            HumanMessage(content=nudge, id="nudge-1"),
-            stopped,
-            reply_surface="web",
-        )
-    )
-    reported = await loop.after_model(
-        _state(*finished("report_work_state"), stopped, reply_surface="web")
-    )
-    waiting = await loop.after_model(
-        _state(*finished("schedule_thread_wakeup"), stopped, reply_surface="web")
-    )
-    gave_up = await loop.after_model(
-        _state(asked, stopped, reply_surface="web", work_state_nudges=5)
+    outage = AIMessage(
+        content="The providers are down.",
+        id="ai-1",
+        response_metadata={MODEL_FAILURE_REPLY_KEY: "outage"},
     )
 
-    assert nudged.jump_to == "model" and nudged.update == {"work_state_nudges": 1}
-    assert [message.content for message in messages_from_dict(nudged.messages)] == [nudge]
-    assert again.jump_to == "model"
-    assert reported.jump_to is None and reported.update == {"work_state_nudges": 0}
-    assert waiting.jump_to is None
-    assert gave_up.jump_to is None and gave_up.update == {"work_state_nudges": 0}
+    result = await loop.after_model(_state(asked, outage, reply_surface=surface))
+
+    assert result.jump_to is None and not result.messages
+    expected = [("reply_on_behalf", "The providers are down.")] if surface == "slack" else []
+    assert [(name, body["text"]) for name, body in calls] == expected
 
 
 @pytest.mark.parametrize(
@@ -527,7 +696,6 @@ async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
 async def test_a_reply_this_turn_satisfies_the_run_even_after_a_nudge(
     monkeypatch: pytest.MonkeyPatch, replied: str, result: dict[str, bool], satisfied: bool
 ) -> None:
-    import json
 
     backend, _calls = _backend(monkeypatch, {}, LoopRules(reply=_REPLY))
     loop = RunLoop(backend)

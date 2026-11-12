@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from starlette.requests import HTTPConnection
 
 from openswe.audit_logs.models import AuditLog
-from openswe.database import postgres
 
 if TYPE_CHECKING:
     from openswe.workspaces.store import Workspace
@@ -24,8 +23,6 @@ async def enrich_workspace(entry: AuditLog, workspace: Workspace | str) -> None:
     try:
         slug = slugify(workspace) if isinstance(workspace, str) else workspace.slug
         if entry.workspace_id is not None and entry.enrichments.workspace == slug:
-            return
-        if not postgres.configured():
             return
         async with asyncio.timeout(2):
             workspace_id = await WORKSPACES.id_for_slug(slug)

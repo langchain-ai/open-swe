@@ -45,13 +45,8 @@ from managed_deepagents._channels.trigger.tracing_project import tracer_session_
 from managed_deepagents._channels.trigger.transport import TriggerTransport, start_trigger_thread
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents._log import logger
-from managed_deepagents._schedule_auth import hand_off_scheduled_thread, schedule_execution
-from managed_deepagents._thread_record import (
-    THREAD_CONVERSATION_METADATA,
-    ThreadRecord,
-    origin_from_binding,
-    thread_record_metadata,
-)
+from managed_deepagents._schedule_auth import schedule_execution
+from managed_deepagents._thread_handoff import hand_off_thread
 
 if TYPE_CHECKING:
     from langchain_core.runnables.config import RunnableConfig
@@ -226,8 +221,10 @@ async def _deliver_answer(
 ) -> None:
     """Post a finished run's answers in the thread it opens, its origin, or ``deliver_to``."""
     binding = run.origin
-    # A channel declared with ``reply="none"`` leaves replying to the agent.
-    if binding is not None and not channel_auto_replies_for_name(binding["name"]):
+    # A channel declared with ``auto_post=False`` leaves replying to the agent,
+    # as does a run its handler started with ``auto_post`` False or on a thread
+    # of its own choosing without ``auto_post``.
+    if binding is not None and not _replies(binding):
         return
     values = final.values if isinstance(final.values, Mapping) else {}
     output = {"messages": values.get("messages")}
@@ -251,6 +248,12 @@ async def _deliver_answer(
             config["configurable"], config.get("metadata") or {}
         )
         await _post_direct(binding, content, scheduled=scheduled)
+
+
+def _replies(binding: ChannelBinding) -> bool:
+    """Whether a run posts its final answer to its binding's target."""
+    reply = binding.get("reply")
+    return channel_auto_replies_for_name(binding["name"]) if reply is None else reply == "auto"
 
 
 def run_boundary(boundary: StateSnapshot | None, messages: object) -> str | None:
@@ -398,23 +401,7 @@ async def _hand_off(run: RunThread, config: RunnableConfig, conversation: Channe
     execution = schedule_execution(config["configurable"])
     if execution is None or not run.thread.id:
         raise RuntimeError("Scheduled thread handoff is unavailable")
-    record = thread_record_metadata(
-        ThreadRecord(
-            origin=origin_from_binding(conversation, None),
-            participants={person.id: person.role for person in run.thread.participants},
-        )
-    )
-    await hand_off_scheduled_thread(
-        {
-            "thread": run.thread.id,
-            "execution": execution,
-            "conversation": {
-                "provider": conversation["provider"],
-                "source_thread_key": conversation["source_thread_key"],
-            },
-        },
-        {**record, THREAD_CONVERSATION_METADATA: conversation["source_thread_key"]},
-    )
+    await hand_off_thread(run.thread, execution, conversation)
 
 
 async def _deliver_to_target(deliver_to: NormalizedScheduleDeliverTo, text: str) -> None:

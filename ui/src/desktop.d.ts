@@ -2,6 +2,7 @@ import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type {
   WorkspaceFileIndex,
   WorkspacePath,
+  WorkspacePreviewLink,
 } from "@/features/agents/lib/workspaceFiles"
 import type { AgentPullRequest } from "@/features/agents/lib/types"
 
@@ -18,6 +19,10 @@ export interface DesktopProject {
   addedAt: number
   /** Terminal/panel scope for the project itself, before a thread exists. */
   scopeId: string
+  /** The Open SWE project this folder belongs to; older desktop builds omit it. */
+  projectId?: string | null
+  /** The GitHub repository the folder is a clone of, if any; older builds omit it. */
+  repo?: string | null
 }
 
 /**
@@ -168,6 +173,8 @@ declare global {
       taskWorkspaces?: boolean
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>
+      /** Missing before desktop builds that open app pages in the system browser. */
+      openInBrowser?: (path: string) => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
@@ -186,6 +193,11 @@ declare global {
       }) => Promise<DesktopLocalThread | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
+      /** Missing before desktop builds that link folders to Open SWE projects. */
+      linkProject?: (input: {
+        cwd: string
+        projectId: string | null
+      }) => Promise<DesktopProject | null>
       getVersion: () => Promise<string>
       getUpdateState: () => Promise<DesktopUpdateState>
       installUpdate: () => Promise<boolean>
@@ -197,7 +209,11 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack" | "github") => Promise<boolean>
+      connectService: (
+        provider: "slack" | "github",
+        options?: { recoveryToken: string }
+      ) => Promise<boolean | { recoveryToken: string; error?: string }>
+      cancelConnectService?: (provider: "slack" | "github") => Promise<void>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
@@ -239,6 +255,11 @@ declare global {
       listWorkspaceFiles: (
         localSessionId: string
       ) => Promise<WorkspaceFileIndex>
+      /** Absent before the desktop release that serves local previews. */
+      previewWorkspaceFile?: (input: {
+        localSessionId: string
+        relativePath: string
+      }) => Promise<WorkspacePreviewLink>
       terminal: DesktopTerminalBridge
     }
   }

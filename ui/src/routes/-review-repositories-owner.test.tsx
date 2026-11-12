@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -66,6 +67,7 @@ function renderPage() {
       </Suspense>
     </QueryClientProvider>
   )
+  return client
 }
 
 const toggle = (repo: string) =>
@@ -73,7 +75,7 @@ const toggle = (repo: string) =>
     name: `Run reviews automatically for ${repo}`,
   })
 
-async function startToggle() {
+async function startToggle(repo = "acme/api", on = true, enabledOnly = false) {
   vi.spyOn(api, "listAutoReviewRepos").mockResolvedValue({
     repos: ["acme/web"],
   })
@@ -92,9 +94,11 @@ async function startToggle() {
   await waitFor(() =>
     expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
   )
-  fireEvent.click(toggle("acme/api"))
+  if (enabledOnly)
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enabled only" }))
+  fireEvent.click(toggle(repo))
   await waitFor(() =>
-    expect(toggle("acme/api").getAttribute("aria-checked")).toBe("true")
+    expect(toggle(repo).getAttribute("aria-checked")).toBe(String(on))
   )
   return settle
 }
@@ -115,6 +119,72 @@ it("flips the switch before the save resolves and locks only that row", async ()
   expect(toggle("acme/api").getAttribute("aria-checked")).toBe("true")
 })
 
+it("keeps a pending disabled row visible until the save succeeds", async () => {
+  const settle = await startToggle("acme/web", false, true)
+
+  expect(toggle("acme/web").hasAttribute("data-disabled")).toBe(true)
+  vi.mocked(api.listAutoReviewRepos).mockResolvedValue({ repos: [] })
+  settle.resolve({ repos: [] })
+
+  await waitFor(() =>
+    expect(screen.queryByRole("switch", { name: /acme\/web/ })).toBeNull()
+  )
+  expect(
+    screen.getByText("No repositories have automatic reviews enabled.")
+  ).toBeTruthy()
+})
+
+it("keeps a failed disabled row visible and restores its enabled state", async () => {
+  const settle = await startToggle("acme/web", false, true)
+
+  expect(toggle("acme/web").hasAttribute("data-disabled")).toBe(true)
+  settle.reject(new Error("nope"))
+
+  await waitFor(() =>
+    expect(toggle("acme/web").hasAttribute("data-disabled")).toBe(false)
+  )
+  expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+})
+
+it("filters cached enabled repositories after a background refresh fails", async () => {
+  vi.spyOn(api, "listAutoReviewRepos").mockResolvedValue({
+    repos: ["acme/web"],
+  })
+  const client = renderPage()
+  await waitFor(() =>
+    expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+  )
+
+  vi.mocked(api.listAutoReviewRepos).mockRejectedValue(
+    new Error("refresh failed")
+  )
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["autoReviewRepos"] })
+  })
+  expect(await screen.findByRole("alert")).toBeTruthy()
+  expect(screen.getByText("1/2 run automatically")).toBeTruthy()
+  expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+  expect(toggle("acme/api").getAttribute("aria-checked")).toBe("false")
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Enabled only" }))
+  expect(screen.queryByRole("switch", { name: /acme\/api/ })).toBeNull()
+  expect(toggle("acme/web")).toBeTruthy()
+
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Search repositories" }),
+    {
+      target: { value: "api" },
+    }
+  )
+  expect(
+    screen.getByText("No enabled repositories match your search.")
+  ).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Enabled only" }))
+  expect(toggle("acme/api")).toBeTruthy()
+  expect(screen.queryByRole("switch", { name: /acme\/web/ })).toBeNull()
+})
+
 it("turns the switch back off when the save fails", async () => {
   const settle = await startToggle()
 
@@ -123,4 +193,34 @@ it("turns the switch back off when the save fails", async () => {
     expect(toggle("acme/api").getAttribute("aria-checked")).toBe("false")
   )
   expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+})
+
+it("shows a settings error instead of an empty enabled list and recovers on retry", async () => {
+  let rejectLoad: (error: Error) => void = () => {}
+  vi.spyOn(api, "listAutoReviewRepos").mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectLoad = reject
+      })
+  )
+  renderPage()
+  fireEvent.click(screen.getByRole("checkbox", { name: "Enabled only" }))
+  rejectLoad(new Error("settings unavailable"))
+
+  expect(await screen.findByRole("alert")).toBeTruthy()
+  expect(
+    screen.queryByText("No repositories have automatic reviews enabled.")
+  ).toBeNull()
+  expect(screen.queryByText("0/2 run automatically")).toBeNull()
+  expect(screen.queryByRole("switch")).toBeNull()
+
+  vi.mocked(api.listAutoReviewRepos).mockResolvedValue({ repos: ["acme/web"] })
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+  await waitFor(() =>
+    expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+  )
+  expect(screen.queryByRole("alert")).toBeNull()
+  expect(screen.queryByRole("switch", { name: /acme\/api/ })).toBeNull()
+  expect(screen.getByText("1/2 run automatically")).toBeTruthy()
 })

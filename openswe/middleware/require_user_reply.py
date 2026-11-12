@@ -11,14 +11,13 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage
+from runtime_api.catalog import Nudge
+from runtime_api.provenance import Provenance
 
 from openswe.input_messages import (
     SystemIdentity,
     build_input_messages,
-    dynamic_context_hash,
-    message_sender_id,
 )
-from openswe.middleware.message_content import content_to_text
 from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
@@ -37,12 +36,6 @@ REPLY_GUARD: SystemIdentity = {
     "platform": "open-swe",
 }
 
-WORK_STATE_GUARD: SystemIdentity = {
-    "id": "system:work-state-guard",
-    "display_name": "Work state guard",
-    "platform": "open-swe",
-}
-
 
 def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
     """The surface this thread currently owes its answer to."""
@@ -56,14 +49,15 @@ def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
 def _starts_turn(message: BaseMessage) -> bool:
     if not isinstance(message, HumanMessage):
         return False
-    if dynamic_context_hash(message.content) is not None:
+    provenance = Provenance.of(message)
+    if provenance is not None and provenance.kind == "context":
         return False
-    return message_sender_id(message.content, kind="system") != REPLY_GUARD["id"]
+    return provenance is None or provenance.sender != REPLY_GUARD["id"]
 
 
 def reply_nudge(
     tool_name: str, no_reply_tool_name: str, introduced: set[str] | None = None
-) -> list[str]:
+) -> list[Nudge]:
     """What asks the model again for the reply it owes, introducing the guard unless ``introduced``."""
     instruction = prompt(
         "runs/missing-user-reply",
@@ -75,14 +69,4 @@ def reply_nudge(
         systems=[REPLY_GUARD],
         injected_dynamic_context_hashes=set(introduced or ()),
     )
-    return [content_to_text(message["content"]) for message in built]
-
-
-def work_state_nudge(tool_name: str) -> list[str]:
-    """What sends a goal-mode run back to work until it reports where the work stands."""
-    built = build_input_messages(
-        prompt("runs/unfinished-work", tool=tool_name),
-        {"sender_id": WORK_STATE_GUARD["id"], "surface": "automation", "kind": "system"},
-        systems=[WORK_STATE_GUARD],
-    )
-    return [content_to_text(message["content"]) for message in built]
+    return [Nudge.of(message) for message in built]

@@ -26,7 +26,6 @@ import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
 
-const STORAGE_KEY = "open-swe.admin.slack-code-channels-enabled"
 const storage = new Map<string, string>()
 const localStorage = {
   clear: () => storage.clear(),
@@ -52,13 +51,8 @@ describe("SlackIntegrationSection", () => {
     })
   })
 
-  it("defaults to legacy Slack and copies Code Channels only when enabled", async () => {
+  it("copies the ordinary Slack manifest", async () => {
     render(<SlackIntegrationSection backendUrl="https://openswe.example.com" />)
-
-    const toggle = screen.getByRole("switch", {
-      name: /^Slack Code Channels/,
-    })
-    expect(toggle.getAttribute("aria-checked")).toBe("false")
 
     fireEvent.click(screen.getByRole("button", { name: "Copy manifest" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
@@ -70,14 +64,6 @@ describe("SlackIntegrationSection", () => {
     expect(legacy.oauth_config.redirect_urls).toContain(
       "https://openswe.example.com/dashboard/api/slack/callback"
     )
-
-    fireEvent.click(toggle)
-    expect(localStorage.getItem(STORAGE_KEY)).toBe("true")
-    fireEvent.click(screen.getByRole("button", { name: "Copy manifest" }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
-    expect(
-      JSON.parse(writeText.mock.calls[1]![0]).features.code_channels.enabled
-    ).toBe(true)
   })
 })
 

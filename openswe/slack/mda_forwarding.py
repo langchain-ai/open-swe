@@ -2,46 +2,40 @@
 
 Open SWE's Slack app keeps its URLs at the backend's ``/webhooks/slack``. A
 conversation belongs to MDA when MDA's Slack channel can start it
-(:func:`mda_can_start`): the backend binds the Slack thread to the thread MDA's
-channel will use, indexes that thread as the channel's, remembers the request it
-gated, and forwards Slack's request to LangSmith Trigger Server exactly as Slack sent it.
-Trigger Server verifies Slack's signature as if Slack had called it and hands the
-message to the deployment's Slack channel, which asks ``/slack/channel/events``
-what to start (:mod:`openswe.slack.channel`). Later messages in that Slack thread,
-and Slack's Stop, follow it there. Every other conversation stays on today's intake.
+(:func:`mda_can_start`) or holds it already; the backend forwards Slack's request
+to LangSmith Trigger Server exactly as Slack sent it. Trigger Server verifies
+Slack's signature as if Slack had called it and hands the message to the
+deployment's Slack channel, which decides what it starts from the message itself,
+and makes a new conversation its own (:mod:`openswe.slack.channel`). Later
+messages in that Slack thread, Slack's Stop, and clicks on the agent's buttons
+there follow it. Every other conversation stays on today's intake.
 
 Every environment forwards: where MDA isn't set up, Trigger Server refuses the request
-(an unregistered Slack app gets a 401), and the backend takes a conversation the channel
-never started back and answers it itself, as it always has (:func:`take_back`). A
-forwarded message never ends in silence: when a conversation MDA's channel started can't
-be forwarded, or the channel
-never asks about a message (:func:`sweep_lost_requests`), the backend takes the
-remembered request back and replies with an error in the Slack thread. Taking it is
-atomic, so the person gets the run, the backend's answer or the error, never two.
+(an unregistered Slack app gets a 401), and the backend answers a new conversation's
+message itself, as it always has; one in a conversation MDA's channel holds gets an
+error reply instead (the caller's ``on_refused``).
 """
 
 import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 import httpx2
 from pydantic import JsonValue
 
-from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
-from openswe.jobs import queue
-from openswe.run_config import Repo
+from openswe.dispatch import channel_of
+from openswe.slack.client import SlackThreadMappingError
+from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.records import bind_slack_thread_id, lookup_slack_thread_id
-from openswe.slack.request import SlackRequest
-from openswe.slack.webhook import notify_slack_processing_error, process_slack_mention
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
+from openswe.threads.runtimes import RUNTIMES
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks.common import (
     PROVISIONAL_VISIBILITY_KEY,
-    SlackRepoResolution,
     visibility_is_settled,
 )
 
@@ -56,18 +50,9 @@ SIGNATURE_WINDOW_SECONDS: Final = 300
 _ATTEMPTS: Final = 5
 _TIMEOUT_SECONDS: Final = 10.0
 _FIRST_BACKOFF_SECONDS: Final = 1.0
-#: Thread metadata key holding the requests the backend gated, until the channel asks for them.
-PENDING_KEY: Final = "mda_slack_requests"
-_PENDING_TTL_SECONDS: Final = 600
-#: Thread metadata key holding each request the channel took, with the call that took it,
-#: so MDA retrying that call gets the same request again.
-RECALLED_KEY: Final = "mda_slack_recalled"
-#: MDA retries a call within three attempts of at most a minute each.
-_REPLAY_SECONDS: Final = 300
-#: A forwarded message the channel hasn't asked about by then is lost: the person hears so.
-LOST_AFTER_SECONDS: Final = 90
-SWEEP_JOB: Final = "mda_slack_lost_requests"
-SWEEP_SCHEDULE: Final = "* * * * *"
+#: The job that once reported forwarded messages the channel never asked about; nothing is
+#: remembered for it any more, so its schedule is cancelled.
+RETIRED_SWEEP_JOB: Final = "mda_slack_lost_requests"
 
 #: The Slack message subtypes Trigger Server starts runs for: plain messages and uploads.
 #: It ignores every other (``thread_broadcast``, edits, joins), so none of those is forwarded.
@@ -79,6 +64,10 @@ FORWARDED_SUBTYPES: Final = frozenset({"", "file_share"})
 TRIGGER_EVENTS_URL: Final = (
     "https://api.smith.langchain.com/v1/triggers/webhooks/d809e66e-0000-4000-8000-000000000003"
 )
+#: Trigger Server's Slack interactivity URL.
+TRIGGER_INTERACTIVITY_URL: Final = (
+    "https://api.smith.langchain.com/v1/triggers/webhooks/slack-custom-app/interactivity"
+)
 
 
 def trigger_server_takes(subtype: str) -> bool:
@@ -86,32 +75,18 @@ def trigger_server_takes(subtype: str) -> bool:
     return subtype in FORWARDED_SUBTYPES
 
 
-def mda_can_start(
-    *,
-    subtype: str,
-    from_bot: bool,
-    code_channel: bool,
-    concierge_dm: bool,
-    kitchen_channel: bool,
-    breakout: bool,
-) -> bool:
+def mda_can_start(*, subtype: str, breakout: bool) -> bool:
     """Whether MDA's Slack channel can start a new conversation with this message.
 
-    It can for a person's mention of Open SWE in a channel and for a message in their
-    DM with it: Trigger Server delivers those as ``mention`` and ``directMessage``, and
-    the backend's endpoint builds the run it would have started itself. The rest
-    needs the backend:
+    It can for a mention of Open SWE by a person or a bot on Open SWE's allow-list, a
+    kitchen channel's untagged message and a DM (a concierge DM as a whole,
+    :func:`startable_concierge`). The rest needs the backend:
 
-    - A code channel is one session for the whole channel, and a concierge DM one for
-      the whole DM; MDA keys a conversation by its Slack thread.
-    - A kitchen channel starts work from untagged messages, routed to its workspace.
-    - Bots' messages carry the triggering bot through the backend's own intake.
-    - Breakouts open flows of their own.
+    - Breakouts open flows of their own; one into a new thread reaches MDA on a thread of
+      its own (:func:`side_thread_id`).
     - Trigger Server ignores subtypes outside :data:`FORWARDED_SUBTYPES`.
     """
-    return trigger_server_takes(subtype) and not (
-        from_bot or code_channel or concierge_dm or kitchen_channel or breakout
-    )
+    return trigger_server_takes(subtype) and not breakout
 
 
 def mda_thread_id(app_id: str, team_id: str, channel_id: str, root_ts: str) -> str:
@@ -128,6 +103,18 @@ async def owned_thread(channel_id: str, root_ts: str) -> str | None:
         return None
     thread = await index.get(thread_id)
     return thread_id if thread is not None and channel_of(thread.metadata) == CHANNEL else None
+
+
+async def owned_conversation(channel_id: str, thread_ts: str) -> str | None:
+    """The MDA channel's thread a click in this Slack thread belongs to, or ``None``.
+
+    A concierge DM's unthreaded buttons belong to the DM's one thread.
+    """
+    if thread_id := await owned_thread(channel_id, thread_ts):
+        return thread_id
+    if channel_id.startswith("D") and thread_ts != CONCIERGE_TS:
+        return await owned_thread(channel_id, CONCIERGE_TS)
+    return None
 
 
 async def channel_started(thread_id: str) -> bool:
@@ -151,6 +138,11 @@ async def claim_conversation(
     """
     thread_id = mda_thread_id(app_id, team_id, channel_id, root_ts)
     await bind_slack_thread_id(channel_id, root_ts, thread_id)
+    await _adopt(thread_id, owner_login)
+    return thread_id
+
+
+async def _adopt(thread_id: str, owner_login: str | None) -> None:
     # Private to the person who started it until the thread's first metadata write, by the
     # channel's run or by the backend taking the conversation back, says who may see it.
     metadata: dict[str, JsonValue] = {
@@ -159,9 +151,80 @@ async def claim_conversation(
         "source": "slack",
     }
     if owner_login:
+        metadata["owner_type"] = "user"
         metadata["owner_login"] = owner_login
     await adopt_channel_run(thread_id, CHANNEL, metadata=metadata)
+
+
+def side_thread_id(channel_id: str, message_ts: str) -> str:
+    """The thread a `/btw` question or a new breakout runs on, apart from its Slack thread's.
+
+    Derived from the message, so MDA's Slack channel finds the request remembered there
+    when it asks about the message (``plan_slack_turn``).
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-side:{channel_id}:{message_ts}"))
+
+
+async def claim_side(thread_id: str, *, owner_login: str | None = None) -> None:
+    """Make a side thread (:func:`side_thread_id`) MDA's channel's, before its request is
+    remembered."""
+    await _adopt(thread_id, owner_login)
+
+
+async def holds(thread_id: str) -> bool:
+    """Whether ``thread_id`` is a conversation of MDA's Slack channel."""
+    thread = await index.get(thread_id) if thread_id else None
+    return thread is not None and channel_of(thread.metadata) == CHANNEL
+
+
+async def claim_breakout(thread_id: str, *, owner_login: str | None = None) -> None:
+    """Make a breakout the agent opens with its tool MDA's channel's: a side thread the
+    channel's handlers run from its first reply on, which the backend starts first.
+
+    Made on MDA as the handlers' own thread before the backend starts that run there,
+    since the channel never started one.
+    """
+    await _adopt(thread_id, owner_login)
+    await RUNTIMES.mda_runtime.create_handler_thread(thread_id, provider=CHANNEL, channel=CHANNEL)
+
+
+def concierge_thread_id(app_id: str, team_id: str, channel_id: str) -> str:
+    """The one thread an MDA concierge DM runs on."""
+    return mda_thread_id(app_id, team_id, channel_id, CONCIERGE_TS)
+
+
+async def startable_concierge(
+    *, app_id: str, team_id: str, channel_id: str, can_start: bool
+) -> str | None:
+    """The thread MDA would claim for a concierge DM no thread holds yet, or ``None``."""
+    if not (can_start and app_id and team_id and channel_id):
+        return None
+    if await lookup_slack_thread_id(channel_id, CONCIERGE_TS) is not None:
+        return None
+    return concierge_thread_id(app_id, team_id, channel_id)
+
+
+async def claim_concierge(
+    app_id: str, team_id: str, channel_id: str, *, owner_login: str | None = None
+) -> str:
+    """Make a concierge DM MDA's: its thread id."""
+    thread_id = concierge_thread_id(app_id, team_id, channel_id)
+    await bind_slack_thread_id(channel_id, CONCIERGE_TS, thread_id)
+    await _adopt(thread_id, owner_login)
     return thread_id
+
+
+async def join_concierge(channel_id: str, root_ts: str, thread_id: str) -> None:
+    """Bind a Slack thread in an MDA concierge DM to the DM's thread, so Stop finds it."""
+    if root_ts == CONCIERGE_TS:
+        return
+    try:
+        await bind_slack_thread_id(channel_id, root_ts, thread_id)
+    except SlackThreadMappingError:
+        logger.warning(
+            "A Slack thread in a concierge DM belongs to another thread",
+            extra={"agent_thread_id": thread_id, "slack_thread_ts": root_ts},
+        )
 
 
 async def startable_thread(
@@ -182,120 +245,17 @@ async def startable_thread(
         return None
     if await lookup_slack_thread_id(channel_id, root_ts) is not None:
         return None
-    return mda_thread_id(app_id, team_id, channel_id, root_ts)
-
-
-async def remember(
-    request: SlackRequest, repo: SlackRepoResolution | None, message_ts: str
-) -> None:
-    """Keep the request the backend gated, until the channel asks what the message starts."""
-    if request.thread_id is None:
-        return
-    entry: dict[str, JsonValue] = {
-        "request": request.model_dump(mode="json"),
-        "repo": None
-        if repo is None or repo.repo is None
-        else {**repo.repo.model_dump(mode="json"), "explicit": repo.explicit},
-        "at": time.time(),
-    }
-    # One statement, so a message remembered while another is recalled keeps both.
-    await index.put_entry(
-        request.thread_id,
-        PENDING_KEY,
-        message_ts,
-        entry,
-        expired_before=time.time() - _PENDING_TTL_SECONDS,
-    )
-
-
-async def recall(
-    thread_id: str, message_ts: str, call_id: str
-) -> tuple[SlackRequest, SlackRepoResolution | None] | None:
-    """The request remembered for ``message_ts`` in ``thread_id``, taken out of the thread.
-
-    One call takes it. MDA retries a call it got no answer to with the same webhook id,
-    ``call_id``, and that call gets the request again, so the run is still built once
-    for MDA; any other call gets ``None``.
-    """
-    now = time.time()
-    entry = await index.take_entry(thread_id, PENDING_KEY, message_ts)
-    if isinstance(entry, dict):
-        taken: dict[str, JsonValue] = {"entry": entry, "by": call_id, "at": now}
-        await index.put_entry(
-            thread_id, RECALLED_KEY, message_ts, taken, expired_before=now - _REPLAY_SECONDS
-        )
-    else:
-        entry = await _taken_by(thread_id, message_ts, call_id, since=now - _REPLAY_SECONDS)
-    if entry is None or not _stamped_since(entry, now - _PENDING_TTL_SECONDS):
+    thread_id = mda_thread_id(app_id, team_id, channel_id, root_ts)
+    # A conversation that moved to another Slack thread took its thread along, and MDA
+    # handed it to that Slack thread, so this one starts on the backend again.
+    if await index.get(thread_id) is not None:
         return None
-    return _remembered(entry)
-
-
-async def _taken_by(
-    thread_id: str, message_ts: str, call_id: str, *, since: float
-) -> dict[str, JsonValue] | None:
-    """The request ``call_id`` took for ``message_ts`` since ``since``, if it took one."""
-    thread = await index.get(thread_id)
-    recalled = thread.metadata.get(RECALLED_KEY) if thread is not None else None
-    taken = recalled.get(message_ts) if isinstance(recalled, dict) else None
-    if not (isinstance(taken, dict) and taken.get("by") == call_id):
-        return None
-    entry = taken.get("entry")
-    return entry if isinstance(entry, dict) and _stamped_since(taken, since) else None
-
-
-def _stamped_since(entry: Mapping[str, JsonValue], since: float) -> bool:
-    at = entry.get("at")
-    return isinstance(at, int | float) and at >= since
-
-
-def _remembered(
-    entry: dict[str, JsonValue],
-) -> tuple[SlackRequest, SlackRepoResolution | None]:
-    request = SlackRequest.model_validate(entry.get("request"))
-    raw_repo = entry.get("repo")
-    repo = None
-    if isinstance(raw_repo, dict):
-        explicit = bool(raw_repo.pop("explicit", False))
-        repo = SlackRepoResolution(repo=Repo.model_validate(raw_repo), explicit=explicit)
-    return request, repo
+    return thread_id
 
 
 def forwarded_headers(headers: Mapping[str, str]) -> dict[str, str]:
     """The headers of Slack's request Trigger Server verifies, by their canonical names."""
     return {name: value for name in FORWARDED_HEADERS if (value := headers.get(name))}
-
-
-async def report_lost(thread_id: str, message_ts: str, why: str) -> bool:
-    """Reply in the Slack thread that its message won't run; whether it did.
-
-    Takes the remembered request back first, so a message the channel already asked
-    about, and so ran, is left alone, and a message is reported once.
-    """
-    entry = await index.take_entry(thread_id, PENDING_KEY, message_ts)
-    if not isinstance(entry, dict):
-        return False
-    request, repo = _remembered(entry)
-    await notify_slack_processing_error(request, repo.repo if repo else None, MdaHandoffLost(why))
-    return True
-
-
-async def take_back(thread_id: str, message_ts: str) -> bool:
-    """Answer a conversation Trigger Server refused on the backend, as before MDA; whether it did.
-
-    Only while the channel never started the conversation (:func:`channel_started`): the
-    thread stops being the channel's, so its later messages stay here too, and the backend
-    runs the request it gated. Taking the request back first leaves one the channel already
-    asked about alone.
-    """
-    entry = await index.take_entry(thread_id, PENDING_KEY, message_ts)
-    if not isinstance(entry, dict):
-        return False
-    request, repo = _remembered(entry)
-    released: dict[str, JsonValue] = {CHANNEL_METADATA_KEY: None}
-    await index.update(thread_id, released)
-    await process_slack_mention(request, repo)
-    return True
 
 
 class MdaHandoffLost(RuntimeError):
@@ -308,14 +268,12 @@ async def forward_to_trigger_server(
     headers: Mapping[str, str],
     *,
     thread_id: str,
-    message_ts: str,
     event_id: str,
+    on_refused: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Deliver a Slack request to Trigger Server unchanged, retrying while its signature is valid.
 
-    When Trigger Server refuses it, or every attempt fails, the message remembered at
-    ``message_ts`` (none for Slack's Stop) is answered here: by the backend itself while
-    the channel never started the conversation (:func:`take_back`), else with an error.
+    When Trigger Server refuses it, or every attempt fails, ``on_refused`` answers it here.
     """
     sent_at = float(headers.get("X-Slack-Request-Timestamp") or 0)
     backoff = _FIRST_BACKOFF_SECONDS
@@ -357,50 +315,10 @@ async def forward_to_trigger_server(
         extra={
             "slack_event_id": event_id,
             "agent_thread_id": thread_id,
-            "slack_message_ts": message_ts,
             "forward_outcome": outcome,
             "status": status,
             "attempts": attempt,
         },
     )
-    if not delivered and message_ts:
-        if await channel_started(thread_id):
-            await report_lost(thread_id, message_ts, f"Trigger Server forward {outcome} ({status})")
-        else:
-            await take_back(thread_id, message_ts)
-
-
-async def sweep_lost_requests() -> int:
-    """Reply in each Slack thread whose forwarded message the channel never asked about.
-
-    Normally the channel asks within seconds; one that hasn't after
-    :data:`LOST_AFTER_SECONDS` was dropped on the way (Trigger Server, MDA's
-    deployment, a restart). Entries past the TTL are dropped unreported, and so are
-    the requests the channel took once MDA can no longer retry the call.
-    """
-    now = time.time()
-    for thread_id, message_ts in await index.entries_between(
-        RECALLED_KEY, after=now - _PENDING_TTL_SECONDS, before=now - _REPLAY_SECONDS
-    ):
-        await index.take_entry(thread_id, RECALLED_KEY, message_ts)
-    reported = 0
-    for thread_id, message_ts in await index.entries_between(
-        PENDING_KEY, after=now - _PENDING_TTL_SECONDS, before=now - LOST_AFTER_SECONDS
-    ):
-        try:
-            lost = await report_lost(
-                thread_id, message_ts, "MDA's Slack channel never asked what the message starts"
-            )
-        except Exception:
-            logger.exception(
-                "Could not report a lost Slack message",
-                extra={"agent_thread_id": thread_id, "slack_message_ts": message_ts},
-            )
-            continue
-        reported += lost
-    return reported
-
-
-async def schedule_sweep() -> None:
-    """Keep :func:`sweep_lost_requests` running every minute."""
-    await queue.schedule(SWEEP_JOB, cron=SWEEP_SCHEDULE, key=SWEEP_JOB)
+    if not delivered and on_refused is not None:
+        await on_refused()

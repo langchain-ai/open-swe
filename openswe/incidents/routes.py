@@ -1,30 +1,15 @@
-"""Authenticated dashboard projections and commands for Incidents."""
+"""Admin settings for the channels Robin joins as incident channels."""
 
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import require_session
-from openswe.incidents.models import IncidentId
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
-
-
-class IncidentCommandBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    request_id: str = Field(min_length=1, max_length=200)
-    action: Literal["ask", "investigate_again", "pause", "resume", "complete", "reopen"]
-    text: str | None = Field(default=None, max_length=8000)
-
-    @model_validator(mode="after")
-    def require_question(self) -> Self:
-        if self.action == "ask" and not self.text:
-            raise ValueError("ask requires nonempty text")
-        return self
 
 
 class IncidentSettingsBody(BaseModel):
@@ -32,13 +17,6 @@ class IncidentSettingsBody(BaseModel):
 
     expected_version: int = Field(ge=0, strict=True)
     policy: dict[str, Any]
-
-
-async def _responder(
-    session: Annotated[dict[str, Any], Depends(require_session)],
-) -> dict[str, Any]:
-    """Any signed-in dashboard user may read incidents; settings stay admin-only."""
-    return session
 
 
 async def _administrator(
@@ -56,10 +34,6 @@ def _actor(session: dict[str, Any]) -> dict[str, Any]:
         "github_login": session["sub"],
         "email": session.get("email"),
     }
-
-
-responder = _responder
-actor = _actor
 
 
 @router.get("/settings")
@@ -82,54 +56,5 @@ async def update_settings(
     return await service.update_settings(
         policy=body.policy,
         expected_version=body.expected_version,
-        actor=_actor(session),
-    )
-
-
-@router.get("/records")
-async def list_incidents(
-    session: Annotated[dict[str, Any], Depends(_responder)],
-    view: Literal["active", "inactive", "all"] | None = None,
-    q: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 25,
-    cursor: str | None = None,
-) -> dict[str, Any]:
-    from openswe.incidents import service as incidents
-
-    return await incidents.list_incidents(
-        view=view,
-        q=q,
-        limit=limit,
-        cursor=cursor,
-        include_setup=is_admin(session.get("email"), login=session.get("sub")),
-    )
-
-
-@router.get("/records/{incident_id}")
-async def get_incident(
-    incident_id: IncidentId,
-    session: Annotated[dict[str, Any], Depends(_responder)],
-) -> dict[str, Any]:
-    from openswe.incidents import service
-
-    return await service.get_incident(
-        incident_id, include_setup=is_admin(session.get("email"), login=session.get("sub"))
-    )
-
-
-@router.post("/records/{incident_id}/commands", status_code=202)
-@audit_endpoint
-async def submit_command(
-    incident_id: IncidentId,
-    body: IncidentCommandBody,
-    session: Annotated[dict[str, Any], Depends(_responder)],
-) -> dict[str, Any]:
-    from openswe.incidents import service
-
-    return await service.submit_command(
-        incident_id,
-        action=body.action,
-        text=body.text,
-        request_id=body.request_id,
         actor=_actor(session),
     )

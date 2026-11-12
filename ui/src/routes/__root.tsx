@@ -28,8 +28,8 @@ import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
-import { useSession } from "@/lib/session"
-import { GitHubLinkPrompt } from "@/features/agents/components/GitHubLinkPrompt"
+import { PageCommandRunner } from "@/features/agents/components/PageCommandRunner"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -61,7 +61,7 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1, maximum-scale=1",
       },
       { name: "theme-color", content: THEME_COLOR.light },
-      { title: "Open SWE" },
+      { title: "Robin" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -86,18 +86,11 @@ export const Route = createRootRouteWithContext<{
   shellComponent: RootDocument,
 })
 
-function AccountGate({ children }: { children: React.ReactNode }) {
-  const session = useSession()
-  if (session.data?.requires_github_link) {
-    return (
-      <main className="flex min-h-svh bg-surface-level-1 text-primary">
-        <GitHubLinkPrompt user={session.data} />
-      </main>
-    )
-  }
+function AppProviders({ children }: { children: React.ReactNode }) {
   return (
     <>
       <InvalidationStream />
+      <PageCommandRunner />
       <AppNotifications />
       <VersionMismatchBanner />
       <AppCommandProvider>{children}</AppCommandProvider>
@@ -118,7 +111,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         )}
         <HeadContent />
       </head>
-      <body>
+      <body onClickCapture={githubUrls.openModifiedLink}>
         {typeof window !== "undefined" &&
           window.openSweDesktop && (
             // Rendered first so later no-drag elements carve out of it; the
@@ -132,7 +125,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Favicon />
           <TooltipProvider>
             <AnalyticsIdentity />
-            <AccountGate>{children ?? <Outlet />}</AccountGate>
+            <AppProviders>{children ?? <Outlet />}</AppProviders>
             <PerfHudMount />
             {import.meta.env.VITE_DEVTOOLS !== "false" && (
               <>

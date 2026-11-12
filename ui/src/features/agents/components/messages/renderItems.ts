@@ -1,4 +1,5 @@
 import { parseSqlResult } from "../chat/SqlResultTable"
+import { Thought } from "./thought"
 import { routedMessageHref } from "./timeline/workEntry"
 import {
   parseManagedToolsCard,
@@ -137,6 +138,80 @@ export function collapsedWorkItems(
   return items.flatMap((item) => attentionItems(item, includeUnfinished))
 }
 
+/** One entry of a live work tail: a thought's latest passage, or a tool call. */
+export type WorkTailEntry =
+  | {
+      kind: "reasoning"
+      key: string
+      heading: string | null
+      body: string
+    }
+  | { kind: "tool"; key: string; chunk: ToolExecutionChunk }
+
+/** The latest thought and tool call, leaving history inside the work fold. */
+export class WorkTail {
+  readonly entries: Array<WorkTailEntry>
+
+  constructor(items: Array<RenderItem>) {
+    const all = items.flatMap(WorkTail.entriesOf)
+    const thought = all
+      .slice(-10)
+      .findLast((entry) => entry.kind === "reasoning")
+    const tool = all.findLast((entry) => entry.kind === "tool")
+    this.entries = [...(thought ? [thought] : []), ...(tool ? [tool] : [])]
+  }
+
+  private static entriesOf(this: void, item: RenderItem): Array<WorkTailEntry> {
+    switch (item.type) {
+      case "reasoning-item": {
+        if (item.chunk.kind !== "reasoning") return []
+        const { heading, body } = new Thought(item.chunk.text).passage
+        if (!heading && !body) return []
+        return [
+          {
+            kind: "reasoning",
+            key: item.key,
+            heading,
+            body,
+          },
+        ]
+      }
+      case "explored-group":
+      case "subagent-group":
+        return WorkTail.toolEntries(item.key, item.chunks)
+      case "code-item":
+        return WorkTail.toolEntries(
+          item.key,
+          item.chunk.calls?.length ? item.chunk.calls : [item.chunk]
+        )
+      case "edit-item":
+      case "shell-item":
+      case "sql-item":
+      case "tool-item":
+        return WorkTail.toolEntries(item.key, [item.chunk])
+      default:
+        return []
+    }
+  }
+
+  private static toolEntries(
+    itemKey: string,
+    chunks: Array<ToolExecutionChunk>
+  ): Array<WorkTailEntry> {
+    return chunks.flatMap((chunk, index) =>
+      chunk.status === "pending"
+        ? []
+        : [
+            {
+              kind: "tool" as const,
+              key: chunk.toolCallId || `${itemKey}-${index}`,
+              chunk,
+            },
+          ]
+    )
+  }
+}
+
 export function countWorkActions(items: Array<RenderItem>): number {
   return items.reduce((count, item) => {
     if (item.type === "explored-group" || item.type === "subagent-group") {
@@ -194,7 +269,7 @@ function isExplorationTool(chunk: ToolExecutionChunk): boolean {
 }
 
 function isShellTool(chunk: ToolExecutionChunk): boolean {
-  return chunk.toolKind === "execute"
+  return chunk.toolKind === "execute" || chunk.toolKind === "background"
 }
 
 function isSqlResult(chunk: ToolExecutionChunk): boolean {

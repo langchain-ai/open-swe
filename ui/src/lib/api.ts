@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 /**
  * Typed client for the open-swe dashboard backend.
  *
@@ -86,6 +87,49 @@ export interface ExpeditedExclusions {
   }[]
 }
 
+export interface EventLogFilters {
+  start_time: string
+  end_time: string
+  source?: string
+  event_type?: string
+  event_type_prefix?: string
+  delivery_id?: string
+  user_id?: string
+  workspace_id?: string
+  repository_id?: string
+  pull_request_id?: string
+}
+
+export interface LoggedEvent {
+  source: string
+  event_type: string
+  delivery_id: string
+  received_at: string
+  user_id: string | null
+  workspace_id: string | null
+  repository_id: string | null
+  pull_request_id: string | null
+  payload: unknown
+  visibility: "public" | "private" | "admin"
+  visible_to_user_id: string | null
+  user_name: string | null
+  workspace_name: string | null
+  repository_name: string | null
+  pull_request_name: string | null
+  pull_request_title: string | null
+}
+
+export interface EventLogUser {
+  id: string
+  display_name: string
+  logins: string
+}
+
+export interface EventLogPage {
+  items: LoggedEvent[]
+  cursor: string | null
+}
+
 export interface AuditLogsPage {
   items: AuditLog[]
   cursor: string | null
@@ -170,8 +214,13 @@ export interface ClientErrorReport {
 }
 
 export class ApiError extends DashboardRequestError {
-  constructor(status: number, message: string, requestId?: string) {
-    super(status, message, requestId)
+  constructor(
+    status: number,
+    message: string,
+    requestId?: string,
+    retryAfter?: string | null
+  ) {
+    super(status, message, requestId, undefined, retryAfter)
     this.name = "ApiError"
   }
 }
@@ -183,35 +232,42 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const requestId = newRequestId()
-  const res = await fetch(dashboardApiUrl(path), {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
-      ...init.headers,
-    },
-  }).catch((cause: unknown) => {
-    throw networkError(cause, requestId)
-  })
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const body = await res.json()
-      if (body?.detail)
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
-    } catch {
-      /* ignore */
+  return productAnalytics.mutation(path, init.method, async () => {
+    const requestId = newRequestId()
+    const res = await fetch(dashboardApiUrl(path), {
+      ...init,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+        ...dashboardForwardedHeaders(),
+        ...init.headers,
+      },
+    }).catch((cause: unknown) => {
+      throw networkError(cause, requestId)
+    })
+    if (!res.ok) {
+      let message = res.statusText
+      try {
+        const body = await res.json()
+        if (body?.detail)
+          message =
+            typeof body.detail === "string"
+              ? body.detail
+              : JSON.stringify(body.detail)
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(
+        res.status,
+        message,
+        requestId,
+        res.headers.get("Retry-After")
+      )
     }
-    throw new ApiError(res.status, message, requestId)
-  }
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+    if (res.status === 204) return undefined as T
+    return (await res.json()) as T
+  })
 }
 
 let activePrDetails = 0
@@ -243,7 +299,6 @@ export interface SessionUser {
   login: string
   auth_provider?: "github" | "langsmith"
   github_login?: string | null
-  requires_github_link?: boolean
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -251,8 +306,12 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** The organizations this Open SWE serves (`ALLOWED_GITHUB_ORGS`), lowercase. */
+  base_orgs?: Array<string>
   /** Mirrors the user's preference: what Enter does while a run is live. */
   follow_up_behavior?: FollowUpBehavior
+  /** Mirrors the user's preference: open Changes when a run that edited files finishes. */
+  auto_show_changes?: boolean
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -335,14 +394,11 @@ export interface Profile {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  pr_failure_reactions?: boolean
-  goal_mode?: boolean
-  experimental_conditional_approval?: boolean
-  experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
   updated_at?: string
 }
 
@@ -355,14 +411,11 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  pr_failure_reactions?: boolean
-  goal_mode?: boolean
-  experimental_conditional_approval?: boolean
-  experimental_memory?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  personal_kitchen_channel_id?: string
 }
 
 export interface SlackBotOption {
@@ -391,11 +444,32 @@ export interface AllowedSlackBotEntry {
   image_url: string
 }
 
+/** An app reviews follow, by id, pinned to the release (an app version id) an admin approved. */
+export interface AppRelease {
+  app: string
+  release: string
+}
+
+/** An app in everyone's web UI, and the repositories it reads for each person who can. */
+export interface FeaturedApp extends AppRelease {
+  repositories?: Array<string>
+}
+
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
 export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** The apps whose review step reviews of private repositories follow, each at the release an admin approved. */
+  review_apps?: Array<AppRelease> | null
+  /** Checks, by name, whose success means a pull request's preview serves its head commit. */
+  review_app_preview_checks?: Array<string> | null
+  /** Instance only: listed apps added to everyone's web UI, each at the release an admin approved. */
+  featured_apps?: Array<FeaturedApp> | null
+  /** Instance only: the domains, each with its subdomains, a review's browser may sign in to. */
+  review_browser_domains?: Array<string> | null
+  /** Instance only: the `<connection>/<tool>` that signs a review's browser in. */
+  review_browser_session_tool?: string | null
   /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
@@ -784,6 +858,7 @@ export interface UserPreferences {
   default_visibility: ThreadVisibility
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
+  auto_show_changes: boolean
 }
 
 export interface Skill {
@@ -838,6 +913,7 @@ export interface WorkspaceOption {
   slack_channel_ids: Array<string>
   /** Bound channels where untagged messages start and continue threads. */
   kitchen_channel_ids: Array<string>
+  ask_channel_ids?: Array<string>
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -886,6 +962,7 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
 }
@@ -907,6 +984,7 @@ export interface WorkspaceUpdate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
   vcpus?: number | null
@@ -930,6 +1008,7 @@ export interface WorkspaceRecord {
   repos: Array<string>
   slack_channel_ids: Array<string>
   kitchen_channel_ids: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -1094,6 +1173,7 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+  conversationResolutionRequired: boolean | null
   // Why it is on the To Review list: Open SWE assigned it, may assign it once
   // its review goes unclaimed, or it was linked in a Slack thread naming you.
   assignment?:
@@ -1135,16 +1215,13 @@ export type PullRequestActionRequest =
 export interface PullRequestActionResult {
   action: PullRequestActionName
   done: boolean
+  auto_merge?: boolean
 }
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
   | { intent: "message"; title: string; message: string }
-  | {
-      intent: "fix"
-      context: OpenPullRequest | null
-    }
-  | { intent: "address-comments" }
+  | { intent: "fix-up"; context: OpenPullRequest | null }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
 
@@ -1255,7 +1332,6 @@ export interface ReviewDetail extends Omit<
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
-  checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
@@ -1867,6 +1943,15 @@ export const api = {
     if (cursor) params.set("cursor", cursor)
     return request<AuditLogsPage>(`/audit-logs?${params}`)
   },
+  searchEventLog: (filters: EventLogFilters, cursor?: string) => {
+    const params = new URLSearchParams({ ...filters, limit: "50" })
+    if (cursor) params.set("cursor", cursor)
+    return request<EventLogPage>(`/admin/event-log?${params}`)
+  },
+  searchEventLogUsers: (q: string) =>
+    request<EventLogUser[]>(
+      `/admin/event-log/users?q=${encodeURIComponent(q)}`
+    ),
   adminListUsers: (page = 1, pageSize = 20, search = "") =>
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
@@ -1895,10 +1980,8 @@ export const api = {
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
-  addressPullRequestComments: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
+  fixUpPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix-up", context: pr }),
   sendCommentsToAgent: (
     repo: string,
     number: number,
@@ -1927,15 +2010,16 @@ export const api = {
   ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
-    method: MergeMethod
+    method: MergeMethod,
+    resolveConversations = false,
+    autoMerge = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
-      ...(pr.ci === "pending" && pr.mergeState === "blocked"
-        ? { auto_merge: true }
-        : {}),
+      ...(autoMerge ? { auto_merge: true } : {}),
+      ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   closePullRequest: (
     pr: OpenPullRequest,
@@ -2039,6 +2123,10 @@ export const api = {
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
+    ),
+  getReviewChecks: (owner: string, repo: string, number: number) =>
+    request<Array<ReviewCheckRun>>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/checks`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
@@ -2148,6 +2236,53 @@ export const api = {
       body: JSON.stringify(body),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  traceFlightSeason: (signal?: AbortSignal) =>
+    request<TraceFlightSeason>("/trace-flight/season", { signal }),
+  traceFlightBest: () => request<TraceFlightBest | null>("/trace-flight/best"),
+  submitTraceFlightRun: (body: TraceFlightSubmission) =>
+    request<TraceFlightResult>("/trace-flight/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+}
+
+/** The open Trace Flight season: the rules and the course every run is played on. */
+export interface TraceFlightSeason {
+  seasonId: string
+  rulesVersion: number
+  seed: number
+}
+
+/** Your best run this season, as inputs the game replays into your trace. */
+export interface TraceFlightBest {
+  seed: number
+  endTick: number
+  endReason: string
+  flapDeltas: Array<number>
+  score: number
+}
+
+export interface TraceFlightRow {
+  rank: number
+  name: string
+  score: number
+  you: boolean
+}
+
+export interface TraceFlightSubmission {
+  seasonId: string
+  rulesVersion: number
+  endTick: number
+  endReason: string
+  flapDeltas: ReadonlyArray<number>
+}
+
+/** The score is the server's replay of the run, never one the client sent. */
+export interface TraceFlightResult {
+  score: number
+  previousBest: number | null
+  newBest: boolean
+  board: Array<TraceFlightRow>
 }
 
 export function loginUrl(redirectTo?: string): string {
@@ -2168,23 +2303,41 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
+export type SlackRecovery = { recoveryToken: string; error?: string }
+export type ConnectResult = boolean | SlackRecovery
+
 export function connectService(
   provider: "slack" | "github",
-  redirectTo?: string
+  redirectTo?: string,
+  recoveryToken?: string
 ) {
-  const pending = window.openSweDesktop?.connectService(provider)
+  const action = productAnalytics.beginAction("integration_connect")
+  const pending = window.openSweDesktop?.connectService(
+    provider,
+    recoveryToken ? { recoveryToken } : undefined
+  )
   if (!pending) {
     const target =
       redirectTo ??
       (provider === "slack"
         ? `${window.location.pathname}${window.location.search}${window.location.hash}`
         : "")
-    const query = target
-      ? `?${new URLSearchParams({ redirect_to: target })}`
-      : ""
+    const params = new URLSearchParams()
+    if (target) params.set("redirect_to", target)
+    if (recoveryToken) params.set("slack_recovery", recoveryToken)
+    const query = params.size ? `?${params}` : ""
     window.location.assign(
       `${API_BASE}/dashboard/api/${provider}/login${query}`
     )
   }
-  return pending
+  return pending?.then(
+    (result) => {
+      action.accepted()
+      return result
+    },
+    (error: unknown) => {
+      action.failed(error)
+      throw error
+    }
+  )
 }

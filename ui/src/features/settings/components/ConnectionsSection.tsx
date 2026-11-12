@@ -5,10 +5,10 @@ import { Button } from "@langchain/macaw-components/Button"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
-import type { SessionUser } from "@/lib/api"
+import type { SessionUser, SlackRecovery } from "@/lib/api"
+import { SlackRecoveryDialog } from "./SlackRecoveryDialog"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { connectService, loginUrl } from "@/lib/api"
-import { hasLinkedGitHub } from "@/lib/linkedGitHub"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -21,6 +21,28 @@ function StatusPill({ connected }: { connected: boolean }) {
 function SlackRow({ user }: { user: SessionUser }) {
   const qc = useQueryClient()
   const [connecting, setConnecting] = useState(false)
+  const [recovery, setRecovery] = useState<SlackRecovery | null>(() => {
+    if (typeof window === "undefined") return null
+    const params = new URLSearchParams(window.location.search)
+    const recoveryToken = params.get("slack_recovery")
+    const error = params.get("recovery_error")
+    const knownError = [
+      "Slack recovery expired or changed — connect Slack again",
+      "This is not the GitHub account connected to your Slack. Try again with the GitHub account you previously used with Robin.",
+      "This GitHub account is already linked to another LangSmith account. Sign in with that LangSmith account to keep using your existing Robin account.",
+      "Your account changed — sign in again before linking GitHub",
+    ].find((message) => message === error)
+    return recoveryToken
+      ? {
+          recoveryToken,
+          error:
+            knownError ??
+            (error
+              ? "Could not recover your account. Please try again."
+              : undefined),
+        }
+      : null
+  })
 
   const slackUserId = user.slack_user_id ?? null
   const workEmail = user.email ?? null
@@ -30,46 +52,58 @@ function SlackRow({ user }: { user: SessionUser }) {
     setConnecting(true)
     // The link lands on the session's user row; refresh it when the OAuth redirect returns.
     void qc.invalidateQueries({ queryKey: ["session"] })
-    void connectService("slack")?.finally(() => {
-      setConnecting(false)
-      void qc.invalidateQueries({ queryKey: ["session"] })
-    })
+    void connectService("slack")
+      ?.then((result) => {
+        if (typeof result === "object") setRecovery(result)
+      })
+      .finally(() => {
+        setConnecting(false)
+        void qc.invalidateQueries({ queryKey: ["session"] })
+      })
   }
 
   return (
-    <SettingsRow
-      label="Slack"
-      description={
-        connected
-          ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
-          : "Sign in with Slack so Open SWE resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
-      }
-      control={
-        <div className="flex items-center gap-space-2">
-          <StatusPill connected={connected} />
-          {user.slack_oauth_enabled ? (
-            <Button
-              size="xs"
-              color={connected ? "secondary" : "primary"}
-              variant={connected ? "outlined" : "normal"}
-              leftDecorator={SlackLogoIcon}
-              onClick={connect}
-              disabled={connecting}
-            >
-              {connecting
-                ? "Redirecting…"
-                : connected
-                  ? "Reconnect"
-                  : "Connect"}
-            </Button>
-          ) : (
-            <span className="text-xxs text-secondary">
-              Sign in with Slack unavailable
-            </span>
-          )}
-        </div>
-      }
-    />
+    <>
+      {recovery && (
+        <SlackRecoveryDialog
+          recovery={recovery}
+          onCancel={() => setRecovery(null)}
+        />
+      )}
+      <SettingsRow
+        label="Slack"
+        description={
+          connected
+            ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
+            : "Connect Slack so Robin recognizes you when you tag it. Your verified email also connects Linear mentions."
+        }
+        control={
+          <div className="flex items-center gap-space-2">
+            <StatusPill connected={connected} />
+            {user.slack_oauth_enabled ? (
+              <Button
+                size="xs"
+                color={connected ? "secondary" : "primary"}
+                variant={connected ? "outlined" : "normal"}
+                leftDecorator={SlackLogoIcon}
+                onClick={connect}
+                disabled={connecting}
+              >
+                {connecting
+                  ? "Redirecting…"
+                  : connected
+                    ? "Reconnect"
+                    : "Connect"}
+              </Button>
+            ) : (
+              <span className="text-xxs text-secondary">
+                Sign in with Slack unavailable
+              </span>
+            )}
+          </div>
+        }
+      />
+    </>
   )
 }
 
@@ -147,7 +181,7 @@ function LangSmithRow({ user }: { user: SessionUser }) {
   return (
     <SettingsRow
       label="LangSmith"
-      description={`Your sign-in account${user.email ? `: ${user.email}` : ""}. Open SWE calls LangSmith as you with it. Sign out to change accounts.`}
+      description={`Your sign-in account${user.email ? `: ${user.email}` : ""}. Robin calls LangSmith as you with it. Sign out to change accounts.`}
       control={<StatusPill connected />}
     />
   )
@@ -157,7 +191,7 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
     <SettingsSection title="Accounts">
       <GitHubRow user={user} />
-      {hasLinkedGitHub(user) && <SlackRow user={user} />}
+      <SlackRow user={user} />
       <LangSmithRow user={user} />
     </SettingsSection>
   )

@@ -23,7 +23,6 @@ from openswe.walkthrough.lines import SIGNS, LinePoint, LineRange, LineSet, Rang
 
 MAX_TITLE_CHARS = 120
 MAX_EXPLANATION_CHARS = 1_200
-MAX_OTHER_SUMMARY_CHARS = 1_200
 _MAX_ERRORS = 20
 
 
@@ -282,7 +281,6 @@ class Plan(BaseModel):
     other_files: list[str] = []
     # Their diff fingerprints, so a reader who approved Other sees a changed one again.
     other_file_fingerprints: list[str] = []
-    other_summary: str = ""
     # Changed lines a planner chose to start a new hunk at, splitting git's hunk in two.
     splits: list[LinePoint] = []
 
@@ -301,7 +299,6 @@ class Plan(BaseModel):
             if lines := carry.lines(chunk.lines):
                 moved.chunks.append(chunk.model_copy(update={"lines": lines, "code": ""}))
         moved.other = carry.lines(self.other)
-        moved.other_summary = self.other_summary
         moved.splits = [point for s in self.splits if (point := carry.point(s)) is not None]
         moved.gather_hunks(index)
         return moved

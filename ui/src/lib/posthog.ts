@@ -14,7 +14,6 @@ const pages = new Set([
   "integrations",
   "admin",
   "assistant",
-  "incidents",
   "cloud-agents",
   "feature-flags",
 ])
@@ -31,11 +30,11 @@ class ProductAnalytics {
   #person: SessionUser | undefined
 
   async initialize(
-    load: PostHogLoader = async () => (await import("posthog-js")).default
+    load: PostHogLoader = async () => (await import("posthog-js")).default,
+    config?: TelemetryConfig
   ): Promise<void> {
-    let config: TelemetryConfig
     try {
-      config = await TelemetryConfig.load()
+      config ??= await TelemetryConfig.load()
     } catch (error) {
       console.warn(
         "PostHog initialization skipped: telemetry configuration unavailable",
@@ -135,4 +134,4 @@ class ProductAnalytics {
   }
 }
 
-export const productAnalytics = new ProductAnalytics()
+export const posthogAnalytics = new ProductAnalytics()

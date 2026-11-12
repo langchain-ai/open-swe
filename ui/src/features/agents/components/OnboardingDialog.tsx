@@ -2,7 +2,10 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
-import { connectService } from "@/lib/api"
+import { useState } from "react"
+
+import { connectService, type SlackRecovery } from "@/lib/api"
+import { SlackRecoveryDialog } from "@/features/settings/components/SlackRecoveryDialog"
 import { useDismissSlackOnboarding, useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
@@ -11,6 +14,8 @@ export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
   const dismiss = useDismissSlackOnboarding()
+  const [recovery, setRecovery] = useState<SlackRecovery | null>(null)
+  const [connecting, setConnecting] = useState(false)
 
   const slackEnabled = session.data?.slack_oauth_enabled ?? false
   const slackConnected = !!session.data?.slack_user_id
@@ -21,6 +26,14 @@ export function OnboardingDialog() {
     !profile.data.slack_onboarding_dismissed &&
     !session.isLoading &&
     !session.isError
+  if (recovery) {
+    return (
+      <SlackRecoveryDialog
+        recovery={recovery}
+        onCancel={() => setRecovery(null)}
+      />
+    )
+  }
   return (
     <Dialog
       open={needsSlack}
@@ -31,7 +44,7 @@ export function OnboardingDialog() {
       <DialogContent
         title="Connect your Slack account"
         titleIcon={SlackLogoIcon}
-        description="Connect Slack so that when you tag Open SWE, it can resolve your GitHub account. We use the email Slack verifies, which also lets Linear mentions resolve to you."
+        description="Connect Slack so that when you tag Robin, it can resolve your GitHub account. We use the email Slack verifies, which also lets Linear mentions resolve to you."
         showClose={false}
         className="w-[min(28rem,calc(100vw-2rem))]"
       >
@@ -45,11 +58,19 @@ export function OnboardingDialog() {
           </Button>
           <Button
             leftDecorator={SlackLogoIcon}
-            onClick={() =>
-              void connectService("slack")?.finally(
-                () => void session.refetch()
-              )
-            }
+            loading={connecting}
+            disabled={connecting}
+            onClick={() => {
+              setConnecting(true)
+              void connectService("slack")
+                ?.then((result) => {
+                  if (typeof result === "object") setRecovery(result)
+                })
+                .finally(() => {
+                  setConnecting(false)
+                  void session.refetch()
+                })
+            }}
           >
             Connect Slack
           </Button>

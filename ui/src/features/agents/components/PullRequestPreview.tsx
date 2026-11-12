@@ -1,9 +1,11 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
-import { createContext, useContext, useMemo } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { createContext, useContext, useMemo, useState } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
 import {
@@ -19,6 +21,7 @@ import type {
   AgentPullRequest,
   AgentPullRequestHealth,
 } from "@/features/agents/lib/types"
+import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
 
 interface PullRequestPreviewContextValue {
   pullRequests: Map<string, AgentPullRequest>
@@ -127,24 +130,74 @@ export function PreviewablePullRequestLink({
   children,
   ...props
 }: ComponentProps<"a">) {
-  const previews = useContext(PullRequestPreviewContext)
   const mention = usePullRequestMention(href)
   if (!mention)
     return (
-      <a href={href} {...props}>
+      <a href={href ? SlackLinks.normalize(href) : href} {...props}>
         {children}
       </a>
     )
+  return (
+    <PullRequestPreviewLink {...props} mention={mention}>
+      {children}
+    </PullRequestPreviewLink>
+  )
+}
+
+function PullRequestPreviewLink({
+  mention,
+  children,
+  ...props
+}: ComponentProps<"a"> & { mention: PullRequestMentionProps }) {
+  const previews = useContext(PullRequestPreviewContext)
+  const [open, setOpen] = useState(false)
+  const preview = useQuery({
+    ...pullRequestPreviewQuery({
+      repo: mention.repoFullName,
+      number: mention.number,
+    }),
+    enabled: open && !mention.pullRequest,
+  })
+  const data = preview.data
+  const pullRequest: AgentPullRequest | undefined =
+    mention.pullRequest ??
+    (data
+      ? {
+          repoFullName: mention.repoFullName,
+          number: mention.number,
+          url: mention.href,
+          title: data.title,
+          state:
+            data.state === "merged" || data.state === "closed"
+              ? data.state
+              : data.draft
+                ? "draft"
+                : "open",
+          headRef: data.head_ref,
+          baseRef: data.base_ref,
+          author: data.author,
+          authorAvatarUrl: data.author_avatar_url,
+          createdAt: null,
+          diffStats: {
+            files: data.changed_files,
+            additions: data.additions,
+            deletions: data.deletions,
+          },
+        }
+      : undefined)
 
   const chip = (
     <PullRequestChip {...props} {...mention}>
       {children}
     </PullRequestChip>
   )
-  if (!mention.pullRequest || !previews) return chip
-
   return (
-    <HoverCard openDelay={250} closeDelay={100}>
+    <HoverCard
+      open={open}
+      onOpenChange={setOpen}
+      openDelay={250}
+      closeDelay={100}
+    >
       <HoverCardTrigger asChild>{chip}</HoverCardTrigger>
       <HoverCardContent
         side="top"
@@ -152,11 +205,20 @@ export function PreviewablePullRequestLink({
         sideOffset={8}
         className={PULL_REQUEST_HOVER_CARD_CLASS}
       >
-        <PullRequestHoverCard
-          pullRequest={mention.pullRequest}
-          health={mention.health}
-          healthUnavailable={previews.healthUnavailable}
-        />
+        {pullRequest ? (
+          <PullRequestHoverCard
+            pullRequest={pullRequest}
+            health={mention.health}
+            healthUnavailable={previews?.healthUnavailable ?? false}
+            showHealth={mention.pullRequest !== undefined}
+          />
+        ) : (
+          <p role="status" className="p-space-2 text-xs text-secondary">
+            {preview.isError
+              ? "Pull request preview unavailable."
+              : "Loading pull request preview…"}
+          </p>
+        )}
       </HoverCardContent>
     </HoverCard>
   )

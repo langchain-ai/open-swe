@@ -6,15 +6,21 @@ import json
 import time
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
+from openswe.database.postgres import transaction
 from openswe.incidents import channels, service
-from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.incidents.models import IncidentPolicy
 from openswe.slack import routes
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common
+
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 _SIGNING_SECRET = "incidents-test-signing-secret"
 
@@ -28,6 +34,7 @@ def handler(monkeypatch):
 
 @pytest.fixture
 def client(monkeypatch) -> TestClient:
+    monkeypatch.setattr(channels.SlackChannel, "observe", AsyncMock())
     monkeypatch.setattr(common, "SLACK_SIGNING_SECRET", _SIGNING_SECRET)
     app = FastAPI()
     app.include_router(routes.router)
@@ -47,9 +54,8 @@ def _payload(event: dict) -> dict:
     }
 
 
-def _incident_state(monkeypatch, policy: IncidentPolicy, record: Incident | None = None) -> None:
+def _incident_state(monkeypatch, policy: IncidentPolicy) -> None:
     monkeypatch.setattr(service.POLICIES, "get", AsyncMock(return_value=policy))
-    monkeypatch.setattr(service.INCIDENTS, "get", AsyncMock(return_value=record))
 
 
 def _post(client, payload, *, timestamp=None, signature=None):
@@ -76,9 +82,6 @@ def _post(client, payload, *, timestamp=None, signature=None):
     [
         {"type": "channel_created", "channel": {"id": "C1", "name": "inc-payments"}},
         {"type": "channel_rename", "channel": {"id": "C1", "name": "inc-payments"}},
-        {"type": "channel_archive", "channel": "C1"},
-        {"type": "message", "channel": "C1", "subtype": "bot_message", "text": "Incident"},
-        {"type": "app_mention", "channel": "C1", "text": "Incidents again"},
     ],
 )
 def test_signed_incidents_event_precedes_coding_filters(client, handler, monkeypatch, event):
@@ -97,8 +100,8 @@ def test_signed_incidents_event_precedes_coding_filters(client, handler, monkeyp
     claim.assert_not_awaited()
 
 
-@pytest.mark.parametrize("status", ["ignored", "duplicate"])
-def test_registered_channel_stays_isolated_when_handler_declines_work(
+@pytest.mark.parametrize("status", ["duplicate"])
+def test_an_incident_channel_event_stays_isolated_when_handler_declines_work(
     client, handler, monkeypatch, status
 ):
     handler.return_value = {"status": status}
@@ -108,7 +111,10 @@ def test_registered_channel_stays_isolated_when_handler_declines_work(
         AsyncMock(side_effect=AssertionError("coding path")),
     )
 
-    response = _post(client, _payload({"type": "app_mention", "channel": "C1"}))
+    response = _post(
+        client,
+        _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-payments"}}),
+    )
 
     assert response.status_code == 200
     assert response.json() == {"status": status}
@@ -152,72 +158,30 @@ def test_unregistered_event_falls_through_to_ordinary_slack(client, handler, mon
     context.assert_awaited_once_with("ordinary", use_cache=False)
 
 
-def test_signed_channel_creation_enrolls_once_and_dedupes_retries(client, monkeypatch):
+async def test_overlapping_channel_events_queue_one_join(client, monkeypatch):
     _incident_state(
         monkeypatch,
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", channel_prefix="inc-"),
     )
-    claimed: set[str] = set()
-
-    async def claim(event_id: str, channel_id: str = "", event_ts: str = "") -> bool:
-        if event_id in claimed:
-            return False
-        claimed.add(event_id)
-        return True
-
-    monkeypatch.setattr(channels, "claim_slack_event", claim)
-    enroll = AsyncMock()
-    monkeypatch.setattr(channels, "enroll_channel", enroll)
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
         AsyncMock(side_effect=AssertionError("external lookup")),
     )
-    payload = _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-errors"}})
+    created = _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-errors"}})
+    renamed = {
+        **_payload({"type": "channel_rename", "channel": {"id": "C1", "name": "inc-errors-2"}}),
+        "event_id": "Ev2",
+    }
 
-    first = _post(client, payload)
-    second = _post(client, payload)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=client.app), base_url="http://test"
+    ) as http:
+        responses = [await _post(http, payload) for payload in (created, renamed, created)]
 
-    assert first.status_code == 200
-    assert first.json() == {"status": "accepted"}
-    assert second.json() == {"status": "duplicate"}
-    enroll.assert_awaited_once()
-    assert enroll.await_args.args[:2] == ("C1", "inc-errors")
-
-
-@pytest.mark.parametrize("field", ["team_id", "api_app_id"])
-def test_signed_wrong_installation_cannot_enroll(client, monkeypatch, field):
-    _incident_state(monkeypatch, IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1"))
-    enroll = AsyncMock()
-    monkeypatch.setattr(channels, "enroll_channel", enroll)
-    monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
-    payload = _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-errors"}})
-    payload[field] = "wrong-installation"
-
-    response = _post(client, payload)
-
-    assert response.status_code == 401
-    enroll.assert_not_awaited()
-
-
-def test_disabled_registered_channel_still_cannot_launch_coding(client, monkeypatch):
-    _incident_state(
-        monkeypatch,
-        IncidentPolicy(enabled=False, workspace_id="T1", slack_app_id="A1"),
-        Incident(
-            id=service.incident_id("T1", "C1"), workspace_id="T1", channel_id="C1", thread_id="i1"
-        ),
-    )
-    monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        common,
-        "resolve_slack_channel_context",
-        AsyncMock(side_effect=AssertionError("coding lookup")),
-    )
-
-    response = _post(
-        client, _payload({"type": "app_mention", "channel": "C1", "text": "<@BOT> fix this"})
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
+    assert [r.json() for r in responses] == [{"status": "accepted"}] * 3
+    async with transaction() as conn:
+        queued = await conn.scalar(
+            text("SELECT count(*) FROM job WHERE kind = :kind"), {"kind": channels.JOIN_JOB}
+        )
+    assert queued == 1

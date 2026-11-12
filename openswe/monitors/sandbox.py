@@ -1,8 +1,9 @@
 """One thread's monitors, as its sandbox holds them."""
 
+import shlex
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, model_validator
 
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
@@ -43,10 +44,27 @@ class MonitorState(BaseModel):
     """A glob of the raw log segments, oldest first by name."""
 
 
-class MonitorEvent(BaseModel):
-    seq: int
+class MonitorBurst(BaseModel):
     at_raw_line: int
     lines: list[str]
+
+
+class MonitorEvent(BaseModel):
+    """The bursts a monitor emitted, held together while it waited between events."""
+
+    seq: int
+    bursts: list[MonitorBurst]
+    omitted_lines: int = 0
+    """Lines held past the event's limit and left out of it."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_burst(cls, data: object) -> object:
+        # Runners started by an earlier script write a single burst inline.
+        if isinstance(data, dict) and "bursts" not in data and "lines" in data:
+            burst = {"at_raw_line": data.get("at_raw_line", 0), "lines": data["lines"]}
+            return {**data, "bursts": [burst]}
+        return data
 
 
 class MonitorEnd(BaseModel):
@@ -83,11 +101,18 @@ class SandboxMonitors:
         description: str,
         timeout: int,
         callback: bool,
+        interval: int | None = None,
     ) -> MonitorState:
+        """Start ``command``; with ``interval``, as a check run that often until it passes.
+
+        A checked monitor works as a wait for a condition: its check's output is
+        printed only once the check exits 0, as the monitor's one event, and the
+        monitor ends there.
+        """
         result = await self._call(
             "start",
             monitor_id=monitor_id,
-            command=command,
+            command=command if interval is None else self._until_passes(command, interval),
             filter=filter,
             description=description,
             timeout=timeout,
@@ -96,6 +121,14 @@ class SandboxMonitors:
             tools_url_file=TOOLS_URL_FILE,
         )
         return MonitorState.model_validate(result)
+
+    @staticmethod
+    def _until_passes(check: str, interval: int) -> str:
+        limit = max(interval, 60)
+        return (
+            f"while :; do out=$(timeout {limit} /bin/sh -c {shlex.quote(check)} 2>&1) && "
+            f'{{ printf "%s\\n" "$out"; exit 0; }}; sleep {interval}; done'
+        )
 
     async def listing(self) -> list[dict[str, JsonValue]]:
         result = await self._call("list")

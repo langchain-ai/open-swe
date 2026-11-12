@@ -168,10 +168,11 @@ function toolDisplayParts(
       if (url) return { heading: "Fetch", preview: truncateMiddle(url, 50) }
       return plain(humanizeToolTitle(title))
     }
-    case "execute": {
+    case "execute":
+    case "background": {
       if (command)
         return {
-          heading: "Shell",
+          heading: toolKind === "background" ? "Background" : "Shell",
           preview: truncateMiddle(formatShellCommand(command), 60),
         }
       return plain(humanizeToolTitle(title))

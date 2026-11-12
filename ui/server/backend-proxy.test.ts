@@ -44,6 +44,27 @@ describe("backendProxy", () => {
     expect(headers.get("cookie")).toBe("session=abc")
   })
 
+  it("tells the backend which domain the browser used", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    await backendProxy({
+      req: new Request("http://robin.example.com/dashboard/api/me", {
+        headers: {
+          "x-forwarded-proto": "https",
+          "x-open-swe-public-origin": "https://attacker.example.com",
+        },
+      }),
+    })
+
+    const headers = (
+      fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    )[1].headers as Headers
+    expect(headers.get("x-open-swe-public-origin")).toBe(
+      "https://robin.example.com"
+    )
+  })
+
   it("delivers event-stream chunks before the upstream closes", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const body = new ReadableStream<Uint8Array>({

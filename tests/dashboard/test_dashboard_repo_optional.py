@@ -1,9 +1,14 @@
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
+from openswe.dashboard import profiles
 from openswe.threads import runs as thread_runs
+from openswe.threads.identity import ThreadIdentity
+from openswe.users import User
 from tests.conftest import patch_thread_module
 
 
@@ -48,6 +53,7 @@ class _FakeLangGraphClient:
 @pytest.fixture
 def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClient:
     client = _FakeLangGraphClient()
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="token"))
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
         return {}
@@ -91,3 +97,42 @@ def test_build_configurable_includes_repo_when_configured(
     )
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert "repo_explicitly_none" not in configurable
+
+
+@pytest.mark.asyncio
+async def test_revoked_github_starts_chat_without_repository_access(
+    monkeypatch, dashboard_run_client
+):
+    user = User(id=UUID("00000000-0000-0000-0000-000000000001"))
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(ThreadIdentity, "user", AsyncMock(return_value=user))
+    configurable = await thread_runs._build_dashboard_configurable(
+        "thread-id", "octo", {"source": "dashboard", "repo_owner": "octo", "repo_name": "repo"}
+    )
+    assert configurable["github_linked"] is False
+    assert configurable["user_id"] == str(user.id)
+    assert configurable["repo_explicitly_none"] is True
+    assert "repo" not in configurable
+    assert "github_login" not in configurable
+
+
+@pytest.mark.asyncio
+async def test_revoked_github_does_not_apply_default_repository(monkeypatch, dashboard_run_client):
+    from openswe.webhooks import common
+
+    monkeypatch.setattr(
+        thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "octo/repo"})
+    )
+    monkeypatch.setattr(common, "account_link_reason", AsyncMock(return_value="revoked"))
+    monkeypatch.setattr(
+        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
+    )
+    require_repo = AsyncMock()
+    monkeypatch.setattr(thread_runs, "require_repo_access_for_user", require_repo)
+    create = AsyncMock(return_value={"thread_id": "thread-id"})
+    monkeypatch.setattr(thread_runs, "create_dashboard_thread_record", create)
+    await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="hello"), "octo"
+    )
+    require_repo.assert_not_awaited()
+    assert create.await_args.kwargs["repo_config"] == {}

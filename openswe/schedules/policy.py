@@ -28,13 +28,7 @@ class AutomationPolicy:
 
     @classmethod
     async def for_record(cls, record: Mapping[str, object]) -> AutomationPolicy:
-        owner_id = record.get("owner_id")
-        if isinstance(owner_id, UUID):
-            return cls(await User.get(owner_id))
-        if "owner_id" in record:
-            return cls(None)
-        login = record.get("created_by")
-        return await cls.for_login(login) if isinstance(login, str) else cls(None)
+        return cls(await User.automation_creator(record))
 
     @property
     def admin(self) -> bool:
@@ -53,7 +47,8 @@ class AutomationPolicy:
             text("SELECT id FROM users WHERE id = :id FOR UPDATE"), {"id": self.owner.id}
         )
         count = await conn.scalar(
-            text("SELECT count(*) FROM automation WHERE owner_id = :id"), {"id": self.owner.id}
+            text("SELECT count(*) FROM automation WHERE created_by_user_id = :id"),
+            {"id": self.owner.id},
         )
         if count is not None and count >= self.MAX_AUTOMATIONS:
             raise HTTPException(

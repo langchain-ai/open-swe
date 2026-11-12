@@ -15,7 +15,6 @@ import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
 import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
-import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
@@ -24,6 +23,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin_.audit-logs'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
+import { Route as AdminEventLogRouteImport } from './routes/admin_.event-log'
 import { Route as AdminIncidentsRouteImport } from './routes/admin_.incidents'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin_.integrations'
 import { Route as AdminOperationsRouteImport } from './routes/admin_.operations'
@@ -36,8 +36,6 @@ import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instruc
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
 import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
 import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
-import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
-import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
 import { Route as MySettingsAboutRouteImport } from './routes/my-settings_.about'
 import { Route as MySettingsAgentRouteImport } from './routes/my-settings_.agent'
 import { Route as MySettingsClaudeCodeRouteImport } from './routes/my-settings_.claude-code'
@@ -45,6 +43,7 @@ import { Route as MySettingsConnectionsRouteImport } from './routes/my-settings_
 import { Route as MySettingsExperimentsRouteImport } from './routes/my-settings_.experiments'
 import { Route as MySettingsGitRouteImport } from './routes/my-settings_.git'
 import { Route as MySettingsInstructionsRouteImport } from './routes/my-settings_.instructions'
+import { Route as MySettingsPluginsRouteImport } from './routes/my-settings_.plugins'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as WorkspacesSlugRouteImport } from './routes/workspaces_.$slug'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
@@ -55,6 +54,7 @@ import { Route as AgentsBotsIndexRouteImport } from './routes/agents/bots/index'
 import { Route as AgentsReviewsIndexRouteImport } from './routes/agents/reviews/index'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 import { Route as OwnerRepoPullNumberRouteImport } from './routes/$owner.$repo.pull.$number'
+import { Route as AgentsPluginsNameSplatRouteImport } from './routes/agents/plugins/$name.$'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
 const IndexRoute = IndexRouteImport.update({
@@ -85,11 +85,6 @@ const CloudAgentsRoute = CloudAgentsRouteImport.update({
 const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
   id: '/feature-flags',
   path: '/feature-flags',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IncidentsRoute = IncidentsRouteImport.update({
-  id: '/incidents',
-  path: '/incidents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -130,6 +125,11 @@ const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
 const AdminEvalsRoute = AdminEvalsRouteImport.update({
   id: '/admin_/evals',
   path: '/admin/evals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminEventLogRoute = AdminEventLogRouteImport.update({
+  id: '/admin_/event-log',
+  path: '/admin/event-log',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIncidentsRoute = AdminIncidentsRouteImport.update({
@@ -192,16 +192,6 @@ const AssistantThreadIdRoute = AssistantThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => AssistantRoute,
 } as any)
-const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => IncidentsRoute,
-} as any)
-const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
-  id: '/$incidentId',
-  path: '/$incidentId',
-  getParentRoute: () => IncidentsRoute,
-} as any)
 const MySettingsAboutRoute = MySettingsAboutRouteImport.update({
   id: '/my-settings_/about',
   path: '/my-settings/about',
@@ -235,6 +225,11 @@ const MySettingsGitRoute = MySettingsGitRouteImport.update({
 const MySettingsInstructionsRoute = MySettingsInstructionsRouteImport.update({
   id: '/my-settings_/instructions',
   path: '/my-settings/instructions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MySettingsPluginsRoute = MySettingsPluginsRouteImport.update({
+  id: '/my-settings_/plugins',
+  path: '/my-settings/plugins',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
@@ -288,6 +283,11 @@ const OwnerRepoPullNumberRoute = OwnerRepoPullNumberRouteImport.update({
   path: '/$owner/$repo/pull/$number',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsPluginsNameSplatRoute = AgentsPluginsNameSplatRouteImport.update({
+  id: '/plugins/$name/$',
+  path: '/plugins/$name/$',
+  getParentRoute: () => AgentsRoute,
+} as any)
 const AgentsReviewsOwnerRepoNumberRoute =
   AgentsReviewsOwnerRepoNumberRouteImport.update({
     id: '/reviews/$owner/$repo/$number',
@@ -302,7 +302,6 @@ export interface FileRoutesByFullPath {
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/feature-flags': typeof FeatureFlagsRoute
-  '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -311,6 +310,7 @@ export interface FileRoutesByFullPath {
   '/workspaces': typeof WorkspacesRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
+  '/admin/event-log': typeof AdminEventLogRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/operations': typeof AdminOperationsRoute
@@ -321,7 +321,6 @@ export interface FileRoutesByFullPath {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
-  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
   '/my-settings/claude-code': typeof MySettingsClaudeCodeRoute
@@ -329,11 +328,11 @@ export interface FileRoutesByFullPath {
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
   '/my-settings/git': typeof MySettingsGitRoute
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
+  '/my-settings/plugins': typeof MySettingsPluginsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
   '/assistant/': typeof AssistantIndexRoute
-  '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -342,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/agents/bots/': typeof AgentsBotsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/plugins/$name/$': typeof AgentsPluginsNameSplatRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesByTo {
@@ -357,6 +357,7 @@ export interface FileRoutesByTo {
   '/workspaces': typeof WorkspacesRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
+  '/admin/event-log': typeof AdminEventLogRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/operations': typeof AdminOperationsRoute
@@ -367,7 +368,6 @@ export interface FileRoutesByTo {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
-  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
   '/my-settings/claude-code': typeof MySettingsClaudeCodeRoute
@@ -375,11 +375,11 @@ export interface FileRoutesByTo {
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
   '/my-settings/git': typeof MySettingsGitRoute
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
+  '/my-settings/plugins': typeof MySettingsPluginsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents': typeof AgentsIndexRoute
   '/assistant': typeof AssistantIndexRoute
-  '/incidents': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -388,6 +388,7 @@ export interface FileRoutesByTo {
   '/agents/bots': typeof AgentsBotsIndexRoute
   '/agents/reviews': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/plugins/$name/$': typeof AgentsPluginsNameSplatRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesById {
@@ -398,7 +399,6 @@ export interface FileRoutesById {
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/feature-flags': typeof FeatureFlagsRoute
-  '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -407,6 +407,7 @@ export interface FileRoutesById {
   '/workspaces': typeof WorkspacesRoute
   '/admin_/audit-logs': typeof AdminAuditLogsRoute
   '/admin_/evals': typeof AdminEvalsRoute
+  '/admin_/event-log': typeof AdminEventLogRoute
   '/admin_/incidents': typeof AdminIncidentsRoute
   '/admin_/integrations': typeof AdminIntegrationsRoute
   '/admin_/operations': typeof AdminOperationsRoute
@@ -417,7 +418,6 @@ export interface FileRoutesById {
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
-  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/my-settings_/about': typeof MySettingsAboutRoute
   '/my-settings_/agent': typeof MySettingsAgentRoute
   '/my-settings_/claude-code': typeof MySettingsClaudeCodeRoute
@@ -425,11 +425,11 @@ export interface FileRoutesById {
   '/my-settings_/experiments': typeof MySettingsExperimentsRoute
   '/my-settings_/git': typeof MySettingsGitRoute
   '/my-settings_/instructions': typeof MySettingsInstructionsRoute
+  '/my-settings_/plugins': typeof MySettingsPluginsRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/workspaces_/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
   '/assistant/': typeof AssistantIndexRoute
-  '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -438,6 +438,7 @@ export interface FileRoutesById {
   '/agents/bots/': typeof AgentsBotsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/plugins/$name/$': typeof AgentsPluginsNameSplatRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRouteTypes {
@@ -449,7 +450,6 @@ export interface FileRouteTypes {
     | '/assistant'
     | '/cloud-agents'
     | '/feature-flags'
-    | '/incidents'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -458,6 +458,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/audit-logs'
     | '/admin/evals'
+    | '/admin/event-log'
     | '/admin/incidents'
     | '/admin/integrations'
     | '/admin/operations'
@@ -468,7 +469,6 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/workspaces'
     | '/assistant/$threadId'
-    | '/incidents/$incidentId'
     | '/my-settings/about'
     | '/my-settings/agent'
     | '/my-settings/claude-code'
@@ -476,11 +476,11 @@ export interface FileRouteTypes {
     | '/my-settings/experiments'
     | '/my-settings/git'
     | '/my-settings/instructions'
+    | '/my-settings/plugins'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents/'
     | '/assistant/'
-    | '/incidents/'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -489,6 +489,7 @@ export interface FileRouteTypes {
     | '/agents/bots/'
     | '/agents/reviews/'
     | '/$owner/$repo/pull/$number'
+    | '/agents/plugins/$name/$'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -504,6 +505,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin/audit-logs'
     | '/admin/evals'
+    | '/admin/event-log'
     | '/admin/incidents'
     | '/admin/integrations'
     | '/admin/operations'
@@ -514,7 +516,6 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/workspaces'
     | '/assistant/$threadId'
-    | '/incidents/$incidentId'
     | '/my-settings/about'
     | '/my-settings/agent'
     | '/my-settings/claude-code'
@@ -522,11 +523,11 @@ export interface FileRouteTypes {
     | '/my-settings/experiments'
     | '/my-settings/git'
     | '/my-settings/instructions'
+    | '/my-settings/plugins'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents'
     | '/assistant'
-    | '/incidents'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -535,6 +536,7 @@ export interface FileRouteTypes {
     | '/agents/bots'
     | '/agents/reviews'
     | '/$owner/$repo/pull/$number'
+    | '/agents/plugins/$name/$'
     | '/agents/reviews/$owner/$repo/$number'
   id:
     | '__root__'
@@ -544,7 +546,6 @@ export interface FileRouteTypes {
     | '/assistant'
     | '/cloud-agents'
     | '/feature-flags'
-    | '/incidents'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -553,6 +554,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/admin_/audit-logs'
     | '/admin_/evals'
+    | '/admin_/event-log'
     | '/admin_/incidents'
     | '/admin_/integrations'
     | '/admin_/operations'
@@ -563,7 +565,6 @@ export interface FileRouteTypes {
     | '/agents_/instructions'
     | '/agents_/workspaces'
     | '/assistant/$threadId'
-    | '/incidents/$incidentId'
     | '/my-settings_/about'
     | '/my-settings_/agent'
     | '/my-settings_/claude-code'
@@ -571,11 +572,11 @@ export interface FileRouteTypes {
     | '/my-settings_/experiments'
     | '/my-settings_/git'
     | '/my-settings_/instructions'
+    | '/my-settings_/plugins'
     | '/review_/styles'
     | '/workspaces_/$slug'
     | '/agents/'
     | '/assistant/'
-    | '/incidents/'
     | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -584,6 +585,7 @@ export interface FileRouteTypes {
     | '/agents/bots/'
     | '/agents/reviews/'
     | '/$owner/$repo/pull/$number'
+    | '/agents/plugins/$name/$'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesById: FileRoutesById
 }
@@ -594,7 +596,6 @@ export interface RootRouteChildren {
   AssistantRoute: typeof AssistantRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
   FeatureFlagsRoute: typeof FeatureFlagsRoute
-  IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
@@ -603,6 +604,7 @@ export interface RootRouteChildren {
   WorkspacesRoute: typeof WorkspacesRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
+  AdminEventLogRoute: typeof AdminEventLogRoute
   AdminIncidentsRoute: typeof AdminIncidentsRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminOperationsRoute: typeof AdminOperationsRoute
@@ -616,6 +618,7 @@ export interface RootRouteChildren {
   MySettingsExperimentsRoute: typeof MySettingsExperimentsRoute
   MySettingsGitRoute: typeof MySettingsGitRoute
   MySettingsInstructionsRoute: typeof MySettingsInstructionsRoute
+  MySettingsPluginsRoute: typeof MySettingsPluginsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   WorkspacesSlugRoute: typeof WorkspacesSlugRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
@@ -664,13 +667,6 @@ declare module '@tanstack/react-router' {
       path: '/feature-flags'
       fullPath: '/feature-flags'
       preLoaderRoute: typeof FeatureFlagsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/incidents': {
-      id: '/incidents'
-      path: '/incidents'
-      fullPath: '/incidents'
-      preLoaderRoute: typeof IncidentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -727,6 +723,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/evals'
       fullPath: '/admin/evals'
       preLoaderRoute: typeof AdminEvalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin_/event-log': {
+      id: '/admin_/event-log'
+      path: '/admin/event-log'
+      fullPath: '/admin/event-log'
+      preLoaderRoute: typeof AdminEventLogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin_/incidents': {
@@ -813,20 +816,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssistantThreadIdRouteImport
       parentRoute: typeof AssistantRoute
     }
-    '/incidents/': {
-      id: '/incidents/'
-      path: '/'
-      fullPath: '/incidents/'
-      preLoaderRoute: typeof IncidentsIndexRouteImport
-      parentRoute: typeof IncidentsRoute
-    }
-    '/incidents/$incidentId': {
-      id: '/incidents/$incidentId'
-      path: '/$incidentId'
-      fullPath: '/incidents/$incidentId'
-      preLoaderRoute: typeof IncidentsIncidentIdRouteImport
-      parentRoute: typeof IncidentsRoute
-    }
     '/my-settings_/about': {
       id: '/my-settings_/about'
       path: '/my-settings/about'
@@ -874,6 +863,13 @@ declare module '@tanstack/react-router' {
       path: '/my-settings/instructions'
       fullPath: '/my-settings/instructions'
       preLoaderRoute: typeof MySettingsInstructionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-settings_/plugins': {
+      id: '/my-settings_/plugins'
+      path: '/my-settings/plugins'
+      fullPath: '/my-settings/plugins'
+      preLoaderRoute: typeof MySettingsPluginsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/review_/styles': {
@@ -946,6 +942,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerRepoPullNumberRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents/plugins/$name/$': {
+      id: '/agents/plugins/$name/$'
+      path: '/plugins/$name/$'
+      fullPath: '/agents/plugins/$name/$'
+      preLoaderRoute: typeof AgentsPluginsNameSplatRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/reviews/$owner/$repo/$number': {
       id: '/agents/reviews/$owner/$repo/$number'
       path: '/reviews/$owner/$repo/$number'
@@ -967,6 +970,7 @@ interface AgentsRouteChildren {
   AgentsAutomationsIndexRoute: typeof AgentsAutomationsIndexRoute
   AgentsBotsIndexRoute: typeof AgentsBotsIndexRoute
   AgentsReviewsIndexRoute: typeof AgentsReviewsIndexRoute
+  AgentsPluginsNameSplatRoute: typeof AgentsPluginsNameSplatRoute
   AgentsReviewsOwnerRepoNumberRoute: typeof AgentsReviewsOwnerRepoNumberRoute
 }
 
@@ -981,6 +985,7 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsAutomationsIndexRoute: AgentsAutomationsIndexRoute,
   AgentsBotsIndexRoute: AgentsBotsIndexRoute,
   AgentsReviewsIndexRoute: AgentsReviewsIndexRoute,
+  AgentsPluginsNameSplatRoute: AgentsPluginsNameSplatRoute,
   AgentsReviewsOwnerRepoNumberRoute: AgentsReviewsOwnerRepoNumberRoute,
 }
 
@@ -1001,20 +1006,6 @@ const AssistantRouteWithChildren = AssistantRoute._addFileChildren(
   AssistantRouteChildren,
 )
 
-interface IncidentsRouteChildren {
-  IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
-  IncidentsIndexRoute: typeof IncidentsIndexRoute
-}
-
-const IncidentsRouteChildren: IncidentsRouteChildren = {
-  IncidentsIncidentIdRoute: IncidentsIncidentIdRoute,
-  IncidentsIndexRoute: IncidentsIndexRoute,
-}
-
-const IncidentsRouteWithChildren = IncidentsRoute._addFileChildren(
-  IncidentsRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
@@ -1022,7 +1013,6 @@ const rootRouteChildren: RootRouteChildren = {
   AssistantRoute: AssistantRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
   FeatureFlagsRoute: FeatureFlagsRoute,
-  IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
@@ -1031,6 +1021,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesRoute: WorkspacesRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminEvalsRoute: AdminEvalsRoute,
+  AdminEventLogRoute: AdminEventLogRoute,
   AdminIncidentsRoute: AdminIncidentsRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminOperationsRoute: AdminOperationsRoute,
@@ -1044,6 +1035,7 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsExperimentsRoute: MySettingsExperimentsRoute,
   MySettingsGitRoute: MySettingsGitRoute,
   MySettingsInstructionsRoute: MySettingsInstructionsRoute,
+  MySettingsPluginsRoute: MySettingsPluginsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   WorkspacesSlugRoute: WorkspacesSlugRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,

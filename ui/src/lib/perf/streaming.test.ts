@@ -139,6 +139,72 @@ describe("agent run span", () => {
     expect(span?.steps.map((step) => step.name)).toEqual(["first_event"])
   })
 
+  it("marks first_text for prose that arrives only in its completed message", () => {
+    const tracker = new RunTracker({ threadId: THREAD_A })
+
+    tracker.transcriptEvent({ turnId: "turn-1", opensRun: true })
+    tracker.transcriptEvent({ turnId: "turn-1", text: "message" })
+    tracker.transcriptEvent({ turnId: "turn-1", ends: "success" })
+
+    const [span] = getPerfSpans()
+    expect(span?.steps.map((step) => step.name)).toEqual([
+      "accepted",
+      "first_event",
+      "first_text",
+    ])
+    expect(span?.attributes).toMatchObject({ text_deltas: 0 })
+  })
+
+  it.each([
+    {
+      case: "a message queued behind the running turn",
+      requested: ["turn-c"],
+      own: "turn-c",
+    },
+    {
+      case: "a message queued behind another queued message",
+      requested: ["turn-b", "turn-c"],
+      own: "turn-c",
+    },
+    {
+      case: "a message that steers the running turn",
+      requested: [],
+      own: "turn-a",
+    },
+  ])("times only the turn that records $case", ({ requested, own }) => {
+    const tracker = new RunTracker({ threadId: THREAD_A })
+    tracker.transcriptEvent({ turnId: "turn-a", opensRun: true })
+    tracker.submitted({ messageId: "msg-c", runningTurnId: "turn-a" })
+
+    for (const turnId of requested)
+      tracker.transcriptEvent({
+        turnId,
+        humanMessageId: turnId === own ? "msg-c" : `msg-${turnId}`,
+      })
+    if (own === "turn-a")
+      tracker.transcriptEvent({ turnId: "turn-a", humanMessageId: "msg-c" })
+    else {
+      tracker.transcriptEvent({ turnId: "turn-a", text: "message" })
+      tracker.transcriptEvent({ turnId: "turn-a", ends: "success" })
+      tracker.transcriptEvent({ turnId: "turn-b", opensRun: true })
+      tracker.transcriptEvent({ turnId: "turn-b", text: "message" })
+      tracker.transcriptEvent({ turnId: "turn-b", ends: "success" })
+      tracker.transcriptEvent({ turnId: own, opensRun: true })
+    }
+    tracker.transcriptEvent({ turnId: own, text: "delta" })
+    tracker.transcriptEvent({ turnId: own, ends: "success" })
+
+    const submitted = getPerfSpans().find(
+      (span) => span.attributes["joined"] === false
+    )
+    expect(submitted?.status).toBe("ended")
+    expect(submitted?.steps.map((step) => step.name)).toEqual([
+      "first_event",
+      "first_text",
+    ])
+    expect(submitted?.attributes).toMatchObject({ text_deltas: 1 })
+  })
+
   it("opens a joined span when a run starts that this client did not submit", () => {
     const tracker = new RunTracker({ threadId: THREAD_A })
 

@@ -1,6 +1,7 @@
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -126,6 +127,8 @@ class _Harness:
         self.acted_as: list[dict[str, str]] = []
         # Calls that reached MDA through its read client, as (method, path).
         self.read: list[tuple[str, str]] = []
+        # Reads held open, through the client kept apart for them, as (method, path).
+        self.held: list[tuple[str, str]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
         self.while_starting: Callable[[], Awaitable[object]] | None = None
@@ -152,6 +155,14 @@ class _Harness:
 
         mda_runtime._read_http = httpx.AsyncClient(
             base_url=mda_runtime.url, transport=httpx.MockTransport(mda_reads)
+        )
+
+        def mda_held_reads(request: httpx.Request) -> httpx.Response:
+            self.held.append((request.method, request.url.path))
+            return httpx.Response(200, json={})
+
+        mda_runtime._stream_http = httpx.AsyncClient(
+            base_url=mda_runtime.url, transport=httpx.MockTransport(mda_held_reads)
         )
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
@@ -250,6 +261,40 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert harness.runtimes.local.threads == {}
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []
+
+
+@pytest.mark.parametrize("creation", ["router", "store", "channel"])
+@pytest.mark.parametrize("subject", ["ada", f"user:{USER_ID}"])
+async def test_new_threads_keep_the_original_owner_after_a_handle_changes_hands(
+    monkeypatch: pytest.MonkeyPatch, creation: str, subject: str
+) -> None:
+    harness = _Harness(monkeypatch)
+    from uuid import UUID
+
+    owner = User(id=UUID(USER_ID))
+    lookup = AsyncMock(return_value=owner)
+    monkeypatch.setattr(User, "for_login", lookup)
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
+    metadata: dict[str, JsonValue] = {"owner_type": "user", "owner_login": subject}
+    if creation == "router":
+        await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": metadata})
+    elif creation == "store":
+        await store.THREADS.create(THREAD, title="Original", metadata=metadata)
+    else:
+        await router.adopt_channel_run(THREAD, "slack", metadata=metadata)
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata["owner_user_id"] == USER_ID
+
+    lookup.return_value = User()
+    await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": metadata, "if_exists": "do_nothing"},
+    )
+    await router.adopt_channel_run(THREAD, "slack", metadata=metadata)
+    await store.THREADS.create(THREAD, title="Replacement", metadata=metadata)
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata["owner_user_id"] == USER_ID
 
 
 async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(
@@ -413,6 +458,7 @@ async def test_a_new_thread_runs_on_mda(
     assert run_config(signed)["metadata"] == {
         "event_match_ids": ["match-1"],
         "ls_attribution_identifier": "trigger",
+        "billing_bucket": "system",
     }
 
 
@@ -448,8 +494,22 @@ async def test_runs_include_the_current_slack_thread_link(
     assert status == 200
     [(_, sent)] = harness.forwarded
     expected: dict[str, JsonValue] = {"slack_thread_url": permalink} if permalink else {}
-    assert sent["metadata"] == {"kind": "follow_up", **expected}
-    assert sent["config"] == {"metadata": {"invocation_id": "turn-1", **expected}}
+    assert sent["metadata"] == {
+        "kind": "follow_up",
+        "created_by": None,
+        "billing_bucket": "system",
+        "owner_ls_user_id": None,
+        **expected,
+    }
+    assert sent["config"] == {
+        "metadata": {
+            "invocation_id": "turn-1",
+            "created_by": None,
+            "billing_bucket": "system",
+            "owner_ls_user_id": None,
+            **expected,
+        }
+    }
 
 
 async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
@@ -531,6 +591,54 @@ async def test_a_channel_thread_takes_runs_stops_and_answers_as_its_conversation
     assert harness.acted_as == [AS_THE_CONVERSATION]
     assert harness.read == [("GET", f"/threads/{THREAD}")]
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
+
+
+# The threads MDA's Slack channel's handlers choose: their owner there.
+AS_THE_SLACK_HANDLER_THREADS = {
+    **AS_THE_CONVERSATION,
+    "x-mda-source-provider": "slack",
+    "x-mda-source-thread-id": 'mda:v1:["slack","handler-threads"]',
+}
+
+
+async def test_a_handler_thread_the_backend_makes_takes_its_first_run_as_the_handlers(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    """A breakout the agent's tool opens: made on MDA as one of the threads the Slack
+    channel's handlers choose, so the backend's first run there and the handler's later
+    runs share its owner."""
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await router.adopt_channel_run(THREAD, "slack")
+    harness.runtimes.mda_runtime._mda_threads.discard(THREAD)
+
+    await harness.runtimes.mda_runtime.create_handler_thread(
+        THREAD, provider="slack", channel="slack"
+    )
+    status, _ = await harness.request(
+        "POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent", "input": {}}
+    )
+
+    assert status == 200
+    assert harness.forwarded[0] == ("/threads", {"thread_id": THREAD, "if_exists": "do_nothing"})
+    assert [path for path, _ in harness.forwarded[1:]] == [f"/threads/{THREAD}/runs"]
+    assert harness.acted_as == [AS_THE_SLACK_HANDLER_THREADS, AS_THE_SLACK_HANDLER_THREADS]
+    # MDA isn't asked who owns the thread it was just told.
+    assert harness.read == []
+
+
+async def test_no_handler_thread_is_made_without_the_service_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MDA_SERVICE_SECRET", raising=False)
+    harness = _Harness(monkeypatch)
+
+    with pytest.raises(runtimes.ChannelThreadError):
+        await harness.runtimes.mda_runtime.create_handler_thread(
+            THREAD, provider="slack", channel="slack"
+        )
+
+    assert harness.forwarded == []
 
 
 async def test_a_channel_thread_takes_a_run_started_by_command(
@@ -785,17 +893,24 @@ async def test_without_the_service_secret_a_channel_thread_refuses_writes(
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "body"),
+    ("method", "path", "body", "held"),
     [
-        ("GET", "/state", None),
-        ("GET", "/runs", None),
-        ("GET", "/runs/run-1/join", None),
-        ("POST", "/history", {"limit": 10}),
-        ("POST", "/commands", {"id": 1, "method": "subscription.subscribe", "params": {}}),
+        ("GET", "/state", None, False),
+        ("GET", "/runs", None, False),
+        ("POST", "/history", {"limit": 10}, False),
+        (
+            "POST",
+            "/commands",
+            {"id": 1, "method": "subscription.subscribe", "params": {}},
+            False,
+        ),
+        # Held open while someone watches, so kept off the pool runs start and stop on.
+        ("GET", "/runs/run-1/join", None, True),
+        ("POST", "/stream/events", {"channels": ["lifecycle"]}, True),
     ],
 )
 async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
-    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue, held: bool
 ) -> None:
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
@@ -803,7 +918,8 @@ async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
     status, _ = await harness.request(method, f"/threads/{THREAD}{path}", body)
 
     assert status == 200
-    assert harness.read == [(method, f"/threads/{THREAD}{path}")]
+    reached = [(method, f"/threads/{THREAD}{path}")]
+    assert (harness.held, harness.read) == ((reached, []) if held else ([], reached))
     assert harness.forwarded == []
     # The channel created the thread on MDA; the backend creates no copy of its own.
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
@@ -954,25 +1070,24 @@ _CHANNEL_CONVERSATION: list[dict[str, JsonValue]] = [
 ]
 
 
-@pytest.mark.parametrize("channel", ["linear", "github"])
-async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
-    monkeypatch: pytest.MonkeyPatch, secret: None, channel: str
-) -> None:
-    """A review on a PR a channel conversation opened runs on the PR's own thread,
-    through the real router, starting with the conversation: the channel's thread
-    refuses the backend's runs (409)."""
+_PRIVATE: dict[str, JsonValue] = {
+    "visibility": "private",
+    "owner_type": "user",
+    "owner_login": "ada",
+}
+
+
+async def _pr_feedback(monkeypatch: pytest.MonkeyPatch, channel: str) -> tuple[_Harness, AsyncMock]:
+    """A private channel conversation, of the person who reviews the PR it opened, and
+    GitHub standing in for the PR, its review and who wrote it. The router is real."""
     from langgraph_sdk.client import LangGraphClient
 
     from openswe import dispatch
-    from openswe.github import webhook
-    from openswe.thread_ids import pr_comment_thread_id
     from openswe.users import User
     from openswe.webhooks import common
 
     harness = _Harness(monkeypatch)
-    # A private conversation, of the person who reviews its PR.
-    private = {"visibility": "private", "owner_type": "user", "owner_login": "ada"}
-    await router.adopt_channel_run(THREAD, channel, metadata={"source": channel, **private})
+    await router.adopt_channel_run(THREAD, channel, metadata={"source": channel, **_PRIVATE})
 
     def reads(request: httpx.Request) -> httpx.Response:
         harness.read.append((request.method, request.url.path))
@@ -994,7 +1109,6 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     )
     monkeypatch.setattr(common, "get_client", lambda **kwargs: LangGraphClient(backend))
     monkeypatch.setattr(dispatch, "get_client", lambda **kwargs: LangGraphClient(backend))
-    # GitHub itself stands in: the PR, its review, and who wrote it.
     monkeypatch.setattr(
         common,
         "extract_pr_context",
@@ -1017,20 +1131,54 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     monkeypatch.setattr(common, "fetch_pr_event_comments", AsyncMock(return_value=[review]))
     react = AsyncMock()
     monkeypatch.setattr(common, "react_to_github_comment", react)
+    return harness, react
+
+
+_REVIEW_PAYLOAD: dict[str, Any] = {
+    "action": "submitted",
+    "sender": {"login": "ada", "id": 1},
+    "review": {
+        "body": "Rename the helper",
+        "user": {"login": "ada"},
+        "state": "changes_requested",
+        "submitted_at": "2026-01-01T00:00:00Z",
+    },
+}
+
+
+class _GitHubChannel:
+    """MDA's GitHub channel, as the backend's channel API stands for it."""
+
+    def __init__(self) -> None:
+        self.started: list[tuple[str, dict[str, object], Any]] = []
+        self.claims = 0
+
+    async def adopt(self, thread_id: str, metadata: dict[str, JsonValue]) -> None:
+        await router.adopt_channel_run(thread_id, "github", metadata=metadata)
+
+    async def start(self, thread_id: str, configurable: dict[str, object], run_input: Any) -> bool:
+        self.started.append((thread_id, configurable, run_input))
+        return True
+
+    async def once(self) -> bool:
+        self.claims += 1
+        return True
+
+
+@pytest.mark.parametrize("channel", ["linear", "github"])
+async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
+    monkeypatch: pytest.MonkeyPatch, secret: None, channel: str
+) -> None:
+    """A review on a PR a channel conversation opened runs on the PR's own thread,
+    through the real router, starting with the conversation: the channel's thread
+    refuses the backend's runs (409)."""
+    from openswe.github import webhook
+    from openswe.thread_ids import pr_comment_thread_id
+
+    harness, react = await _pr_feedback(monkeypatch, channel)
 
     await webhook.process_github_pr_comment(
-        {
-            "action": "submitted",
-            "sender": {"login": "ada", "id": 1},
-            "review": {
-                "body": "Rename the helper",
-                "user": {"login": "ada"},
-                "state": "changes_requested",
-                "submitted_at": "2026-01-01T00:00:00Z",
-            },
-        },
-        "pull_request_review",
-        agent_thread_id=THREAD,
+        _REVIEW_PAYLOAD, "pull_request_review", agent_thread_id=THREAD
     )
 
     pr_thread = pr_comment_thread_id("o", "r", 7)
@@ -1046,7 +1194,66 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     pr_metadata = (await index.get(pr_thread)).metadata  # type: ignore[union-attr]
     assert pr_metadata["continues_thread"] == THREAD
     # Its history stays as private on the PR's thread.
-    assert {key: pr_metadata.get(key) for key in private} == private
+    assert {key: pr_metadata.get(key) for key in _PRIVATE} == _PRIVATE
     # The channel's thread got no run, and the review its 👀 only once one started.
     assert all(f"/threads/{THREAD}/runs" not in path for path, _ in harness.forwarded)
+    react.assert_awaited_once()
+
+
+async def test_mda_starts_pr_feedback_on_a_new_pr_thread_as_its_github_channels(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    """With MDA's GitHub channel routing the review, its run on the PR's new thread is
+    the channel's: the backend indexes the thread as the channel's and signs the run,
+    and starts nothing itself."""
+    from openswe.github import webhook
+    from openswe.thread_ids import pr_comment_thread_id
+
+    harness, react = await _pr_feedback(monkeypatch, "linear")
+    github = _GitHubChannel()
+
+    await webhook.process_github_pr_comment(
+        _REVIEW_PAYLOAD, "pull_request_review", agent_thread_id=THREAD, channel=github
+    )
+
+    pr_thread = pr_comment_thread_id("o", "r", 7)
+    assert not [path for path, _ in harness.forwarded if path.endswith("/runs")]
+    [(thread_id, configurable, run_input)] = github.started
+    assert thread_id == pr_thread
+    assert configurable["github_login"] == "ada"
+    # The conversation first, read from it alone: the new thread has no messages yet.
+    messages = run_input["messages"]
+    assert messages[: len(_CHANNEL_CONVERSATION)] == _CHANNEL_CONVERSATION
+    assert "Rename the helper" in json.dumps(messages[len(_CHANNEL_CONVERSATION) :])
+    pr_metadata = (await index.get(pr_thread)).metadata  # type: ignore[union-attr]
+    assert pr_metadata["channel"] == "github"
+    assert pr_metadata["continues_thread"] == THREAD
+    assert {key: pr_metadata.get(key) for key in _PRIVATE} == _PRIVATE
+    # Only a run the backend starts itself is claimed once per delivery.
+    assert github.claims == 0
+    react.assert_awaited_once()
+
+
+async def test_the_backend_still_starts_pr_feedback_on_a_pr_thread_it_owns(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    """A PR thread the backend made before MDA's channel started these runs stays the
+    backend's: it starts the run itself, once per delivery."""
+    from openswe.github import webhook
+    from openswe.thread_ids import pr_comment_thread_id
+
+    harness, react = await _pr_feedback(monkeypatch, "linear")
+    pr_thread = pr_comment_thread_id("o", "r", 7)
+    await index.create(pr_thread, runtime="mda", metadata={"branch_name": f"open-swe/{THREAD}"})
+    github = _GitHubChannel()
+
+    await webhook.process_github_pr_comment(
+        _REVIEW_PAYLOAD, "pull_request_review", agent_thread_id=THREAD, channel=github
+    )
+
+    assert github.started == []
+    assert github.claims == 1
+    assert [path for path, _ in harness.forwarded if path.endswith("/runs")] == [
+        f"/threads/{pr_thread}/runs"
+    ]
     react.assert_awaited_once()

@@ -247,9 +247,111 @@ describe("ChatComposer drafts", () => {
     renderComposer(false, { draftKey: "draft-user:new:home" })
     expect(screen.getByRole("textbox").textContent).toBe("")
   })
+
+  it("replaces an untouched suggestion and its images, even after a remount", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const shot = (fileName: string) => ({
+      kind: "image" as const,
+      base64: "aGVsbG8=",
+      mimeType: "image/png",
+      fileName,
+    })
+    const draftKey = "draft-user:thread:suggested"
+    renderComposer(false, {
+      draftKey,
+      restoreDraft: {
+        key: 1,
+        text: "About the header",
+        images: [shot("before.png"), shot("after.png")],
+        replacesSuggestion: true,
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toBe("About the header")
+    )
+    cleanup()
+    const next = [1, 2, 3, 4].map((n) => shot(`footer-${n}.png`))
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      draftKey,
+      onSubmit,
+      restoreDraft: {
+        key: 1,
+        text: "About the footer",
+        images: next,
+        replacesSuggestion: true,
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toBe("About the footer")
+    )
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        { text: "About the footer", images: next, replies: [] },
+        expect.anything()
+      )
+    )
+  })
+
+  it("keeps every unsent image when a cancelled queued message comes back", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const shot = (fileName: string) => ({
+      kind: "image" as const,
+      base64: "aGVsbG8=",
+      mimeType: "image/png",
+      fileName,
+    })
+    const draftKey = "draft-user:thread:queued"
+    const unsent = [1, 2, 3].map((n) => shot(`unsent-${n}.png`))
+    renderComposer(false, {
+      draftKey,
+      restoreDraft: { key: 1, text: "Unsent", images: unsent },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toBe("Unsent")
+    )
+    cleanup()
+    const queued = [1, 2, 3].map((n) => shot(`queued-${n}.png`))
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      draftKey,
+      onSubmit,
+      restoreDraft: { key: 2, text: "Queued", images: queued },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("textbox").textContent).toContain("Queued")
+    )
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ images: [...queued, ...unsent] }),
+        expect.anything()
+      )
+    )
+  })
 })
 
 describe("ChatComposer options", () => {
+  it.each([false, true])(
+    "shows the Cloud target only in the desktop app (desktop: %s)",
+    (desktop) => {
+      vi.stubGlobal("openSweDesktop", desktop ? {} : undefined)
+      try {
+        renderComposer(false, { runTarget: "cloud" })
+        expect(Boolean(screen.queryByText("Cloud"))).toBe(desktop)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
+
   it("offers a project picker locally and shows branch controls only for Git folders", async () => {
     const local = {
       runTarget: "local" as const,
@@ -324,7 +426,7 @@ describe("ChatComposer options", () => {
     )
 
     expect(
-      await screen.findByRole("menuitem", { name: "Attach images" })
+      await screen.findByRole("menuitem", { name: "Attach files" })
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
   })
@@ -387,6 +489,96 @@ describe("ChatComposer people autocomplete", () => {
 })
 
 describe("ChatComposer skill autocomplete", () => {
+  it("sends a trailing shell variable unless its fuzzy suggestion was explicitly chosen", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [
+        {
+          name: "patch-notes",
+          description: "Write release notes",
+          instructions: "",
+        },
+      ],
+      restoreDraft: { key: 1, text: "check $PATH", images: [] },
+    })
+    await screen.findByRole("option", { name: /patch-notes/ })
+    fireEvent.keyDown(screen.getByRole("textbox"), {
+      key: "Enter",
+      code: "Enter",
+    })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "check $PATH" }),
+        expect.anything()
+      )
+    )
+  })
+
+  it("accepts a fuzzy suggestion with arrow navigation then Enter", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [
+        {
+          name: "patch-notes",
+          description: "Write release notes",
+          instructions: "",
+        },
+      ],
+      restoreDraft: { key: 1, text: "check $PATH", images: [] },
+    })
+    await screen.findByRole("option", { name: /patch-notes/ })
+    const editor = screen.getByRole("textbox")
+    fireEvent.keyDown(editor, { key: "ArrowDown", code: "ArrowDown" })
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+    await waitFor(() => expect(editor.textContent).toContain("/patch-notes"))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("ranks command names ahead of descriptions and tolerates typos", () => {
+    const skills = [
+      {
+        name: "review",
+        description: "Review a pull request",
+        instructions: "",
+      },
+      {
+        name: "model-audit",
+        description: "Inspect configuration",
+        instructions: "",
+      },
+      { name: "unrelated", description: "Pick a model", instructions: "" },
+    ]
+    const trigger = {
+      kind: "slash-command" as const,
+      query: "MODEL",
+      rangeStart: 0,
+      rangeEnd: 6,
+    }
+    expect(
+      buildCommandItems(trigger, [], skills)
+        .slice(0, 3)
+        .map((item) => item.label)
+    ).toEqual(["/model", "/model-audit", "/unrelated"])
+    expect(
+      buildCommandItems({ ...trigger, query: "reviw" }, [], skills)[0]?.label
+    ).toBe("/review")
+    expect(
+      buildCommandItems({ ...trigger, query: "audit" }, [], skills)[0]?.label
+    ).toBe("/model-audit")
+    expect(
+      buildCommandItems(
+        { ...trigger, query: "configuration", kind: "skill-command" },
+        [],
+        skills
+      )[0]?.label
+    ).toBe("/model-audit")
+    expect(
+      buildCommandItems({ ...trigger, query: "zzzzzz" }, [], skills)
+    ).toEqual([])
+  })
+
   it("omits the model command when no model picker is available", () => {
     const items = buildCommandItems(
       {

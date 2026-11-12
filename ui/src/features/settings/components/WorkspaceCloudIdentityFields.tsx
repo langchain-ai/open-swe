@@ -111,7 +111,7 @@ export function WorkspaceCloudIdentityFields({
       />
       <p className="text-xs text-secondary">
         The proxy uses short-lived cloud credentials outside the sandbox. Grant
-        only the permissions this workspace needs; cloud trust must pin the
+        only the permissions this environment needs; cloud trust must pin the
         tag-scoped LangSmith subject.
       </p>
       {FIELDS[cloud].map(({ key, label, placeholder, list }) => (
@@ -143,7 +143,7 @@ export function WorkspaceCloudIdentityFields({
       <Input
         label="Subject Scope"
         size="sm"
-        hintText="Use tag:<LangSmith tag value UUID> and assign the same tag below. Workspace scope is not allowed: every Open SWE workspace shares one LangSmith workspace."
+        hintText="Use tag:<LangSmith tag value UUID> and assign the same tag below. Workspace scope is not allowed: every Robin environment shares one LangSmith workspace."
         placeholder="tag:<LangSmith tag value UUID>"
         value={
           typeof identity.subject_scope === "string"

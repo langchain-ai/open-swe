@@ -157,7 +157,6 @@ async def test_rollout_webhook_asks_for_a_retry_when_the_event_is_not_stored(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app.state.record.return_value = False
-    monkeypatch.setattr("openswe.rollout_events.configured", lambda: True)
     body = json.dumps({"target": "gcp-staging", "commits": ["a" * 40]}).encode()
     response = await _post(app, body, _token())
     assert response.status_code == 503

@@ -3,8 +3,6 @@
 import asyncio
 import logging
 
-from langgraph_sdk.client import LangGraphClient
-
 from openswe.slack.client import slack_thread_mutation_lock
 from openswe.slack.http import SlackClient
 from openswe.slack.payloads import SlackMessage
@@ -52,7 +50,6 @@ async def _thread_is_solo(channel_id: str, thread_ts: str, user_id: str) -> bool
 
 
 async def allow_solo_thread_followup(
-    client: LangGraphClient,
     *,
     channel_id: str,
     thread_ts: str,
@@ -71,7 +68,7 @@ async def allow_solo_thread_followup(
                 return False
         async with (
             asyncio.timeout(2),
-            slack_thread_mutation_lock(client, channel_id, thread_ts, purpose="solo-followups"),
+            slack_thread_mutation_lock(channel_id, thread_ts, purpose="solo-followups"),
         ):
             thread = await SlackThread.find(channel_id, thread_ts)
             if thread is not None and thread.solo_blocked:
@@ -110,7 +107,7 @@ async def allow_solo_thread_followup(
 
 
 def track_explicit_mention(
-    client: LangGraphClient, *, channel_id: str, thread_ts: str, message_ts: str, user_id: str
+    *, channel_id: str, thread_ts: str, message_ts: str, user_id: str
 ) -> None:
     """Record an @mention's sender for solo routing without holding up the reply.
 
@@ -119,7 +116,6 @@ def track_explicit_mention(
     """
     task = asyncio.create_task(
         allow_solo_thread_followup(
-            client,
             channel_id=channel_id,
             thread_ts=thread_ts,
             message_ts=message_ts,

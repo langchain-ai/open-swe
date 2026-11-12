@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
@@ -21,6 +22,7 @@ from managed_deepagents._channels.runtime import (
     is_json_value,
     json_copy,
 )
+from managed_deepagents._channels.target import channel_target
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents.run_context import ChannelContext
 
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
         ChannelEvent,
         ChannelInfo,
         ChannelMessage,
+        ChannelReply,
+        ChannelTarget,
         JsonValue,
         PostedChannelThread,
     )
@@ -48,6 +52,9 @@ class ChannelBinding(TypedDict):
     #: Absent for a binding read from the thread record: no message started the run.
     event: NotRequired[ChannelEvent]
     raw_event: NotRequired[JsonValue]
+    #: Whether this run posts its final answer to ``target``, over the channel's
+    #: ``reply``; absent, the channel's applies.
+    reply: NotRequired[ChannelReply]
 
 
 def binding_with_messages(
@@ -89,13 +96,27 @@ def resolve_channel_binding(
     except (ValueError, TypeError):
         return None
     user = configurable.get("langgraph_auth_user")
+    source = _field(user, "mda_source_thread_id")
     if (
         _field(user, "mda_source_provider") != binding["provider"]
-        or _field(user, "mda_source_thread_id") != binding["source_thread_key"]
+        # A run on a thread the channel's handler chose runs as the channel's handler
+        # threads; its binding still names the conversation that started it.
+        or source not in (binding["source_thread_key"], handler_threads_key(binding["name"]))
         or not _is_declared_route(binding)
     ):
         return None
     return binding
+
+
+def handler_threads_key(channel_name: str) -> str:
+    """The source key that owns the threads a channel's handlers choose.
+
+    One per channel, so a thread several conversations start runs on has one
+    owner, and Stop and answers can search them. MDA derives it; no request does.
+    """
+    return "mda:v1:" + json.dumps(
+        [channel_name, "handler-threads"], ensure_ascii=False, separators=(",", ":")
+    )
 
 
 def _is_declared_route(binding: ChannelBinding) -> bool:
@@ -147,6 +168,7 @@ def resolve_channel_info(
         provider=binding["provider"],
         event=binding.get("event"),
         raw_event=binding.get("raw_event"),
+        channel_target=channel_target(binding, binding.get("event")),
     )
 
 
@@ -183,9 +205,15 @@ def runtime_channel(
             transport = TriggerTransport(client)
 
             async def start_thread(
-                message: ChannelMessage, run: ChannelRunResult | None
+                message: ChannelMessage,
+                run: ChannelRunResult | None,
+                *,
+                hand_off: bool = False,
+                to: ChannelTarget | None = None,
             ) -> PostedChannelThread:
-                return await start_trigger_conversation(client, binding, message, run)
+                return await start_trigger_conversation(
+                    client, binding, message, run, hand_off=hand_off, to=to
+                )
     else:
         transport = messaging_transport_for_name(binding["name"])
         if transport is None and transport_factory is not None:
@@ -198,6 +226,7 @@ def runtime_channel(
         target=binding["target"],
         transport=cast("ChannelMessagingAdapter | None", transport),
         start_thread=start_thread,
+        channel_target=channel_target(binding, binding.get("event")),
     )
 
 

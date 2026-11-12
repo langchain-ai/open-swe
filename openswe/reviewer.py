@@ -22,7 +22,7 @@ import re
 import uuid
 import warnings
 from functools import partial
-from typing import Any, NamedTuple, NotRequired, cast
+from typing import Any, Final, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +38,21 @@ from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
+from runtime_api.models import (
+    DEFAULT_LLM_REASONING,
+    ModelKwargs,
+    make_model,
+    provider_model_kwargs,
+)
+from runtime_api.provenance import Provenance
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.http import GitHubClient
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
+from openswe.github.pull_requests import PullRequest
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -52,6 +61,7 @@ from openswe.middleware import (
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.prompt import SystemPrompt
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import (
     ApprovalPolicy,
@@ -72,6 +82,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
+from openswe.review_apps.apps import ReviewApps
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -97,16 +108,11 @@ from openswe.tools import (
     update_finding,
     web_search,
 )
+from openswe.tools.review_apps import ReviewAppTools
 from openswe.utils import ttl_cache
 from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    make_model,
-    provider_model_kwargs,
-)
 from openswe.utils.startup_trace import aphase
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
@@ -136,9 +142,6 @@ def _repo_checkout_note(
 
 def _reviewer_system_prompt(
     *,
-    repo_owner: str,
-    repo_name: str,
-    pr_number: int | str,
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     approval_policy: str | None = None,
@@ -146,22 +149,58 @@ def _reviewer_system_prompt(
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
-) -> str:
-    return prompt(
-        "reviewer/main",
-        repo_owner=repo_owner or "<owner>",
-        repo_name=repo_name or "<repo>",
-        pr_number=pr_number if pr_number != "" else "<pr_number>",
-        reviewer_eval=reviewer_eval,
-        approval_policy=approval_policy or "",
-        org_guidelines=org_guidelines or "",
-        repo_style_prompt=repo_style_prompt or "",
-        agents_md_content=agents_md_content or "",
-        scoped_agents_md=[
-            (path, posixpath.dirname(path), content)
-            for path, content in (scoped_agents_md or {}).items()
-        ],
-        api_standards_skill=api_standards_skill or "",
+    skills_prompt: str | None = None,
+    review_apps: ReviewApps | None = None,
+    concise_findings: bool = False,
+) -> SystemPrompt:
+    """The reviewer's system prompt: what every review shares, then what its repository's
+    do, then what depends on the pull request's changed files and checkout, such as the
+    approval policy, which stays out of the run context beside author-controlled text.
+
+    The pull request itself is named in the run context, so a review's first model call
+    reads the parts ahead of its own from the cache other reviews wrote.
+    """
+    return SystemPrompt(
+        shared=prompt(
+            "reviewer/main",
+            reviewer_eval=reviewer_eval,
+            approval_assessment=bool(approval_policy),
+        ),
+        workspace=prompt(
+            "reviewer/repository",
+            org_guidelines=org_guidelines or "",
+            repo_style_prompt=repo_style_prompt or "",
+            agents_md_content=agents_md_content or "",
+            api_standards_skill=api_standards_skill or "",
+            concise_findings=concise_findings,
+        ),
+        thread="\n\n".join(
+            part
+            for part in (
+                prompt("reviewer/approval-policy-section", approval_policy=approval_policy)
+                if approval_policy and not reviewer_eval
+                else "",
+                prompt(
+                    "reviewer/scoped-conventions",
+                    scoped_agents_md=[
+                        (path, posixpath.dirname(path), content)
+                        for path, content in scoped_agents_md.items()
+                    ],
+                )
+                if scoped_agents_md
+                else "",
+                skills_prompt or "",
+                prompt(
+                    "reviewer/review-apps",
+                    apps=review_apps.apps,
+                    number=review_apps.number,
+                    browses=review_apps.browses,
+                )
+                if review_apps is not None
+                else "",
+            )
+            if part
+        ),
     )
 
 
@@ -441,6 +480,10 @@ class PrepareReviewerRunState(PrepareRunState):
     review_approval_policy: NotRequired[str | None]
     review_approval_errors: NotRequired[list[str]]
     review_config_errors: NotRequired[list[str]]
+    review_changes_approval: NotRequired[bool]
+    # A run for a deployed preview: the findings there were when it started, which its
+    # publish leaves to the review that recorded them.
+    review_earlier_finding_ids: NotRequired[list[str] | None]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
@@ -796,6 +839,12 @@ async def prepare_reviewer_run(
             repo_owner, repo_name, pr_number, head_sha, token=github_token
         )
 
+    async def _fetch_changes_approval() -> bool:
+        if reviewer_eval or not isinstance(pr_number, int):
+            return False
+        async with GitHubClient.connect(token=github_token) as github:
+            return await ApprovalPolicy.changed_by(github.repo(repo_owner, repo_name), pr_number)
+
     # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
@@ -806,6 +855,7 @@ async def prepare_reviewer_run(
     org_guidelines_task = asyncio.create_task(_fetch_org_guidelines())
     approval_policy_task = asyncio.create_task(_fetch_approval_policy())
     config_errors_task = asyncio.create_task(_fetch_config_errors())
+    changes_approval_task = asyncio.create_task(_fetch_changes_approval())
     api_standards_task = asyncio.create_task(_fetch_api_standards_skill())
     scoped_agents_md_task = asyncio.create_task(_fetch_scoped_agents_md())
     tasks = (
@@ -818,6 +868,7 @@ async def prepare_reviewer_run(
         org_guidelines_task,
         approval_policy_task,
         config_errors_task,
+        changes_approval_task,
         api_standards_task,
         scoped_agents_md_task,
     )
@@ -832,6 +883,7 @@ async def prepare_reviewer_run(
         org_guidelines = await org_guidelines_task
         policy = await approval_policy_task
         config_errors = await config_errors_task
+        changes_approval = await changes_approval_task
         api_standards_skill = await api_standards_task
     finally:
         for task in tasks:
@@ -842,6 +894,7 @@ async def prepare_reviewer_run(
     approval_policy = policy.render() if policy is not None else None
 
     review_context = ""
+    earlier_finding_ids: list[str] | None = None
     if pr_number is not None:
         if reviewer_event == "finding_reply":
             existing_findings = await list_findings_async(thread_id)
@@ -857,6 +910,19 @@ async def prepare_reviewer_run(
                 pr_title=pr_title,
                 pr_body=pr_body,
                 existing_threads_block=existing_threads_block,
+            )
+        elif reviewer_event == "preview_ready":
+            earlier_finding_ids = [
+                finding["id"] for finding in await list_findings_async(thread_id)
+            ]
+            review_context = prompt(
+                "reviewer/preview-ready-context",
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+                pr_url=pr_url,
+                head_sha=head_sha,
+                overview=_format_pr_overview(pr_title, pr_body),
             )
         elif is_re_review and last_reviewed_sha:
             existing_findings = await list_findings_async(thread_id)
@@ -887,9 +953,6 @@ async def prepare_reviewer_run(
             )
 
     system_prompt = _reviewer_system_prompt(
-        repo_owner=repo_owner,
-        repo_name=repo_name,
-        pr_number=pr_number if isinstance(pr_number, int) else "",
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         approval_policy=approval_policy,
@@ -897,6 +960,10 @@ async def prepare_reviewer_run(
         agents_md_content=agents_md_content,
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
+        skills_prompt=checkout.skills_prompt,
+        review_apps=await ReviewApps.of(cfg),
+        concise_findings=bool(repo_owner and repo_name)
+        and await PullRequest.concise_for_repo(repo_owner, repo_name),
     )
     run_context = prompt(
         "reviewer/run-context",
@@ -916,16 +983,22 @@ async def prepare_reviewer_run(
             if block
         ],
     )
-    if checkout.skills_prompt:
-        system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
-        "rendered_system_prompt": system_prompt,
-        "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
+        **system_prompt.state(),
+        "messages": [
+            HumanMessage(
+                content=run_context,
+                id=f"run-context:{uuid.uuid4()}",
+                additional_kwargs=Provenance.harness("run_context").stamp(),
+            )
+        ],
         "review_approval_policy": approval_policy,
         "review_approval_errors": policy.errors if policy is not None else [],
         "review_config_errors": config_errors,
+        "review_changes_approval": changes_approval,
+        "review_earlier_finding_ids": earlier_finding_ids,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }
@@ -1002,6 +1075,19 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
     )
 
 
+# A run for a newly deployed preview does only the apps' work (``reviewer_event``
+# ``"preview_ready"``): it can add and publish findings that work turns up, but gets nothing
+# that changes the review's existing findings, replies on the pull request or suggests tasks.
+PREVIEW_READY_EXCLUDED_TOOLS: Final = frozenset(
+    {
+        "update_finding",
+        "resolve_finding_thread",
+        "reply_to_finding_thread",
+        "suggest_task",
+    }
+)
+
+
 def reviewer_tools() -> list[BaseTool]:
     """The reviewer's tools, wherever the graph that calls them runs."""
     return apply_tool_descriptions(
@@ -1043,8 +1129,12 @@ async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None
     use_gateway = models.use_gateway
 
     surface.base_tools = reviewer_tools()
+    if (app_tools := await ReviewAppTools.of_run(cfg)) is not None:
+        await app_tools.offer(surface)
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
-    surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
+    surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS | (
+        PREVIEW_READY_EXCLUDED_TOOLS if cfg.reviewer_event == "preview_ready" else frozenset()
+    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

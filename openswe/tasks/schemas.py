@@ -1,3 +1,5 @@
+import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
 from uuid import UUID
@@ -9,6 +11,8 @@ from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
 from openswe.threads.identity import ThreadIdentity
 from openswe.users import User
+
+logger = logging.getLogger(__name__)
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
@@ -57,6 +61,21 @@ class ThreadMetadata(BaseModel):
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))
 
+    @classmethod
+    async def for_new_thread(cls, metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        values = dict(metadata)
+        if values.get("owner_type") == "user" and not values.get("owner_user_id"):
+            login = values.get("owner_login")
+            if isinstance(login, str) and login:
+                try:
+                    owner = await ThreadIdentity(login).user()
+                except Exception:
+                    logger.warning("Could not resolve new thread owner", exc_info=True)
+                else:
+                    if owner is not None:
+                        values["owner_user_id"] = str(owner.id)
+        return values
+
     async def delegation_supported(self) -> bool:
         """Whether workers could share this thread's sandbox: a machine's only while it serves it."""
         if self.sandbox_id and self.sandbox_id.startswith(SANDBOX_ID_PREFIX):
@@ -78,7 +97,7 @@ class ThreadMetadata(BaseModel):
         else:
             user = await user_for_login(self.owner_login or "")
         if user is None:
-            raise PermissionError("The thread owner needs an Open SWE account")
+            raise PermissionError("The thread owner needs a Robin account")
         return user
 
 

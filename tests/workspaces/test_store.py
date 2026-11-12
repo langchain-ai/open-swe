@@ -341,6 +341,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
             "repos": [],
             "slack_channel_ids": [],
             "kitchen_channel_ids": [],
+            "ask_channel_ids": [],
             "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
@@ -406,8 +407,9 @@ def _fully_populated(now: str) -> Workspace:
         update_script="git pull",
         base_snapshot_id="snap-base",
         repos=["acme/api"],
-        slack_channel_ids=["C0API"],
+        slack_channel_ids=["C0API", "C0ASK"],
         kitchen_channel_ids=["C0API"],
+        ask_channel_ids=["C0ASK"],
         mem_bytes=8 * 1024**3,
         vcpus=4,
         fs_capacity_bytes=128 * 1024**3,
@@ -539,15 +541,17 @@ async def test_an_update_releases_the_bindings_it_drops() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_kitchen_mode_is_limited_to_bound_channels() -> None:
+@pytest.mark.parametrize("mode", ["kitchen", "ask"])
+async def test_kitchen_mode_is_limited_to_bound_channels(mode: str) -> None:
+    field = f"{mode}_channel_ids"
     with pytest.raises(ValidationError, match="bound to this workspace"):
-        WorkspaceCreate(name="Core", repos=["acme/api"], kitchen_channel_ids=["C0API"])
+        WorkspaceCreate(name="Core", repos=["acme/api"], **{field: ["C0API"]})
     await WORKSPACES.create(
         WorkspaceCreate(
             name="Core",
             repos=["acme/api"],
             slack_channel_ids=["C0API", "C0WEB"],
-            kitchen_channel_ids=["c0api"],
+            **{field: ["c0api"]},
         ),
         "alice",
     )
@@ -555,16 +559,22 @@ async def test_kitchen_mode_is_limited_to_bound_channels() -> None:
     assert not await WORKSPACES.is_kitchen_channel("C0WEB")
 
     with pytest.raises(ValueError, match="bound to this workspace"):
-        await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=["C0OTHER"]))
+        await WORKSPACES.apply_update("core", WorkspaceUpdate(**{field: ["C0OTHER"]}))
 
-    moved = await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=["C0WEB"]))
-    assert moved.kitchen_channel_ids == ["C0WEB"]
+    moved = await WORKSPACES.apply_update("core", WorkspaceUpdate(**{field: ["C0WEB"]}))
+    assert getattr(moved, field) == ["C0WEB"]
+    assert await WORKSPACES.is_ask_channel("C0WEB") is (mode == "ask")
+    with pytest.raises(ValueError, match="both Kitchen and Ask"):
+        await WORKSPACES.apply_update(
+            "core", WorkspaceUpdate(kitchen_channel_ids=["C0WEB"], ask_channel_ids=["C0WEB"])
+        )
     assert not await WORKSPACES.is_kitchen_channel("C0API")
 
     await WORKSPACES.apply_update("core", WorkspaceUpdate(slack_channel_ids=["C0API"]))
     stored = await WORKSPACES.get("core")
     assert stored is not None
     assert stored.kitchen_channel_ids == []
+    assert stored.ask_channel_ids == []
     assert not await WORKSPACES.is_kitchen_channel("C0WEB")
 
 

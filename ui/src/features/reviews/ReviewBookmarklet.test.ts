@@ -6,7 +6,7 @@ import { ReviewBookmarklet, reviewBookmarkletUrl } from "./ReviewBookmarklet"
 
 it("provides a draggable bookmarklet link", () => {
   render(createElement(ReviewBookmarklet))
-  const link = screen.getByRole("link", { name: "👀 Open in Open SWE" })
+  const link = screen.getByRole("link", { name: "👀 Open in Robin" })
   expect(link.getAttribute("href")).toBe(
     reviewBookmarkletUrl(window.location.origin)
   )
@@ -85,3 +85,12 @@ it("explains itself off a pull request page", () => {
   expect(open).not.toHaveBeenCalled()
   expect(alert).toHaveBeenCalled()
 })
+
+it.each(["about:blank", "chrome://newtab/"])(
+  "explains a modifier-click that ran it in an empty tab: %s",
+  (url) => {
+    const { open, alert } = run(url)
+    expect(open).not.toHaveBeenCalled()
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining("empty tab"))
+  }
+)

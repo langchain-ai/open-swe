@@ -6,7 +6,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { SettingsSection } from "@/components/AppShell"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import {
@@ -73,12 +73,15 @@ function GeneralSection({
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
         kitchen_channel_ids: draft.kitchenChannelIds,
+        ask_channel_ids: draft.askChannelIds,
         prompt: draft.prompt,
       })
       onSaved(saved)
       setDraft(draftFromWorkspace(saved))
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save the workspace")
+      setError(
+        e instanceof Error ? e.message : "Could not save the environment"
+      )
     } finally {
       setSaving(false)
     }
@@ -87,12 +90,12 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
+      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one environment, and a Slack channel belongs to one environment."
     >
       <WorkspaceEditor
         draft={draft}
         onChange={setDraft}
-        promptHint="Instructions appended to every run in this workspace"
+        promptHint="Instructions appended to every run in this environment"
         workspaceSlug={record.slug}
         workspaces={workspaces}
         channelLabel={(id) => channelLabel(id, draft.slackChannelIds)}
@@ -158,7 +161,7 @@ export function WorkspaceSettingsPanel({
       workspace.refresh_finished_at === repositoryRebuild.finishedAt ||
       !["success", "failed"].includes(workspace.refresh_status ?? "never"))
   const deleteWorkspace = useMutation({
-    meta: { errorTitle: "Couldn't delete workspace" },
+    meta: { errorTitle: "Couldn't delete environment" },
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
       setDeleting(false)
@@ -185,7 +188,7 @@ export function WorkspaceSettingsPanel({
   if (record.isError || !record.data) {
     return (
       <div role="alert">
-        <Banner intent="error" title="Could not load this workspace.">
+        <Banner intent="error" title="Could not load this environment.">
           {record.error instanceof Error ? record.error.message : null}
         </Banner>
       </div>
@@ -309,8 +312,8 @@ export function WorkspaceSettingsPanel({
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
-          title="Delete workspace"
-          description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
+          title="Delete environment"
+          description="Permanently delete this environment, its settings, and sandbox snapshot. This cannot be undone."
           action={
             <Button
               size="xs"
@@ -328,8 +331,8 @@ export function WorkspaceSettingsPanel({
           open={deleting}
           onOpenChange={setDeleting}
           title={`Delete ${record.data.name}?`}
-          description="This deletes the workspace, its settings and sandbox snapshot, and releases its repository and Slack channel bindings. This cannot be undone."
-          confirmLabel="Delete workspace"
+          description="This deletes the environment, its settings and sandbox snapshot, and releases its repository and Slack channel bindings. This cannot be undone."
+          confirmLabel="Delete environment"
           pendingLabel="Deleting…"
           pending={deleteWorkspace.isPending}
           destructive

@@ -52,7 +52,7 @@ def _slack_blocks(
         section(
             f"Connect these services to use them through the *{gateway.name}* managed tools. "
             "Each button opens the service's consent screen for your account only; sign "
-            f"in to Open SWE in your browser first. {then}"
+            f"in to Robin in your browser first. {then}"
         )
     ]
     if oauth:
@@ -110,7 +110,7 @@ async def connect_managed_tools(
         }
     configured = await instance_gateway()
     if configured is None:
-        return {"success": False, "error": "No managed tools are set up on this Open SWE"}
+        return {"success": False, "error": "No managed tools are set up on this Robin instance"}
     gateway = gateway_id(configured)
     try:
         status = await gateway_status(login, gateway)

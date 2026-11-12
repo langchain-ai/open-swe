@@ -3,7 +3,7 @@ import { createRoot, hydrateRoot } from "react-dom/client"
 
 import { initializeDatadogRum } from "./lib/datadog"
 import { installDatadogPerfSink } from "./lib/perf/datadogSink"
-import { productAnalytics } from "./lib/posthog"
+import { productAnalytics } from "./lib/analytics"
 import { exposePerfGlobal } from "./lib/perf/trace"
 
 // This bundle's own identity, stamped by the build; never the backend's.

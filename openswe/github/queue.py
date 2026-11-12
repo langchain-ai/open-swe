@@ -100,16 +100,6 @@ class ValidationRuns(Snapshot):
     workflow_runs: tuple[ValidationRun, ...]
 
 
-class ValidationJobs(Snapshot):
-    total_count: int = Field(ge=0)
-    jobs: tuple[ValidationJob, ...]
-
-
-class ValidationArtifacts(Snapshot):
-    total_count: int = Field(ge=0)
-    artifacts: tuple[Artifact, ...]
-
-
 class ReviewPage(Snapshot):
     nodes: tuple[Review, ...]
     has_next: bool = Field(validation_alias=AliasPath("pageInfo", "hasNextPage"))

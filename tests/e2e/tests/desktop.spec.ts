@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -125,6 +127,14 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     );
 
     await page.goto("open-swe://app/agents");
+    // New threads default to Cloud; this test drives a This Mac thread.
+    await page.evaluate(() =>
+      window.localStorage.setItem(
+        "open-swe.agents.desktop-thread-source",
+        "local",
+      ),
+    );
+    await page.reload();
     const taskThreadId = "74000000-0000-4000-8000-000000000099";
     const bridgeId = await page.evaluate(async (threadId) => {
       return window.openSweDesktop!.takeOverThread({ threadId, repo: "" });
@@ -136,7 +146,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     const task = tasks.find((thread) => thread.id === taskThreadId);
     expect(task?.managedTaskFolder).toBe(true);
     expect(task?.cwd).toContain(taskThreadId);
-    await expect(page).toHaveTitle(/Open SWE/);
+    await expect(page).toHaveTitle(/Robin/);
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),
@@ -236,6 +246,85 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await electronApp.close().catch(() => {});
     if (!process.env.E2E_KEEP_TMP)
       rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("Desktop keeps cloud browser authentication redirects inside the viewer", async () => {
+  const stateRoot = mkdtempSync(join(tmpdir(), "desktop-browser-"));
+  const archive = join(stateRoot, "ui.json.gz");
+  writeFileSync(
+    archive,
+    gzipSync(
+      JSON.stringify({
+        files: [
+          {
+            path: "/_shell.html",
+            body: Buffer.from(
+              "<html><body>Browser fixture</body></html>",
+            ).toString("base64"),
+          },
+        ],
+      }),
+    ),
+  );
+  const server = createServer((request, response) => {
+    if (request.url === "/auth") {
+      response.writeHead(302, {
+        "set-cookie":
+          "viewer=session; HttpOnly; Path=/act; SameSite=None; Secure; Partitioned",
+        location: "/act",
+      });
+      response.end();
+      return;
+    }
+    const authenticated = request.headers.cookie === "viewer=session";
+    response.writeHead(authenticated ? 200 : 403, {
+      "content-type": "text/html",
+    });
+    response.end(
+      authenticated ? "Viewer connected" : "Window link is not valid",
+    );
+  });
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  const address = server.address();
+  if (!address || typeof address === "string")
+    throw new Error("No viewer address");
+  const viewerOrigin = `http://127.0.0.1:${address.port}`;
+  const electronApp = await electron.launch({
+    executablePath: electronPath,
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      desktopRoot,
+      "--backend-url=https://desktop.test",
+    ],
+    env: {
+      ...process.env,
+      HOME: stateRoot,
+      XDG_CONFIG_HOME: stateRoot,
+      APPDATA: stateRoot,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: archive,
+    },
+  });
+  try {
+    const page = await electronApp.firstWindow();
+    await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
+    await page.evaluate((origin) => {
+      const frame = document.createElement("iframe");
+      frame.title = "Browser window";
+      frame.src = `${origin}/auth`;
+      document.body.append(frame);
+    }, viewerOrigin);
+    await expect(
+      page
+        .frameLocator('iframe[title="Browser window"]')
+        .getByText("Viewer connected", { exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await electronApp.close();
+    await new Promise<void>((closed, reject) =>
+      server.close((error) => (error ? reject(error) : closed())),
+    );
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
 

@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { ButtonGroup } from "@langchain/macaw-components/ButtonGroup"
@@ -75,7 +76,6 @@ export function ReviewButton({
   onOpenReview,
   approveLabel = "Approve",
   onApproved,
-  readyLabel = "Mark ready",
   nextLabel,
   onNext,
 }: {
@@ -90,7 +90,6 @@ export function ReviewButton({
   onOpenReview: (verdict: PullRequestReviewEvent) => void
   /** Names what an approval also does, e.g. "Approve & next" while working through a queue. */
   approveLabel?: string
-  readyLabel?: string
   /** Names the queue step shown when this PR has no action left, e.g. "Next". */
   nextLabel?: string
   onNext?: () => void
@@ -186,6 +185,7 @@ export function ReviewButton({
     <Popover
       open={open}
       onOpenChange={(value) => {
+        if (value && !open) productAnalytics.featureOpened("review")
         if (!submit.isPending) setOpen(value)
       }}
     >
@@ -201,11 +201,7 @@ export function ReviewButton({
           <ButtonGroup size="sm" color="primary" variant="normal">
             <MarkReadyButton
               pr={status.data}
-              label={readyLabel}
-              onReady={() => {
-                refresh.status()
-                onApproved?.()
-              }}
+              onReady={() => refresh.status()}
             />
             <PopoverTrigger asChild>
               <Button
@@ -417,10 +413,8 @@ export function ReviewButton({
 function MarkReadyButton({
   pr,
   onReady,
-  label,
 }: {
   pr: OpenPullRequest
-  label: string
   onReady: () => void
 }) {
   const queryClient = useQueryClient()
@@ -439,7 +433,7 @@ function MarkReadyButton({
     >
       {actionLabel(
         {
-          idle: label,
+          idle: "Mark ready",
           pending: "Marking ready…",
           done: "Marked ready",
           retry: "Retry mark ready",

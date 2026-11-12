@@ -1,4 +1,4 @@
-"""Sign in with Slack endpoints that link a Slack identity to a GitHub login."""
+"""Sign in with Slack endpoints that link a verified Slack identity to a person."""
 
 import hmac
 import logging
@@ -36,6 +36,8 @@ from openswe.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from openswe.slack.recovery import SlackRecovery
+from openswe.users import AccountConflict
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +71,13 @@ async def slack_login(
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = SESSION_DEP,
 ) -> RedirectResponse:
-    """Start the Sign in with Slack flow to link the current GitHub account."""
+    """Start the Sign in with Slack flow to link the current Robin account."""
     if not slack_oauth_configured():
         raise HTTPException(500, "Slack OAuth is not configured")
     redirect_uri = f"{slack_base_url()}/dashboard/api/slack/callback"
+    user = await DashboardPrincipal.from_session(_session).user()
+    if user is None:
+        raise HTTPException(401, "Robin account not found — sign in with LangSmith again")
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=sanitize_redirect_to(redirect_to)
@@ -81,6 +86,7 @@ async def slack_login(
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,
+        linking_user_id=str(user.id),
     )
     response = RedirectResponse(
         build_authorize_url(redirect_uri=redirect_uri, state=state), status_code=302
@@ -95,11 +101,7 @@ async def slack_callback(
     code: str,
     state: str,
 ) -> RedirectResponse:
-    """Link the verified Slack identity to the logged-in GitHub user.
-
-    The Slack member id and email come from Slack's verified OIDC claims, so a
-    user can only ever link their own Slack account — no self-asserted values.
-    """
+    """Link the verified Slack identity to the signed-in Robin person."""
     state_payload = decode_state(state)
     handoff = desktop_handoff_from_state(state_payload)
 
@@ -131,13 +133,25 @@ async def slack_callback(
     ):
         raise HTTPException(400, "oauth state mismatch — please retry")
 
+    user = await DashboardPrincipal.from_session(session).user()
+    if user is None or state_payload.get("linking_user_id") != str(user.id):
+        raise HTTPException(400, "Robin account changed — please restart Slack sign-in")
     identity = await _verified_slack_identity(code)
-    await _link_slack_identity(
-        session,
-        slack_user_id=identity.user_id,
-        email=identity.email or "",
-        team_id=identity.team_id,
-    )
+    try:
+        await _link_slack_identity(
+            session,
+            slack_user_id=identity.user_id,
+            email=identity.email or "",
+            team_id=identity.team_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 409 or not isinstance(exc.detail, dict):
+            raise
+        response = RedirectResponse(
+            await SlackRecovery.redirect(exc.detail["recovery_token"]), status_code=302
+        )
+        _clear_slack_state_cookie(response)
+        return response
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -160,17 +174,20 @@ async def _link_slack_identity(
 ) -> None:
     """Attach the Slack account to the person the session belongs to."""
     principal = DashboardPrincipal.from_session(session)
-    github_login = principal.github_login
-    if github_login is None:
-        raise HTTPException(403, "Link a GitHub account before linking Slack")
     user = await principal.user()
     if user is None:
-        logger.warning(
-            "Slack identity not linked: no user for this GitHub login",
-            extra={"github_login": github_login},
-        )
-        raise HTTPException(409, "no Open SWE account for your GitHub login — sign in again")
-    await user.link("slack", slack_user_id, email=email, team_id=team_id)
+        raise HTTPException(401, "Robin account not found — sign in with LangSmith again")
+    try:
+        await user.link("slack", slack_user_id, email=email, team_id=team_id)
+    except AccountConflict as exc:
+        raise HTTPException(
+            409,
+            {
+                "code": "slack_account_conflict",
+                "message": "Your Slack is connected to an older Robin account.",
+                "recovery_token": await SlackRecovery(user.id, slack_user_id).issue(),
+            },
+        ) from exc
 
 
 @router.post("/slack/desktop/exchange")

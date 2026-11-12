@@ -7,6 +7,7 @@ signed up to review it on GitHub and where each of them stands.
 import json
 
 from openswe.expedited_review.eligibility import ChangedFile
+from openswe.human_review.pick_modals import PICK_MODALS
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
 from openswe.users import User
@@ -36,7 +37,7 @@ def _label(request: HumanReviewRequest) -> str:
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
     state = states.get(reviewer.github_login, "")
     status = _STATE_LABELS.get(state, ":eyes: reviewing")
-    assigned = " _(picked by Open SWE)_" if reviewer.assigned_by_agent else ""
+    assigned = " _(picked by Robin)_" if reviewer.assigned_by_agent else ""
     return f"• {reviewer.slack_mention}{assigned} — {status}"
 
 
@@ -50,7 +51,7 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
             f"• {pick.slack_mention} — :hourglass_flowing_sand: waiting for them to accept"
             for pick in picks
         )
-        blocks.append(section(f"*Picked by Open SWE*\n{lines}"))
+        blocks.append(section(f"*Picked by Robin*\n{lines}"))
     return blocks
 
 
@@ -95,7 +96,7 @@ def _stats(
 
 
 def accept_button(request: HumanReviewRequest) -> ButtonElement:
-    """What a picked reviewer clicks to take the review; anyone else clicking signs up instead."""
+    """Accept the review and open the pull request."""
     return button(
         "Accept",
         action_id="open_swe_option_select_accept",
@@ -106,19 +107,11 @@ def accept_button(request: HumanReviewRequest) -> ButtonElement:
 
 
 def decline_button(request: HumanReviewRequest) -> ButtonElement:
-    return button(
-        "Decline",
-        action_id="open_swe_option_select_decline",
-        value=_button_value("decline", request),
-    )
+    return PICK_MODALS["human_review_decline"].button(str(request.id))
 
 
 def snooze_button(request: HumanReviewRequest) -> ButtonElement:
-    return button(
-        "Snooze",
-        action_id="open_swe_option_select_snooze",
-        value=_button_value("snooze", request),
-    )
+    return PICK_MODALS["human_review_snooze"].button(str(request.id))
 
 
 PICK_BUTTON_IDS = frozenset(
@@ -132,7 +125,6 @@ PICK_BUTTON_IDS = frozenset(
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
-        # Slack opens the URL and still delivers the click, so signing up lands on the PR.
         button(
             "I'll review",
             action_id="open_swe_option_select_review",
@@ -190,9 +182,9 @@ async def closed_card(
     if outcome in ("approved", "merged"):
         line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
         if approvers:
-            line += f" — approved by {approvers}"
+            line += f", approved by {approvers}"
         if outcome == "approved" and not request.auto_merge:
-            line += " — awaiting manual merge"
+            line += ", awaiting manual merge"
     else:
         line = f"Review request: {outcome} — {pull}"
     return line, [section(line)]

@@ -11,6 +11,9 @@ import { Switch } from "@langchain/macaw-components/Switch"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
+import { useSession } from "@/lib/session"
+import { useProfileSettings } from "./ProfileSwitchRow"
 import {
   notificationsEnabled,
   notificationsSupported,
@@ -25,8 +28,9 @@ import type {
   ThreadVisibility,
   UserPreferences,
 } from "@/lib/api"
+import { sessionQueryOptions } from "@/lib/session"
 import { useTheme } from "@/lib/theme"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -36,7 +40,7 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 
 const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "private", label: "Private · only me" },
-  { value: "public", label: "Workspace" },
+  { value: "public", label: "Shared" },
 ]
 
 const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
@@ -53,6 +57,8 @@ const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
 export function GeneralSettings() {
   const { theme, setTheme } = useTheme()
+  const { profile, ready, save } = useProfileSettings()
+  const session = useSession()
   const qc = useQueryClient()
   const pendingPreferences = useMutationState({
     filters: {
@@ -83,6 +89,7 @@ export function GeneralSettings() {
     onMutate: () => qc.cancelQueries({ queryKey: PREFERENCES_KEY }),
     onSuccess: (data) => {
       qc.setQueryData(PREFERENCES_KEY, data)
+      void qc.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
     },
     onSettled: () =>
       qc.isMutating({ mutationKey: SAVE_PREFERENCES_KEY }) > 1
@@ -91,7 +98,7 @@ export function GeneralSettings() {
   })
   const workspaceOptions = useWorkspaceOptions()
   const workspaceItems = [
-    { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
+    { value: NO_DEFAULT_WORKSPACE, label: "Environment default" },
     ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
       value: workspace.slug,
       label: workspace.name,
@@ -149,7 +156,7 @@ export function GeneralSettings() {
       >
         <SettingsRow
           label="Default visibility"
-          description="Private threads can use your personal connections and only you can prompt them. Workspace threads are open to everyone. Visibility can't change later."
+          description="Private threads can use your personal connections and only you can prompt them. Shared threads are open to everyone with access to this Robin instance. Visibility can't change later."
           control={
             <Select
               aria-label="Default visibility"
@@ -164,11 +171,11 @@ export function GeneralSettings() {
           }
         />
         <SettingsRow
-          label="Default workspace"
-          description="Preselected in the composer when the chosen repository doesn't belong to another workspace."
+          label="Default environment"
+          description="Preselected in the composer when the chosen repository doesn't belong to another environment."
           control={
             <Select
-              aria-label="Default workspace"
+              aria-label="Default environment"
               options={workspaceItems}
               value={
                 preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE
@@ -197,6 +204,46 @@ export function GeneralSettings() {
               }
               disabled={preferences.isLoading}
               triggerClassName="w-40"
+            />
+          }
+        />
+        <SettingsRow
+          label="Show changes when a run finishes"
+          description="Open the Changes panel when a run that edited files finishes."
+          control={
+            <Switch
+              aria-label="Show changes when a run finishes"
+              checked={preferences.data?.auto_show_changes ?? true}
+              onChange={(v) => savePreferences.mutate({ auto_show_changes: v })}
+              disabled={preferences.isLoading}
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Slack">
+        <SettingsRow
+          label="Personal kitchen channel"
+          description={
+            session.data?.slack_user_id
+              ? "Open SWE responds to your messages in this channel without an @mention. Only your messages get kitchen handling; environment kitchen channels stay unchanged. Choose an internal channel Open SWE has joined. Clear to turn off."
+              : "Link Slack in Connections to choose a channel where Open SWE responds to your messages without an @mention."
+          }
+          control={
+            <SlackChannelCombobox
+              aria-label="Personal kitchen channel"
+              placeholder="No personal kitchen"
+              value={profile?.personal_kitchen_channel_id || null}
+              disabled={!ready || !session.data?.slack_user_id}
+              eligible={(channel) =>
+                channel.is_member &&
+                !channel.is_ext_shared &&
+                !channel.is_pending_ext_shared
+              }
+              onValueChange={(value) =>
+                save({ personal_kitchen_channel_id: value ?? "" })
+              }
+              className="w-56 max-w-full"
             />
           }
         />

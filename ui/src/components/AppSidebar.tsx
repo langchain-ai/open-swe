@@ -15,6 +15,7 @@ import { FlaskIcon } from "@phosphor-icons/react/dist/ssr/Flask"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { ListBulletsIcon } from "@phosphor-icons/react/dist/ssr/ListBullets"
 import { PaintBrushIcon } from "@phosphor-icons/react/dist/ssr/PaintBrush"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
@@ -67,6 +68,11 @@ const NAV: Array<NavGroup> = [
         icon: LinkIcon,
       },
       {
+        to: "/my-settings/plugins",
+        label: "Apps",
+        icon: PuzzlePieceIcon,
+      },
+      {
         to: "/my-settings/claude-code",
         label: "Claude Code",
         icon: TerminalWindowIcon,
@@ -79,7 +85,7 @@ const NAV: Array<NavGroup> = [
     ],
   },
   {
-    heading: "Workspace",
+    heading: "Robin",
     items: [
       {
         to: "/review",
@@ -93,7 +99,7 @@ const NAV: Array<NavGroup> = [
         label: "Repository Instructions",
         icon: FileTextIcon,
       },
-      { to: "/workspaces", label: "Workspaces", icon: CubeRegularIcon },
+      { to: "/workspaces", label: "Environments", icon: CubeRegularIcon },
       { to: "/usage", label: "Usage", icon: ChartBarIcon },
     ],
   },
@@ -114,6 +120,7 @@ const NAV: Array<NavGroup> = [
         label: "Audit Logs",
         icon: ArticleRegularIcon,
       },
+      { to: "/admin/event-log", label: "Event Log", icon: ListBulletsIcon },
       { to: "/admin/users", label: "Users", icon: UsersIcon },
       { to: "/admin/evals", label: "Evals", icon: ChartBarHorizontalIcon },
     ],

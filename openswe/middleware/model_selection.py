@@ -7,86 +7,57 @@ from langchain.agents.middleware.types import AgentState, OmitFromOutput
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
+from runtime_api.catalog import RouteName, kept_route
+from runtime_api.provenance import Provenance
+from runtime_api.route_questions import TaskRoute
 
-from openswe.input_messages import input_message_text, message_sender_id
+from openswe.input_messages import input_message_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.utils.jev import JEV
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["fast", "balanced", "performance"]
-SelectedRoute = Route | Literal["default"]
+SelectedRoute = RouteName
 PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
 
 
-def _latest_human_task(messages: Sequence[object]) -> str:
-    """The user's own request, skipping injected context envelopes.
-
-    Context blocks (sender metadata, dynamic context) are appended as
-    ``HumanMessage``s after the real input, so the newest ``HumanMessage`` is
-    usually machine-authored. Only ``kind="human"`` envelopes carry a request.
-    """
-    plain = ""
+def _latest_task(messages: Sequence[object]) -> str:
+    """What a person last wrote, skipping the context around it; for a run no person
+    started (a schedule, a background event), the latest event sent to it."""
+    event = ""
     for message in reversed(messages):
-        if not isinstance(message, HumanMessage):
+        if not isinstance(message, HumanMessage) or (provenance := Provenance.of(message)) is None:
             continue
-        content = message.content
-        if message_sender_id(content, kind="human") is not None:
-            if authored := input_message_text(content):
-                return authored
-            continue
-        text = message.text
-        if plain or not isinstance(text, str) or "<dynamic-context" in text:
-            continue
-        if "<input-message" not in text:
-            plain = text
-    return plain
-
-
-ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
-
-
-def _route_criteria() -> dict[Route, str]:
-    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
+        if provenance.human and (authored := input_message_text(message.content)):
+            return authored
+        if not event and provenance.kind == "system":
+            event = input_message_text(message.content) or ""
+    return event
 
 
 @dataclass(frozen=True)
 class RouteSelection:
     route: SelectedRoute
-    classifier: JevDecision | None = None
-
-    @property
-    def persist(self) -> bool:
-        return self.classifier is None or self.classifier.outcome == "accepted"
+    # False when the classifier was unsure: the route holds for this run alone.
+    persist: bool = True
 
 
 async def _select_jev_route(task: str) -> RouteSelection:
-    decision = JevDecision()
-    route = await select_jev_choice(
-        task,
-        question="route",
-        instructions=prompt("model-selection/instructions"),
-        criteria=_route_criteria(),
-        decision=decision,
-    )
-    return RouteSelection(route or "default", decision)
+    route, persist = await TaskRoute.classify(task, prompt=prompt, jev=JEV)
+    return RouteSelection(route or "default", persist)
 
 
 async def classify_route(messages: Sequence[object]) -> RouteSelection:
-    """The route the person's latest request takes, as the classifier reads it."""
-    return await _select_jev_route(_latest_human_task(messages)[-8_000:])
+    """The route the latest request takes, as the classifier reads it."""
+    return await _select_jev_route(_latest_task(messages))
 
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
-
-
-def normalize_route(route: PersistedRoute) -> SelectedRoute:
-    return "fast" if route == "fast_alt" else route
 
 
 def _emit_routed_model(route_model_ids: Mapping[str, str], route: SelectedRoute) -> None:
@@ -131,8 +102,10 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return RouteSelection("default")
         if self._routing_mode is None:
             return RouteSelection("default")
-        if model_route := state.get("model_route"):
-            return RouteSelection(normalize_route(model_route))
+        model_route = kept_route(state.get("model_route"))
+        # A thread that ran before routing kept `default`; once routed, it is classified.
+        if model_route and not (self._routing_mode == "auto" and model_route == "default"):
+            return RouteSelection(model_route)
         if self._routing_mode == "fast":
             return RouteSelection("fast")
         return await classify_route(state.get("messages", []))

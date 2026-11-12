@@ -19,7 +19,6 @@ from openswe.claude_code.hooks import HOOK_EVENT, MIRRORED_EVENTS, SessionMirror
 from openswe.claude_code.sync_tokens import NAME_MAX_CHARS, ClaimRedeemedError, ClaudeCodeSyncToken
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import ConnectClaim, session_user_id
-from openswe.database import postgres
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.models import User
 from openswe.utils.dashboard_links import dashboard_api_base_url
@@ -48,13 +47,7 @@ HOOK_REQUEST_BODY: dict[str, object] = {
 }
 
 
-def _require_database() -> None:
-    if not postgres.configured():
-        raise HTTPException(503, "Claude Code sync requires PostgreSQL; set POSTGRES_URI")
-
-
 async def _hook_owner(request: Request) -> User:
-    _require_database()
     presented = bearer_github_token(request)
     token = await ClaudeCodeSyncToken.authenticate(presented) if presented else None
     owner = await User.get(token.user_id) if token is not None else None
@@ -130,10 +123,9 @@ def hook_settings(secret: str) -> dict[str, JsonValue]:
 
 
 async def _session_user(session: dict[str, Any]) -> User:
-    _require_database()
     user = await User.for_session(session_user_id(session), session["sub"])
     if user is None:
-        raise HTTPException(403, "Claude Code sync requires a signed-in Open SWE user")
+        raise HTTPException(403, "Claude Code sync requires a signed-in Robin user")
     return user
 
 
@@ -170,7 +162,6 @@ async def api_create_claude_code_token(
 @audit_endpoint
 async def api_redeem_claude_code_claim(request: Request) -> MintedSyncToken:
     """Mint the token a ``connect_claude_code`` claim stands for, once, for the script installing it."""
-    _require_database()
     presented = bearer_github_token(request)
     if presented is None:
         raise HTTPException(401, "missing claim", headers={"WWW-Authenticate": "Bearer"})

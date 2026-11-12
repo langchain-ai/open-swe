@@ -60,6 +60,7 @@ it("reads the workspace's settings and writes only its own override", async () =
       return new Response(JSON.stringify(stored))
     }
     reads.push(url)
+    if (url.endsWith("/plugins/apps")) return new Response("[]")
     return new Response(
       JSON.stringify(url.endsWith("/api/settings") ? SETTINGS : stored)
     )

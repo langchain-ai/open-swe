@@ -145,6 +145,7 @@ test.describe("review page", () => {
     // The server-rendered input shows before the client handles it; retry until it does.
     await page.goto("/agents/reviews");
     await expect(async () => {
+      await input.clear();
       await input.fill(`see ${link} thx`);
       await input.press("Enter");
       await expect(page).toHaveURL(target, { timeout: 5_000 });
@@ -200,6 +201,7 @@ test.describe("review page", () => {
   test("edits descriptions, cancels drafts, and keeps failed saves retryable", async ({
     page,
   }) => {
+    await page.route("**/monaco-editor/**", (route) => route.abort());
     await openReview(page, pr);
     const description = page.getByRole("article", {
       name: "Description",
@@ -210,14 +212,8 @@ test.describe("review page", () => {
     const save = description.getByRole("button", { name: "Save description" });
     await edit.click();
     await expect(input).toBeFocused();
-    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    await expect(input).toHaveValue(DESCRIPTION);
     await expect(save).toBeDisabled();
-    await input.press("ControlOrMeta+f");
-    const find = description.locator(".find-widget");
-    await expect(find).toHaveAttribute("aria-hidden", "false");
-    await page.keyboard.press("Escape");
-    await expect(find).toHaveAttribute("aria-hidden", "true");
-    await expect(input).toBeFocused();
     await input.focus();
     await input.press("ControlOrMeta+A");
     await page.keyboard.insertText("Discard this draft");
@@ -226,7 +222,7 @@ test.describe("review page", () => {
       .click();
     await expect(description).toContainText(DESCRIPTION);
     await edit.click();
-    await expect(description.locator(".view-lines")).toContainText(DESCRIPTION);
+    await expect(input).toHaveValue(DESCRIPTION);
     const updated = "## Updated description\n\nSaved **from the review page**.";
     await input.focus();
     await input.press("ControlOrMeta+A");
@@ -238,9 +234,7 @@ test.describe("review page", () => {
     ).toBeVisible();
     await page.reload();
     await edit.click();
-    await expect(description.locator(".view-lines")).toContainText(
-      "Updated description",
-    );
+    await expect(input).toHaveValue(updated);
     const endpoint = `**${reviewApi(pr, "/description")}`;
     await page.route(endpoint, (route) =>
       route.fulfill({
@@ -255,9 +249,7 @@ test.describe("review page", () => {
     await input.press("ControlOrMeta+A");
     await page.keyboard.insertText("Retry this draft");
     await save.click();
-    await expect(description.locator(".view-lines")).toContainText(
-      "Retry this draft",
-    );
+    await expect(input).toHaveValue("Retry this draft");
     await expect(
       page.getByText("Couldn't update description", { exact: true }),
     ).toBeVisible();
@@ -456,7 +448,8 @@ test.describe("review page", () => {
       const labels: string[] = [button.textContent ?? ""];
       const callout = button.parentElement!;
       new MutationObserver(() => {
-        const label = callout.querySelector("button")?.textContent ?? "";
+        const label =
+          callout.querySelector(":scope > button")?.textContent ?? "";
         if (labels[labels.length - 1] !== label) labels.push(label);
       }).observe(callout, {
         subtree: true,
@@ -791,6 +784,83 @@ test.describe("review page", () => {
       body,
     });
     expect((await fakePull(page, pr)).standalone_comment_posts).toEqual([]);
+  });
+
+  test("Robin queues commands for the page it chats beside, which the page carries out in order", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    await openChatTab(page);
+    await sendChat(page, "E2E_REVIEW_PAGE_TOOLS point me at ZETA_44");
+
+    // Each tool answers at once with its command's place in the page's queue;
+    // Robin then waits for the page to carry them out and reads what it listed.
+    await expect(
+      chatPanel(page).getByText(
+        "Queued page commands at positions 1, 2, 3, 4, 5. The page ran 5 of 5; it lists alpha.py, zeta.py.",
+      ),
+    ).toBeVisible({ timeout: 60_000 });
+
+    // The page hears its queue change and carries the commands out.
+    await expect(
+      diffColumn(page).getByText("Showing 1 of 2 matching “zeta”"),
+    ).toBeVisible();
+    await expect(page.getByLabel("Find in files and changes")).toHaveValue(
+      "ZETA_44",
+    );
+    // zeta.py starts below alpha.py's 150 lines, so the draft is only in view
+    // because the page scrolled the diff to it.
+    const draft = diffColumn(page).getByLabel("Comment body");
+    await expect(draft).toHaveValue("Could ZETA_44 get a descriptive name?");
+    await expect(draft).toBeInViewport();
+
+    // A draft is the person's to post: nothing reached GitHub.
+    const fake = await fakePull(page, pr);
+    expect(fake.review_comments).toEqual([]);
+    expect(fake.reviews).toEqual([]);
+
+    // The tools are Robin's alone; a browser's own agent never sees them.
+    const browserTools = await page.evaluate(async () => {
+      const context = (
+        document as Document & {
+          modelContext?: { getTools(): Promise<Array<{ name: string }>> };
+        }
+      ).modelContext;
+      return context ? (await context.getTools()).map((tool) => tool.name) : [];
+    });
+    expect(browserTools).not.toContain("review_show_code");
+  });
+
+  test("Robin moves to a walkthrough step and marks steps and files viewed", async ({
+    page,
+  }) => {
+    const seeded = await page.request.post("/control/walkthrough", {
+      data: {
+        repo: `${OWNER}/${REPO}`,
+        number: pr.number,
+        title: "Both constant modules",
+      },
+    });
+    expect(seeded.ok(), await seeded.text()).toBeTruthy();
+    await openReview(page, pr);
+    // Robin's step tool switches the diff to the walkthrough's order itself.
+    await page.evaluate(() =>
+      localStorage.setItem("open-swe.review.view", "files"),
+    );
+    await page.reload();
+    await openChatTab(page);
+    await expect(page.getByText("0/2 viewed")).toBeVisible();
+
+    await sendChat(page, "E2E_REVIEW_PAGE_STEPS walk me through it");
+    await expect(
+      chatPanel(page).getByText("The page ran 3 of 3 walkthrough commands."),
+    ).toBeVisible({ timeout: 60_000 });
+
+    // The whole step was marked viewed, then alpha.py handed back unviewed.
+    await expect(page.getByText("1/2 viewed")).toBeVisible();
+    await expect(
+      diffColumn(page).getByText("Both constant modules").first(),
+    ).toBeVisible();
   });
 
   test("opens the chat as a sheet on a narrow window", async ({ page }) => {

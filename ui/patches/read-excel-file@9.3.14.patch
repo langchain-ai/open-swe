@@ -1,0 +1,96 @@
+diff --git a/modules/xlsx/parseSheet.js b/modules/xlsx/parseSheet.js
+index 1e1879bd32b3b50def136967576452fd43a4ff47..e19c6bc34ddbd03277c4b15fe6486ca3b9fc083a 100644
+--- a/modules/xlsx/parseSheet.js
++++ b/modules/xlsx/parseSheet.js
+@@ -12,6 +12,12 @@ import InvalidSpreadsheetError from './InvalidSpreadsheetError.js';
+ // An empty cell has `null` value.
+ var EMPTY_CELL_VALUE = null;
+ 
++// Patched for open-swe: a few bytes can name a cell far away, and the parser fills
++// every gap up to it, so it stops with a RangeError before a workbook outgrows these.
++// Four of Excel's tallest sheets, so a full sheet still opens beside others.
++var MAX_ROWS = 4 * 1048576;
++var MAX_CELLS = 2000000;
++
+ /**
+  * Parses a `sheet.xml` file.
+  * @param {string} content
+@@ -35,6 +41,15 @@ export default function parseSheet(content, parseXml, _ref) {
+   var rows = [];
+   var errors = [];
+   var state = createInitialState();
++  // Every sheet of one workbook is parsed, start to end, with this same `_ref`.
++  function isPosition(number) {
++    return Number.isInteger(number) && number >= 1;
++  }
++  function assertWithinLimits(rowCount, cellCount) {
++    if ((_ref.previewRows || 0) + rowCount > MAX_ROWS || (_ref.previewCells || 0) + cellCount > MAX_CELLS) {
++      throw new RangeError("The workbook has more than ".concat(MAX_ROWS, " rows or ").concat(MAX_CELLS, " cells."));
++    }
++  }
+   return parseXml(content, state, onOpenTag, onCloseTag, onText, onProgress).then(function () {
+     var _state$sheetData = state.sheetData,
+       rowCount = _state$sheetData.rowCount,
+@@ -126,6 +141,12 @@ export default function parseSheet(content, parseXml, _ref) {
+       if (errors.length > 0) {
+         throwInvalidCellError(errors[0]);
+       }
++      // The rows the padding below keeps, each as wide as the widest.
++      var sheetData = state.sheetData;
++      var paddedRows = sheetData.dataRowCount < sheetData.rowCount ? Math.min(rows.length, sheetData.dataRowCount) : rows.length;
++      assertWithinLimits(rows.length, paddedRows * sheetData.dataColumnCount);
++      _ref.previewRows = (_ref.previewRows || 0) + rows.length;
++      _ref.previewCells = (_ref.previewCells || 0) + paddedRows * sheetData.dataColumnCount;
+     } else {
+       if (rowsRead.length > 1) {
+         // The rows except for the last one have already been "finalized",
+@@ -148,6 +169,10 @@ export default function parseSheet(content, parseXml, _ref) {
+     if (tagName === 'dimension') {
+       state.dimension = parseSheetDimensionRef(attributes.ref);
+     } else if (tagName === 'sheetData') {
++      // A second one would start the counts again over rows already kept.
++      if (state.sheetData) {
++        throw new InvalidSpreadsheetError('More than one <sheetData/>');
++      }
+       state.sheetData = createInitialStateInSheetData();
+     } else if (state.sheetData) {
+       onOpenTagInSheetData(tagName, attributes, state.sheetData);
+@@ -218,6 +243,9 @@ export default function parseSheet(content, parseXml, _ref) {
+       // `<c>` elements in it, or just assumed to be "previous row number + 1".
+       if (attributes.r) {
+         state.rowNumber = Number(attributes.r);
++        if (!isPosition(state.rowNumber)) {
++          throw new InvalidSpreadsheetError("Invalid <row/> number ".concat(attributes.r));
++        }
+       }
+       state.row = [];
+     } else if (tagName === 'c') {
+@@ -229,6 +257,7 @@ export default function parseSheet(content, parseXml, _ref) {
+   }
+   function onCloseTagInSheetData(tagName, state) {
+     if (tagName === 'row') {
++      assertWithinLimits(Math.max(state.rowNumber || 0, state.rowIndexShift + state.rows.length + 1), 0);
+       // If the row number is known, check for any inter-row gaps that it might introduce.
+       if (state.rowNumber) {
+         // Google AI says that `<row>` elements must be ordered by row number ascending,
+@@ -257,6 +286,10 @@ export default function parseSheet(content, parseXml, _ref) {
+       state.rowNumber = undefined;
+     } else if (tagName === 'c') {
+       var cell = parseCellFromXmlData(state.c);
++      // The limits count rows and columns, so every cell must move them forward.
++      if (!isPosition(cell.row) || !isPosition(cell.column)) {
++        throw new InvalidSpreadsheetError("Invalid <c/> address ".concat(state.c.attributes.r));
++      }
+       // Google AI says that the Open XML specification (ISO/IEC 29500) strictly dictates
+       // that `<c>` elements within `sheet.xml` (or specifically `<sheetData>`)
+       // must be written in ascending order of their `r` attributes (e.g., "A1", "B1", "C1").
+@@ -280,6 +313,9 @@ export default function parseSheet(content, parseXml, _ref) {
+       }
+       // If the cell is not empty.
+       else if (cell.value !== EMPTY_CELL_VALUE) {
++        // Every row up to this one is padded to the widest; the enclosing <row r> can exceed the cell's own.
++        var rowSpan = Math.max(state.rowNumber || 0, cell.row, state.rowIndexShift + state.rows.length + 1);
++        assertWithinLimits(rowSpan, rowSpan * Math.max(cell.column, state.dataColumnCount));
+         // Insert empty cells where there're gaps between the columns.
+         while (cell.column > state.row.length + 1) {
+           state.row.push(EMPTY_CELL_VALUE);

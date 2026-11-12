@@ -18,9 +18,6 @@ describe("app location", () => {
     "/assistant",
     "/assistant?noRepo=true",
     "/assistant/thread-1",
-    "/incidents",
-    "/incidents?view=inactive",
-    "/incidents/incident-1",
   ])("restores the last app location: %s", (href) => {
     rememberAppLocation(href)
 
@@ -29,9 +26,8 @@ describe("app location", () => {
 
   it.each([
     "/my-settings",
-    "/incidents-external",
     "/assistant-external",
-    "https://example.com/incidents",
+    "https://example.com/assistant",
   ])("ignores locations outside the app: %s", (href) => {
     rememberAppLocation("/agents/thread-1")
     rememberAppLocation(href)
@@ -47,14 +43,14 @@ describe("app location", () => {
 describe("section location", () => {
   it("restores the last location within each section", () => {
     rememberAppLocation("/agents/reviews/acme/api/42")
-    rememberAppLocation("/incidents?view=inactive")
+    rememberAppLocation("/agents/skills?tab=mine")
     rememberAppLocation("/agents/thread-1")
 
     expect(getLastSectionLocation("/agents/reviews")).toBe(
       "/agents/reviews/acme/api/42"
     )
-    expect(getLastSectionLocation("/incidents")).toBe(
-      "/incidents?view=inactive"
+    expect(getLastSectionLocation("/agents/skills")).toBe(
+      "/agents/skills?tab=mine"
     )
   })
 

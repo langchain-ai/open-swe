@@ -127,7 +127,7 @@ async def record_agent_invocation_completion(
     failure_code: str | None = None,
     thread_id: str = "",
 ) -> bool:
-    if not invocation_id or not database.configured():
+    if not invocation_id:
         return False
     run_id = opaque_id("run", invocation_id)
     if run_id is None:
@@ -139,6 +139,8 @@ async def record_agent_invocation_completion(
         input_tokens=usage.input_tokens if usage else None,
         output_tokens=usage.output_tokens if usage else None,
         total_tokens=usage.total_tokens if usage else None,
+        cache_read_tokens=usage.cache_read_tokens if usage else None,
+        cache_creation_tokens=usage.cache_creation_tokens if usage else None,
     )
     if status == "success":
         name = EventName.RUN_COMPLETED
@@ -147,18 +149,14 @@ async def record_agent_invocation_completion(
         name = EventName.RUN_CANCELED
         payload = RunCanceledPayload(
             cancellation_source="superseded" if status == "interrupted" else "user",
-            input_tokens=counts.input_tokens,
-            output_tokens=counts.output_tokens,
-            total_tokens=counts.total_tokens,
+            **counts.model_dump(),
         )
     else:
         name = EventName.RUN_FAILED
         payload = RunFailedPayload(
             failure_class="timeout" if status == "timeout" else "error",
             failure_code=failure_code,
-            input_tokens=counts.input_tokens,
-            output_tokens=counts.output_tokens,
-            total_tokens=counts.total_tokens,
+            **counts.model_dump(),
         )
     return await emitter.enqueue_event(
         name,
@@ -172,7 +170,7 @@ async def record_agent_invocation_completion(
 
 
 async def agent_invocation_needs_cost_refresh(*, invocation_id: str) -> bool:
-    if not invocation_id or not database.configured():
+    if not invocation_id:
         return False
     run_id = opaque_id("run", invocation_id)
     if run_id is None:
@@ -187,7 +185,7 @@ async def agent_invocation_needs_cost_refresh(*, invocation_id: str) -> bool:
 
 
 async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) -> None:
-    if not invocation_id or not database.configured():
+    if not invocation_id:
         return
     run_id = opaque_id("run", invocation_id)
     if run_id is None or not (await _run_status(run_id))["finished"]:
@@ -203,8 +201,6 @@ async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) ->
 
 
 async def record_agent_invocation_cost(*, invocation_id: str, cost_usd: float) -> None:
-    if not database.configured():
-        raise RuntimeError("Usage analytics is unavailable")
     if not invocation_id:
         return
     if not math.isfinite(cost_usd) or cost_usd < 0:

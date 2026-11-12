@@ -46,14 +46,15 @@ const pr: OpenPullRequest = {
   requiredChecksPassing: true,
   missingChecks: [],
   unresolvedThreads: 1,
+  conversationResolutionRequired: false,
 }
 
-it("blocks the sibling action as soon as one is queued", async () => {
+it("blocks the button on another card as soon as one is queued", async () => {
   vi.spyOn(api, "pullRequestThreadStatus").mockResolvedValue({
     running: false,
   })
   let finish: (result: PullRequestThreadResult) => void = () => {}
-  vi.spyOn(api, "fixPullRequest").mockImplementation(
+  vi.spyOn(api, "fixUpPullRequest").mockImplementation(
     () => new Promise<PullRequestThreadResult>((resolve) => (finish = resolve))
   )
   const client = new QueryClient({
@@ -61,24 +62,25 @@ it("blocks the sibling action as soon as one is queued", async () => {
   })
   render(
     <QueryClientProvider client={client}>
-      <PullRequestThreadAction pr={pr} login="me" actions={["fix"]} />
-      <PullRequestThreadAction
-        pr={pr}
-        login="me"
-        actions={["address-comments"]}
-      />
+      <div data-testid="first">
+        <PullRequestThreadAction pr={pr} login="me" />
+      </div>
+      <div data-testid="second">
+        <PullRequestThreadAction pr={pr} login="me" />
+      </div>
     </QueryClientProvider>
   )
 
-  const fix = await screen.findByRole("button", { name: "Fix" })
-  const address = screen.getByRole("button", { name: "Address comments" })
-  await waitFor(() => expect(address.hasAttribute("disabled")).toBe(false))
+  const [first, second] = await screen.findAllByRole("button", {
+    name: "Fix up",
+  })
+  await waitFor(() => expect(second!.hasAttribute("disabled")).toBe(false))
 
-  fireEvent.click(fix)
-  await screen.findByRole("button", { name: "Fix queued" })
+  fireEvent.click(first!)
+  await screen.findByRole("button", { name: "Fix up queued" })
   finish({ thread_id: "t", already_running: false })
 
-  await screen.findByRole("button", { name: "Fix queued" })
-  const blocked = screen.getByRole("button", { name: "Addressing comments" })
+  await screen.findByRole("button", { name: "Fix up queued" })
+  const blocked = screen.getByRole("button", { name: "Fixing up" })
   expect(blocked.hasAttribute("disabled")).toBe(true)
 })

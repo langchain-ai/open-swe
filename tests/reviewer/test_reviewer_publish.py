@@ -1,12 +1,13 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
 from collections.abc import Callable, Iterator
-from typing import Any, Literal
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.review.approval_withdrawal import ApprovalWithdrawal
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import Finding, new_finding
 from openswe.review.publish import (
@@ -147,7 +148,9 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
         patch("openswe.tools.publish_review.replace_findings", AsyncMock()),
         patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
         patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
-        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()),
+        patch.object(ApprovalWithdrawal, "attempt", autospec=True, return_value="a" * 40),
+        patch.object(ApprovalWithdrawal, "queue", AsyncMock()),
+        patch("openswe.tools.publish_review.queue.cancel", AsyncMock()),
         patch("openswe.tools.publish_review._withdraw_open_swe_change_requests", AsyncMock()),
         patch(
             "openswe.tools.publish_review.resolve_review_head_sha",
@@ -210,6 +213,89 @@ async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
     set_meta.assert_not_awaited()
 
 
+async def test_a_run_for_a_deployed_preview_ranks_only_the_findings_it_added() -> None:
+    from openswe.tools.publish_review import publish_review
+
+    head = "b" * 40
+    # The code review recorded one at this head and left it unpublished, below its threshold.
+    findings = [
+        _f(id="f_review", sha=head, file="a.py", start_line=1, end_line=1),
+        _f(id="f_visual", sha=head, file="b.py", start_line=2, end_line=2),
+    ]
+    with (
+        patch(
+            "openswe.tools.publish_review.get_config",
+            return_value=_eval_config(reviewer_event="preview_ready", head_sha=head),
+        ),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+    ):
+        result = await publish_review(
+            ranking=[], state={"review_earlier_finding_ids": ["f_review"]}
+        )
+
+    assert result["expected_finding_ids"] == ["f_visual"]
+
+
+async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_nothing_else() -> (
+    None
+):
+    from openswe.tools.publish_review import _publish_review_async
+
+    head = "a" * 40
+    findings = [
+        _f(id="f_review", sha=head, file="a.py", start_line=1, end_line=1),
+        _f(id="f_visual", sha=head, file="b.py", start_line=2, end_line=2),
+    ]
+    post_review = AsyncMock(return_value={"id": 99})
+    with (
+        patch("openswe.run_config.get_config", return_value={"configurable": {"thread_id": "tid"}}),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review._record_review_publication", AsyncMock()),
+        patch(
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("openswe.tools.publish_review._store_thread_ids_on_findings", AsyncMock()),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as recorded,
+        patch.object(ApprovalWithdrawal, "attempt", AsyncMock()) as withdrawn,
+        patch(
+            "openswe.tools.publish_review.PullRequestApproval.record_auto_approval", AsyncMock()
+        ) as approval,
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()) as settled,
+        patch("openswe.tools.publish_review.PullRequest.link_review", AsyncMock()) as linked,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha=head,
+            token="t",
+            severity_threshold="medium",
+            is_re_review=True,
+            assessment=_assessment(head),
+            apps_only=True,
+            state={
+                "review_approval_policy": "Docs only",
+                # The code review's to act on, not the preview run's.
+                "review_config_errors": ["`.open-swe/settings.json` is not valid JSON"],
+                "review_earlier_finding_ids": ["f_review"],
+            },
+        )
+
+    assert result["review_id"] == 99
+    assert post_review.await_args is not None
+    kwargs = post_review.await_args.kwargs
+    assert kwargs["event"] == "COMMENT"
+    assert [comment["path"] for comment in kwargs["inline_comments"]] == ["b.py"]
+    # The code review's verdict, approvals, check and recorded commit stay its own.
+    for untouched in (withdrawn, approval, settled, linked, recorded):
+        untouched.assert_not_awaited()
+
+
 async def test_publish_review_refuses_when_called_alongside_other_tools() -> None:
     from langchain_core.messages import AIMessage
 
@@ -244,13 +330,17 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
         "eval-tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
     )
     with (
-        patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
+        patch(
+            "openswe.tools.publish_review.get_config",
+            return_value=_eval_config(base_sha="base-commit"),
+        ),
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="eval-tid"),
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=["f_one"])
 
     assert result["surfaced_count"] == 1
+    assert set_meta.await_args.kwargs["last_reviewed_base_sha"] == "base-commit"
     publication = set_meta.await_args.kwargs["extra"][REVIEWER_EVAL_PUBLICATION_KEY]
     assert [finding["id"] for finding in publication["findings"]] == ["f_one"]
 
@@ -424,7 +514,9 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
         assert result["success"] is True
         assert result["skipped_empty_re_review"] is True
         post.assert_awaited_once()
-        metadata.assert_awaited_once_with("tid", last_reviewed_sha="a" * 40)
+        metadata.assert_awaited_once_with(
+            "tid", last_reviewed_sha="a" * 40, last_reviewed_base_sha=""
+        )
         settle.assert_awaited_once()
 
 
@@ -1112,16 +1204,16 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment,conditional_enabled",
+    "prepared_policy,mode,current_head,expected_event,has_assessment,conditional_enabled,live_head",
     [
-        (None, "approve", True, "COMMENT", False, None),
-        ("Docs only", "off", True, "COMMENT", False, None),
-        ("Docs only", "dry_run", True, "COMMENT", True, None),
-        ("Docs only", "approve", False, "COMMENT", True, None),
-        ("Docs only", "approve", True, "APPROVE", True, None),
-        ("Docs only", "approve", True, "COMMENT", True, False),
-        ("Docs only", "approve", True, "COMMENT", True, True),
-        ("Docs only", "approve", True, "COMMENT", True, "lookup-fails"),
+        (None, "approve", True, "COMMENT", False, None, "a" * 40),
+        ("Docs only", "off", True, "COMMENT", False, None, "a" * 40),
+        ("Docs only", "dry_run", True, "COMMENT", True, None, "a" * 40),
+        ("Docs only", "approve", False, "COMMENT", True, None, "a" * 40),
+        ("Docs only", "approve", True, "APPROVE", True, None, "a" * 40),
+        ("Docs only", "approve", True, "APPROVE", True, None, "b" * 40),
+        ("Docs only", "approve", True, "APPROVE", True, None, None),
+        ("Docs only", "approve", True, "COMMENT", True, True, "a" * 40),
     ],
     ids=[
         "no-policy",
@@ -1129,9 +1221,9 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         "dry-run",
         "head-moved",
         "approve",
-        "conditional-off",
-        "conditional-on",
-        "conditional-author-unknown",
+        "head-moved-while-approving",
+        "withdrawal-unconfirmed",
+        "conditional",
     ],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
@@ -1140,28 +1232,23 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
-    conditional_enabled: bool | Literal["lookup-fails"] | None,
+    conditional_enabled: bool | None,
+    live_head: str | None,
     registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
-    from openswe.users import UserPreferences
+
+    withdrawals: list[ApprovalWithdrawal] = []
+
+    async def attempt(self: ApprovalWithdrawal, *, token: str | None = None) -> str | None:
+        withdrawals.append(self)
+        return live_head
 
     with (
         patch(
             "openswe.github.pull_request_status.PullRequestClient.pull",
             AsyncMock(return_value={"user": {"login": "pr-author"}}),
         ),
-        patch(
-            "openswe.tools.publish_review.User.preferences_for_login",
-            AsyncMock(
-                side_effect=RuntimeError("database unavailable")
-                if conditional_enabled == "lookup-fails"
-                else None,
-                return_value=UserPreferences(
-                    experimental_conditional_approval=conditional_enabled is True
-                ),
-            ),
-        ) as author_preferences,
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("openswe.tools.publish_review.approval_mode_for", AsyncMock(return_value=mode)),
         patch(
@@ -1183,7 +1270,10 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
         patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
         patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
-        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()) as withdraw,
+        patch.object(ApprovalWithdrawal, "attempt", attempt),
+        patch(
+            "openswe.tools.publish_review.PullRequestApproval.record_auto_approval", AsyncMock()
+        ) as recorded,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1210,13 +1300,14 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     assert result["success"] is True
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == expected_event
-    # Every earlier Open SWE approval goes; only an approval this publish posted may stand.
-    assert withdraw.await_args is not None
-    assert withdraw.await_args.kwargs["keep_review_id"] == (
-        77 if expected_event == "APPROVE" else None
-    )
+    # Only approvals of the live head survive, and only an approving publish keeps any.
+    [withdrawal] = withdrawals
+    assert withdrawal.keep_head is (expected_event == "APPROVE")
     # Scoped to this publish's own review so a sibling deployment's approval stands.
-    assert withdraw.await_args.kwargs["scope_to_review_id"] == 77
+    assert withdrawal.review_id == 77
+    # An approval is recorded only once its head is confirmed to still be the live one.
+    approval_stands = expected_event == "APPROVE" and live_head == "a" * 40
+    recorded.assert_awaited_once_with("o", "r", 7, "a" * 40 if approval_stands else "")
     body = post.await_args.kwargs["body"]
     assert ("Risk:" in body) is has_assessment
     assert ("(dry run)" in body) is (has_assessment and mode == "dry_run")
@@ -1224,16 +1315,11 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     assert (saved is not None) is has_assessment
     if saved is not None:
         assert saved.dry_run is (mode == "dry_run")
-        assert saved.approved is (expected_event == "APPROVE")
+        assert saved.approved is approval_stands
 
         if conditional_enabled is not None:
-            author_preferences.assert_awaited_once_with("pr-author")
-            assert saved.decision == (
-                "would_approve_conditionally"
-                if conditional_enabled is True
-                else "needs_human_review"
-            )
-            assert bool(saved.approval_condition) is (conditional_enabled is True)
+            assert saved.decision == "would_approve_conditionally"
+            assert saved.approval_condition
 
 
 @pytest.mark.parametrize(
@@ -1352,7 +1438,7 @@ async def test_approval_publication_handles_github_rejections(
         assert saved.approved is False
         assert saved.decision == "would_approve"
         assert saved.head_sha == "a" * 40
-        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40)
+        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40, last_reviewed_base_sha="")
         settle_check.assert_awaited_once()
     else:
         assert saved is None

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from langsmith.utils import LangSmithError
 
 from openswe.utils import langsmith as ls_utils
 
@@ -14,6 +15,7 @@ _REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 def _clear_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     ls_utils._PROJECT_ID_CACHE.clear()
     ls_utils._TENANT_ID_CACHE.clear()
+    ls_utils._PROJECT_AGENT_CACHE.clear()
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: None)
 
 
@@ -145,10 +147,16 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize(
     ("scenario", "expected"),
-    [("recovered-tool", "failed-model"), ("ambiguous", "root"), ("no-message", "root")],
+    [
+        ("recovered-tool", "failed-model"),
+        ("ambiguous", "root"),
+        ("no-message", "root"),
+        ("missing", None),
+        ("lookup-error", None),
+    ],
 )
 async def test_error_url_follows_terminal_failure(
-    monkeypatch: pytest.MonkeyPatch, legacy: bool, scenario: str, expected: str
+    monkeypatch: pytest.MonkeyPatch, legacy: bool, scenario: str, expected: str | None
 ) -> None:
     thread_url = "https://smith.example/o/tenant/projects/p/pid/t/thread"
     monkeypatch.setattr(ls_utils, "get_langsmith_trace_url", AsyncMock(return_value=thread_url))
@@ -161,6 +169,10 @@ async def test_error_url_follows_terminal_failure(
         queries.append(kwargs)
 
         async def results() -> AsyncIterator[SimpleNamespace]:
+            if scenario == "lookup-error":
+                raise RuntimeError("lookup failed")
+            if scenario == "missing":
+                return
             if legacy and len(queries) == 1:
                 return
             for run_id, order, error in [
@@ -186,18 +198,21 @@ async def test_error_url_follows_terminal_failure(
     )
 
     terminal_error = None if scenario == "no-message" else "model timed out"
-    assert await ls_utils.get_langsmith_error_url("thread", "invocation", terminal_error) == (
-        f"https://smith.example/o/tenant/projects/p/pid/r/{expected}"
+    link = await ls_utils.get_langsmith_error_url("thread", "invocation", terminal_error)
+    assert link == ls_utils.LangSmithErrorLink(
+        f"https://smith.example/o/tenant/projects/p/pid/r/{expected}" if expected else thread_url,
+        is_fallback=expected is None,
     )
-    assert len(queries) == (2 if legacy else 1)
-    for query_args in queries:
+    assert len(queries) == (
+        1 if scenario == "lookup-error" else 2 if legacy or scenario == "missing" else 1
+    )
+    for field, query_args in zip(("invocation_id", "prepare_run_id"), queries, strict=False):
         assert query_args["project_ids"] == ["pid"]
         assert query_args["has_error"] is True
         assert query_args["min_start_time"] == start
         assert ls_utils._langsmith_metadata_filter("thread_id", "thread") in str(
             query_args["filter"]
         )
-        field = "prepare_run_id" if legacy and query_args is queries[-1] else "invocation_id"
         assert ls_utils._langsmith_metadata_filter(field, "invocation") in str(query_args["filter"])
 
 
@@ -209,3 +224,51 @@ async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch)
     assert await ls_utils.get_langsmith_trace_url("t9") == (
         "https://smith.example/o/tenant-d/projects/p/pid/t/t9"
     )
+
+
+async def test_trace_url_scopes_to_owning_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api/v1")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key")
+    monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant-d")
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    calls: list[tuple[str, object]] = []
+
+    class _FakeClient:
+        async def _arequest_with_retries(self, method: str, url: str, **kwargs: object):
+            calls.append((url, kwargs["params"]))
+            return SimpleNamespace(json=lambda: {"items": [{"id": "agent-1"}]})
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
+
+    for _ in range(2):
+        assert await ls_utils.get_langsmith_trace_url("t9") == (
+            "https://smith.example/o/tenant-d/a/agent-1/projects/p/pid/t/t9"
+        )
+    assert calls == [
+        ("https://smith.example/api/v1/agents", {"tracer_session_id": "pid", "page_size": 2})
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "cached"), [(403, True), (404, True), (429, False), (503, False)]
+)
+async def test_agent_lookup_caches_only_definitive_client_errors(
+    monkeypatch: pytest.MonkeyPatch, status: int, cached: bool
+) -> None:
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api/v1")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key")
+    calls: list[str] = []
+
+    class _FakeClient:
+        async def _arequest_with_retries(self, method: str, url: str, **kwargs: object):
+            calls.append(url)
+            error = LangSmithError("failed")
+            error.__cause__ = Exception()
+            error.__cause__.response = SimpleNamespace(status_code=status)  # type: ignore[attr-defined]
+            raise error
+
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
+
+    assert await ls_utils._resolve_project_agent_id("pid") is None
+    assert await ls_utils._resolve_project_agent_id("pid") is None
+    assert len(calls) == (1 if cached else 2)

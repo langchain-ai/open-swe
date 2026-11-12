@@ -26,6 +26,7 @@ from openswe.reviewer import (
 )
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.tools.review_apps import ReviewAppTools
 
 logger = logging.getLogger(__name__)
 
@@ -100,5 +101,10 @@ class ReviewerKind(RunKind):
         cfg = RunConfig.from_config(config)
         return None if cfg.thread_id is None else reviewer_sandbox(cfg.thread_id, cfg)
 
-    async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
-        return _tools_by_name().get(name)
+    async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
+        static = _tools_by_name().get(name)
+        if static is not None:
+            return static
+        # The tools the workspace's review apps add, as the run's catalog offered them.
+        app_tools = await ReviewAppTools.of_run(RunConfig.from_config(config))
+        return None if app_tools is None else await app_tools.tool(name)

@@ -17,7 +17,7 @@ from typing import Any, Self
 import httpx2
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from openswe.github.checks import REVIEW_CHECK_RUN_NAME
+from openswe.github.checks import APPROVAL_CHECK_RUN_NAME, REVIEW_CHECK_RUN_NAME
 from openswe.github.http import ReadResult, RepoClient, read_result
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,15 @@ logger = logging.getLogger(__name__)
 FAILING_CONCLUSIONS: frozenset[str] = frozenset(["failure", "timed_out", "action_required"])
 
 # Check runs Open SWE itself produces; never treat them as fixable CI.
-_OPEN_SWE_CHECK_NAMES: frozenset[str] = frozenset([REVIEW_CHECK_RUN_NAME, "Open SWE Auto-fix"])
+_OPEN_SWE_CHECK_NAMES: frozenset[str] = frozenset(
+    [
+        REVIEW_CHECK_RUN_NAME,
+        APPROVAL_CHECK_RUN_NAME,
+        "Open SWE Review",
+        "Robin Auto-fix",
+        "Open SWE Auto-fix",
+    ]
+)
 
 
 @dataclass(frozen=True, slots=True)

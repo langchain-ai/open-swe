@@ -1,4 +1,4 @@
-"""The sandbox commands and monitors running for a thread, for the dashboard."""
+"""The sandbox commands, monitors and event listeners keeping a thread busy, for the dashboard."""
 
 import logging
 from typing import TYPE_CHECKING, Self
@@ -11,6 +11,7 @@ from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import connect_sandbox
 from openswe.threads.summary import _assert_thread_promptable
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY, RUNNING_MONITORS_KEY
+from openswe.webhooks.event_subscriptions import EventSubscription
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
@@ -27,9 +28,42 @@ class BackgroundCommand(BaseModel):
     started_at: float | None = None
 
 
+class EventListener(BaseModel):
+    """An event subscription that wakes the thread when a matching event arrives."""
+
+    subscription_id: str
+    target: str
+    sources: list[str]
+    event_types: list[str]
+    instructions: str
+    one_shot: bool
+    trigger_count: int
+    last_triggered_at: float | None
+    expires_at: float
+    created_at: float | None
+
+    @classmethod
+    def of(cls, subscription: EventSubscription) -> Self:
+        return cls(
+            subscription_id=str(subscription.id),
+            target=subscription.target,
+            sources=subscription.sources,
+            event_types=subscription.event_types,
+            instructions=subscription.instructions,
+            one_shot=subscription.one_shot,
+            trigger_count=subscription.trigger_count,
+            last_triggered_at=subscription.last_triggered_at.timestamp()
+            if subscription.last_triggered_at
+            else None,
+            expires_at=subscription.expires_at.timestamp(),
+            created_at=subscription.created_at.timestamp() if subscription.created_at else None,
+        )
+
+
 class BackgroundWork(BaseModel):
     commands: list[BackgroundCommand] = []
     monitors: list[MonitorState] = []
+    listeners: list[EventListener] = []
 
 
 class BackgroundOutput(BaseModel):
@@ -66,8 +100,13 @@ class ThreadBackgroundWork:
     async def listing(self) -> BackgroundWork:
         from openswe.background_tasks import thread_tasks
 
+        work = BackgroundWork(
+            listeners=[
+                EventListener.of(subscription)
+                for subscription in await EventSubscription.for_thread(self._thread_id)
+            ]
+        )
         sandbox = await self._sandbox()
-        work = BackgroundWork()
         if sandbox is None:
             return work
         if self._commands_running:

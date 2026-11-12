@@ -1,10 +1,12 @@
 """LangSmith login and live organization authorization for independent accounts."""
 
+import asyncio
 import logging
 import secrets
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlparse
 
@@ -24,10 +26,12 @@ from openswe.dashboard.oauth_credentials import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users.authorization import UnauthorizedUser
+from openswe.utils.dashboard_links import PublicOrigin
 from openswe.utils.http_pool import pooled_transport
 
 if TYPE_CHECKING:
     from openswe.dashboard.principal import DashboardPrincipal
+    from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +48,97 @@ class LangSmithAccount(BaseModel):
     name: str = ""
     picture: str = ""
 
-    def require_allowed_org(self) -> None:
-        if (
-            not ENV.LANGSMITH_LOGIN_ORG_ID.get()
-            or self.ls_org_id != ENV.LANGSMITH_LOGIN_ORG_ID.get()
-        ):
+    def require_allowed_org(self, org_id: str) -> None:
+        if not org_id or self.ls_org_id != org_id:
             raise UnauthorizedUser("This LangSmith organization is not authorized")
 
 
+class LangSmithOrgDiscovery:
+    def __init__(self) -> None:
+        self.identity: tuple[str, str] | None = None
+        self.org_id = ""
+        self.workspace_id = ""
+        self.expires_at = 0.0
+        self.lock = asyncio.Lock()
+
+    async def resolve(self) -> tuple[str, str]:
+        key = ENV.LANGSMITH_API_KEY.get()
+        if not key:
+            raise HTTPException(503, "LangSmith login is not configured")
+        endpoint = ENV.LANGSMITH_ENDPOINT.get().rstrip("/")
+        # The key itself, not a digest: it already lives in this process's environment,
+        # and a rotated key must re-run discovery.
+        identity = (endpoint, key)
+        async with self.lock:
+            if self.identity == identity and monotonic() < self.expires_at:
+                if not self.org_id or not self.workspace_id:
+                    raise HTTPException(
+                        503, "LangSmith organization discovery is temporarily unavailable"
+                    )
+                return self.org_id, self.workspace_id
+            try:
+                org_id, workspace_id = await self.discover(endpoint, key)
+            except HTTPException:
+                self.identity = identity
+                self.org_id = ""
+                self.workspace_id = ""
+                self.expires_at = monotonic() + 3
+                raise
+            self.identity = identity
+            self.org_id = org_id
+            self.workspace_id = workspace_id
+            self.expires_at = monotonic() + LANGSMITH_AUTHORIZATION_TTL.total_seconds()
+            return org_id, workspace_id
+
+    async def discover(self, endpoint: str, key: str) -> tuple[str, str]:
+        try:
+            async with httpx2.AsyncClient(
+                timeout=httpx2.Timeout(3.0, connect=1.0), transport=pooled_transport()
+            ) as client:
+                response = await client.get(
+                    endpoint + "/auth/public",
+                    headers={"Accept": "application/json", "X-Api-Key": key},
+                    follow_redirects=False,
+                )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise HTTPException(
+                503, "Could not determine the authorized LangSmith organization"
+            ) from exc
+        org_id = data.get("organization_id") if isinstance(data, dict) else None
+        if not isinstance(org_id, str) or not org_id.strip():
+            raise HTTPException(503, "Invalid LangSmith deployment organization response")
+        workspace_id = data.get("tenant_id") if isinstance(data, dict) else None
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise HTTPException(503, "Invalid LangSmith deployment workspace response")
+        return org_id, workspace_id
+
+
+LANGSMITH_ORG_DISCOVERY = LangSmithOrgDiscovery()
+
+
 class LangSmithLogin:
+    @staticmethod
+    def slack_onboarding_url() -> str | None:
+        base = PublicOrigin.dashboard_api_base_url()
+        return f"{base}/dashboard/api/auth/langsmith/login?connect_slack=true" if base else None
+
     def __init__(self) -> None:
         self.issuer = langsmith_issuer()
         self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
         self.client_secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.get()
-        self.org_id = ENV.LANGSMITH_LOGIN_ORG_ID.get()
+        self.org_id = ""
+        self.workspace_id = ""
 
-    def require_configured(self) -> None:
-        if not self.org_id or not langsmith_oauth_configured():
+    async def allowed_org(self) -> str:
+        self.org_id, self.workspace_id = await LANGSMITH_ORG_DISCOVERY.resolve()
+        return self.org_id
+
+    async def require_configured(self) -> None:
+        if not langsmith_oauth_configured():
             raise HTTPException(503, "LangSmith login is not configured")
+        await self.allowed_org()
 
     def same_origin(self, url: str) -> str:
         issuer, endpoint = urlparse(self.issuer), urlparse(url)
@@ -103,7 +180,7 @@ class LangSmithLogin:
         return body
 
     async def metadata(self) -> dict[str, str]:
-        self.require_configured()
+        await self.require_configured()
         data = await self.request("GET", self.issuer + "/.well-known/openid-configuration")
         if not isinstance(data, dict) or data.get("issuer") != self.issuer:
             raise HTTPException(502, "Invalid LangSmith OAuth issuer")
@@ -126,6 +203,7 @@ class LangSmithLogin:
         nonce: str,
         handoff_challenge: str | None,
         handoff_port: int | None,
+        connect_slack: bool = False,
     ) -> str:
         endpoints = await self.metadata()
         verifier = secrets.token_urlsafe(32)
@@ -137,6 +215,7 @@ class LangSmithLogin:
             provider="langsmith",
             encrypted_code_verifier=encrypt_token(verifier),
             redirect_uri=redirect_uri,
+            connect_slack=connect_slack,
         )
         params = {
             "response_type": "code",
@@ -147,13 +226,15 @@ class LangSmithLogin:
             "code_challenge_method": "S256",
             "scope": "openid profile email offline_access",
             "resource": self.issuer,
+            "organization_id": self.org_id,
+            "workspace_id": self.workspace_id,
         }
         return endpoints["authorization_endpoint"] + "?" + urlencode(params)
 
     async def account(
         self, token: str, *, userinfo_endpoint: str | None = None
     ) -> LangSmithAccount:
-        self.require_configured()
+        await self.require_configured()
         data = await self.request(
             "GET", userinfo_endpoint or self.issuer + "/userinfo", token=token
         )
@@ -162,7 +243,7 @@ class LangSmithLogin:
         except ValidationError as exc:
             raise HTTPException(502, "Invalid LangSmith identity response") from exc
         try:
-            account.require_allowed_org()
+            account.require_allowed_org(self.org_id)
         except UnauthorizedUser as exc:
             raise HTTPException(403, "Your LangSmith organization is not authorized") from exc
         organizations = await self.request(
@@ -250,16 +331,25 @@ class LangSmithLogin:
         )
 
     async def access_token(self, key: str) -> str | None:
-        from openswe.dashboard.principal import DashboardPrincipal
         from openswe.users import User
 
         user = await User.for_login("github", key)
         if user is None:
             return None
+        if not any(item.provider == "langsmith" for item in user.identities):
+            return None
+        return await self.authorize_user(user)
+
+    async def authorize_user(self, user: User) -> str:
+        """Authorize a Robin person through their own linked LangSmith login."""
+        from openswe.dashboard.principal import DashboardPrincipal
+
         identity = next((item for item in user.identities if item.provider == "langsmith"), None)
         if identity is None:
-            return None
-        principal = DashboardPrincipal("langsmith", key, user.id, identity.external_id)
+            raise HTTPException(401, "Sign in with LangSmith to use Robin")
+        principal = DashboardPrincipal(
+            "langsmith", f"user:{user.id}", user.id, identity.external_id
+        )
         return await self.authorize_session(principal)
 
     async def credential(self, key: str) -> OAuthCredential:
@@ -345,7 +435,7 @@ class LangSmithLogin:
         return token
 
     async def authorize_session(self, principal: DashboardPrincipal) -> str:
-        self.require_configured()
+        await self.require_configured()
         user = await principal.user()
         if user is not None:
             principal = replace(principal, subject=f"user:{user.id}", user_id=user.id)

@@ -4,14 +4,12 @@ import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 export function DeleteThreadDialog({
   open,
   onOpenChange,
-  threadTitle,
   isDeleting,
   onConfirm,
-  detail = "This cannot be undone.",
+  detail = "Are you sure you want to delete this thread?",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  threadTitle: string
   isDeleting: boolean
   onConfirm: () => void
   detail?: string
@@ -20,7 +18,7 @@ export function DeleteThreadDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="Delete thread"
-        description={`Delete "${threadTitle}"? ${detail}`}
+        description={detail}
         showClose={false}
         className="w-[min(28rem,calc(100vw-2rem))]"
       >

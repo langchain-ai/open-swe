@@ -11,6 +11,7 @@ from openswe.github.app import PermissionMap
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.run_config import RunConfig
+from openswe.sandboxes import lifecycle
 from openswe.sandboxes.lifecycle import (
     bind_mda_sandbox,
     reconnect_replaced_sandbox,
@@ -47,7 +48,7 @@ class RunSandbox:
         return await ManagedSandbox.for_thread(
             self._cfg.thread_id,
             self._cfg.workspace_slug,
-            allow_github=self._cfg.auth_provider != "langsmith",
+            allow_github=self._cfg.github_linked,
             github_repositories=repositories,
             github_permissions=permissions,
         )
@@ -94,17 +95,21 @@ class RunSandbox:
 
         await in_graph_context({**self.config, "run_name": "sandbox"}, reconnect)
 
-    async def refresh_github_proxy(self, *, narrowed: bool) -> datetime | None:
-        """Give the sandbox's GitHub proxy a fresh token, narrowed as the run reaches GitHub
-        when ``narrowed``; when the token expires, if the backend writes the proxy."""
+    async def refresh_github_proxy(self, *, force_refresh: bool = False) -> datetime | None:
+        """Refresh the backend-owned proxy within the authenticated run's GitHub scope."""
         if self._cfg.thread_id is None:
             raise ValueError("This run has no thread")
-        repositories, permissions = self._github_scope() if narrowed else (None, None)
+        repositories, permissions = self._github_scope()
+        if self.reviews and self._cfg.repo is None:
+            metadata = await lifecycle.get_sandbox_metadata(self._cfg.thread_id)
+            if metadata.get("kind") in {"reviewer", "reviewer-shadow", "review-scout"}:
+                repositories = None
         return await refresh_thread_github_proxy(
             self._cfg.thread_id,
             workspace_slug=self._cfg.workspace_slug,
             github_proxy_repositories=repositories,
             github_proxy_permissions=permissions,
+            force_refresh=force_refresh,
         )
 
     async def tell_gone(self, *, sandbox_id: str | None = None, reason: str | None = None) -> None:

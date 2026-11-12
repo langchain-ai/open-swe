@@ -29,8 +29,18 @@ import type { PerfAttributes, SpanHandle } from "./trace"
 
 export type RunEndReason = "success" | "error" | "interrupt" | "stopped"
 
-interface RunState {
+/** What a submitted span knows about the turn it will time; see `submitted`. */
+interface RunSubmission {
+  messageId: string | null
+  runningTurnId: string | null
+}
+
+const UNSUBMITTED: RunSubmission = { messageId: null, runningTurnId: null }
+
+interface RunState extends RunSubmission {
   span: SpanHandle
+  /** The transcript turn this span times, once the log names it. */
+  turnId: string | null
   events: number
   textDeltas: number
   lagSum: number
@@ -77,12 +87,17 @@ export class RunTracker {
     this.threadId = options.threadId?.toLowerCase() ?? null
   }
 
-  private begin(extra: PerfAttributes): void {
+  private begin(
+    extra: PerfAttributes,
+    submission: RunSubmission = UNSUBMITTED
+  ): void {
     if (this.state && !this.state.span.ended) {
       this.state.span.abandon("superseded")
     }
     this.state = {
       span: startSpan("agent_run", extra),
+      turnId: null,
+      ...submission,
       events: 0,
       textDeltas: 0,
       lagSum: 0,
@@ -101,9 +116,14 @@ export class RunTracker {
     this.threadId = threadId?.toLowerCase() ?? null
   }
 
-  /** The user pressed send on this stream. */
-  submitted(): void {
-    this.begin({ joined: false })
+  /**
+   * The user pressed send on this stream. The span times the turn that records
+   * `messageId`: a new turn for a fresh or queued message, or the running turn
+   * a message steers. A message-less run (`/offload`) times the next turn to
+   * start other than `runningTurnId`.
+   */
+  submitted(submission: RunSubmission = UNSUBMITTED): void {
+    this.begin({ joined: false }, submission)
   }
 
   /** The server accepted the run. */
@@ -162,22 +182,45 @@ export class RunTracker {
   }
 
   /**
-   * A transcript-log event reached the browser. `opensRun` starts a span for a
-   * run this client did not submit (a queued message, another tab, Slack);
-   * `text` counts a streamed prose flush.
+   * A transcript-log event of `turnId` reached the browser. `opensRun` starts
+   * a span for a run this client did not submit (a queued message, another
+   * tab, Slack); `text` is a streamed prose flush (`delta`) or assistant prose
+   * that first arrived whole in its completed message (`message`), which still
+   * marks `first_text` but is not a delta; `humanMessageId` is the human
+   * message the event records; `ends` is the turn's outcome. Events of a turn
+   * the span does not time, such as the one a queued message waits behind,
+   * leave it alone.
    */
-  transcriptEvent(options: { opensRun?: boolean; text?: boolean }): void {
+  transcriptEvent(options: {
+    turnId: string
+    opensRun?: boolean
+    humanMessageId?: string
+    text?: "delta" | "message"
+    ends?: RunEndReason
+  }): void {
     if (options.opensRun && (!this.state || this.state.span.ended)) {
       this.begin({ joined: true })
       this.state?.span.mark("accepted")
     }
     const state = this.state
     if (!state || state.span.ended) return
+    if (state.turnId === null && this.claims(state, options))
+      state.turnId = options.turnId
+    if (options.turnId !== state.turnId) return
     state.events += 1
     state.span.mark("first_event")
-    if (!options.text) return
-    state.textDeltas += 1
-    state.span.mark("first_text")
+    if (options.text === "delta") state.textDeltas += 1
+    if (options.text) state.span.mark("first_text")
+    if (options.ends) this.completed(options.ends)
+  }
+
+  private claims(
+    state: RunState,
+    event: { turnId: string; opensRun?: boolean; humanMessageId?: string }
+  ): boolean {
+    if (state.messageId !== null)
+      return event.humanMessageId === state.messageId
+    return Boolean(event.opensRun) && event.turnId !== state.runningTurnId
   }
 
   transcriptBuilt(durationMs: number): void {

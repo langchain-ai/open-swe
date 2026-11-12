@@ -79,7 +79,7 @@ export function RepositoryPicker({
     <OwnershipPicker
       triggerLabel="Choose repositories"
       title="Bound Repositories"
-      description="Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace."
+      description="Events on these repositories run in this environment, and its image preloads them. A repository is bound to one environment."
       noun="repository"
       pluralNoun="repositories"
       items={items}
@@ -158,13 +158,13 @@ export function SlackChannelPicker({
     disabled: !channel.is_member,
     warning: channel.is_member
       ? undefined
-      : "Invite Open SWE to this channel, then refresh to select it.",
+      : "Invite Robin to this channel, then refresh to select it.",
   }))
   return (
     <OwnershipPicker
       triggerLabel="Choose channels"
       title="Slack channels"
-      description="Mentions in these channels start runs in this workspace. A channel belongs to one workspace."
+      description="Mentions in these channels start runs in this environment. A channel belongs to one environment."
       noun="channel"
       pluralNoun="channels"
       items={items}
@@ -194,7 +194,7 @@ export function SlackChannelPicker({
       notice={
         directory.data?.refreshing
           ? "Refreshing channels from Slack. New ones appear when it finishes."
-          : "Missing a channel? Invite Open SWE in Slack, then refresh this list."
+          : "Missing a channel? Invite Robin in Slack, then refresh this list."
       }
       disabled={disabled}
     />

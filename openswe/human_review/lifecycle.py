@@ -27,7 +27,7 @@ from openswe.expedited_review.readiness import (
     review_authors,
 )
 from openswe.expedited_review.reviews import dismiss_approval
-from openswe.github.http import GitHubAppUnavailable, GitHubError, or_none
+from openswe.github.http import GitHubAppUnavailable, or_none
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
@@ -56,7 +56,6 @@ from openswe.slack.client import (
 from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
-from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -95,40 +94,6 @@ class ReviewCard:
     """A request's card in Slack, its author DM, and the request's open-to-closed lifecycle."""
 
     request: HumanReviewRequest
-
-    async def link_on_github(self) -> None:
-        """Link the published Slack review request from its pull request."""
-        request = self.request
-        if request.awaiting_ready or not request.slack_message_ts:
-            return
-        anchor = request.slack_thread_ts or request.slack_message_ts
-        permalink = await get_slack_permalink(request.slack_channel_id, anchor)
-        if permalink is None and anchor != request.slack_message_ts:
-            permalink = await get_slack_permalink(
-                request.slack_channel_id, request.slack_message_ts
-            )
-        if permalink is None:
-            logger.warning(
-                "Could not link Slack review request without a permalink",
-                extra={"request_id": str(request.id)},
-            )
-            return
-        marker = f"<!-- open-swe-review-request:{request.id} -->"
-        pr = request.pull_request
-        try:
-            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                if any(
-                    marker in str(comment.get("body", ""))
-                    for comment in await pull.issue_comments()
-                ):
-                    return
-                await pull.comment(f"Review requested in [Slack]({permalink}).\n\n{marker}")
-        except GitHubAppUnavailable, GitHubError, httpx2.HTTPError:
-            logger.warning(
-                "Could not link Slack review request on GitHub",
-                extra={"request_id": str(request.id)},
-                exc_info=True,
-            )
 
     async def _files(self) -> list[ChangedFile] | None:
         """The PR's changed files; ``None`` when the App cannot read them."""
@@ -184,6 +149,7 @@ class ReviewCard:
             approval,
             title=title,
             author=await approval.author_mention(),
+            author_login=await approval.author_login(),
             files=files,
             diff_image_id=approval.slack_diff_file_id or None,
             choices=await self._channel_choices(),
@@ -272,7 +238,10 @@ class ReviewCard:
 
     async def _channel_choices(self) -> list[ChannelChoice]:
         pr = self.request.pull_request
-        if (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip():
+        configured = self.request.run_config.get("expedited_review_channel")
+        if configured is None:
+            configured = (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip()
+        if configured:
             return []
         choices = self.request.slack_channel_choices or await own_choices(self.request)
         if self.request.slack_message_ts == self.request.slack_thread_ts:
@@ -355,6 +324,7 @@ class ReviewCard:
                 request,
                 title=pr.title,
                 author=author,
+                author_login=await request.author_login(),
                 files=files,
                 diff_image_id=diff_image_id,
                 choices=[] if copy else await self._channel_choices(),
@@ -369,6 +339,7 @@ class ReviewCard:
             request,
             title=pr.title,
             author=author,
+            author_login=await request.author_login(),
             files=files,
             outcome=outcome,
             diff_image_id=diff_image_id,
@@ -446,7 +417,19 @@ class ReviewCard:
         if approval.sent_elsewhere or approval.approved or approval.awaiting_ready:
             return
         pr = approval.pull_request
-        configured = (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip()
+        configured = approval.run_config.get("expedited_review_channel")
+        if not isinstance(configured, str):
+            settings = await RepoSettings.cached(pr.owner, pr.repo)
+            if settings.review_channel_rules:
+                files = await self._files()
+                if files is None:
+                    logger.warning("Could not route expedited review without its changed files")
+                    return
+                configured = settings.channel_for_files([file.filename for file in files])
+            else:
+                configured = settings.review_channel.strip()
+            approval.run_config = {**approval.run_config, "expedited_review_channel": configured}
+            await approval.save()
         if not configured:
             return
         channel = await SlackChannel.resolve(configured)
@@ -484,6 +467,14 @@ class ReviewCard:
             if files is None:
                 logger.warning("Could not publish ready expedited card without its changed files")
                 return
+            pr = request.pull_request
+            settings = await RepoSettings.cached(pr.owner, pr.repo)
+            request.run_config = {
+                **request.run_config,
+                "expedited_review_channel": settings.channel_for_files(
+                    [file.filename for file in files]
+                ),
+            }
             try:
                 message_ts = await self.post_expedited(
                     title=request.pull_request.title, files=files
@@ -495,7 +486,6 @@ class ReviewCard:
             else:
                 request.slack_message_ts = message_ts
                 await request.save()
-                await self.link_on_github()
                 await self.broadcast_configured()
             return
         if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
@@ -769,84 +759,44 @@ class ReviewCard:
         await self.update_post_reactions(snapshot)
 
     async def update_post_reactions(self, snapshot: PullRequestSnapshot | None = None) -> None:
-        """Positive reactions need every linked PR; any active PR can supply a blocker."""
+        """Positive reactions need every linked PR; any active PR can supply a blocker.
+
+        The post's lock keeps reaction writes in order, so a stale update can't undo a newer one.
+        """
         if skip_on_preview("update_post_reactions"):
             return
         request = self.request
-        async with HumanReviewRequest.locked_post(
-            request.slack_channel_id, request.slack_message_ts
-        ) as rows:
+        channel_id, message_ts = request.slack_channel_id, request.slack_message_ts
+        async with HumanReviewRequest.locked_post(channel_id, message_ts) as rows:
             row = next((row for row in rows if row.id == request.id), None)
             if row is None:
                 return
             if snapshot is not None:
-                preferences = await User.preferences_for_login(
-                    snapshot.author or row.pull_request.author
-                )
-                failing = preferences.pr_failure_reactions and snapshot.check_state in {
-                    "failure",
-                    "blocked",
-                }
-                reason = ", ".join(snapshot.failing_checks) or "a check finished without success"
                 row.run_config = {
                     **row.run_config,
-                    "posted_failure": reason if failing else "",
                     "posted_draft": snapshot.draft,
                     "posted_conflicted": snapshot.mergeable is False
                     or snapshot.mergeable_state == "dirty",
                 }
             active = [row for row in rows if row.state == "open"]
-            failures = sorted(
-                f"{row.pull_request.url}: {row.run_config['posted_failure']}"
-                for row in active
-                if row.run_config.get("posted_failure")
-            )
             expected = row.run_config.get("posted_pr_urls")
             complete = not isinstance(expected, list) or set(expected) == {
                 row.pull_request.url.lower() for row in rows
             }
             reactions = {
-                "warning": bool(failures),
+                "warning": False,
                 "construction": any(row.run_config.get("posted_conflicted") for row in active),
                 "pencil2": any(row.run_config.get("posted_draft") for row in active),
-                "white_check_mark": complete
-                and all(
-                    row.approved_at is not None and row.state in {"open", "merged"} for row in rows
-                ),
+                "white_check_mark": False,
             }
             if complete and all(row.state == "merged" for row in rows):
                 reactions["merged"] = True
-            await remove_slack_reaction(request.slack_channel_id, request.slack_message_ts, "x")
-            failure_reacted = False
+            await remove_slack_reaction(channel_id, message_ts, "x")
             for emoji, enabled in reactions.items():
                 react = add_slack_reaction if enabled else remove_slack_reaction
-                success = await react(request.slack_channel_id, request.slack_message_ts, emoji)
-                if emoji == "warning":
-                    failure_reacted = enabled and success
+                success = await react(channel_id, message_ts, emoji)
                 if emoji == "merged" and enabled and not success:
-                    await add_slack_reaction(
-                        request.slack_channel_id,
-                        request.slack_message_ts,
-                        "twisted_rightwards_arrows",
-                    )
-            notice = "\n".join(failures)
-            first = rows[0]
-            if notice and not failure_reacted:
-                return
-            if notice and first.run_config.get("posted_failure_notice") != notice:
-                requester = first.requested_by
-                if requester is not None and requester.slack_user_id:
-                    try:
-                        await wake_thread_owner(
-                            request.slack_channel_id,
-                            request.slack_message_ts,
-                            requester.slack_user_id,
-                            prompt("slack/pr-failure-reaction", failures=notice),
-                        )
-                    except Exception:
-                        logger.warning("Could not explain PR failure reaction", exc_info=True)
-                        return
-            first.run_config = {**first.run_config, "posted_failure_notice": notice}
+                    await add_slack_reaction(channel_id, message_ts, "twisted_rightwards_arrows")
 
     async def mark_merged(self) -> None:
         updated = await self.retire("merged", "merged")
@@ -861,12 +811,12 @@ class ReviewCard:
             await ReviewPicks(updated).release("it was closed")
 
     async def mark_approved(self) -> None:
-        """React to a posted request's message the first time its pull request is approved."""
+        """Record the first approval and refresh a watched post's status reactions."""
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is None or row.state != "open" or row.approved_at is not None:
                 return
             row.approved_at = datetime.now(UTC)
-        await self._react("white_check_mark")
+        await self.update_blocked_reactions()
 
     async def withdraw_reviews(self) -> None:
         """Dismiss the GitHub reviews every closed, unmerged card of this PR still has standing.
@@ -1026,7 +976,7 @@ class ReviewPicks:
             await self._close(
                 reviewer,
                 f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
+                "Robin removed you as a reviewer.",
             )
         return await HumanReviewRequest.get(request.id) or current
 

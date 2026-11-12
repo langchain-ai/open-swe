@@ -1,3 +1,5 @@
+import { SlackLinks } from "./slack-links"
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 import { toast } from "sonner"
@@ -13,8 +15,7 @@ export const slackChannelDirectoryKey = ["slackChannels"] as const
 
 export const SLACK_CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 
-export const slackChannelHref = (id: string): string =>
-  `https://slack.com/app_redirect?channel=${encodeURIComponent(id)}`
+export const slackChannelHref = (id: string): string => SlackLinks.open(id)
 
 /**
  * The channels the bot can see, as the backend last walked them from Slack.
@@ -120,33 +121,31 @@ export function useRecentSlackChannels(): ReadonlyArray<string> {
 
 /**
  * Channels matching `query`, in the order every channel picker offers them:
- * recently chosen first, newest first, then channels the bot is in, then the rest by name.
+ * best match first, then recently chosen, newest first, then channels the bot is in.
  */
-export function rankSlackChannels(
-  channels: ReadonlyArray<SlackChannelOption>,
+export function rankSlackChannels<
+  T extends Pick<SlackChannelOption, "id" | "name"> & { is_member?: boolean },
+>(
+  channels: ReadonlyArray<T>,
   query: string,
   recent: ReadonlyArray<string>
-): Array<SlackChannelOption> {
-  const rank = (channel: SlackChannelOption) => {
+): Array<T> {
+  const search = new FuzzySearch(query.trim().replace(/^#/, ""))
+  const rank = (channel: T) => {
     const index = recent.indexOf(channel.id)
     return index >= 0 ? index : recent.length + (channel.is_member ? 0 : 1)
   }
   return channels
-    .filter((channel) => slackChannelMatches(channel, query))
-    .sort((left, right) => rank(left) - rank(right))
-}
-
-/** Name or id match, ignoring a leading `#` the way Slack's switcher does. */
-export function slackChannelMatches(
-  channel: Pick<SlackChannelOption, "id" | "name">,
-  query: string
-): boolean {
-  const needle = query.trim().replace(/^#/, "").toLowerCase()
-  if (!needle) return true
-  return (
-    channel.name.toLowerCase().includes(needle) ||
-    channel.id.toLowerCase().includes(needle)
-  )
+    .map((channel) => ({
+      channel,
+      score: search.score(channel.name, channel.id),
+    }))
+    .filter(({ score }) => score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score || rank(left.channel) - rank(right.channel)
+    )
+    .map(({ channel }) => channel)
 }
 
 /** A cached channel name, with a readable fallback while names are unavailable. */

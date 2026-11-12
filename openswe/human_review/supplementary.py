@@ -233,10 +233,12 @@ class SupplementaryReview:
         if reviews is None:
             return []
         already_reviewed = {login.lower() for login in reviews}
+        posters = await self.request.recent_channel_posters()
         eligible: list[tuple[User, ReviewerAvailability]] = []
         for user in users:
             if (
                 user is None
+                or user.id not in posters
                 or not user.slack_user_id
                 or self.request.is_author(user.id, user.github_login)
                 or self.request.participant(user.id) is not None

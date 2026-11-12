@@ -216,9 +216,9 @@ describe("WorkspacesSection", () => {
     renderSection(false)
 
     expect(
-      await screen.findByText("No workspaces are configured.")
+      await screen.findByText("No environments are configured.")
     ).toBeTruthy()
-    expect(screen.getByText(/ask a workspace admin/)).toBeTruthy()
+    expect(screen.getByText(/ask a Robin admin/)).toBeTruthy()
   })
 
   it("creates a workspace from the create form with a repository and a picked channel", async () => {
@@ -271,22 +271,22 @@ describe("WorkspacesSection", () => {
 
     const channel = await screen.findByRole("link", { name: "#commits" })
     expect(channel.getAttribute("href")).toBe(
-      "https://slack.com/app_redirect?channel=C0000000001"
+      "/dashboard/api/slack/open?channel=C0000000001"
     )
     expect(channel.getAttribute("target")).toBe("_blank")
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Add workspace" })
+      await screen.findByRole("button", { name: "Add environment" })
     )
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
-    fireEvent.click(screen.getByRole("button", { name: "Add workspace" }))
-    fireEvent.change(screen.getByLabelText("Workspace name"), {
+    fireEvent.click(screen.getByRole("button", { name: "Add environment" }))
+    fireEvent.change(screen.getByLabelText("Environment name"), {
       target: { value: "Preview" },
     })
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
     const repositoryHelp = screen.getByRole("button", {
-      name: "About workspace repositories",
+      name: "About environment repositories",
     })
     fireEvent.pointerMove(repositoryHelp, { pointerType: "mouse" })
     expect(
@@ -311,7 +311,11 @@ describe("WorkspacesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(screen.getByText("#oss-help")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Channel type for #oss-help" })
+    )
+    fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+    fireEvent.click(screen.getByRole("button", { name: "Create environment" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
     expect(createSpy).toHaveBeenCalledWith({
@@ -319,6 +323,7 @@ describe("WorkspacesSection", () => {
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
       kitchen_channel_ids: [],
+      ask_channel_ids: ["C0000000002"],
     })
   })
 })

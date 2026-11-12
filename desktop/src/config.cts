@@ -2,8 +2,8 @@ const path = require("node:path");
 
 const APP_ORIGIN = "open-swe://app";
 const APP_URL = `${APP_ORIGIN}/`;
-const APP_NAME = "Open SWE";
-const DEVELOPMENT_APP_NAME = "Open SWE Development";
+const APP_NAME = "Robin";
+const DEVELOPMENT_APP_NAME = "Robin Development";
 const APP_USER_MODEL_ID = "com.langchain.openswe";
 const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev";
 const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development";
@@ -106,10 +106,16 @@ function isConnectProvider(value) {
 // The app requests this itself, with its own session cookie, and opens only
 // the provider URL it redirects to — the browser never sees an endpoint that
 // needs the session.
-function connectLoginUrl(backendUrl, provider, { challenge, port }) {
+function connectLoginUrl(
+  backendUrl,
+  provider,
+  { challenge, port },
+  recoveryToken?: string,
+) {
   const target = new URL(`/dashboard/api/${provider}/login`, backendUrl);
   target.searchParams.set("desktop_handoff", challenge);
   target.searchParams.set("desktop_port", String(port));
+  if (recoveryToken) target.searchParams.set("slack_recovery", recoveryToken);
   return target.toString();
 }
 
@@ -202,14 +208,17 @@ function localCallbackUrl(navigationUrl, backendUrl) {
   }
 }
 
-function desktopDeepLinkUrl(value, backendUrl) {
+/** Localizes a trusted dashboard origin; the downloaded UI decides page ownership. */
+function desktopDeepLinkUrl(value, backendUrl, dashboardOrigins = []) {
   try {
     const target = new URL(value);
     const backend = new URL(backendUrl);
     if (
-      target.protocol !== "https:" ||
-      target.origin !== backend.origin ||
-      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
+      !["http:", "https:"].includes(target.protocol) ||
+      target.username ||
+      target.password ||
+      (target.origin !== backend.origin &&
+        !dashboardOrigins.includes(target.origin))
     )
       return null;
     return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;

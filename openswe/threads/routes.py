@@ -2,6 +2,7 @@
 
 import json
 import logging
+import posixpath
 from time import perf_counter
 from typing import Annotated, Any, Literal
 
@@ -27,6 +28,14 @@ from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
+)
+from openswe.threads.file_preview import (
+    ERROR_HEADERS,
+    PREVIEW_MAX_BYTES,
+    ByteRange,
+    FilePreviewGrant,
+    PreviewFileType,
+    PreviewLink,
 )
 from openswe.threads.files import (
     WorkspaceFileIndex,
@@ -54,7 +63,9 @@ from openswe.threads.handlers import (
     share_thread_with_workspace,
 )
 from openswe.threads.listing import (
+    SIDEBAR_ORDERS,
     DashboardThreadScope,
+    SidebarThreadOrderBody,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
     list_dashboard_threads,
@@ -63,6 +74,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -72,13 +84,22 @@ from openswe.threads.proxy import (
     proxy_dashboard_thread_runs_list,
     proxy_dashboard_thread_stream_events,
 )
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.runs import (
     SessionCreateBody,
     ThreadRenameBody,
     ThreadResolveBody,
     create_dashboard_session,
 )
+from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
+from openswe.threads.store import THREADS
+from openswe.threads.summary import (
+    ThreadReadPosition,
+    _now_ms,
+    _thread_run_id,
+    assert_thread_readable,
+)
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -184,11 +205,41 @@ async def api_list_thread_repos(
     )
 
 
+@router.put("/threads/order")
+@audit_endpoint
+async def api_reorder_sidebar_threads(
+    body: SidebarThreadOrderBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, bool]:
+    try:
+        await SIDEBAR_ORDERS.reorder(session["sub"], body, email=session.get("email"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+
+
+class PinnedThreadOrderBody(BaseModel):
+    thread_ids: list[str] = Field(max_length=1000)
+
+
+@router.put("/threads/pinned/order")
+@audit_endpoint
+async def api_reorder_pinned_threads(
+    body: PinnedThreadOrderBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, bool]:
+    try:
+        await THREAD_PINS.reorder(session["sub"], body.thread_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
@@ -230,6 +281,7 @@ async def api_list_threads_page(
     exclude_source: Annotated[list[str] | None, Query()] = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
+    project: Annotated[str | None, Query(max_length=64)] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
@@ -261,6 +313,7 @@ async def api_list_threads_page(
         exclude_sources=frozenset(exclude_source or ()),
         sort_by=sort_by,
         hierarchy=hierarchy,
+        project=project,
     )
 
 
@@ -322,11 +375,64 @@ async def api_get_thread_pull_request_context(
     )
 
 
+class ThreadReadState(BaseModel):
+    viewed: bool
+    response_id: str | None = Field(default=None, alias="responseId")
+
+
+@router.put(
+    "/threads/{thread_id}/read-state",
+    response_model=ThreadReadState,
+    response_model_exclude_unset=True,
+)
+async def api_set_thread_read_state(
+    thread_id: str,
+    body: ThreadReadState,
+    session: dict[str, str] = SESSION_DEP,
+) -> ThreadReadState:
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
+    latest = await RUNTIMES.runs_on(thread.runtime).latest_run(thread_id) if body.viewed else None
+    if latest is not None and (
+        latest.run_id != thread.metadata.get("latest_run_id")
+        or latest.status != thread.metadata.get("latest_run_status")
+    ):
+        await THREADS.update(
+            thread_id, {"latest_run_id": latest.run_id, "latest_run_status": latest.status}
+        )
+    run_id = _thread_run_id(thread.metadata, latest.run_id if latest else None)
+    position = ThreadReadPosition(thread.metadata, None, session["sub"], run_id)
+    guarded = "response_id" in body.model_fields_set
+    if (
+        not body.viewed
+        or not guarded
+        or not position.review
+        or body.response_id == position.response_id
+    ):
+        await THREAD_READ_STATES.set(
+            session["sub"],
+            thread_id,
+            viewed=body.viewed,
+            run_id=run_id,
+            viewed_at_ms=_now_ms(),
+            response_id=body.response_id,
+            acknowledge_current=not guarded or position.review,
+        )
+    position = ThreadReadPosition(
+        thread.metadata,
+        await THREAD_READ_STATES.saved(session["sub"], thread_id),
+        session["sub"],
+        run_id,
+    )
+    return ThreadReadState(viewed=position.viewed)
+
+
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
     principal: PrincipalDep,
-    mark_viewed: bool = True,
 ) -> Response:
     if principal.machine:
         return JSONResponse(await machine_thread(thread_id, principal))
@@ -336,7 +442,6 @@ async def api_get_thread(
         thread_id,
         principal.person,
         email=principal.email,
-        mark_viewed=mark_viewed,
         timings=timings,
     )
     timings["total"] = (perf_counter() - started) * 1000
@@ -394,6 +499,49 @@ async def api_get_thread_path(
 ) -> WorkspacePath:
     return await get_dashboard_thread_path(
         thread_id, session["sub"], path, email=session.get("email")
+    )
+
+
+class FilePreviewBody(BaseModel):
+    path: str
+
+
+@router.post("/threads/{thread_id}/files/preview-url")
+async def api_create_thread_file_preview(
+    thread_id: str,
+    body: FilePreviewBody,
+    session: dict[str, object] = SESSION_DEP,
+) -> PreviewLink:
+    """A short-lived link to one file's bytes, or an HTML page's folder, for the Files panel."""
+    return await FilePreviewGrant.mint(thread_id, session, body.path)
+
+
+# No session: the link's token is the credential, and a sandboxed preview frame sends no cookies.
+# Each request, a deck's every asset included, re-checks access and stats the file in the sandbox.
+@router.get("/threads/{thread_id}/files/raw/{token}/{rest:path}")
+async def api_get_thread_file_preview(
+    thread_id: str, token: str, rest: str, request: Request
+) -> Response:
+    try:
+        grant = FilePreviewGrant.decode(token, thread_id)
+        workspace = await grant.open(request.url.path, request.method)
+        file = await grant.stat(workspace, rest)
+        file_type = PreviewFileType.of(file.path)
+        span = ByteRange.of(request.headers.get("range"), file.size)
+        headers = file_type.headers(posixpath.basename(file.path)) | span.headers()
+        content = (
+            await workspace.read(file, span.start, span.end, limit=PREVIEW_MAX_BYTES)
+            if span.length
+            else b""
+        )
+    except HTTPException as exc:
+        raise HTTPException(
+            exc.status_code, exc.detail, headers={**ERROR_HEADERS, **(exc.headers or {})}
+        ) from exc
+    return Response(
+        content=content,
+        status_code=206 if span.partial else 200,
+        headers={**headers, "Content-Length": str(len(content))},
     )
 
 

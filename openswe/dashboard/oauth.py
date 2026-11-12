@@ -27,6 +27,7 @@ from openswe.users.authorization import (
     is_authorized_github_login,
 )
 from openswe.utils.dashboard_links import (
+    PublicOrigin,
     dashboard_api_base_url,
     dashboard_base_url,
     dashboard_is_same_origin,
@@ -178,11 +179,11 @@ def _secret() -> str:
 def allowed_dashboard_origins() -> set[str]:
     """Origins permitted for dashboard frontend requests and post-login redirects.
 
-    Built from DASHBOARD_BASE_URL plus any DASHBOARD_ALLOWED_ORIGINS entries
-    so the dashboard itself and its preview deploys are allowed — but nothing
-    else.
+    Built from DASHBOARD_BASE_URL plus any DASHBOARD_ALLOWED_ORIGINS and
+    DASHBOARD_ALIAS_URLS entries so the dashboard itself, its alias domains and
+    its preview deploys are allowed — but nothing else.
     """
-    origins: set[str] = set()
+    origins: set[str] = set(PublicOrigin.aliases())
     base = dashboard_base_url()
     if base:
         origins.add(_origin_of(base))
@@ -224,14 +225,17 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = dashboard_base_url()
+    fallback = PublicOrigin.dashboard_base_url()
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
     parsed = urlparse(trimmed)
+    # Browsers read a backslash in a URL as a slash, so /\evil.example is a
+    # protocol-relative URL to them even though urlparse sees a path.
     if (
         trimmed.startswith("/")
         and not trimmed.startswith("//")
+        and "\\" not in trimmed
         and not parsed.scheme
         and not parsed.netloc
         and not _is_blocked_redirect_path(parsed.path)
@@ -343,6 +347,9 @@ def issue_state(
     provider: Literal["github", "langsmith"] = "github",
     encrypted_code_verifier: str | None = None,
     redirect_uri: str | None = None,
+    connect_slack: bool = False,
+    linking_user_id: str | None = None,
+    slack_recovery: str | None = None,
 ) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
@@ -357,6 +364,12 @@ def issue_state(
             encrypted_code_verifier=encrypted_code_verifier,
             redirect_uri=redirect_uri,
         )
+    if connect_slack:
+        payload["connect_slack"] = True
+    if linking_user_id is not None:
+        payload["linking_user_id"] = linking_user_id
+    if slack_recovery is not None:
+        payload["slack_recovery"] = slack_recovery
     if handoff_challenge and handoff_port:
         payload["handoff_challenge"] = handoff_challenge
         payload["handoff_port"] = handoff_port
@@ -745,7 +758,7 @@ async def fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
 
 
 def frontend_base_url() -> str:
-    v = dashboard_base_url()
+    v = PublicOrigin.dashboard_base_url()
     if not v:
         raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
     return v

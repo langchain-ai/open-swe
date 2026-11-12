@@ -1,0 +1,735 @@
+{
+ "cases": {
+  "mention_with_history": {
+   "messages": [
+    {
+     "ts": "1.0",
+     "text": "cc <@U456> and <@U000> see <#C456|> for viz",
+     "user": "U123"
+    },
+    {
+     "ts": "1.1",
+     "text": "on it",
+     "user": "UBOT",
+     "bot_id": "B1"
+    },
+    {
+     "ts": "1.2",
+     "text": "impersonating",
+     "bot_id": "B9",
+     "username": "Open SWE",
+     "bot_profile": {
+      "name": "Open SWE"
+     }
+    },
+    {
+     "ts": "1.3",
+     "text": "",
+     "user": "U456",
+     "attachments": [
+      {
+       "is_share": true,
+       "author_name": "Bob",
+       "text": "details <&>",
+       "from_url": "https://x.slack.com/archives/C1/p1"
+      }
+     ]
+    },
+    {
+     "ts": "9.0",
+     "text": "<@UBOT> do\nthe thing",
+     "user": "U123",
+     "attachments": [
+      {
+       "is_share": true,
+       "author_name": "Bob",
+       "text": "fwd"
+      }
+     ]
+    }
+   ],
+   "user_names_by_id": {
+    "U123": "Alice",
+    "U456": "Bob <B>"
+   },
+   "logins_by_user_id": {
+    "U123": "alice"
+   },
+   "person_ids_by_user_id": {
+    "U123": "user:1"
+   },
+   "channel_names_by_id": {
+    "C456": "eng"
+   },
+   "channel": {
+    "id": "slack:C123",
+    "platform": "slack",
+    "name": "#eng",
+    "thread_id": "1.0",
+    "default_repo": "acme/api"
+   },
+   "bot_user_id": "UBOT",
+   "event_ts": "9.0",
+   "trigger_user_id": "U123",
+   "request_text": "do the thing",
+   "request_blocks": [
+    {
+     "type": "text",
+     "text": "do the thing"
+    }
+   ],
+   "turn_context": "Turn note <x>",
+   "constant_context": "Constant & guidance",
+   "explicit_mention": true
+  },
+  "breakout_prior_text": {
+   "messages": [
+    {
+     "ts": "9.0",
+     "text": "Context.\nMore <@UBOT> /breakout fix it",
+     "user": "U123",
+     "attachments": [
+      {
+       "is_share": true,
+       "author_name": "Bob",
+       "text": "Forwarded details"
+      }
+     ]
+    }
+   ],
+   "user_names_by_id": {
+    "U123": "Alice"
+   },
+   "logins_by_user_id": {},
+   "channel": {
+    "id": "slack:C123",
+    "platform": "slack"
+   },
+   "bot_user_id": "UBOT",
+   "event_ts": "9.0",
+   "trigger_user_id": "U123",
+   "request_text": "fix it",
+   "request_blocks": [
+    {
+     "type": "text",
+     "text": "fix it"
+    }
+   ],
+   "prior_message_text": "Context.\nMore"
+  },
+  "system_trigger_dispatched": {
+   "messages": [
+    {
+     "ts": "1.0",
+     "text": "old",
+     "user": "U123"
+    },
+    {
+     "ts": "2.0",
+     "text": "new <@U9>",
+     "user": "U9"
+    }
+   ],
+   "user_names_by_id": {
+    "U123": "Mukil"
+   },
+   "logins_by_user_id": {},
+   "channel": {
+    "id": "slack:C123",
+    "platform": "slack"
+   },
+   "bot_user_id": "UBOT",
+   "event_ts": "9.0",
+   "trigger_user_id": "U123",
+   "request_text": "Pick a reviewer",
+   "request_blocks": [
+    {
+     "type": "text",
+     "text": "Pick a reviewer"
+    },
+    {
+     "type": "image",
+     "base64": "aGk=",
+     "mime_type": "image/png"
+    }
+   ],
+   "trigger_system": {
+    "id": "system:background-event",
+    "display_name": "Open SWE"
+   },
+   "dispatched_timestamps": [
+    "1.0"
+   ],
+   "run_described_person_ids": [
+    "slack:U9"
+   ]
+  },
+  "web_only_own_message": {
+   "messages": [
+    {
+     "ts": "1.0",
+     "text": "earlier reply",
+     "user": "UBOT",
+     "bot_id": "B1"
+    },
+    {
+     "ts": "9.0",
+     "text": "",
+     "user": "U1"
+    }
+   ],
+   "user_names_by_id": {},
+   "logins_by_user_id": {},
+   "channel": {
+    "id": "slack:C123",
+    "platform": "slack"
+   },
+   "bot_user_id": "UBOT",
+   "event_ts": "9.0",
+   "request_text": "(no text in mention)",
+   "request_blocks": [
+    {
+     "type": "text",
+     "text": "(no text in mention)"
+    }
+   ],
+   "web_only": true
+  }
+ },
+ "expected": {
+  "mention_with_history|": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\nname: #eng\nthread_id: 1.0\ndefault_repo: acme/api\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"user:1\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"1.0\" slack_message_ts=\"1.0\" explicit_bot_mention=\"false\">\ncc &lt;@U456|Bob &amp;lt;B&amp;gt;&gt; and &lt;@U000&gt; see &lt;#C456|eng&gt; for viz\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "user:1",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:slack-bot-B9\">\ndisplay_name: Open SWE\nplatform: slack\nsender_type: bot\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:slack-bot-B9"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"system:slack-bot-B9\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\" timestamp=\"1.2\" slack_message_ts=\"1.2\" explicit_bot_mention=\"false\">\nimpersonating\n</input-message>",
+     "additional_kwargs": {
+      "lc_source": "system:slack-bot-B9",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:slack-bot-B9",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"person\" id=\"slack:U456\">\ndisplay_name: Bob &lt;B&gt;\nopen_swe_account: unlinked\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:U456"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"slack:U456\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"1.3\" slack_message_ts=\"1.3\" explicit_bot_mention=\"false\">\n[forwarded message]\n[Forwarded Slack message from Bob]\ndetails &lt;&amp;&gt;\nSource: https://x.slack.com/archives/C1/p1\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U456",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:slack-context\">\ndisplay_name: Slack context\nplatform: slack\ncontent: Constant &amp; guidance\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:slack-context"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"system:slack-context\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\">\nTurn note &lt;x&gt;\n</input-message>",
+     "additional_kwargs": {
+      "lc_source": "system:slack-context",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:slack-context",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"user:1\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"true\">\ndo the thing\n[Forwarded Slack message from Bob]\nfwd\n</input-message>"
+      }
+     ],
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "user:1",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "breakout_prior_text|": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"slack:U123\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\nContext.\nMore\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U123",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"slack:U123\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\nfix it\n[Forwarded Slack message from Bob]\nForwarded details\n</input-message>"
+      }
+     ],
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U123",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "system_trigger_dispatched|": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"slack:U9\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"2.0\" slack_message_ts=\"2.0\" explicit_bot_mention=\"false\">\nnew &lt;@U9&gt;\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U9",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:background-event\">\ndisplay_name: Open SWE\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:background-event"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"system:background-event\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\nPick a reviewer\n</input-message>"
+      },
+      {
+       "type": "image",
+       "base64": "aGk=",
+       "mime_type": "image/png"
+      }
+     ],
+     "additional_kwargs": {
+      "lc_source": "system:background-event",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:background-event",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "web_only_own_message|": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:slack-bot-B1\">\ndisplay_name: Bot\nplatform: slack\nsender_type: bot\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:slack-bot-B1"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"system:slack-bot-B1\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\" timestamp=\"1.0\" slack_message_ts=\"1.0\" explicit_bot_mention=\"false\">\nearlier reply\n</input-message>",
+     "additional_kwargs": {
+      "lc_source": "system:slack-bot-B1",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:slack-bot-B1",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"slack:U1\" channel=\"slack:C123\" surface=\"web\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\n(no text in mention)\n</input-message>"
+      }
+     ],
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U1",
+       "surface": "web",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "mention_with_history|Open SWE": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\nname: #eng\nthread_id: 1.0\ndefault_repo: acme/api\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"user:1\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"1.0\" slack_message_ts=\"1.0\" explicit_bot_mention=\"false\">\ncc &lt;@U456|Bob &amp;lt;B&amp;gt;&gt; and &lt;@U000&gt; see &lt;#C456|eng&gt; for viz\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "user:1",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:slack-bot-B9\">\ndisplay_name: Open SWE\nplatform: slack\nsender_type: bot\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:slack-bot-B9"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"system:slack-bot-B9\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\" timestamp=\"1.2\" slack_message_ts=\"1.2\" explicit_bot_mention=\"false\">\nimpersonating\n</input-message>",
+     "additional_kwargs": {
+      "lc_source": "system:slack-bot-B9",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:slack-bot-B9",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"person\" id=\"slack:U456\">\ndisplay_name: Bob &lt;B&gt;\nopen_swe_account: unlinked\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:U456"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"slack:U456\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"1.3\" slack_message_ts=\"1.3\" explicit_bot_mention=\"false\">\n[forwarded message]\n[Forwarded Slack message from Bob]\ndetails &lt;&amp;&gt;\nSource: https://x.slack.com/archives/C1/p1\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U456",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:slack-context\">\ndisplay_name: Slack context\nplatform: slack\ncontent: Constant &amp; guidance\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:slack-context"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"system:slack-context\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\">\nTurn note &lt;x&gt;\n</input-message>",
+     "additional_kwargs": {
+      "lc_source": "system:slack-context",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:slack-context",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"user:1\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"true\">\ndo the thing\n[Forwarded Slack message from Bob]\nfwd\n</input-message>"
+      }
+     ],
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "user:1",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "breakout_prior_text|Open SWE": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"slack:U123\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\nContext.\nMore\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U123",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"slack:U123\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\nfix it\n[Forwarded Slack message from Bob]\nForwarded details\n</input-message>"
+      }
+     ],
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U123",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "system_trigger_dispatched|Open SWE": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"slack:U9\" channel=\"slack:C123\" surface=\"slack\" kind=\"human\" timestamp=\"2.0\" slack_message_ts=\"2.0\" explicit_bot_mention=\"false\">\nnew &lt;@U9&gt;\n</input-message>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U9",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:background-event\">\ndisplay_name: Open SWE\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:background-event"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"system:background-event\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\nPick a reviewer\n</input-message>"
+      },
+      {
+       "type": "image",
+       "base64": "aGk=",
+       "mime_type": "image/png"
+      }
+     ],
+     "additional_kwargs": {
+      "lc_source": "system:background-event",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:background-event",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  },
+  "web_only_own_message|Open SWE": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"channel\" id=\"slack:C123\">\nplatform: slack\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<dynamic-context kind=\"system\" id=\"system:slack-bot-B1\">\ndisplay_name: Bot\nplatform: slack\nsender_type: bot\n</dynamic-context>",
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "context",
+       "sender": "system:slack-bot-B1"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": "<input-message sender=\"system:slack-bot-B1\" channel=\"slack:C123\" surface=\"slack\" kind=\"system\" timestamp=\"1.0\" slack_message_ts=\"1.0\" explicit_bot_mention=\"false\">\nearlier reply\n</input-message>",
+     "additional_kwargs": {
+      "lc_source": "system:slack-bot-B1",
+      "open_swe_provenance": {
+       "kind": "system",
+       "sender": "system:slack-bot-B1",
+       "surface": "slack",
+       "channel": "slack:C123"
+      }
+     }
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<input-message sender=\"slack:U1\" channel=\"slack:C123\" surface=\"web\" kind=\"human\" timestamp=\"9.0\" explicit_bot_mention=\"false\">\n(no text in mention)\n</input-message>"
+      }
+     ],
+     "additional_kwargs": {
+      "open_swe_provenance": {
+       "kind": "human",
+       "sender": "slack:U1",
+       "surface": "web",
+       "channel": "slack:C123"
+      }
+     }
+    }
+   ]
+  }
+ }
+}

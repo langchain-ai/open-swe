@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
@@ -28,6 +28,7 @@ from openswe.dashboard.oauth import (
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.users.preferences import KitchenChannelPreference
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 RETIRED_PROFILE_KEYS = frozenset(
     {
+        "experimental_live_activity",
         "create_prs",
         "dm_session_enabled",
         "default_model",
@@ -48,6 +50,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "experimental_monitor",
         "experimental_assistant_ui",
         "recent_thread_context_enabled",
+        "github_review_request_comments",
     }
 )
 
@@ -80,7 +83,7 @@ PROFILES = ProfileRecords("profile")
 GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(KitchenChannelPreference):
     default_repo: str | None = None
     workspace_default_repos: dict[str, str] = Field(default_factory=dict)
     base_branch: str | None = None
@@ -88,10 +91,6 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
-    pr_failure_reactions: bool | None = None
-    goal_mode: bool | None = None
-    experimental_memory: bool | None = None
-    experimental_conditional_approval: bool | None = None
     experimental_classify: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -403,26 +402,23 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     login = session["sub"]
-    preferences = await User.update_preferences(
-        login,
-        UserPreferencesPatch(
-            concierge_mode=update.concierge_mode,
-            pr_failure_reactions=update.pr_failure_reactions,
-            goal_mode=update.goal_mode,
-            experimental_memory=update.experimental_memory,
-            experimental_conditional_approval=update.experimental_conditional_approval,
-            experimental_classify=update.experimental_classify,
-        ),
-    )
+    try:
+        preferences = await User.update_preferences(
+            login,
+            UserPreferencesPatch(
+                personal_kitchen_channel_id=update.personal_kitchen_channel_id,
+                concierge_mode=update.concierge_mode,
+                experimental_classify=update.experimental_classify,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if preferences is None and (
-        update.concierge_mode
-        or update.pr_failure_reactions
-        or update.goal_mode
-        or update.experimental_memory
-        or update.experimental_conditional_approval
+        update.personal_kitchen_channel_id is not None
+        or update.concierge_mode
         or update.experimental_classify
     ):
-        raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
+        raise HTTPException(status_code=409, detail="No Robin user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),

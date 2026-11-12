@@ -1,6 +1,6 @@
-# oswe CLI
+# Robin CLI
 
-`oswe` starts a normal cloud Open SWE agent on a remote deployment and makes the current directory on the machine running it that agent's sandbox.
+`robin` starts a normal cloud Robin agent on a remote deployment and makes the current directory on the machine running it that agent's sandbox.
 The remote agent's shell commands, file uploads and file downloads all execute here.
 
 The deployment cannot dial that machine, so the CLI long-polls the backend for sandbox requests, runs them locally, and posts the results back.
@@ -11,29 +11,31 @@ The deployment cannot dial that machine, so the CLI long-polls the backend for s
 ## Install
 
 On Apple Silicon Macs running macOS Ventura or later, you can install with Homebrew.
-It installs the desktop app and links `oswe` onto your `PATH`; the CLI updates with the app.
+It installs the desktop app and links the legacy `oswe` command onto your `PATH`; the CLI updates with the app.
 
 ```sh
 brew install --cask langchain-ai/tap/open-swe-desktop
 ```
 
 If you installed the cask before it linked `oswe`, run `brew reinstall --cask open-swe-desktop` once to get the link (a plain `brew upgrade` skips auto-updating casks).
+Use `oswe` in place of `robin` in the examples below until the cask also links `robin`.
 
 For Intel Macs, Linux, or just the CLI, use a standalone download.
-Every desktop release, stable and nightly, ships `oswe` inside the app at `Open SWE.app/Contents/Resources/bin/oswe` and as standalone downloads for `darwin-arm64`, `darwin-x64`, `linux-arm64` and `linux-x64` with an `oswe-SHA256SUMS` file.
+Every desktop release, stable and nightly, ships `robin` and the compatible `oswe` command inside the app at `Robin.app/Contents/Resources/bin/` and as standalone downloads for `darwin-arm64`, `darwin-x64`, `linux-arm64` and `linux-x64` with a `robin-SHA256SUMS` file.
 The macOS binaries are signed and notarized.
 
 ```sh
-curl -fsSL https://github.com/langchain-ai/open-swe/releases/latest/download/oswe-darwin-arm64.tar.gz | tar -xz
-sudo mv oswe /usr/local/bin/
+curl -fsSL https://github.com/langchain-ai/open-swe/releases/latest/download/robin-darwin-arm64.tar.gz | tar -xz
+sudo mv robin /usr/local/bin/
 ```
 
-`oswe --version` prints the desktop release it came from.
+`robin --version` prints the desktop release it came from.
+Legacy `oswe-*` downloads remain available; both commands use the same configuration, credentials, and thread history.
 
 ## Build
 
 ```sh
-make cli            # -> cli/dist/oswe
+make cli            # -> cli/dist/robin and cli/dist/oswe
 ```
 
 Requires [Bun](https://bun.com/docs/installation).
@@ -41,7 +43,7 @@ The binary embeds its own runtime, so the machine that runs it needs neither Bun
 Copy it anywhere on your `PATH`:
 
 ```sh
-cp cli/dist/oswe /usr/local/bin/
+cp cli/dist/robin /usr/local/bin/
 ```
 
 ## Authenticate
@@ -51,7 +53,7 @@ The CLI uses the first credential it finds:
 1. **`OPEN_SWE_API_KEY`** — a workspace API key (`osk_…`) an admin minted.
 1. **GitHub Actions** — inside a job with `permissions: id-token: write`, the job's own OIDC token, requested with the backend URL as its audience (override with `OPEN_SWE_OIDC_AUDIENCE`).
    An admin must first let the repository start threads in its workspace's settings.
-1. **A person's session** — `OPEN_SWE_SESSION`, or the one `oswe login` stored.
+1. **A person's session** — `OPEN_SWE_SESSION`, or the one `robin login` stored.
 
 An API key and a workflow are machines: their threads are always `system` threads.
 A person's threads are always private: whoever can prompt one runs commands on this machine.
@@ -59,18 +61,18 @@ A person's threads are always private: whoever can prompt one runs commands on t
 ### Sign in as a person
 
 ```sh
-oswe login --backend https://dev.open-swe.langchain.dev
+robin login --backend https://dev.open-swe.langchain.dev
 ```
 
 This is the desktop app's sign-in: your browser opens the GitHub login the dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it for the same session the desktop app stores.
 Requests then carry it as the dashboard's own `osw_session` cookie.
-The session is stored in `~/.open-swe/config.json` (mode 0600) under the backend that minted it, and `oswe logout` forgets the current backend's session.
+The session is stored in `~/.open-swe/config.json` (mode 0600) under the backend that minted it, and `robin logout` forgets the current backend's session.
 `--backend` also makes that backend the shared one, so it repoints the desktop app too.
 
 ### Check the credential
 
 ```sh
-oswe auth status
+robin auth status
 ```
 
 Prints the backend, which credential is in use and where it came from, then asks the server whether it accepts it: a session reports who it signs in as.
@@ -84,9 +86,9 @@ permissions:
   id-token: write
 steps:
   - uses: actions/checkout@v4
-  - run: oswe run "is the test suite green?"
+  - run: robin run "is the test suite green?"
     env:
-      OPEN_SWE_BACKEND_URL: https://open-swe.example.com
+      OPEN_SWE_BACKEND_URL: https://robin.example.com
 ```
 
 ### Backend
@@ -106,7 +108,7 @@ It is compiled with `--no-compile-autoload-dotenv`, because it runs inside your 
 
 ```sh
 cd ~/code/my-project
-oswe run "add retries to the upload path"
+robin run "add retries to the upload path"
 ```
 
 What happens:
@@ -128,8 +130,8 @@ It exits on the result of the last run, once no worker is left running and no re
 So a run composes like any other command:
 
 ```sh
-oswe run "is the test suite green?" && echo passing
-git diff | oswe run "review this diff" > review.txt
+robin run "is the test suite green?" && echo passing
+git diff | robin run "review this diff" > review.txt
 ```
 
 The agent reports exit codes the way `grep` and `test` do: 0 when the task was done or the answer is yes, 1 when it failed or the answer is no, 2 when it could not tell.
@@ -143,7 +145,7 @@ Options:
 
 | Flag | Meaning |
 | --- | --- |
-| `--thread <id>` | Continue a thread oswe started on this machine, from the directory it serves. Refused while another oswe process is serving it. |
+| `--thread <id>` | Continue a thread robin started on this machine, from the directory it serves. Refused while another robin process is serving it. |
 | `--model <id>` | Agent model id. The backend only honors it together with `--effort`. |
 | `--effort <name>` | Reasoning effort for `--model`. |
 

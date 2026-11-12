@@ -59,6 +59,8 @@ export type AcpToolKind =
   | "move"
   | "search"
   | "execute"
+  /** `background_execute` — a shell command started in the background. */
+  | "background"
   | "think"
   | "fetch"
   | "slack"
@@ -184,6 +186,13 @@ export interface ImageChunk {
   fileName?: string
 }
 
+/** What a page around a thread puts in its composer; a new `key` puts it there again. */
+export interface ComposerDraft {
+  key: number
+  text: string
+  images?: ReadonlyArray<ImageChunk>
+}
+
 /**
  * An image the transcript references rather than inlines: the log stores
  * metadata plus either an attachment id addressing bytes on our own API, or a
@@ -223,6 +232,7 @@ export interface Message {
   timestamp: string
   deliveryStatus?: "sending" | "failed"
   deliveryError?: string
+  deliveryTurnId?: string
   optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
@@ -232,9 +242,15 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  slackMessageUrl?: string
   /** Passages the sender selected and replied to, carried in the message's envelope. */
   replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
+  /**
+   * What the context a plugin sent with this message is called, such as the
+   * open page; the agent read the context itself, which the thread never shows.
+   */
+  contextLabel?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
@@ -377,10 +393,27 @@ export interface AgentThreadMonitor {
   raw_lines: number
 }
 
-/** The sandbox commands and monitors running for a thread. */
+/** An event subscription that wakes the thread when a matching event arrives. */
+export interface AgentEventListener {
+  subscription_id: string
+  /** The pull request URL, repository, or "workspace" it listens on. */
+  target: string
+  sources: Array<string>
+  event_types: Array<string>
+  instructions: string
+  one_shot: boolean
+  trigger_count: number
+  last_triggered_at: number | null
+  expires_at: number
+  created_at: number | null
+}
+
+/** The sandbox commands, monitors and event listeners keeping a thread busy. */
 export interface AgentBackgroundWork {
   commands: Array<AgentBackgroundCommand>
   monitors: Array<AgentThreadMonitor>
+  /** Absent from servers older than the listing of event subscriptions. */
+  listeners?: Array<AgentEventListener>
 }
 
 /** The last lines a background command or monitor wrote. */
@@ -419,6 +452,7 @@ export interface WorkflowDiffStats {
 }
 
 export interface WorkflowPushApproval {
+  coordinatorStatus?: "approved" | "rejected" | null
   fingerprint: string
   status: WorkflowApprovalStatus
   repo: string
@@ -562,6 +596,7 @@ export type TaskMembership =
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
 export interface AgentThread {
+  pendingWorkflowApproval?: boolean
   waitingForDelegatedWork?: boolean
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
@@ -581,6 +616,8 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  /** The Open SWE project the thread was started in or moved to. */
+  projectId?: string | null
   branch: string
   model: string
   effort?: string | null
@@ -599,6 +636,8 @@ export interface AgentThread {
   automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
+  latestRunId?: string | null
+  unreadResponseId?: string | null
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
@@ -612,7 +651,6 @@ export interface AgentThread {
   runCosts?: Record<string, number>
   sourceUrl?: string | null
   sourceAppUrl?: string | null
-  codeChannelUrl?: string | null
   sandboxId?: string | null
   /** For a thread bridged to someone's machine: which app serves it. */
   sandboxBridgeClient?: "cli" | "desktop" | null

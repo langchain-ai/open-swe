@@ -24,7 +24,6 @@ def _ready(
         created.append(self)
         return self
 
-    monkeypatch.setattr("openswe.rollout_events.configured", lambda: True)
     monkeypatch.setattr(
         "openswe.rollout_events.Repository.get",
         AsyncMock(return_value=SimpleNamespace(id=uuid4())),
@@ -204,11 +203,9 @@ async def test_ask_to_monitor_rollout_does_not_ask_without_a_rollout_skill(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("blocker", ["unconfigured", "no_workspace"])
 async def test_ask_to_monitor_rollout_does_not_ask_when_a_yes_cannot_subscribe(
-    monkeypatch: pytest.MonkeyPatch, blocker: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("openswe.rollout_events.configured", lambda: blocker != "unconfigured")
     monkeypatch.setattr("openswe.rollout_events.Repository.get", AsyncMock(return_value=None))
     monkeypatch.setattr("openswe.rollout_events.workspace_for_repo", AsyncMock(return_value=""))
     dispatch = AsyncMock()

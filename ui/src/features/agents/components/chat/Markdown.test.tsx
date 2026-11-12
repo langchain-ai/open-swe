@@ -19,10 +19,18 @@ const attachment =
 afterEach(cleanup)
 
 it("embeds a standalone GitHub attachment and restores its link if playback fails", () => {
-  render(<Markdown content={attachment} />)
+  render(
+    <Markdown
+      content={attachment}
+      transformMediaUrl={(src) => `/proxy?url=${encodeURIComponent(src)}`}
+    />
+  )
 
   const video = screen.getByLabelText("GitHub attachment video")
-  expect(video.getAttribute("src")).toBe(attachment)
+  // A private repo's upload only plays through the authenticated proxy.
+  expect(video.getAttribute("src")).toBe(
+    `/proxy?url=${encodeURIComponent(attachment)}`
+  )
   expect(video.hasAttribute("controls")).toBe(true)
   fireEvent.error(video)
   expect(screen.queryByLabelText("GitHub attachment video")).toBeNull()

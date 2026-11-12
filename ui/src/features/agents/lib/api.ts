@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
@@ -147,6 +148,26 @@ export interface ThreadBrowser {
   expires_at: string
 }
 
+/** A tool the page offers Robin, as a message's `page_tools` carries it. */
+export interface PageToolOffer {
+  name: string
+  description: string
+  parameters: object
+}
+
+/** A command Robin queued for this tab's page, under the page's own name for its tool. */
+export interface PageCommand {
+  position: number
+  tool: string
+  arguments: Record<string, unknown>
+}
+
+export interface PageQueue {
+  /** The invalidation topic the queue changes under. */
+  topic: string
+  commands: Array<PageCommand>
+}
+
 export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -165,6 +186,8 @@ export interface ThreadsPageParams {
   /** An allowed Slack bot's `team_id:bot_id`, with `scope: "bot"`. */
   bot?: string
   repo?: string
+  /** A project id, or `"none"` for threads outside every project. */
+  project?: string
   ownerless?: boolean
   owned?: boolean
   /** Thread sources to leave out, such as `claude_code`. */
@@ -186,6 +209,24 @@ export interface SidebarRepo {
   updatedAt: number
   /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
   workspace: string
+  projectId?: null
+}
+
+/** One of the viewer's projects, listed even before it has a thread. */
+export interface SidebarProjectFolder {
+  projectId: string
+  /** The repository bound to the project, whose threads it files. */
+  repoFullName: string | null
+  name: string
+  updatedAt: number
+  workspace: string
+}
+
+export type SidebarFolder = SidebarRepo | SidebarProjectFolder
+
+/** Where a file's bytes are served, relative to the dashboard API. */
+export interface ThreadFilePreviewLink {
+  path: string
 }
 
 const API_BASE = dashboardApiBase()
@@ -239,34 +280,36 @@ export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const requestId = newRequestId()
-  const res = await timedFetch(dashboardApiUrl(path), {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
-      ...init.headers,
-    },
-  }).catch((cause: unknown) => {
-    throw networkError(cause, requestId)
-  })
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const body = await res.json()
-      if (body?.detail) {
-        message = errorDetailMessage(body.detail)
+  return productAnalytics.mutation(path, init.method, async () => {
+    const requestId = newRequestId()
+    const res = await timedFetch(dashboardApiUrl(path), {
+      ...init,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+        ...dashboardForwardedHeaders(),
+        ...init.headers,
+      },
+    }).catch((cause: unknown) => {
+      throw networkError(cause, requestId)
+    })
+    if (!res.ok) {
+      let message = res.statusText
+      try {
+        const body = await res.json()
+        if (body?.detail) {
+          message = errorDetailMessage(body.detail)
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
+      throw new AgentsApiError(res.status, message, requestId)
     }
-    throw new AgentsApiError(res.status, message, requestId)
-  }
-  // A proxied cancel comes back 202 with no body; only parse what is there.
-  const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
+    // A proxied cancel comes back 202 with no body; only parse what is there.
+    const text = await res.text()
+    return (text ? JSON.parse(text) : undefined) as T
+  })
 }
 
 function filenameFromContentDisposition(value: string | null): string | null {
@@ -302,7 +345,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     blob: await res.blob(),
     filename:
       filenameFromContentDisposition(res.headers.get("content-disposition")) ??
-      "open-swe-recovery.patch",
+      "robin-recovery.patch",
   }
 }
 
@@ -322,6 +365,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.automationId) search.set("automation_id", params.automationId)
   if (params.bot) search.set("bot", params.bot)
   if (params.repo) search.set("repo", params.repo)
+  if (params.project) search.set("project", params.project)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
@@ -375,10 +419,25 @@ export const agentsApi = {
       excludeSources?: Array<string>
     } = {}
   ) =>
-    agentsRequest<Array<SidebarRepo>>(
+    agentsRequest<Array<SidebarFolder>>(
       `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  reorderSidebarThreads: (body: {
+    thread_ids: Array<string>
+    project?: string
+    repo?: string
+    ownerless?: boolean
+  }) =>
+    agentsRequest<{ ok: boolean }>("/threads/order", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  reorderPinnedThreads: (threadIds: Array<string>) =>
+    agentsRequest<{ ok: boolean }>("/threads/pinned/order", {
+      method: "PUT",
+      body: JSON.stringify({ thread_ids: threadIds }),
+    }),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   shareThreadWithWorkspace: (threadId: string) =>
@@ -440,11 +499,16 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
-  getThread: (threadId: string, options?: { markViewed?: boolean }) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}${
-        options?.markViewed === false ? "?mark_viewed=false" : ""
-      }`
+  getThread: (threadId: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  setThreadViewed: (
+    threadId: string,
+    viewed: boolean,
+    responseId?: string | null
+  ) =>
+    agentsRequest<{ viewed: boolean }>(
+      `/threads/${encodeURIComponent(threadId)}/read-state`,
+      { method: "PUT", body: JSON.stringify({ viewed, responseId }) }
     ),
   getPullRequestChecks: (
     pullRequests: Array<{ repoFullName: string; number: number }>
@@ -533,6 +597,11 @@ export const agentsApi = {
     agentsRequest<WorkspacePath>(
       `/threads/${encodeURIComponent(threadId)}/files?path=${encodeURIComponent(path)}`
     ),
+  createThreadFilePreview: (threadId: string, path: string) =>
+    agentsRequest<ThreadFilePreviewLink>(
+      `/threads/${encodeURIComponent(threadId)}/files/preview-url`,
+      { method: "POST", body: JSON.stringify({ path }) }
+    ),
   getThreadFileIndex: (threadId: string) =>
     agentsRequest<WorkspaceFileIndex>(
       `/threads/${encodeURIComponent(threadId)}/file-index`
@@ -554,5 +623,14 @@ export const agentsApi = {
     agentsRequest<ThreadBrowser>(
       `/threads/${encodeURIComponent(threadId)}/browser`,
       { method: "POST" }
+    ),
+  pageCommands: (pageSession: string) =>
+    agentsRequest<PageQueue>(
+      `/page-sessions/${encodeURIComponent(pageSession)}/commands`
+    ),
+  recordPageCommand: (pageSession: string, position: number, result: unknown) =>
+    agentsRequest<void>(
+      `/page-sessions/${encodeURIComponent(pageSession)}/commands/${position}/result`,
+      { method: "POST", body: JSON.stringify({ result }) }
     ),
 }

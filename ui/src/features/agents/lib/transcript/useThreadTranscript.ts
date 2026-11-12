@@ -27,6 +27,7 @@ import {
 } from "@/lib/perf/threadLoad"
 import { runTranscriptBuilt } from "@/lib/perf/streaming"
 import { perfNow } from "@/lib/perf/trace"
+import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { fetchOlderTurns, fetchTranscript, openTranscriptEvents } from "./api"
 import {
   applyEvent,
@@ -252,19 +253,33 @@ export function useThreadTranscript(
           )
             summaries.reconcile()
           if (!runTracker) return
-          const payload = event.payload
           runTracker.transcriptEvent({
+            turnId: event.payload.turn_id,
             opensRun: event.event_type === "turn.started",
+            humanMessageId:
+              event.event_type === "turn.requested" ||
+              (event.event_type === "message.completed" &&
+                event.payload.role === "human")
+                ? event.payload.message_id
+                : undefined,
             text:
-              event.event_type === "message.appended" &&
-              Boolean("text" in payload && payload.text),
+              event.event_type === "message.appended" && event.payload.text
+                ? "delta"
+                : event.event_type === "message.completed" &&
+                    event.payload.role === "ai" &&
+                    event.payload.text &&
+                    !current.messages[event.payload.message_id]?.text
+                  ? "message"
+                  : undefined,
+            ends:
+              event.event_type === "turn.completed"
+                ? "success"
+                : event.event_type === "turn.failed"
+                  ? "error"
+                  : event.event_type === "turn.interrupted"
+                    ? "interrupt"
+                    : undefined,
           })
-          if (event.event_type === "turn.completed")
-            runTracker.completed("success")
-          else if (event.event_type === "turn.failed")
-            runTracker.completed("error")
-          else if (event.event_type === "turn.interrupted")
-            runTracker.completed("interrupt")
         },
         onError: (streamError) => {
           if (disposed) return
@@ -294,11 +309,28 @@ export function useThreadTranscript(
           if (disposed) return
           publish(loaded)
         }
+        attempt = 0
+        onConnected()
         threadHydrated(threadId)
         hydration.resolve()
         if (!disposed) subscribe()
       } catch (loadError) {
         if (disposed) return
+        if (
+          loadError instanceof DashboardRequestError &&
+          [0, 502, 503, 504].includes(loadError.status) &&
+          attempt < 3
+        ) {
+          attempt += 1
+          const delay = reconnectDelayMs(attempt)
+          onReconnect({ attempt, delayMs: delay })
+          retry = setTimeout(() => {
+            retry = null
+            if (!disposed) void start()
+          }, delay)
+          return
+        }
+        onConnected()
         setError(loadError)
         threadHydrationFailed(threadId)
         hydration.reject(loadError)

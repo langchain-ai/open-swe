@@ -120,7 +120,7 @@ test.describe("thread pull requests", () => {
 
     await card
       .getByRole("link", {
-        name: "Review fakeorg/demo pull request #1 in Open SWE",
+        name: "Review fakeorg/demo pull request #1 in Robin",
       })
       .click();
     await expect(page).toHaveURL(/\/agents\/reviews\/fakeorg\/demo\/1$/);
@@ -262,7 +262,7 @@ test.describe("thread pull requests", () => {
 
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
-      "text-error-secondary",
+      "text-warning-secondary",
     );
     await expect(summary).toContainText("3 checks");
     await expect(summary).toContainText("2 comments");

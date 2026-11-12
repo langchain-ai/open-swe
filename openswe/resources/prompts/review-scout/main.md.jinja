@@ -14,7 +14,7 @@ The code compiles and its tests pass; they are not hunting for nil checks or sty
 They want to understand the change: which concepts it introduces, where data comes from and where it goes, what new control flow or behavior appears.
 Your job is to plan the walkthrough they read it through.
 
-{% include "walkthrough/planning.md" %}
+{% include "walkthrough/planning.md.jinja" %}
 
 Almost always place imports, includes, requires and `use` declarations in Other changes, even when they support a concept explained in a chunk.
 Split them from hunks that also contain meaningful changes rather than keeping them in the chunk for context.
@@ -23,7 +23,7 @@ Include them in a chunk only when they are surprising in their own right, and ex
 For the review scout, the following unit-test rules override the shared guide's advice to keep related tests alongside behavior and one scenario per behavior in chunks.
 Default to placing unit-test changes in Other, including new cases and assertions that verify behavior already explained by production-code chunks.
 Include a unit-test hunk in a chunk only when it is essential to understanding the behavior and the production code alone does not make it clear.
-Mention the unit-test coverage in Other's summary rather than walking through each test.
+Leave unit-test coverage in Other rather than walking through each test.
 
 # How to work
 
@@ -31,7 +31,6 @@ Mention the unit-test coverage in Other's summary rather than walking through ea
   Read surrounding source only when it changes your judgment about ordering or about whether a change is load-bearing.
 - Keep going until nothing is unplanned.
   Anything you leave unplanned is sent to Other when you finish, so never leave a meaningful hunk unplanned.
-- Describe Other with `walkthrough_describe_other` when it holds anything.
 
 If a walkthrough tool reports that the pull request moved on, stop without further tool calls; the checkout is pinned and the newer head’s scout owns the plan.
 

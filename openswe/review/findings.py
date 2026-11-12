@@ -787,11 +787,11 @@ def _rows_query(*pull_request_ids: UUID) -> Select[FindingRow]:
     )
 
 
-async def list_findings(thread_id: str) -> list[Finding]:
+async def list_findings(thread_id: str, *, strict: bool = False) -> list[Finding]:
     """Return all findings recorded for the reviewer thread.
 
     Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
-    PostgreSQL does not exist; other failures degrade to no findings.
+    PostgreSQL does not exist; other failures degrade to no findings unless ``strict``.
     """
     # The shadow module imports this one.
     from openswe.review.shadow import ReviewShadow
@@ -808,6 +808,8 @@ async def list_findings(thread_id: str) -> list[Finding]:
     except ReviewerThreadMissingError:
         raise
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         logger.exception(
             "Failed to load reviewer findings", extra={"reviewer_thread_id": thread_id}
         )
@@ -1103,28 +1105,21 @@ async def set_reviewer_thread_metadata(
     *,
     pr: ReviewerPRMeta | None = None,
     last_reviewed_sha: str | None = None,
+    last_reviewed_base_sha: str | None = None,
     head_sha: str | None = None,
     watch: bool | None = None,
     slack_thread: ReviewerSlackThread | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Persist reviewer-thread-level metadata.
-
-    Always sets ``kind=reviewer`` so the future UI can list reviewer threads by
-    filtering on metadata. Only includes the fields the caller passed in
-    (langgraph metadata updates merge rather than overwrite).
-
-    ``head_sha`` records the current PR head the dispatching webhook is acting
-    on. A push that lands mid-run is queued into the still-running run, whose
-    frozen config can't be updated; persisting the head here lets the reviewer
-    tools resolve the live head via ``resolve_review_head_sha``.
-    """
+    """Persist the supplied reviewer metadata, retaining fields omitted by the caller."""
     client = get_client()
     metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
     if pr is not None:
         metadata["pr"] = pr
     if last_reviewed_sha is not None:
         metadata["last_reviewed_sha"] = last_reviewed_sha
+    if last_reviewed_base_sha is not None:
+        metadata["last_reviewed_base_sha"] = last_reviewed_base_sha
     if head_sha is not None:
         metadata["head_sha"] = head_sha
     if watch is not None:

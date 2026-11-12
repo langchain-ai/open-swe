@@ -2,7 +2,8 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi.responses import RedirectResponse
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
@@ -24,6 +25,8 @@ from openswe.slack.channel_options import (
 from openswe.slack.client import get_slack_user_names
 from openswe.slack.connect import router as connect_router
 from openswe.slack.dm import CONCIERGE_TS, open_dm
+from openswe.slack.http import SlackClient, slack_http_errors, slack_identity
+from openswe.slack.links import SlackLink
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.user_options import SlackUserDirectory, SlackUserOption
 from openswe.threads.summary import assert_thread_readable
@@ -33,6 +36,33 @@ from openswe.utils.thread_ops import langgraph_client
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
+
+
+@router.get("/slack/open", response_class=RedirectResponse, status_code=302)
+async def api_open_slack(
+    channel: Annotated[str, Query(pattern=r"^[CGD][A-Z0-9]{2,}$", max_length=32)],
+    message_ts: Annotated[
+        str | None, Query(pattern=r"^[0-9]{1,20}\.[0-9]{1,6}$", max_length=27)
+    ] = None,
+    thread_ts: Annotated[
+        str | None, Query(pattern=r"^[0-9]{1,20}\.[0-9]{1,6}$", max_length=27)
+    ] = None,
+    _session: dict[str, object] = SESSION_DEP,
+) -> RedirectResponse:
+    async with slack_http_errors(), SlackClient.bot() as client:
+        identity = await slack_identity(client)
+    workspace_url = identity.get("url")
+    try:
+        if not isinstance(workspace_url, str):
+            raise ValueError("Slack did not return a workspace URL")
+        url = SlackLink(channel, message_ts or "", thread_ts or "").in_workspace(workspace_url)
+    except ValueError as exc:
+        raise HTTPException(503, "Slack workspace navigation is unavailable. Try again.") from exc
+    return RedirectResponse(
+        url,
+        status_code=302,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 @router.get("/slack/users")

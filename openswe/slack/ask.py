@@ -10,12 +10,15 @@ never touches the agent thread that Slack thread already maps to.
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
 
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run, dispatch_input
+from openswe.input_messages import RunInput
 from openswe.prompts import prompt
+from openswe.slack import forks
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     acknowledge_slack_command,
@@ -31,16 +34,16 @@ from openswe.slack.client import (
 )
 from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import settle_slack_thread_status
-from openswe.slack.webhook import workspace_scoped_default_repo
+from openswe.slack.webhook import SlackAuthorization, workspace_scoped_default_repo
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.users import User
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-ASK_COMMAND = "/oswe"
+ASK_COMMAND = "/robin"
 BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
@@ -51,13 +54,13 @@ CHANNEL_CONTEXT_MAX_TOKENS = 5000
 _CHANNEL_CONTEXT_MAX_CHARS = CHANNEL_CONTEXT_MAX_TOKENS * 4
 _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context budget]"
 _NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
-_CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
-_START_FAILURE = "Open SWE could not start that request. Try again in a moment."
+_CHANNEL_REFUSAL = "Robin cannot answer questions in this channel."
+_START_FAILURE = "Robin could not start that request. Try again in a moment."
 _SHORTCUT_ACKNOWLEDGEMENT = "Working on it — I’ll send a separate reply, visible only to you."
 _ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
-_BY_THE_WAY_USAGE = "Ask a question after it: `@Open SWE /btw how does thread routing work?`"
+_BY_THE_WAY_USAGE = "Ask a question after it: `@Robin /btw how does thread routing work?`"
 _BY_THE_WAY_TOO_LONG = (
-    "That question is too long for `/btw`. Tag Open SWE without `/btw` to start a thread instead."
+    "That question is too long for `/btw`. Tag Robin without `/btw` to start a thread instead."
 )
 
 
@@ -73,6 +76,8 @@ class SlackAskRequest(BaseModel):
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
+    # The thread this question's thread starts with, whose Slack messages it holds.
+    held_thread_id: str = ""
 
     @property
     def by_the_way(self) -> bool:
@@ -82,6 +87,34 @@ class SlackAskRequest(BaseModel):
     def in_slack_thread(self) -> bool:
         """Whether `/btw` was sent as a reply, so the thread rather than the channel is context."""
         return self.by_the_way and self.reply_thread_ts != self.message_ts
+
+
+@dataclass(frozen=True)
+class AskChannelRun:
+    """A `/btw` run, prepared for MDA's Slack channel to start on the question's own thread."""
+
+    input: RunInput
+    configurable: dict[str, Any]
+
+
+@dataclass
+class _AskRunCapture:
+    run: AskChannelRun | None = None
+
+
+def by_the_way_request(request: SlackRequest) -> SlackAskRequest:
+    """The `/btw` question a request handed to MDA's Slack channel asks, on its own thread."""
+    return SlackAskRequest(
+        channel_id=request.channel_id,
+        user_id=request.user_id,
+        question=request.by_the_way or "",
+        thread_id=request.thread_id or "",
+        command=BY_THE_WAY_COMMAND,
+        team_id=request.team_id,
+        reply_thread_ts=request.thread_ts,
+        message_ts=request.original_message_ts,
+        held_thread_id=request.held_thread_id,
+    )
 
 
 def ask_thread_id(channel_id: str, user_id: str, invocation: str) -> str:
@@ -120,20 +153,28 @@ async def _channel_context(channel_id: str) -> str:
     return await _budgeted_transcript(messages)
 
 
-async def _thread_context(channel_id: str, thread_ts: str) -> str:
-    """The Slack thread `/btw` was sent in, oldest trimmed away until it fits the budget."""
+async def _thread_context(channel_id: str, thread_ts: str, held: set[str]) -> str:
+    """The Slack thread `/btw` was sent in, oldest trimmed away until it fits the budget.
+
+    A question forked from the thread's conversation has the messages the agent got
+    there (``held``), so only the rest are quoted.
+    """
     raw = await fetch_slack_thread_messages(channel_id, thread_ts)
     messages = [
         message
         for item in raw
-        if (message := SlackMessage.parse(item)) is not None and not message.is_noise
+        if (message := SlackMessage.parse(item)) is not None
+        and not message.is_noise
+        and message.ts not in held
     ]
     return await _budgeted_transcript(messages)
 
 
 async def _request_context(request: SlackAskRequest) -> str:
     if request.in_slack_thread:
-        context = await _thread_context(request.channel_id, request.reply_thread_ts)
+        holder = request.held_thread_id or request.thread_id
+        held = await forks.held_timestamps(holder) if holder else set()
+        context = await _thread_context(request.channel_id, request.reply_thread_ts, held)
     else:
         context = await _channel_context(request.channel_id)
     return _CONTEXT_FENCE_RE.sub(r"&lt;\1", context)
@@ -175,33 +216,20 @@ async def _refuse(request: SlackAskRequest, text: str) -> None:
     )
 
 
-async def _runnable_login(request: SlackAskRequest, login: str | None, email: str) -> str | None:
-    """The GitHub login to run as, or None once the asker has been asked to link one."""
-    reason = await common.account_link_reason(login)
-    if reason is None:
-        return login
-    await _settle_thinking_status(request)
-    await common.post_account_link_prompt(
-        request.channel_id,
-        request.reply_thread_ts,
-        request.user_id,
-        email or None,
-        reason=reason,
-        ephemeral=True,
-    )
-    if request.response_url:
-        await clear_slack_command_message(request.response_url)
-    return None
-
-
-async def _process_slack_ask(request: SlackAskRequest) -> None:
+async def _process_slack_ask(
+    request: SlackAskRequest, *, channel_run: _AskRunCapture | None = None
+) -> None:
     if request.response_url:
         await acknowledge_slack_command(
             request.response_url,
             _SHORTCUT_ACKNOWLEDGEMENT if request.selected_message else _ACKNOWLEDGEMENT,
         )
     if request.by_the_way:
-        await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
+        # MDA's Slack channel shows a run it starts as working itself.
+        if channel_run is None:
+            await add_slack_reaction(
+                request.channel_id, request.message_ts, "hourglass_flowing_sand"
+            )
         if not request.question:
             await _refuse(request, _BY_THE_WAY_USAGE)
             return
@@ -214,24 +242,36 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         return
 
     user_name, user_email = await _slack_user_profile(request.user_id)
-    login = await _runnable_login(
-        request,
-        await User.login_for_slack(request.user_id)
-        or (await User.login_for_email(user_email) if user_email else None),
-        user_email,
-    )
-    if login is None:
+    authorization = await SlackAuthorization.resolve(request.user_id)
+    if (needed := authorization.needed) is not None:
+        await _settle_thinking_status(request)
+        await common.post_account_link_prompt(
+            request.channel_id,
+            request.reply_thread_ts,
+            request.user_id,
+            user_email or None,
+            reason=needed.reason,
+            langsmith=True,
+        )
+        if request.response_url:
+            await clear_slack_command_message(request.response_url)
         return
+    identity = authorization.identity
+    login = authorization.github_login
 
     thread_id = request.thread_id
     # A repository the channel names owns the routing decision, so it has to be
     # resolved before the workspace is.
-    resolution = await common.get_slack_repo_config(
-        request.channel_id,
-        "",
-        slack_user_id=request.user_id,
-        channel_context=channel_context,
-        thread_id=thread_id,
+    resolution = (
+        common.SlackRepoResolution()
+        if not login
+        else await common.get_slack_repo_config(
+            request.channel_id,
+            "",
+            slack_user_id=request.user_id,
+            channel_context=channel_context,
+            thread_id=thread_id,
+        )
     )
     workspace = (
         await resolve_workspace(
@@ -241,7 +281,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         )
     ).slug
     resolved_repo = resolution.repo
-    if not resolution.explicit:
+    if login and not resolution.explicit:
         resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace, login)
     repo = resolved_repo.model_dump() if resolved_repo else None
     slack_thread = SlackThreadRef(
@@ -266,13 +306,14 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         thread_id,
         source="slack",
         repo_config=repo,
-        github_login=login,
+        github_login=login or "",
         user_email=user_email,
         title=request.question,
         source_context=source_context,
         workspace=workspace,
         visibility="private",
-        owner_login=login,
+        owner_login=identity.subject if identity else "",
+        identity=identity,
         unlisted=True,
     )
     if not persisted:
@@ -283,11 +324,11 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         **source_context.dump(),
         "repo": repo,
         "source": "slack",
-        "github_login": login,
         "user_email": user_email,
         "workspace": workspace,
         "environment": workspace,
     }
+    authorization.configure(configurable)
     run_prompt = prompt(
         "runs/slack-explain"
         if request.selected_message
@@ -304,6 +345,12 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         in_slack_thread=request.in_slack_thread,
         channel_context=await _request_context(request) or _NO_CHANNEL_CONTEXT,
     )
+    if channel_run is not None:
+        channel_run.run = AskChannelRun(
+            input=await dispatch_input(run_prompt, "slack", configurable),
+            configurable=configurable,
+        )
+        return
     await dispatch_agent_run(thread_id, run_prompt, configurable, source="slack", thread_title=None)
     logger.info(
         "Started a one-off Slack question run",
@@ -313,6 +360,18 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
             "by_the_way": request.by_the_way,
         },
     )
+
+
+async def prepare_ask_channel_run(request: SlackAskRequest) -> AskChannelRun | None:
+    """The run a `/btw` question starts, without starting it; ``None`` when it starts none.
+
+    Everything else happens as for the backend's own: the asker hears a refusal or the
+    prompt to connect an account privately, and the question's thread gets its metadata.
+    MDA's Slack channel starts the run (``openswe.slack.channel``).
+    """
+    capture = _AskRunCapture()
+    await _process_slack_ask(request, channel_run=capture)
+    return capture.run
 
 
 async def process_slack_ask(request: SlackAskRequest) -> None:

@@ -34,7 +34,8 @@ _VALIDATION_MESSAGES = {
     "connection": (
         "Connection must name an MDA connection made for MCP servers, open-swe-mcp-<server> "
         "(lowercase letters, digits, and single hyphens, at most 64 characters), and its "
-        "owner, agent or user"
+        "owner, agent or user; or, for Linear's MCP server at https://mcp.linear.app, the "
+        "Linear channel's mda/linear-token with owner agent"
     ),
     "connection_header": "Connection header must be a valid header name, such as DD_API_KEY",
 }

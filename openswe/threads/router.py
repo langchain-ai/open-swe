@@ -109,7 +109,9 @@ def _started(thread_id: str, starting_ms: int) -> Callable[[Headers], Awaitable[
 
 
 # Thread routes that read though they are POSTs.
-_POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
+_POST_READS: Final = frozenset({"/history", "/state/checkpoint", "/stream/events"})
+# Reads held open until a run ends or the caller leaves.
+_HELD_READS: Final = re.compile(r"^/(?:stream(?:/events)?|runs/[^/]+/(?:join|stream))$")
 
 
 async def adopt_channel_run(
@@ -124,8 +126,11 @@ async def adopt_channel_run(
     with :func:`channel_run_starting` once the run is ready. ``metadata`` is what a
     new thread starts with until its metadata is written, such as its visibility.
     """
+    from openswe.tasks.schemas import ThreadMetadata
+
     thread = await index.get(thread_id)
     if thread is None:
+        metadata = await ThreadMetadata.for_new_thread(metadata or {})
         await index.create(
             thread_id,
             runtime="mda",
@@ -332,8 +337,11 @@ class ThreadRouter:
         *,
         if_exists: Literal["raise", "do_nothing"],
     ) -> IndexedThread:
+        from openswe.tasks.schemas import ThreadMetadata
+
         if if_exists == "do_nothing" and (known := await THREADS.get(thread_id)) is not None:
             return known
+        metadata = await ThreadMetadata.for_new_thread(metadata)
         thread = await index.create(
             thread_id,
             runtime="mda",
@@ -499,7 +507,12 @@ class ThreadRouter:
             if channel_of(thread.metadata) is None:
                 # The channel created its threads there; the backend's own may need it.
                 await mda.ensure_remote_thread(thread_id)
-            http = mda.read_http if reads else mda.http
+            if not reads:
+                http = mda.http
+            elif _HELD_READS.match(rest):
+                http = mda.stream_http
+            else:
+                http = mda.read_http
             await forward(http, scope, send, body, headers=write.headers)
             return
         if thread is not None:

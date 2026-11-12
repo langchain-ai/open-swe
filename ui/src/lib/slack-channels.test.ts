@@ -39,6 +39,19 @@ it("offers recently chosen channels first, newest first, then members", () => {
   ).toEqual(["deploys", "builds"])
 })
 
+it("offers the closest match first, ahead of recent loose matches", () => {
+  const channels = [
+    channel("C00000000E5", "proj-fleet-sdk"),
+    channel("C00000000F6", "proj-gateway"),
+    channel("C00000000G7", "proj-sandbox-engine", false),
+  ]
+  rememberSlackChannels(["C00000000E5"])
+
+  expect(
+    rankSlackChannels(channels, "proj-sandbox", readRecent())[0]?.name
+  ).toBe("proj-sandbox-engine")
+})
+
 it("keeps only valid channel ids from storage", () => {
   window.localStorage.setItem(
     "open-swe.slack-channels.recent.v1",

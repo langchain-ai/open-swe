@@ -6,9 +6,16 @@ JSON line; ``run`` is the detached runner that ``start`` spawns.
 
 A monitor runs ``command`` with stdout and stderr merged, numbers every line it
 prints into ``raw.log``, and feeds those lines to ``filter`` when there is one.
-Each batch of lines the filter prints (or, with no filter, the command prints)
-within ``BATCH_SECONDS`` is one event in ``events.jsonl``. The backend reads
-events past ``acked.json`` with ``sync`` and records them for the thread.
+Each run of lines the filter prints (or, with no filter, the command prints)
+within ``BATCH_SECONDS`` is one burst. The first burst becomes an event in
+``events.jsonl`` at once. After each event the runner waits, starting at
+``DEBOUNCE_SECONDS`` and doubling with every event, and the bursts that arrive
+meanwhile are held and become the next event together. Output that comes after
+the monitor was quiet for twice its wait starts over at ``DEBOUNCE_SECONDS``.
+An event also waits until the backend has acked the one before it, so until the
+monitor ends a read finds at most one. Once ``MAX_HELD_EVENTS`` events were held
+without the monitor going quiet, it ends as too noisy. The backend reads events
+past ``acked.json`` with ``sync`` and records them for the thread.
 Standard library only, and no syntax newer than Python 3.8.
 """
 
@@ -36,11 +43,10 @@ MAX_RAW_BYTES = 50 * 1024 * 1024
 RAW_SEGMENT = re.compile(r"^raw-(\d{12})\.log$")
 MAX_FILTER_BACKLOG = 4 * 1024 * 1024
 BATCH_SECONDS = 0.2
-MAX_EVENT_LINES = 50
+DEBOUNCE_SECONDS = 2
+MAX_HELD_EVENTS = 10
+MAX_EVENT_LINES = 100
 MAX_LINE_CHARS = 2000
-NOISY_WINDOW_SECONDS = 120
-NOISY_WINDOW_EVENTS = 40
-MAX_EVENTS = 200
 SYNC_EVENTS_LIMIT = 100
 TAIL_LINES = 20
 DEFAULT_OUTPUT_LINES = 200
@@ -49,6 +55,8 @@ MAX_OUTPUT_BYTES = 65536
 MAX_FILTER_ERR_CHARS = 2000
 DRAIN_SECONDS = 5
 NUDGE_SECONDS = 2
+# How often a runner asks again while the backend has not acked its last event.
+RENUDGE_SECONDS = 60
 # Detached processes do not count as sandbox activity; a sync is a sandbox exec that does.
 HEARTBEAT_SECONDS = 900
 CALLBACK_RETRY_DELAYS = (0, 5, 15, 30, 60, 120, 300, 300, 300)
@@ -150,6 +158,9 @@ class Monitor:
     def acked(self):
         acked = read_json(self.acked_path, {})
         return acked if isinstance(acked, dict) else {}
+
+    def acked_seq(self):
+        return self.acked().get("seq", 0)
 
     def summary(self, state):
         keys = (
@@ -256,6 +267,31 @@ class Monitor:
             return ""
 
 
+class Gathering:
+    """The bursts the runner holds for its next event."""
+
+    def __init__(self, held, now):
+        self.held = held
+        """Whether the first burst arrived while the runner was waiting after an event."""
+        self.started = now
+        self.bursts = []
+        self.burst_started = 0.0
+        self.shown = 0
+        self.omitted = 0
+
+    def add(self, text, at_raw_line, now):
+        if self.shown >= MAX_EVENT_LINES:
+            self.omitted += 1
+            return
+        if not self.bursts or now - self.burst_started >= BATCH_SECONDS:
+            self.bursts.append({"at_raw_line": at_raw_line, "lines": []})
+            self.burst_started = now
+        if len(text) > MAX_LINE_CHARS:
+            text = text[:MAX_LINE_CHARS] + " [truncated]"
+        self.bursts[-1]["lines"].append(text)
+        self.shown += 1
+
+
 class RawLog:
     """Every line the command printed, numbered from 1, in segments named by their first line.
 
@@ -330,10 +366,11 @@ class Runner:
         self.raw = RawLog(monitor.dir)
         self.events = open(monitor.events_path, "a")
         self.seq = 0
-        self.recent = collections.deque()
-        self.batch = []
-        self.batch_started = 0.0
-        self.batch_anchor = 0
+        self.gathering = None
+        self.held = 0
+        self.wait = 0.0
+        self.waited_from = 0.0
+        self.last_output = 0.0
         self.backlog = bytearray()
         self.dropped = 0
         self.status = None
@@ -375,47 +412,58 @@ class Runner:
     # -- events ------------------------------------------------------------
 
     def event_lines(self, lines, first_number=None):
+        if not lines:
+            return
+        now = time.monotonic()
+        # Quiet is measured from the last output, not the last event: an event
+        # waiting for its ack can go out long after the output it holds.
+        if now - self.last_output >= 2 * self.wait:
+            self.held, self.wait = 0, 0.0
+        self.last_output = now
         for index, line in enumerate(lines):
-            if not self.batch:
-                self.batch_started = time.monotonic()
-                self.batch_anchor = (
-                    first_number + index if first_number is not None else self.raw.count
-                )
-            text = line.decode(errors="replace")
-            if len(text) > MAX_LINE_CHARS:
-                text = text[:MAX_LINE_CHARS] + " [truncated]"
-            self.batch.append(text)
-            if len(self.batch) >= MAX_EVENT_LINES:
-                self.emit_batch()
+            if self.gathering is None:
+                self.gathering = Gathering(now < self.waited_from + self.wait, now)
+            self.gathering.add(
+                line.decode(errors="replace"),
+                first_number + index if first_number is not None else self.raw.count,
+                now,
+            )
 
-    def emit_batch(self):
-        if not self.batch or self.status == "too_noisy":
-            self.batch = []
+    def event_due(self):
+        """Whether the held bursts may go out: the wait is over and the last event was acked."""
+        now = time.monotonic()
+        return (
+            self.gathering is not None
+            and now - self.gathering.started >= BATCH_SECONDS
+            and now >= self.waited_from + self.wait
+            and self.monitor.acked_seq() >= self.seq
+        )
+
+    def emit_event(self):
+        gathering, self.gathering = self.gathering, None
+        if gathering is None or self.status == "too_noisy":
             return
         self.seq += 1
         self.events.write(
             json.dumps(
                 {
                     "seq": self.seq,
-                    "at_raw_line": self.batch_anchor,
-                    "lines": self.batch,
+                    "bursts": gathering.bursts,
+                    "omitted_lines": gathering.omitted,
                     "ts": time.time(),
                 }
             )
             + "\n"
         )
         self.events.flush()
-        self.batch = []
-        now = time.monotonic()
-        self.recent.append(now)
-        while self.recent and now - self.recent[0] > NOISY_WINDOW_SECONDS:
-            self.recent.popleft()
-        if self.seq >= MAX_EVENTS:
-            self.end("too_noisy", f"reached the limit of {MAX_EVENTS} events")
-        elif len(self.recent) > NOISY_WINDOW_EVENTS:
+        self.wait = self.wait * 2 or DEBOUNCE_SECONDS
+        self.waited_from = time.monotonic()
+        if gathering.held:
+            self.held += 1
+        if self.held >= MAX_HELD_EVENTS:
             self.end(
                 "too_noisy",
-                f"emitted more than {NOISY_WINDOW_EVENTS} events in {NOISY_WINDOW_SECONDS}s",
+                f"{MAX_HELD_EVENTS} of its events in a row arrived while it was waiting between events",
             )
 
     def end(self, status, reason=None):
@@ -476,7 +524,9 @@ class Runner:
             return
         now = time.monotonic()
         due = self.seq > self.nudged_seq and now - self.last_nudge >= NUDGE_SECONDS
-        if due or now - self.last_nudge >= HEARTBEAT_SECONDS:
+        # The next event waits for the backend to ack this one, so a lost call must be retried.
+        unacked = now - self.last_nudge >= RENUDGE_SECONDS and self.seq > self.monitor.acked_seq()
+        if due or unacked or now - self.last_nudge >= HEARTBEAT_SECONDS:
             self.nudge = self.post_sync()
             self.nudged_seq = self.seq
             self.last_nudge = now
@@ -597,8 +647,8 @@ class Runner:
                     filter_open = False
                     self.event_lines(filter_lines.finish())
             self.feed_filter(filt)
-            if self.batch and time.monotonic() - self.batch_started >= BATCH_SECONDS:
-                self.emit_batch()
+            if self.event_due():
+                self.emit_event()
             if os.path.exists(self.monitor.stop_path):
                 reason = None
                 try:
@@ -636,7 +686,8 @@ class Runner:
             filter_exit_code = filt.wait()
         if self.status is None:
             self.status = "completed" if exit_code == 0 else "failed"
-        self.emit_batch()
+        # Whatever is still held goes out with the end, without waiting.
+        self.emit_event()
         self.raw.flush()
         self.save(self.status, exit_code, filter_exit_code)
         self.final_sync()

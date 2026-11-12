@@ -7,6 +7,9 @@ from openswe.run_config import RunConfig
 from openswe.users import User
 
 # ``openswe.tools`` exports the tool function under the module's name.
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 request_human_review = importlib.import_module("openswe.tools.request_human_review")
 
 

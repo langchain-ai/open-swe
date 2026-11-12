@@ -43,6 +43,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from runtime_api.provenance import Provenance
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
@@ -101,7 +102,9 @@ HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
-_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
+_SUGGESTED_REVIEWER = re.compile(
+    r"(?:Robin|Open SWE) suggests @(\S+): (.+?) Unless this Slack thread"
+)
 
 # The spec seeds config.py (VALUE_1..VALUE_30) and CHANGELOG.md on main. Drawn:
 # greet.py and config.py's VALUE_2 hunk, four lines. Excluded: 40 more.
@@ -199,6 +202,79 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
+FILE_PREVIEWS_MARKER = "E2E_FILE_PREVIEWS"
+_FILE_PREVIEWS_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAACXBIWXMAAAABAAAAAQBPJcTWAAAATElEQVR4nO3OMR"
+    "HAIAAAMbjDVLWhGQ/du/xIh0RB5n7O+JN1O/AlVISKUBEqQkWoCBWhIlSEilARKkJFqAgVoSJUhIpQESpCRagIlRd6"
+    "pgJfMNIJbQAAAABJRU5ErkJggg=="
+)
+
+# A checkout named after the thread's repository, which the Files panel opens at,
+# holding one file of each kind file_previews.spec.ts renders.
+_FILE_PREVIEWS_SCRIPT = f"""
+set -e
+rm -rf demo
+git clone "$E2E_REMOTE" demo
+cd demo
+mkdir -p docs/img site/css site/js data
+echo '{_FILE_PREVIEWS_PNG}' | base64 -d > docs/img/badge.png
+cat > docs/guide.md <<'MD'
+# Preview guide
+
+A rendered **Markdown** file with an image beside it.
+
+![Badge](img/badge.png)
+
+Open [the deck](../site/index.html) or the [scores](../data/scores.csv).
+MD
+cat > site/index.html <<'HTML'
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="css/deck.css">
+  <script type="module" src="js/deck.mjs"></script>
+</head>
+<body><h1>Quarterly deck</h1><p id="status">waiting</p></body>
+</html>
+HTML
+cat > site/css/deck.css <<'CSS'
+h1 {{ color: rgb(124, 58, 237); }}
+CSS
+cat > site/js/deck.mjs <<'JS'
+document.getElementById("status").textContent = "module loaded";
+JS
+printf 'region,revenue\\nEMEA,120\\nAPAC,"95,5"\\n' > data/scores.csv
+python3 - data <<'XLSX'
+import sys
+import zipfile
+
+NS = "http://schemas.openxmlformats.org"
+PARTS = [
+    ("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="' + NS + '/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'),
+    ("_rels/.rels", '<?xml version="1.0"?><Relationships xmlns="' + NS + '/package/2006/relationships"><Relationship Id="rId1" Type="' + NS + '/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
+    ("xl/workbook.xml", '<?xml version="1.0"?><workbook xmlns="' + NS + '/spreadsheetml/2006/main" xmlns:r="' + NS + '/officeDocument/2006/relationships"><sheets><sheet name="Summary" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+    ("xl/_rels/workbook.xml.rels", '<?xml version="1.0"?><Relationships xmlns="' + NS + '/package/2006/relationships"><Relationship Id="rId1" Type="' + NS + '/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'),
+]
+
+
+def book(path, rows):
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, text in PARTS:
+            archive.writestr(name, text)
+        archive.writestr("xl/worksheets/sheet1.xml", '<?xml version="1.0"?><worksheet xmlns="' + NS + '/spreadsheetml/2006/main"><sheetData>' + rows + '</sheetData></worksheet>')
+
+
+def text(ref, value):
+    return '<c r="' + ref + '" t="inlineStr"><is><t>' + value + '</t></is></c>'
+
+
+out = sys.argv[1]
+book(out + "/book.xlsx", '<row r="1">' + text("A1", "region") + text("B1", "revenue") + '</row><row r="2">' + text("A2", "EMEA") + '<c r="B2"><v>120</v></c></row>')
+book(out + "/bomb.xlsx", '<row r="100000000"><c r="A100000000"><v>1</v></c></row>')
+XLSX
+echo PREVIEW_FILES_OK
+""".strip()
+
 _IFRAME_HTML_PATH = "/workspace/iframe-output.html"
 _IFRAME_HTML = """<!doctype html>
 <html>
@@ -264,7 +340,7 @@ class SystemPromptRecord:
 LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 # Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
-# empty reply so background titling never renames threads or code channels mid-spec.
+# empty reply so background titling never renames threads mid-spec.
 _THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
 
 # Gives every reply of the run a thought, as a reasoning model's would carry.
@@ -294,6 +370,7 @@ BACKGROUND_WORK_MONITOR_COMMAND = (
     'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
 )
 BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
+BACKGROUND_WORK_LISTENER_INSTRUCTIONS = "Recheck the build when CI finishes."
 INBOX_MARKER = "E2E_INBOX"
 INBOX_EVENT_LINE = "INBOX_EVENT build finished"
 # Prints its event at once, then outlasts the spec without lingering on the host.
@@ -302,6 +379,7 @@ INBOX_FOLLOW_UP = "Please also note the inbox follow-up."
 # The harness holds the run here until the spec has queued what the inbox should bring.
 INBOX_GATE_URL = f"{BASE_URL}/control/inbox-gate"
 _INBOX_GATE_SECONDS = 90.0
+
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -1062,6 +1140,62 @@ REVIEW_CHAT_COMMENTS_MARKER = "E2E_REVIEW_CHAT_COMMENTS"
 REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
 REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
 REVIEW_CHAT_FILE = "zeta.py"
+# The review page's own tools queue commands for the page, then read back what the
+# page found once it has carried them out.
+REVIEW_PAGE_TOOLS_MARKER = "E2E_REVIEW_PAGE_TOOLS"
+REVIEW_PAGE_STEPS_MARKER = "E2E_REVIEW_PAGE_STEPS"
+REVIEW_PAGE_TOOLS_COMMENT = "Could ZETA_44 get a descriptive name?"
+
+
+def _tool_result(messages: list[BaseMessage], call_id: str) -> Any:
+    """What the tool call ``call_id`` returned, parsed from its JSON."""
+    return next(
+        (
+            json.loads(_text(message.content))
+            for message in reversed(messages)
+            if isinstance(message, ToolMessage) and message.tool_call_id == call_id
+        ),
+        None,
+    )
+
+
+def _page_steps_step(messages: list[BaseMessage]) -> AIMessage:
+    """Says how far the page got with the walkthrough commands."""
+    progress = _tool_result(messages, "call-page-steps-queue") or {}
+    return AIMessage(
+        content=(
+            f"The page ran {progress.get('executed_through')} of"
+            f" {progress.get('queued_through')} walkthrough commands."
+        )
+    )
+
+
+def _page_queue_step(messages: list[BaseMessage]) -> AIMessage:
+    """Says where each command was queued, how far the page got and what it listed."""
+    positions = ", ".join(
+        str((_tool_result(messages, call_id) or {}).get("position"))
+        for call_id in (
+            "call-page-files",
+            "call-page-show",
+            "call-page-filter",
+            "call-page-highlight",
+            "call-page-draft",
+        )
+    )
+    progress = _tool_result(messages, "call-page-queue") or {}
+    listed = next(
+        (r["result"] for r in progress.get("results", []) if r["tool"] == "review_list_files"),
+        {},
+    )
+    paths = ", ".join(file["path"] for file in listed.get("files", []))
+    return AIMessage(
+        content=(
+            f"Queued page commands at positions {positions}. The page ran"
+            f" {progress.get('executed_through')} of {progress.get('queued_through')};"
+            f" it lists {paths}."
+        )
+    )
+
 
 _IMPLEMENT_STEPS: tuple[StepSpec, ...] = (
     _tool_step(
@@ -1138,6 +1272,62 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content="The review draft is ready."),
     ),
     "review_chat_plain": (StepSpec(content="The pull request adds two constant modules."),),
+    "review_page_tools": (
+        _tool_step("Reading the page.", "page_review_list_files", {}, "call-page-files"),
+        _tool_step(
+            "Showing the constant.",
+            "page_review_show_code",
+            {"path": REVIEW_CHAT_FILE, "start_line": 40, "line": 44},
+            "call-page-show",
+        ),
+        _tool_step(
+            "Narrowing the files.",
+            "page_review_filter_files",
+            {"filter": "zeta"},
+            "call-page-filter",
+        ),
+        _tool_step(
+            "Highlighting the name.",
+            "page_review_highlight_text",
+            {"query": "ZETA_44"},
+            "call-page-highlight",
+        ),
+        _tool_step(
+            "Drafting a comment.",
+            "page_review_draft_comment",
+            {"path": REVIEW_CHAT_FILE, "line": 44, "body": REVIEW_PAGE_TOOLS_COMMENT},
+            "call-page-draft",
+        ),
+        _tool_step(
+            "Checking the page.",
+            "read_page_queue",
+            {"since": 0, "wait_for": 5},
+            "call-page-queue",
+        ),
+        _dynamic_step(_page_queue_step),
+    ),
+    "review_page_steps": (
+        _tool_step("Opening the step.", "page_review_show_step", {"index": 1}, "call-page-step"),
+        _tool_step(
+            "Marking the step viewed.",
+            "page_review_mark_step_viewed",
+            {"index": 1},
+            "call-page-step-viewed",
+        ),
+        _tool_step(
+            "Leaving alpha.py for you.",
+            "page_review_mark_file_viewed",
+            {"path": "alpha.py", "viewed": False},
+            "call-page-file-unviewed",
+        ),
+        _tool_step(
+            "Checking the page.",
+            "read_page_queue",
+            {"since": 0, "wait_for": 3},
+            "call-page-steps-queue",
+        ),
+        _dynamic_step(_page_steps_step),
+    ),
     # Parent turn: delegate to two general-purpose subagents in one step so the
     # transcript renders a subagent card grid. The subagents run this same fake
     # model; their task description carries the marker that selects the
@@ -1189,38 +1379,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_resolve_thread_step),
         StepSpec(content="Resolved the target thread through the thread tools."),
     ),
-    "code_channel": (
-        _tool_step(
-            "This task warrants a dedicated Slack code channel.",
-            "manage_code_channel",
-            {"action": "create", "title": "Investigate flaky CI failures"},
-            "call-code-channel-create",
-        ),
-        _tool_step(
-            "Continuing the task in its dedicated code channel.",
-            "slack_reply",
-            {
-                "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session."
-            },
-            "call-code-channel-reply",
-        ),
-        _tool_step(
-            "Marking the code-channel session active.",
-            "manage_code_channel",
-            {"action": "status", "status": "active"},
-            "call-code-channel-active",
-        ),
-    ),
-    "code_channel_followup": (
-        _tool_step(
-            "Replying to the unmentioned code-channel follow-up.",
-            "slack_reply",
-            {
-                "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session."
-            },
-            "call-code-channel-followup",
-        ),
-    ),
     "inbox": tuple(_dynamic_step(_inbox_step) for _ in range(6)),
     "background_work": (
         _tool_step(
@@ -1247,7 +1405,33 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             },
             "call-background-work-monitor",
         ),
-        StepSpec(content="Started the build and the log monitor."),
+        _tool_step(
+            "Listening for CI to finish.",
+            "listen_events",
+            {
+                "action": "subscribe",
+                "timeout_seconds": 300,
+                "event_types": ["check_suite.completed"],
+                "instructions": BACKGROUND_WORK_LISTENER_INSTRUCTIONS,
+            },
+            "call-background-work-listen",
+        ),
+        StepSpec(content="Started the build, the log monitor and a CI listener."),
+    ),
+    "file_previews": (
+        _tool_step(
+            "Writing the preview files.",
+            "execute",
+            {"command": _FILE_PREVIEWS_SCRIPT},
+            "call-file-previews",
+        ),
+        _tool_step(
+            "Telling the thread the files are ready.",
+            "slack_reply",
+            {"message": "The preview files are ready."},
+            "call-file-previews-reply",
+        ),
+        StepSpec(content="Wrote the preview files."),
     ),
     "iframe": (
         _tool_step(
@@ -1681,6 +1865,8 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
     ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),
+    ScriptRule("review_page_tools", lambda ctx: REVIEW_PAGE_TOOLS_MARKER in ctx.last_text),
+    ScriptRule("review_page_steps", lambda ctx: REVIEW_PAGE_STEPS_MARKER in ctx.last_text),
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(
@@ -1704,16 +1890,12 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
     ScriptRule(
-        "code_channel_followup",
-        lambda ctx: "E2E_CODE_CHANNEL_FOLLOWUP" in ctx.last_text,
-    ),
-    ScriptRule(
-        "code_channel",
-        lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
-    ),
-    ScriptRule(
         "background_work",
         lambda ctx: ctx.human_count <= 1 and BACKGROUND_WORK_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
+        "file_previews",
+        lambda ctx: ctx.human_count <= 1 and FILE_PREVIEWS_MARKER in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
@@ -1809,6 +1991,87 @@ class FakeScriptedChatModel(BaseChatModel):
             and "display_description" in spec["function"].get("parameters", {}).get("required", [])
         ]
         return self
+
+    async def _memory_reply(self, messages: list[BaseMessage], context: ScriptContext) -> AIMessage:
+        if any(
+            isinstance(message, ToolMessage) and message.tool_call_id == "call-memory-reply"
+            for message in messages
+        ):
+            return AIMessage(content="")
+        if "E2E_MEMORY_SAVE" in context.last_text:
+            saved = next(
+                (
+                    message
+                    for message in reversed(messages)
+                    if isinstance(message, ToolMessage)
+                    and message.tool_call_id == "call-memory-save"
+                ),
+                None,
+            )
+            if saved is None:
+                number = re.search(r"E2E_MEMORY_SAVE (\d+)", context.last_text)
+                assert number is not None
+                return AIMessage(
+                    content="Saving your number in user memory.",
+                    tool_calls=[
+                        {
+                            "name": "write_file",
+                            "args": {
+                                "file_path": "/memories/user/AGENTS.md",
+                                "content": f"Remembered number: {number.group(1)}\n",
+                            },
+                            "id": "call-memory-save",
+                        }
+                    ],
+                )
+            assert saved.status != "error", saved.content
+            answer = "Your number is saved."
+        else:
+            assert not any(
+                "E2E_MEMORY_SAVE" in _text(message.content)
+                for message in messages
+                if isinstance(message, HumanMessage)
+                and (provenance := Provenance.of(message)) is not None
+                and provenance.kind == "human"
+            ), "Recall must not receive the original conversation"
+            prompt = "\n".join(
+                _text(message.content) for message in messages if isinstance(message, SystemMessage)
+            )
+            number = re.search(r"Remembered number: (\d+)", prompt)
+            answer = (
+                f"Your remembered number is {number.group(1)}."
+                if number
+                else "No remembered number found."
+            )
+        return AIMessage(
+            content="Replying about user memory.",
+            tool_calls=[
+                {
+                    "name": "slack_reply",
+                    "args": {"message": answer, "response_type": "final"},
+                    "id": "call-memory-reply",
+                }
+            ],
+        )
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: object = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        humans = _script_humans(messages)
+        context = ScriptContext(
+            first_text=_text(humans[0].content) if humans else "",
+            last_text=_text(humans[-1].content) if humans else "",
+            human_count=len(humans),
+            pending_text=_latest_turn_text(messages),
+        )
+        if "E2E_MEMORY_SAVE" in context.last_text or "E2E_MEMORY_RECALL" in context.last_text:
+            reply = await self._memory_reply(messages, context)
+            return ChatResult(generations=[ChatGeneration(message=reply)])
+        return await super()._agenerate(messages, stop=stop, **kwargs)
 
     def _generate(
         self,

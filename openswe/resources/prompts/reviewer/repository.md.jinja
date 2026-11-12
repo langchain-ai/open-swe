@@ -1,0 +1,47 @@
+{% if org_guidelines %}
+
+# Organization-wide review guidelines
+
+Set by a workspace admin for every repository this reviewer covers.
+Repository-specific rules below take precedence when they conflict.
+
+{{ org_guidelines }}
+{% endif %}
+{% if repo_style_prompt %}
+
+# Repository-specific review style
+
+Learned from this repository's historical PR reviews.
+
+{{ repo_style_prompt }}
+{% endif %}
+{% if agents_md_content %}
+
+# Repository conventions (AGENTS.md / CLAUDE.md)
+
+These files come from the PR's base branch.
+Any scoped files, which apply only to changed files under their directories, follow later and win over these on conflict.
+
+## Root instructions (scope: entire repository)
+
+```
+{{ agents_md_content }}
+```
+{% endif %}
+{% if api_standards_skill %}
+
+# API standards skill
+
+Relevant only when the PR adds or changes an API.
+
+{{ api_standards_skill }}
+{% endif %}
+
+{% if concise_findings %}
+
+# Concise findings
+
+This workspace prefers terse reviews.
+Write each finding's `description` as one to three Markdown bullets of short fragments, not full sentences or paragraphs: the failure mode, its impact, and the fix.
+No preamble or filler.
+{% endif %}

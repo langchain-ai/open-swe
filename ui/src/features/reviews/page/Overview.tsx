@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
-import { TextEditor } from "@/components/TextEditor"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import { api, reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -97,7 +98,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
               className="ml-auto size-3 -rotate-90 group-open/requested:rotate-0"
             />
           </summary>
-          <div className="mt-space-1">
+          <div className="mt-space-1" data-reply-part="requested behavior">
             <HumanInputText summary={detail.walkthrough.human_input} />
           </div>
         </details>
@@ -197,7 +198,7 @@ function Description({
       update.mutate(draft)
   }
   const { owner, repo, number } = pr
-  const proxyImage = useCallback(
+  const proxyMedia = useCallback(
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),
     [owner, repo, number]
   )
@@ -251,26 +252,23 @@ function Description({
       </header>
       {draft !== null && (
         <div className="flex flex-col gap-space-2">
-          <div
-            className="flex h-64 min-h-0 flex-col overflow-hidden rounded-md border border-default"
-            onKeyDownCapture={(event) => {
+          <Textarea
+            size="md"
+            aria-label="PR description"
+            autoFocus
+            rows={12}
+            inputClassName="font-mono text-xs"
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                 event.preventDefault()
                 event.stopPropagation()
                 save()
               }
-            }}
-            onKeyDown={(event) => {
               if (event.key === "Escape") event.stopPropagation()
             }}
-          >
-            <TextEditor
-              ariaLabel="PR description"
-              autoFocus
-              value={draft}
-              onChange={setDraft}
-            />
-          </div>
+          />
           <div className="flex justify-end gap-space-2">
             <Button
               size="sm"
@@ -283,9 +281,12 @@ function Description({
             <Button
               size="sm"
               disabled={draft === body || update.isPending}
+              aria-label="Save description"
+              aria-keyshortcuts="Meta+Enter Control+Enter"
               onClick={save}
             >
               Save description
+              <SubmitShortcut />
             </Button>
           </div>
         </div>
@@ -293,6 +294,7 @@ function Description({
       <div
         hidden={draft !== null}
         ref={ref}
+        data-reply-part="description"
         className={cn(
           "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
           clamped && "overflow-hidden"
@@ -302,7 +304,7 @@ function Description({
         {body.trim() ? (
           <Markdown
             content={linkGithubRefs(body, pr, pullRequests)}
-            transformImageUrl={proxyImage}
+            transformMediaUrl={proxyMedia}
             enlargeImages
           />
         ) : (

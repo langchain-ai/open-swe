@@ -4,7 +4,8 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Collection, Mapping, Sequence
+import re
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -22,6 +23,7 @@ from openswe.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
 )
+from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.oauth import build_settings_url
 from openswe.dashboard.options import (
     default_vision_model_pair,
@@ -40,6 +42,8 @@ from openswe.github.app import (
     get_github_app_installation_token_with_expiry,
 )
 from openswe.github.checks import (  # noqa: F401
+    REVIEW_CHECK_TIMEOUT,
+    REVIEW_CHECK_TIMEOUT_JOB,
     complete_review_check_run,
     create_review_check_run,
 )
@@ -47,16 +51,13 @@ from openswe.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
     derive_pr_state,  # noqa: F401
-    describe_open_swe_tags,  # noqa: F401
     extract_pr_context,  # noqa: F401
-    fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
     fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
     sanitize_github_comment_body,  # noqa: F401
-    verify_github_signature,
 )
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
@@ -67,6 +68,7 @@ from openswe.github.thread_token import (
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import PersonIdentity
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -103,7 +105,7 @@ from openswe.slack.client import (
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     parse_slack_ts,  # noqa: F401
-    post_slack_ephemeral_message,
+    post_slack_ephemeral_message,  # noqa: F401
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     remove_slack_reaction,
@@ -112,16 +114,6 @@ from openswe.slack.client import (
     strip_bot_mention,  # noqa: F401
     update_slack_message,
     verify_slack_signature,
-)
-from openswe.slack.code_channels import (  # noqa: F401
-    CODE_CHANNEL_SESSION_TS,
-    DEFAULT_CODE_CHANNEL_COMMANDS,
-    get_block_suggestions,
-    is_code_channel,
-    repo_context_bar_items,
-    set_commands,
-    set_context_bar,
-    set_session_status,
 )
 from openswe.slack.events import (
     claim_slack_event,
@@ -142,6 +134,7 @@ from openswe.slack.records import (  # noqa: F401
 from openswe.slack.stop import process_agent_session_stopped
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import (
     SLACK_BOT_TRIGGER_KIND,
     TRIGGERING_BOT_KEY,
@@ -178,11 +171,9 @@ from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 __all__ = [
     "Any",
     "BackgroundTasks",
-    "CODE_CHANNEL_SESSION_TS",
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "FEEDBACK_REACTIONS",
-    "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
     "LANGGRAPH_URL",
     "OPEN_SWE_TAGS",
@@ -193,16 +184,12 @@ __all__ = [
     "SLACK_SIGNING_SECRET",
     "SlackThreadMappingError",
     "AGENT_VERSION_METADATA",
-    "describe_open_swe_tags",
     "mentions_open_swe",
     "GH_PR_AGENT_STATE_ACTIONS",
     "GH_PR_FIRST_REVIEW_ACTIONS",
     "GH_PR_WATCH_TOGGLE_ACTIONS",
     "SUPPORTED_GH_COMMENT_ACTIONS",
-    "SUPPORTED_GH_EVENTS",
     "SUPPORTED_GH_ISSUE_ACTIONS",
-    "SUPPORTED_GH_PULL_REQUEST_ACTIONS",
-    "build_github_issue_comments_text",
     "build_queued_finding_reply_prompt",
     "build_reviewer_configurable",
     "draft_review_enabled_for_author",
@@ -248,7 +235,6 @@ __all__ = [
     "extract_repo_from_text",
     "fetch_github_pr_metadata",
     "fetch_image_block",
-    "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
     "fetch_pr_review_threads",
@@ -266,7 +252,6 @@ __all__ = [
     "get_workspace_settings",
     "get_valid_access_token",
     "has_access_token_record",
-    "is_code_channel",
     "json",
     "list_reviewer_findings",
     "logger",
@@ -282,15 +267,12 @@ __all__ = [
     "queue_message_for_thread",
     "react_to_github_comment",
     "reconcile_findings_with_review_threads",
-    "repo_context_bar_items",
     "resolve_agent_model_id",
     "resolve_slack_links_in_context",
     "resolve_slack_thread_id",
     "sanitize_github_comment_body",
     "select_slack_context_messages",
-    "set_context_bar",
     "set_reviewer_thread_metadata",
-    "set_session_status",
     "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
@@ -298,7 +280,6 @@ __all__ = [
     "update_agent_thread_pr_state",
     "update_slack_message",
     "upsert_agent_thread_metadata",
-    "verify_github_signature",
     "verify_slack_signature",
     "workspace_for_repo_config",
 ]
@@ -326,7 +307,6 @@ if ENV.DEBUG_TRACEMALLOC.optional():
     )
 
 
-GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
 SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
 SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
 SLACK_BOT_USERNAME = ENV.SLACK_BOT_USERNAME.get()
@@ -352,16 +332,6 @@ PUBLIC_REPO_ORG_GATE: str = ENV.PUBLIC_REPO_ORG_GATE.get().strip()
 
 ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
-)
-
-_GITHUB_BOT_MESSAGE_PREFIXES = (
-    "🔐 **GitHub Authentication Required**",
-    "✅ **Pull Request Created**",
-    "✅ **Pull Request Updated**",
-    "**Pull Request Created**",
-    "**Pull Request Updated**",
-    "🤖 **Agent Response**",
-    "❌ **Agent Error**",
 )
 
 
@@ -550,6 +520,7 @@ async def upsert_agent_thread_metadata(
     owner_type: str = "user",
     unlisted: bool = False,
     token_repositories: Sequence[str] | None = None,
+    identity: ThreadIdentity | None = None,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -605,10 +576,17 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    if existing_meta.get("source") == "incidents_agent":
+        for key in ("source", "origin", "thread_category", "trigger_kind"):
+            metadata.pop(key, None)
     # A thread a bot started stays one, whoever speaks in its Slack thread later.
     if thread_is_bot_triggered(existing_meta):
-        metadata.pop("trigger_kind")
-    if owner_type == "system" and existing_meta:
+        metadata.pop("trigger_kind", None)
+    if (
+        owner_type == "system"
+        and existing_meta
+        and not ThreadRecord.is_unowned_placeholder(existing_meta)
+    ):
         expected_bot = source_context.slack_thread if source_context else None
         saved_bot = existing_context.slack_thread
         if (
@@ -620,13 +598,17 @@ async def upsert_agent_thread_metadata(
             != (expected_bot.team_id, expected_bot.triggering_bot_id)
         ):
             return False
-    sender_login = github_login or await User.login_for_email(user_email) or ""
+    sender_login = (
+        identity.github_login or ""
+        if identity is not None
+        else github_login or await User.login_for_email(user_email) or ""
+    )
     slack_ids = set(slack_participant_user_ids)
     triggering_slack = source_context.slack_thread if source_context else None
     if triggering_slack and triggering_slack.triggering_user_id:
         slack_ids.add(triggering_slack.triggering_user_id)
     slack_logins = await asyncio.gather(*(User.login_for_slack(user_id) for user_id in slack_ids))
-    people: list[PersonIdentity] = []
+    people: list[PersonIdentity] = [identity.person] if identity is not None else []
     for user_id, login in zip(slack_ids, slack_logins, strict=True):
         person: PersonIdentity = {"id": f"slack:{user_id}"}
         if triggering_slack and user_id == triggering_slack.triggering_user_id:
@@ -636,7 +618,10 @@ async def upsert_agent_thread_metadata(
         people.append(person)
     metadata.update(
         await participant_metadata(
-            existing_meta, login=sender_login, email=user_email, people=people
+            existing_meta,
+            login=sender_login,
+            email=None if identity is not None else user_email,
+            people=people,
         )
     )
     # The context that opened the thread identifies it; later messages arrive
@@ -676,6 +661,11 @@ async def upsert_agent_thread_metadata(
         initiating_login = owner_login.strip() or sender_login.strip()
         if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
+            from openswe.tasks.schemas import ThreadMetadata
+
+            ownership = await ThreadMetadata.for_new_thread({**existing_meta, **metadata})
+            if ownership.get("owner_user_id"):
+                metadata["owner_user_id"] = ownership["owner_user_id"]
 
     try:
         if existing is None:
@@ -753,8 +743,7 @@ async def get_slack_repo_config(
     Priority, the first two explicit and the rest defaults:
         1. Repo carried over from the existing Slack thread's metadata.
         2. A ``repo:owner/name`` token in the channel's topic/purpose.
-        3. The triggering user's dashboard ``default_repo`` (if they have a
-           profile and their Slack email maps to a known GitHub login).
+        3. The explicitly linked Slack user's dashboard ``default_repo``.
         4. The default repo of the workspace this channel is bound to.
         5. ``SLACK_REPO_*`` env defaults.
 
@@ -769,9 +758,7 @@ async def get_slack_repo_config(
     explicit = False
 
     try:
-        resolved_thread_id = thread_id or await resolve_slack_thread_id(
-            langgraph_client, channel_id, thread_ts
-        )
+        resolved_thread_id = thread_id or await resolve_slack_thread_id(channel_id, thread_ts)
         thread = await langgraph_client.threads.get(resolved_thread_id)
         thread_repo_config = _repo_in_thread_metadata(thread_metadata(thread))
         if thread_repo_config:
@@ -808,13 +795,7 @@ async def get_slack_repo_config(
 
     if not repo_config and slack_user_id:
         try:
-            slack_user = await get_slack_user_info(slack_user_id)
-            slack_email = (
-                (slack_user or {}).get("profile", {}).get("email")
-                if isinstance(slack_user, dict)
-                else None
-            )
-            profile_repo = await get_profile_default_repo(await User.login_for_email(slack_email))
+            profile_repo = await get_profile_default_repo(await User.login_for_slack(slack_user_id))
             if profile_repo:
                 logger.info(
                     "Applying dashboard default_repo for Slack user %s: %s/%s",
@@ -868,8 +849,24 @@ class ThreadRecord:
         """
         return self.exists and self.metadata.get(PROVISIONAL_VISIBILITY_KEY) is not True
 
-    def authorize(self, github_login: str) -> JsonObject:
-        """Reject a private-thread follow-up from someone who may not prompt it."""
+    @staticmethod
+    def is_unowned_placeholder(metadata: Mapping[str, object]) -> bool:
+        """Whether a thread is a stub MDA's Slack channel claimed with no person as its owner.
+
+        An allow-listed bot may start one like a new thread: its first metadata write
+        replaces the stub's provisional private visibility.
+        """
+        return metadata.get(PROVISIONAL_VISIBILITY_KEY) is True and not metadata.get("owner_login")
+
+    def authorize(self, github_login: str, *, bot: bool = False) -> JsonObject:
+        """Reject a private-thread follow-up from someone who may not prompt it.
+
+        ``bot`` is an allow-listed Slack bot, which may start an unowned placeholder. It
+        reads as the public thread the bot's first metadata write makes it (bots start
+        none in private channels or DMs), so the bot's first turn keeps its Slack context.
+        """
+        if bot and self.is_unowned_placeholder(self.metadata):
+            return {**self.metadata, "visibility": "public"}
         if thread_is_private(self.metadata) and not thread_is_promptable(
             self.metadata, github_login
         ):
@@ -1001,74 +998,50 @@ async def post_account_link_prompt(
     user_id: str,
     user_email: str | None,
     reason: AccountLinkReason = "unlinked",
-    agent_thread_id: str | None = None,
-    ephemeral: bool = False,
+    langsmith: bool = False,
 ) -> None:
-    """Prompt a Slack user to connect their account via the dashboard.
-
-    ``reason`` is ``"unlinked"`` (never signed in with GitHub) or ``"revoked"``
-    (signed in before, but the stored GitHub authorization is no longer usable).
-    Open SWE opens PRs as the triggering user, so it cannot start until the user
-    has signed in with GitHub and connected their Slack account in the dashboard.
-
-    Posts a plain, token-free dashboard link as a visible threaded reply. The
-    link carries no per-user identity, so it's safe to show in a shared channel:
-    the user signs in with GitHub from their own session and connects Slack via
-    verified OIDC on the settings page.
-    """
-    settings_url = build_settings_url()
+    """Prompt a Slack user with a token-free, verified account-onboarding link."""
+    settings_url = LangSmithLogin.slack_onboarding_url() if langsmith else build_settings_url()
     if not settings_url:
         logger.debug(
             "Dashboard settings URL unavailable (DASHBOARD_BASE_URL unset); skipping prompt"
         )
         return
-    if reason == "revoked":
+    if langsmith:
+        sign_in = (
+            f"<{settings_url}|Sign in with LangSmith> and follow the prompts to link Slack, "
+            "then tag me again."
+        )
+        text = (
+            f"🔐 Your LangSmith sign-in needs to be renewed. {sign_in}"
+            if reason == "revoked"
+            else f"👋 Sign in with LangSmith to chat with Robin. {sign_in} "
+            "GitHub is optional and only needed for coding features."
+        )
+    elif reason == "revoked":
         text = (
             "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
-            f"account. Re-connect it in <{settings_url}|your Open SWE settings>, then tag me again."
+            f"account. Re-connect it in <{settings_url}|your Robin settings>, then tag me again."
         )
     else:
         text = (
             "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
-            f"connect your Slack account in <{settings_url}|your Open SWE settings>, then tag me "
+            f"connect your Slack account in <{settings_url}|your Robin settings>, then tag me "
             "again."
         )
     try:
-        if ephemeral:
-            await post_slack_ephemeral_message(channel_id, user_id, text)
-        else:
-            await post_slack_thread_reply(
-                channel_id, thread_ts, text, agent_thread_id=agent_thread_id
-            )
+        await post_slack_ephemeral_message(
+            channel_id,
+            user_id,
+            text,
+            thread_ts="" if thread_ts == "0" else thread_ts,
+        )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
 
 GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
-SUPPORTED_GH_EVENTS = frozenset(
-    [
-        "issue_comment",
-        "issues",
-        "pull_request",
-        "pull_request_review_comment",
-        "pull_request_review_thread",
-        "pull_request_review",
-        "push",
-        *GITHUB_CI_EVENTS,
-    ]
-)
 SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
-SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
-    [
-        "opened",
-        "edited",
-        "ready_for_review",
-        "converted_to_draft",
-        "closed",
-        "reopened",
-        "synchronize",
-    ]
-)
 GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.
@@ -1103,23 +1076,6 @@ SUPPORTED_GH_COMMENT_ACTIONS = {
 }
 
 
-def build_github_issue_comments_text(
-    comments: list[dict[str, Any]], *, trusted: Collection[str]
-) -> str:
-    lines: list[str] = []
-    for comment in comments:
-        body = comment.get("body", "")
-        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
-            continue
-        author = comment.get("author", "unknown")
-        formatted_body = format_github_comment_body_for_prompt(author, body, trusted=trusted)
-        lines.append(f"\n**{author}:**\n{formatted_body}\n")
-
-    if not lines:
-        return ""
-    return "\n\n## Comments:\n" + "".join(lines)
-
-
 async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:
     """Reject private-thread follow-ups before reading credentials or dispatching."""
     return (await ThreadRecord.read(thread_id)).authorize(github_login)
@@ -1135,11 +1091,14 @@ async def trigger_or_queue_run(
     repo_config: dict[str, str],
     pr_number: int,
     token_repositories: Sequence[str] | None = None,
+    start: Callable[[str, dict[str, object], Any], Awaitable[bool]] | None = None,
 ) -> bool:
     """Return whether a new agent run was created or queued for a busy thread.
 
     ``token_repositories`` is recorded if this creates the thread; a thread that
-    must be narrowed but could not record it is not started.
+    must be narrowed but could not record it is not started. ``start`` starts the
+    run instead of the backend, with the thread, its configurable and its input:
+    MDA's GitHub channel, for a pull request's own thread.
     """
     record = await ThreadRecord.read(thread_id)
     record.authorize(github_login)
@@ -1175,6 +1134,8 @@ async def trigger_or_queue_run(
     slack_thread = SourceContext.from_metadata(record.metadata).slack_thread
     if slack_thread is not None:
         configurable["slack_thread"] = slack_thread.dump()
+    if start is not None:
+        return await start(thread_id, configurable, input)
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
@@ -1305,7 +1266,7 @@ async def track_review_check_run(
             token=token,
             conclusion="neutral",
             title="Superseded by a newer review",
-            summary="A newer Open SWE review run replaced this one.",
+            summary="A newer Robin review run replaced this one.",
         )
     ]
     await set_reviewer_thread_metadata(
@@ -1316,6 +1277,17 @@ async def track_review_check_run(
             "superseded_review_check_run_ids": unsettled,
         },
     )
+    try:
+        await queue.schedule(
+            REVIEW_CHECK_TIMEOUT_JOB,
+            {"thread_id": thread_id, "owner": owner, "repo": repo, "check_run_id": check_run_id},
+            due_at=datetime.now(UTC) + REVIEW_CHECK_TIMEOUT,
+            key=f"{REVIEW_CHECK_TIMEOUT_JOB}:{thread_id}",
+        )
+    except Exception:
+        logger.exception(
+            "Could not schedule the review check timeout", extra={"thread_id": thread_id}
+        )
 
 
 async def build_reviewer_configurable(
@@ -1394,11 +1366,19 @@ async def fetch_open_pr_for_branch(
         ).open_pull_for_branch(head_ref)
 
 
-def _normalized_diff_hash(diff_text: str) -> str:
-    normalized = "\n".join(
-        line.rstrip() for line in diff_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    ).strip()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+def _normalized_diff_hash(diff_text: str) -> str | None:
+    lines: list[str] = []
+    for section in re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE):
+        binary = "\nBinary files " in section or "\nGIT binary patch" in section
+        if binary and not re.search(
+            r"^index [0-9a-f]{40}\.\.[0-9a-f]{40}(?: |$)", section, re.MULTILINE
+        ):
+            return None
+        for line in section.split("\n"):
+            if not binary and line.startswith("index "):
+                continue
+            lines.append(re.sub(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", "@@", line))
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 async def _fetch_compare_diff(
@@ -1440,14 +1420,19 @@ async def is_pr_diff_unchanged_since_last_review(
     last_reviewed_sha: str,
     head_sha: str,
     token: str,
+    last_reviewed_base_sha: str = "",
+    base_sha: str = "",
 ) -> bool:
     previous_diff, current_diff = await asyncio.gather(
-        _fetch_compare_diff(repo_config, base_ref, last_reviewed_sha, token=token),
-        _fetch_compare_diff(repo_config, base_ref, head_sha, token=token),
+        _fetch_compare_diff(
+            repo_config, last_reviewed_base_sha or base_ref, last_reviewed_sha, token=token
+        ),
+        _fetch_compare_diff(repo_config, base_sha or base_ref, head_sha, token=token),
     )
     if previous_diff is None or current_diff is None:
         return False
-    return _normalized_diff_hash(previous_diff) == _normalized_diff_hash(current_diff)
+    previous_hash = _normalized_diff_hash(previous_diff)
+    return previous_hash is not None and previous_hash == _normalized_diff_hash(current_diff)
 
 
 async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:

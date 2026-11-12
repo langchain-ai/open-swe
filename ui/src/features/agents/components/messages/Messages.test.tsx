@@ -17,6 +17,12 @@ import type { ReactNode } from "react"
 import { Messages } from "./Messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
+import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+
+vi.mock("@/lib/appCommands", () => ({
+  useAppCommand: () => undefined,
+  useRegisterAppCommands: () => {},
+}))
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -32,7 +38,10 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   ),
 }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllEnvs()
+})
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>
@@ -41,6 +50,116 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("hides system message pills while preserving human messages", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "listener",
+        content:
+          '<dynamic-context kind="system" id="system:event-subscription">\ndisplay_name: Event listener\n</dynamic-context>',
+      }),
+      ...["Build completed", "Review posted", "Checks passed"].map(
+        (text, index) =>
+          new HumanMessage({
+            id: `event-${index}`,
+            content: `<input-message sender="system:event-subscription" kind="system" surface="github">${text}</input-message>`,
+          })
+      ),
+      new HumanMessage({
+        id: "pull-request-notice",
+        content:
+          '<input-message sender="system:pull-request-thread" kind="system" surface="automation">Pull request context</input-message>',
+      }),
+      ...[
+        [
+          "system:sandbox-handoff",
+          "Moved to the cloud. Continuing from the branch as pushed.",
+        ],
+        ["system:api_key/key-1", "Investigate the nightly job failure"],
+        ["system:github_actions/org/repo", "Fix the deployment check"],
+      ].map(
+        ([sender, text]) =>
+          new HumanMessage({
+            id: sender,
+            content: `<input-message sender="${sender}" kind="system" surface="automation">${text}</input-message>`,
+          })
+      ),
+      new HumanMessage({ id: "human", content: "Please continue" }),
+      new HumanMessage({
+        id: "separate-event",
+        content:
+          '<input-message sender="system:event-subscription" kind="system" surface="github">New commit</input-message>',
+      }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    expect(screen.getByText("Please continue")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /event listener/i })).toBeNull()
+    expect(screen.queryByText("Build completed")).toBeNull()
+    expect(screen.queryByText("New commit")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Context" })).toBeNull()
+    expect(screen.queryByText("Pull request context")).toBeNull()
+    expect(
+      screen.getByText(
+        "Moved to the cloud. Continuing from the branch as pushed."
+      )
+    ).toBeTruthy()
+    expect(screen.getByText("Investigate the nightly job failure")).toBeTruthy()
+    expect(screen.getByText("Fix the deployment check")).toBeTruthy()
+    expect(screen.queryByTestId("system-message-toggle")).toBeNull()
+  })
+
+  it("copies the displayed thread URL with the dashboard base path on another page", async () => {
+    vi.stubEnv("BASE_URL", "/robin/")
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <Messages
+        threadId="displayed-thread"
+        messages={[
+          {
+            id: "failed-message",
+            author: "user",
+            timestamp: "2026-11-06T20:18:00Z",
+            deliveryStatus: "failed",
+            deliveryError: "the message could not be started",
+            deliveryTurnId: "failed-turn",
+            chunks: [{ kind: "text", text: "When is the job scheduled?" }],
+          },
+        ]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    const failedMessage = screen.getByRole("button", {
+      name: "Failed to send · Copy debug details",
+    })
+    expect(failedMessage.textContent).toBe("Failed to send")
+    fireEvent.focus(failedMessage)
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "the message could not be started"
+    )
+    await act(async () => {
+      fireEvent.click(failedMessage)
+    })
+    expect(writeText).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          url: `${window.location.origin}/robin/agents/displayed-thread`,
+          message_id: "failed-message",
+          turn_id: "failed-turn",
+          timestamp: "2026-11-06T20:18:00Z",
+          error: "the message could not be started",
+        },
+        null,
+        2
+      )
+    )
+    Reflect.deleteProperty(navigator, "clipboard")
+  })
+
   it("renders queued passage replies even without plain text", () => {
     render(
       <Messages
@@ -89,6 +208,36 @@ describe("Messages", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
+  it("links Slack user messages to their original message when metadata is available", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "slack-person",
+        content:
+          '<dynamic-context kind="person" id="slack:U123">\ndisplay_name: Alice\n</dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "slack-message",
+        content:
+          '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1787165499.123456" slack_message_ts="1787165487.000034">Hello</input-message>',
+      }),
+      new HumanMessage({
+        id: "legacy-slack-message",
+        content:
+          '<input-message sender="slack:U123" surface="slack" kind="human">Earlier message</input-message>',
+      }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    const link = screen.getByRole("link", {
+      name: "View message from Alice in Slack",
+    })
+    expect(link.getAttribute("href")).toBe(
+      "/dashboard/api/slack/open?channel=C123&message_ts=1787165487.000034"
+    )
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(screen.getByRole("img", { name: "Slack" })).toBeTruthy()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
@@ -131,7 +280,9 @@ describe("Messages", () => {
       history: createMemoryHistory({ initialEntries: ["/"] }),
     })
     await router.load()
-    const { container } = render(<RouterProvider router={router} />)
+    const { container } = render(<RouterProvider router={router} />, {
+      wrapper,
+    })
 
     const details = screen.getByRole("button", {
       name: "Investigate login · Message",
@@ -195,7 +346,9 @@ describe("Messages", () => {
       history: createMemoryHistory({ initialEntries: ["/"] }),
     })
     await router.load()
-    const { container } = render(<RouterProvider router={router} />)
+    const { container } = render(<RouterProvider router={router} />, {
+      wrapper,
+    })
     const chip = screen.getByRole("button", {
       name: "Worker 2cfc31d4 · Started",
     })
@@ -318,7 +471,8 @@ describe("Messages", () => {
               ],
             },
           ]}
-        />
+        />,
+        { wrapper }
       )
       expect(
         screen.getByRole("button", { name: `Worker · ${label}` })
@@ -327,35 +481,199 @@ describe("Messages", () => {
     }
   )
 
-  it("expands system context with the shared chip", () => {
+  it("folds runs that woke and ended without a reply into one row", () => {
+    const monitor = (
+      id: string,
+      at: string,
+      sender = { id: "system:monitor", name: "Monitor" }
+    ) => ({
+      id,
+      author: "user" as const,
+      timestamp: at,
+      structuredSenderKind: "system" as const,
+      structuredSenderId: sender.id,
+      structuredSenderName: sender.name,
+      chunks: [{ kind: "text" as const, text: `Wake ${id}` }],
+    })
+    const silentRun = (
+      id: string,
+      startedAt: string,
+      at: string,
+      call: Partial<ToolExecutionChunk> = {}
+    ) => ({
+      id,
+      author: "agent" as const,
+      startedAt,
+      timestamp: at,
+      chunks: [
+        {
+          kind: "tool-execution" as const,
+          toolCallId: `${id}-call`,
+          toolName: "check_pr",
+          toolKind: "other" as const,
+          title: "Check PR",
+          status: "completed" as const,
+          output: "still pending",
+          ...call,
+        },
+      ],
+    })
     render(
       <Messages
         isStreaming={false}
         messages={[
           {
-            id: "system-context",
+            id: "moved",
             author: "user",
-            timestamp: "2026-09-03T10:30:00.000Z",
+            timestamp: "2026-09-03T09:59:00.000Z",
             structuredSenderKind: "system",
-            structuredSenderName: "Scheduler",
-            chunks: [{ kind: "text", text: "Check the latest deployment" }],
+            structuredSenderId: "system:sandbox-handoff",
+            structuredSenderName: "Moved to the cloud",
+            chunks: [{ kind: "text", text: "Moved this thread to the cloud." }],
           },
+          monitor("wake-1", "2026-09-03T10:00:00.000Z"),
+          silentRun(
+            "run-1",
+            "2026-09-03T10:00:00.000Z",
+            "2026-09-03T10:01:00.000Z"
+          ),
+          monitor("wake-2", "2026-09-03T10:05:00.000Z", {
+            id: "system:background-task",
+            name: "Background task",
+          }),
+          silentRun(
+            "run-2",
+            "2026-09-03T10:05:00.000Z",
+            "2026-09-03T10:08:00.000Z"
+          ),
+          monitor("wake-3", "2026-09-03T10:10:00.000Z"),
+          {
+            id: "run-3",
+            author: "agent",
+            timestamp: "2026-09-03T10:11:00.000Z",
+            chunks: [{ kind: "text", text: "CI is green." }],
+          },
+          // A call waiting on approval keeps its run, and the one before it,
+          // out of a fold.
+          monitor("wake-4", "2026-09-03T10:20:00.000Z"),
+          silentRun(
+            "run-4",
+            "2026-09-03T10:20:00.000Z",
+            "2026-09-03T10:21:00.000Z"
+          ),
+          monitor("wake-5", "2026-09-03T10:25:00.000Z"),
+          silentRun(
+            "run-5",
+            "2026-09-03T10:25:00.000Z",
+            "2026-09-03T10:26:00.000Z",
+            { status: "pending" }
+          ),
+          monitor("wake-6", "2026-09-03T10:30:00.000Z"),
+          silentRun(
+            "run-6",
+            "2026-09-03T10:30:00.000Z",
+            "2026-09-03T10:31:00.000Z",
+            { toolKind: "read", status: "error", output: "Check failed" }
+          ),
+          monitor("wake-7", "2026-09-03T10:35:00.000Z"),
+          silentRun(
+            "run-7",
+            "2026-09-03T10:35:00.000Z",
+            "2026-09-03T10:36:00.000Z"
+          ),
+          monitor("wake-8", "2026-09-03T10:40:00.000Z"),
+          silentRun(
+            "run-8",
+            "2026-09-03T10:40:00.000Z",
+            "2026-09-03T10:41:00.000Z",
+            {
+              toolKind: "code",
+              calls: [
+                {
+                  kind: "tool-execution",
+                  toolCallId: "nested-failed-call",
+                  toolName: "check_pr",
+                  toolKind: "other",
+                  title: "Check PR",
+                  status: "error",
+                  output: "Nested check failed",
+                },
+              ],
+            }
+          ),
         ]}
-      />
+      />,
+      { wrapper }
     )
-    const toggle = screen.getByRole("button", { name: "Scheduler" })
-    expect(screen.queryByText("Check the latest deployment")).toBeNull()
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute("aria-expanded")).toBe("true")
-    expect(screen.getByText("Check the latest deployment")).toBeTruthy()
-    fireEvent.click(toggle)
-    expect(screen.queryByText("Check the latest deployment")).toBeNull()
+
+    const fold = screen.getByRole("button", {
+      name: "2 runs without a reply · 4m 0s · 2 actions · woken by Monitor, Background task",
+    })
+    expect(
+      screen.getAllByRole("button", { name: /runs without a reply/ })
+    ).toHaveLength(1)
+    expect(screen.queryByRole("button", { name: "Monitor" })).toBeNull()
+    expect(screen.getByText("CI is green.")).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "Moved to the cloud" })
+    ).toBeNull()
+
+    fireEvent.click(fold)
+    expect(fold.getAttribute("aria-expanded")).toBe("true")
+    expect(screen.queryByRole("button", { name: "Monitor" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Background task" })).toBeNull()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Worked for 1m 0s · 2 actions" })
+    )
+    expect(screen.getByLabelText("Tool call failed")).toBeTruthy()
   })
 
   it("shows run activity while a stream is starting with no messages", () => {
-    render(<Messages messages={[]} isStreaming />)
+    const { rerender } = render(<Messages messages={[]} isStreaming />)
 
     expect(screen.getByRole("status").textContent).toBe("Working…0s")
+    const wake: Message = {
+      id: "wake",
+      author: "user",
+      timestamp: new Date().toISOString(),
+      structuredSenderKind: "system",
+      structuredSenderId: "system:monitor",
+      chunks: [{ kind: "text", text: "Check CI" }],
+    }
+    rerender(
+      <Messages
+        messages={[wake]}
+        isStreaming
+        emptyState={<p>No messages yet</p>}
+      />
+    )
+    expect(screen.getByRole("status").textContent).toContain("Working…")
+    expect(screen.queryByText("No messages yet")).toBeNull()
+    expect(screen.queryByText("Check CI")).toBeNull()
+    rerender(
+      <Messages
+        messages={[
+          {
+            id: "previous-answer",
+            author: "agent",
+            timestamp: wake.timestamp,
+            chunks: [{ kind: "text", text: "Previous answer" }],
+          },
+          wake,
+        ]}
+        isStreaming
+      />
+    )
+    expect(screen.getByText("Previous answer")).toBeTruthy()
+    expect(screen.getByRole("status").textContent).toContain("Working…")
+    rerender(
+      <Messages
+        messages={[wake]}
+        isStreaming={false}
+        emptyState={<p>No messages yet</p>}
+      />
+    )
+    expect(screen.getByText("No messages yet")).toBeTruthy()
   })
 
   it("shows reconnect activity in the existing status line", () => {

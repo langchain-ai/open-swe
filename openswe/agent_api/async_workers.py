@@ -9,7 +9,8 @@ the worker as the coordinator. Instead:
   launch carries in place of its run token. It is refused wherever the thread may
   not delegate: a worker can't launch another.
 - ``worker_launched``: once the thread exists, the coordinator registers it as a
-  worker of its task, with its own index entry, owner and sandbox access.
+  worker of its task, with its own index entry, owner and sandbox access, and hears
+  the context of the task its thread now coordinates.
 - ``adopt``: the worker's first run exchanges the grant and its thread id for a run
   token of its own; it registers itself if the coordinator has not yet.
 
@@ -43,7 +44,8 @@ from runtime_api.workers import (
 from openswe.agent_api.client import start_remote_run
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.tokens import RemoteRun, WorkerGrant, sign_worker_grant
-from openswe.dispatch import prepare_run_config
+from openswe.dispatch import prepare_durable_run
+from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.prompts import prompt
 from openswe.tasks import service, store
 
@@ -121,7 +123,24 @@ async def launched(run: RemoteRun, body: Launched) -> Worker:
         worker = service.worker_reply(replay.task, replay.delegation)
     else:
         await launched_run.settle_if_ended()
-    return Worker(worker=_json_object.validate_python(worker))
+    return Worker(
+        worker=_json_object.validate_python(worker), task_context=await _task_context(run)
+    )
+
+
+async def _task_context(run: RemoteRun) -> str | None:
+    """The context of the task the coordinator's thread now belongs to: its run was planned
+    before. The worker is registered whatever happens here, so a failure only leaves it out."""
+    try:
+        coordination = await TaskCoordinationMiddleware.for_thread(run.thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read the task a coordinator joined",
+            extra={"coordinator_thread_id": run.thread_id},
+            exc_info=True,
+        )
+        return None
+    return coordination.context_message() if coordination is not None else None
 
 
 async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
@@ -130,7 +149,8 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
     # Registered as the coordinator's worker_launched registers it, whichever comes first.
     instructions = _assigned_instructions(grant.coordinator.thread_id, body.instructions)
     await service.register_async_worker(actor, grant.request_id, body.thread_id, instructions)
-    configurable = prepare_run_config(
+    prepared = await prepare_durable_run(
+        grant.coordinator.assistant_id,
         {
             "configurable": {
                 **await service.recipient_config(body.thread_id),
@@ -138,11 +158,11 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
             }
         },
         None,
-    )["configurable"]
+        source="task",
+    )
     started = await start_remote_run(
-        _json_object.validate_python(configurable),
-        # MDA started this run, not a task message: no run metadata comes with it.
-        metadata={},
+        _json_object.validate_python(prepared["configurable"]),
+        metadata=_json_object.validate_python(prepared["metadata"]),
         thread_id=body.thread_id,
         assistant_id=grant.coordinator.assistant_id,
     )

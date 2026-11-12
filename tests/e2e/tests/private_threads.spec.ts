@@ -64,9 +64,9 @@ test("private threads require owner confirmation to expose the entire thread", a
     await expect(
       page.getByRole("menuitemradio", { name: "Private" }),
     ).toHaveAttribute("aria-checked", "true");
-    await page.getByRole("menuitemradio", { name: "Workspace" }).click();
+    await page.getByRole("menuitemradio", { name: "Shared" }).click();
     await expect(page.getByRole("dialog")).toContainText(
-      "Expose this entire thread to the workspace?",
+      "Expose this entire thread to all Robin users?",
     );
     await expect(
       page.getByRole("button", { name: "Share entire thread" }),
@@ -152,7 +152,7 @@ test("private threads require owner confirmation to expose the entire thread", a
       await page.screenshot({ path: process.env.SHARING_BEFORE_SCREENSHOT });
     }
     await page.getByRole("button", { name: "Thread visibility" }).click();
-    await page.getByRole("menuitemradio", { name: "Workspace" }).click();
+    await page.getByRole("menuitemradio", { name: "Shared" }).click();
     await page.getByRole("checkbox").check();
     if (process.env.SHARING_SCREENSHOT) {
       await page.screenshot({ path: process.env.SHARING_SCREENSHOT });
@@ -161,7 +161,7 @@ test("private threads require owner confirmation to expose the entire thread", a
     await expect(page.getByRole("dialog")).not.toBeVisible();
     await expect(
       page.getByRole("button", { name: "Thread visibility" }),
-    ).toHaveText(/Workspace/);
+    ).toHaveText(/Shared/);
     await expect(page).toHaveURL(new RegExp(`/agents/${createdId}$`));
     const shared = await (
       await page.request.get(`/dashboard/api/threads/${createdId}`)

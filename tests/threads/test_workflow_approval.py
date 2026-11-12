@@ -34,3 +34,27 @@ async def test_concurrent_decisions_have_one_winner(
 
     assert sorted(result[1] for result in results if result is not None) == [False, True]
     assert results[0][0] == results[1][0] == stored["fp"]
+
+
+async def test_repeated_pending_request_becomes_latest(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = {"fp": {"status": "pending", "requested_at": "2026-11-08T14:00:00Z", "notified": True}}
+    monkeypatch.setattr(
+        workflow_approval, "get_workflow_push_approvals", AsyncMock(return_value=deepcopy(stored))
+    )
+    monkeypatch.setattr(workflow_approval, "_save_approvals", AsyncMock())
+    monkeypatch.setattr(workflow_approval, "now_iso", lambda: "2026-11-08T16:00:00Z")
+    record, created = await workflow_approval.ensure_workflow_push_pending(
+        "thread",
+        fingerprint="fp",
+        repo="repo",
+        branch="branch",
+        base_sha="base",
+        head_sha="head",
+        files=[],
+    )
+    assert record["requested_at"] == "2026-11-08T16:00:00Z"
+    assert record["first_requested_at"] == "2026-11-08T14:00:00Z"
+    assert record["status"] == "pending"
+    assert created is False

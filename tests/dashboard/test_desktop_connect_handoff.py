@@ -16,14 +16,16 @@ from uuid import uuid7
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from cryptography.fernet import Fernet
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from openswe.dashboard import routes
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session
 from openswe.slack import connect
 from openswe.slack.oauth import SlackIdentity
-from openswe.users import User
+from openswe.slack.recovery import SlackRecovery
+from openswe.users import AccountConflict, User
 
 _VERIFIER = "desktop-connect-verifier"
 _CHALLENGE = (
@@ -33,7 +35,7 @@ _APP_ORIGIN = {"origin": "open-swe://app"}
 
 
 @pytest.fixture
-def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+def links(monkeypatch: pytest.MonkeyPatch, langsmith_users) -> list[dict[str, Any]]:
     """Stub the Slack legs and collect the account links they produce."""
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
@@ -52,7 +54,7 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         )
 
     collected: list[dict[str, Any]] = []
-    user = User()
+    user = langsmith_users.add("alice")
 
     async def fake_link(provider: str, external_id: str, **kwargs: Any) -> User:
         collected.append({"provider": provider, "external_id": external_id, **kwargs})
@@ -157,3 +159,36 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         "iat",
         "exp",
     }
+
+
+async def test_conflicting_slack_exchange_returns_private_session_bound_recovery(
+    links, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    with _client() as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(uuid7())),
+        )
+        handoff = _start_desktop_slack_flow(client)
+        user = User.for_session.return_value
+        monkeypatch.setattr(user, "link", AsyncMock(side_effect=AccountConflict("already linked")))
+        result = client.post(
+            "/dashboard/api/slack/desktop/exchange",
+            json={"code": handoff, "verifier": _VERIFIER},
+            headers=_APP_ORIGIN,
+        )
+        assert result.status_code == 409
+        detail = result.json()["detail"]
+        assert detail["code"] == "slack_account_conflict"
+        token = detail["recovery_token"]
+        assert (await SlackRecovery.read(token, user.id)).slack_user_id == "U123"
+        with pytest.raises(HTTPException):
+            await SlackRecovery.read(token, uuid7())
+        with pytest.raises(HTTPException):
+            await SlackRecovery.read("tampered" + token, user.id)
+        assert links == []
+        monkeypatch.setattr("openswe.slack.recovery.time.time", lambda: 1)
+        expired = await SlackRecovery(user.id, "U123").issue()
+        with pytest.raises(HTTPException):
+            await SlackRecovery.read(expired, user.id)

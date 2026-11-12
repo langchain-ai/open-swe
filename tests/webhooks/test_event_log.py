@@ -2,7 +2,7 @@ import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import httpx
@@ -17,7 +17,7 @@ from openswe.slack import routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common, event_log
-from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, EventRefs
+from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, EventLogQuery, EventRefs
 
 
 async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
@@ -156,7 +156,7 @@ async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> Non
         {
             "type": "http",
             "method": "POST",
-            "path": "/webhooks/github",
+            "path": "/mda/channel-api/record_github_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }
@@ -185,6 +185,37 @@ async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> Non
     assert all(kind.payload_shape is None for kind in narrowed)
     (opened,) = await EventLog.kinds(since, source="github", event_type="pull_request.opened")
     assert opened.payload_shape == {"action": "string", "number": "number"}
+    window = {"start_time": since, "end_time": datetime.now(UTC), "source": "github"}
+    prefixed = await EventLog.search(EventLogQuery(**window, event_type_prefix="pull_request"))
+    assert sorted(event.event_type for event in prefixed.items) == [
+        "pull_request.closed",
+        "pull_request.opened",
+        "pull_request.opened",
+    ]
+    pages = []
+    cursor = None
+    while True:
+        page = await EventLog.search(
+            EventLogQuery(**window, event_type_prefix="pull_request", limit=1, cursor=cursor)
+        )
+        pages += page.items
+        if page.cursor is None:
+            break
+        cursor = page.cursor
+    assert len(pages) == 3
+
+    window = {"start_time": since, "end_time": datetime.now(UTC)}
+    first = await EventLog.search(
+        EventLogQuery(**window, source="github", event_type="pull_request.opened", limit=1)
+    )
+    assert [event.payload for event in first.items] == [{"action": "opened", "number": 2}]
+    rest = await EventLog.search(
+        EventLogQuery(
+            **window, source="github", event_type="pull_request.opened", cursor=first.cursor
+        )
+    )
+    assert [event.payload for event in rest.items] == [{"action": "opened", "number": 1}]
+    assert rest.cursor is None
 
 
 async def test_rotation_keeps_the_retained_days_and_tomorrow(registry_db: None) -> None:
@@ -305,9 +336,10 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
     ids = {name: uuid4() for name in ("user", "workspace", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
-            "INSERT INTO users (id) VALUES (:user)",
+            "INSERT INTO users (id, display_name) VALUES (:user, 'Ada')",
             "INSERT INTO user_identity (user_id, provider, external_id) "
             "VALUES (:user, 'github', '42')",
+            "UPDATE user_identity SET login = 'ada-gh' WHERE user_id = :user",
             "INSERT INTO workspace (id, slug, name) VALUES (:workspace, 'acme', 'Acme')",
             "INSERT INTO repository (id, key, full_name) "
             "VALUES (:repository, 'acme/widgets', 'acme/widgets')",
@@ -328,7 +360,7 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
         {
             "type": "http",
             "method": "POST",
-            "path": "/webhooks/github",
+            "path": "/mda/channel-api/record_github_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }
@@ -343,6 +375,19 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
             )
         ).one()
     assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
+    now = datetime.now(UTC)
+    page = await EventLog.search(
+        EventLogQuery(start_time=now - timedelta(hours=1), end_time=now, user_id=ids["user"])
+    )
+    (event,) = page.items
+    assert (
+        event.user_name,
+        event.workspace_name,
+        event.repository_name,
+        event.pull_request_name,
+    ) == ("Ada", "Acme", "acme/widgets", "acme/widgets#7")
+    assert [user.id for user in await EventLog.users("ada-g")] == [ids["user"]]
+    assert await EventLog.users("%") == []
 
 
 async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
@@ -356,7 +401,7 @@ async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
         {
             "type": "http",
             "method": "POST",
-            "path": "/linear/channel/events",
+            "path": "/mda/channel-api/record_linear_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }
@@ -486,3 +531,29 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
                 await conn.execute(text("SELECT thread_ts, pr_url FROM slack_pull_request_link"))
             ).one()
         assert tuple(link) == ("1786573300.000000", "https://github.com/acme/widgets/pull/7")
+
+
+async def test_dropped_events_are_not_stored(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset({"slack:message"}))
+    claim = AsyncMock()
+    monkeypatch.setattr(event_log.event_claims, "claim", claim)
+
+    assert await event_log.EventLog.record_once(
+        MagicMock(), b"{}", "slack", event_type="message", delivery_id="d-1"
+    )
+    assert await event_log.EventLog.record(MagicMock(), b"{}", "slack", event_type="message")
+    claim.assert_not_awaited()
+
+
+async def test_dropped_events_match_their_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset({"github:check_run.completed"}))
+
+    assert event_log.EventLog.dropped("github", "check_run", action="completed")
+    assert not event_log.EventLog.dropped("github", "check_run", action="created")
+    assert await event_log.EventLog.record(
+        MagicMock(headers={}), b'{"action": "completed"}', "github", event_type="check_run"
+    )

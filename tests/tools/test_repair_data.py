@@ -9,6 +9,8 @@ from sqlalchemy.exc import DBAPIError
 from openswe.database import postgres
 from openswe.tools.repair_data import execute_database_sql, write_database_rows
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture(autouse=True)
 def admin_context(monkeypatch: pytest.MonkeyPatch):

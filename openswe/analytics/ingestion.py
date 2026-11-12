@@ -623,6 +623,8 @@ async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> 
     input_tokens = payload.get("input_tokens")
     output_tokens = payload.get("output_tokens")
     total_tokens = payload.get("total_tokens")
+    cache_read_tokens = payload.get("cache_read_tokens")
+    cache_creation_tokens = payload.get("cache_creation_tokens")
     current = await conn.execute(
         text(
             "SELECT technical_status, terminal_event_ids FROM run_projection WHERE workspace_id = "
@@ -635,9 +637,11 @@ async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> 
         await conn.execute(
             text(
                 "INSERT INTO run_projection (workspace_id, run_id, technical_status, terminal_at, "
-                "terminal_event_ids, input_tokens, output_tokens, total_tokens) VALUES "
+                "terminal_event_ids, input_tokens, output_tokens, total_tokens, cache_read_tokens, "
+                "cache_creation_tokens) VALUES "
                 "(:workspace_id, :run_id, :status, :occurred_at, ARRAY[:event_id]::uuid[], "
-                ":input_tokens, :output_tokens, :total_tokens)"
+                ":input_tokens, :output_tokens, :total_tokens, :cache_read_tokens, "
+                ":cache_creation_tokens)"
             ),
             {
                 "workspace_id": event.workspace_id,
@@ -648,6 +652,8 @@ async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> 
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "total_tokens": total_tokens,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
             },
         )
         return
@@ -663,7 +669,9 @@ async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> 
             "terminal_at, :occurred_at), :occurred_at), terminal_conflict = :conflict, "
             "terminal_event_ids = :event_ids, input_tokens = COALESCE(:input_tokens, input_tokens), "
             "output_tokens = COALESCE(:output_tokens, output_tokens), total_tokens = COALESCE("
-            ":total_tokens, total_tokens), updated_at = "
+            ":total_tokens, total_tokens), cache_read_tokens = COALESCE(:cache_read_tokens, "
+            "cache_read_tokens), cache_creation_tokens = COALESCE(:cache_creation_tokens, "
+            "cache_creation_tokens), updated_at = "
             "clock_timestamp() WHERE workspace_id = :workspace_id AND run_id = :run_id"
         ),
         {
@@ -676,6 +684,8 @@ async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> 
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": total_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "cache_creation_tokens": cache_creation_tokens,
         },
     )
     if conflict:

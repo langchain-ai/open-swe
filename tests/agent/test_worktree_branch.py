@@ -51,6 +51,7 @@ async def test_renames_a_temporary_branch_from_the_request(tmp_path: Path) -> No
     model = _FakeModel("Retry Flaky Login!")
 
     renamed = await rename_temporary_worktree_branch(
+        thread_id="t",
         backend=LocalShellBackend(root_dir=str(repo), virtual_mode=False),
         request="Make the login test stop flaking",
         model=cast(BaseChatModel, model),
@@ -66,6 +67,7 @@ async def test_leaves_a_deliberately_named_branch_alone(tmp_path: Path) -> None:
 
     assert (
         await rename_temporary_worktree_branch(
+            thread_id="t",
             backend=LocalShellBackend(root_dir=str(repo), virtual_mode=False),
             request="Make the login test stop flaking",
             model=cast(BaseChatModel, model),

@@ -76,7 +76,7 @@ def operation_connections(operation: str, config: RunnableConfig) -> list[Connec
     return [
         ref
         for read in _READ_BY.get(operation, ())
-        if not (read is GITHUB_USER and RunConfig.from_config(config).auth_provider == "langsmith")
+        if not (read is GITHUB_USER and not RunConfig.from_config(config).github_linked)
         and (ref := read.ref()) is not None
         and (ref.owner == "agent" or for_person)
     ]

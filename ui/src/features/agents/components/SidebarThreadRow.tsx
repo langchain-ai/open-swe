@@ -2,13 +2,18 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   LaptopRegularIcon,
-  PushPinRegularIcon,
 } from "@langchain/macaw-components/icons"
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuTrigger,
 } from "@langchain/macaw-components/ContextMenu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
 import {
   HoverCard,
   HoverCardContent,
@@ -17,43 +22,44 @@ import {
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
-import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
-import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
-import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
-import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
-import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
-import { HourglassIcon } from "@phosphor-icons/react/dist/ssr/Hourglass"
-import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
-import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
-import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
-import type { SVGProps } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
 import type {
-  AgentSource,
   AgentSubagentSummary,
   AgentThread,
 } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { parsePullRequestReference } from "@/features/reviews/search"
+import { RenameThreadDialog } from "@/features/agents/components/RenameThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
-  markAgentThreadViewed,
   markReviewViewed,
   useDeleteAgentThread,
+  useSetAgentThreadViewed,
 } from "@/features/agents/lib/queries"
 import {
   noteReviewOpenedFromSidebar,
@@ -62,52 +68,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 
-/** Phosphor has no Linear mark; this is Linear's own logo. */
-function LinearLogoIcon({
-  size = 16,
-  weight: _weight,
-  mirrored: _mirrored,
-  ...props
-}: SVGProps<SVGSVGElement> & {
-  size?: string | number
-  weight?: unknown
-  mirrored?: boolean
-}) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      fill="currentColor"
-      {...props}
-    >
-      <path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z" />
-    </svg>
-  )
-}
-
 const ICON_SIZE = 14
-
-const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
-  {
-    dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
-    github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
-    slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
-    linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
-    schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
-    claude_code: {
-      icon: TerminalWindowIcon,
-      label: "Mirrored from Claude Code",
-    },
-  }
-
-const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
-
-function sourceMeta(item: SidebarThreadItem) {
-  if (item.source && item.source !== "dashboard")
-    return SOURCE_META[item.source]
-  return runsOnAMac(item.thread) ? THIS_MAC_META : null
-}
 
 type PrState = NonNullable<AgentThread["pr"]>["state"]
 
@@ -229,29 +190,33 @@ function SidebarRowTitle({
   )
 }
 
-function sidebarRowClassName({
-  compact,
+const TREE_STEP = 20
+
+/** Props for a row `depth` levels below a top-level thread. */
+function sidebarRowProps({
   active,
-  paddingLeft,
   archived,
+  indent,
+  depth,
 }: {
-  compact: boolean
   active: boolean
-  paddingLeft: string
   archived: boolean
-}): string {
-  return cn(
-    "relative flex items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
-    paddingLeft,
-    // Only ever on screen while "Show archived" is on; without this an
-    // archived row is indistinguishable from a live one.
-    archived && "opacity-55",
-    compact ? "h-7 gap-space-2" : "h-8",
-    "text-primary",
-    active
-      ? "bg-selected group-hover/row:bg-selected-hover"
-      : "group-hover/row:bg-surface-level-2-hover"
-  )
+  indent: boolean
+  depth: number
+}): { className: string; style: React.CSSProperties } {
+  return {
+    className: cn(
+      "relative flex h-8 items-center gap-space-2 rounded-lg pr-space-2 transition-colors",
+      // Only ever on screen while "Show archived" is on; without this an
+      // archived row is indistinguishable from a live one.
+      archived && "opacity-55",
+      "text-primary",
+      active
+        ? "bg-selected group-hover/row:bg-selected-hover"
+        : "group-hover/row:bg-surface-level-2-hover"
+    ),
+    style: { paddingLeft: (indent ? 16 : 8) + depth * TREE_STEP },
+  }
 }
 
 function RunningIndicator({ label }: { label: string }) {
@@ -276,34 +241,115 @@ function ErrorIndicator({ label }: { label: string }) {
 function PullRequestIcon({
   state,
   live,
-  className,
 }: {
   state: PrState
   live?: PullRequestSnapshot
-  className?: string
 }) {
-  // Thread metadata records the state the PR had when it was opened; live
-  // truth wins so a merged PR stops rendering as open.
   const meta = PR_STATE_META[live?.state ?? state]
   const Glyph = meta.icon
   return (
+    <Glyph
+      size={ICON_SIZE}
+      weight="regular"
+      className={cn("shrink-0", meta.className)}
+      aria-label={meta.label}
+    />
+  )
+}
+
+function PullRequestMenuItem({
+  pr,
+  live,
+}: {
+  pr: NonNullable<AgentThread["pr"]>
+  live?: PullRequestSnapshot
+}) {
+  // Thread metadata records the state the PR had when it was opened; live
+  // truth wins so a merged PR stops rendering as open.
+  const meta = PR_STATE_META[live?.state ?? pr.state]
+  const Glyph = meta.icon
+  return (
+    <DropdownMenuItem asChild>
+      <a href={pr.url} target="_blank" rel="noreferrer">
+        <Glyph size={ICON_SIZE} weight="regular" className={meta.className} />
+        {meta.label} #{pr.number}
+      </a>
+    </DropdownMenuItem>
+  )
+}
+
+function DisclosureCaret({
+  expanded,
+  label,
+  onToggle,
+}: {
+  expanded: boolean
+  label: string
+  onToggle: () => void
+}) {
+  const Caret = expanded ? CaretDownIcon : CaretRightIcon
+  const toggle = (event: React.SyntheticEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggle()
+  }
+  return (
     <span
-      className={cn("relative flex shrink-0", className)}
-      title={meta.label}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-label={label}
+      title={label}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") toggle(event)
+      }}
+      className="-mx-space-1 flex size-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
     >
-      <Glyph
-        size={ICON_SIZE}
-        weight="regular"
-        className={meta.className}
-        aria-label={meta.label}
-      />
-      {live?.checks === "failing" && (
-        <span
-          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-error-strong ring-2 ring-surface-level-2"
-          aria-label="Checks failing"
-        />
-      )}
+      <Caret size={10} weight="fill" />
     </span>
+  )
+}
+
+/**
+ * Children of a sidebar row, joined to their parent by a guide line that
+ * runs down from under the parent's title and curves into each child.
+ */
+function SidebarTree({
+  label,
+  indent,
+  depth,
+  children,
+}: {
+  label: string
+  indent: boolean
+  depth: number
+  children: React.ReactNode
+}) {
+  const guide = (indent ? 16 : 8) + (depth - 1) * TREE_STEP + 6
+  return (
+    <ul
+      aria-label={label}
+      style={{ "--tree-x": `${guide}px` } as React.CSSProperties}
+    >
+      {children}
+    </ul>
+  )
+}
+
+/** The guide line for one `SidebarTree` child; render it last in the `li`. */
+function TreeBranch() {
+  return (
+    <>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-0.5 left-(--tree-x) h-4.5 w-2.5 rounded-bl-md border-b border-l border-subtle"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -top-0.5 -bottom-0.5 left-(--tree-x) border-l border-subtle [:last-child>&]:hidden"
+      />
+    </>
   )
 }
 
@@ -314,7 +360,6 @@ export function SidebarThreadRow({
   pinned,
   archived,
   live,
-  compact = false,
   indent = false,
   onNavigate,
   onTogglePin,
@@ -326,18 +371,23 @@ export function SidebarThreadRow({
   pinned: boolean
   archived: boolean
   live?: PullRequestSnapshot
-  compact?: boolean
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
+  const selection = useSidebarThreadSelection()
+  const selected = selection?.selected.has(item.id) ?? false
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
+  const setViewed = useSetAgentThreadViewed()
   const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const menuNavigated = useRef(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
   const activeSubagentId =
@@ -358,9 +408,11 @@ export function SidebarThreadRow({
   const [workersExpanded, setWorkersExpanded] = useState(
     Boolean(activeWorkerId)
   )
-  useEffect(() => {
+  const [previousWorkerId, setPreviousWorkerId] = useState(activeWorkerId)
+  if (previousWorkerId !== activeWorkerId) {
+    setPreviousWorkerId(activeWorkerId)
     if (activeWorkerId) setWorkersExpanded(true)
-  }, [activeWorkerId])
+  }
   const hasSubagents = subagents.length > 0
   const activeSubagent =
     isActive &&
@@ -372,159 +424,62 @@ export function SidebarThreadRow({
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && !workersExpanded)
-  const source = sourceMeta(item)
-  const SourceIcon = source?.icon
-  // Strictly an unread marker, not a "finished" one: any thread the user has
-  // not opened since its latest run shows the dot. The focused thread is being
-  // read right now, so it never does — derived rather than left to the
-  // optimistic cache patch, which a list refetch can overwrite.
-  const unread = !item.viewed && !isActive
+  const unread = !item.viewed
   const isDeleting =
     deleteThread.isPending && deleteThread.variables === item.id
 
   const markViewed = () => {
     if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
-    else markAgentThreadViewed(queryClient, item.id)
   }
-
-  // Covers every way a row becomes active — click, command palette, keyboard
-  // nav, browser back — not just the click handler below.
-  useEffect(() => {
-    if (isActive && !item.viewed) markViewed()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, item.viewed])
 
   const onConfirmDelete = () => {
     if (isDeleting) return
     deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
-  const onArchiveClick = (event: React.MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    onToggleArchived()
-  }
-
-  const onPinClick = (event: React.MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    onTogglePin()
-  }
-
   const handleNavigate = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (contextMenuOpen) {
+    if (contextMenuOpen || moreMenuOpen) {
       event.preventDefault()
       return
     }
+    if (selection?.click(event, item)) return
     markViewed()
     onNavigate?.()
   }
 
-  const onToggleSubagents = (event: React.SyntheticEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    toggleSubagentsCollapsed(item.key)
-  }
-  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
-
   const rowContent = (
     <>
-      <span
-        className={cn(
-          "absolute inset-y-0 flex -translate-x-full flex-col justify-center",
-          indent ? "left-space-5" : "left-space-2"
-        )}
-      >
-        {hasSubagents && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={!subagentsCollapsed}
-            aria-label={
-              subagentsCollapsed ? "Show subagents" : "Hide subagents"
-            }
-            title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-            onClick={onToggleSubagents}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ")
-                onToggleSubagents(event)
-            }}
-            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            <SubagentCaret size={12} weight="bold" />
-          </span>
-        )}
-        {workers.length > 0 && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={workersExpanded}
-            aria-label={
-              workersExpanded ? "Hide task workers" : "Show task workers"
-            }
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              setWorkersExpanded((expanded) => !expanded)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                event.stopPropagation()
-                setWorkersExpanded((expanded) => !expanded)
-              }
-            }}
-            className="flex max-h-5 min-h-0 w-4 flex-1 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            {workersExpanded ? (
-              <CaretDownIcon size={12} weight="bold" />
-            ) : (
-              <CaretRightIcon size={12} weight="bold" />
-            )}
-          </span>
-        )}
-      </span>
+      {selected && (
+        <span className="text-brand text-xs" aria-label="Selected thread">
+          ✓
+        </span>
+      )}
+      {hasSubagents && (
+        <DisclosureCaret
+          expanded={!subagentsCollapsed}
+          label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+          onToggle={() => toggleSubagentsCollapsed(item.key)}
+        />
+      )}
+      {workers.length > 0 && (
+        <DisclosureCaret
+          expanded={workersExpanded}
+          label={workersExpanded ? "Hide task workers" : "Show task workers"}
+          onToggle={() => setWorkersExpanded((expanded) => !expanded)}
+        />
+      )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
-      <span className="flex shrink-0 items-center gap-space-2 group-hover/row:hidden">
-        {item.status === "error" && <ErrorIndicator label="Thread error" />}
-        {thread.automationActionPosted && (
-          <SlackLogoIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-success"
-            aria-label="Action posted to Slack"
-          />
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 [@media(hover:none)]:pr-space-5",
+          moreMenuOpen && "invisible min-w-6"
         )}
-        {item.reviewPage ? (
-          <BookOpenTextIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-tertiary"
-            aria-label="Pull request review"
-          />
-        ) : (
-          <>
-            {source && SourceIcon && !item.pr && (
-              <SourceIcon
-                size={ICON_SIZE}
-                weight="regular"
-                className="text-icon-tertiary"
-                aria-label={source.label}
-              />
-            )}
-            {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
-          </>
-        )}
-        {item.status === "running" ? (
+      >
+        {item.status === "running" || item.waitingForDelegatedWork ? (
           <RunningIndicator label="Thread running" />
-        ) : item.waitingForDelegatedWork ? (
-          <HourglassIcon
-            size={ICON_SIZE}
-            weight="regular"
-            className="text-icon-secondary"
-            aria-label="Waiting for delegated work"
-          />
+        ) : item.status === "error" ? (
+          <ErrorIndicator label="Thread error" />
         ) : unread ? (
           <span
             className="size-2 rounded-full bg-brand"
@@ -532,33 +487,14 @@ export function SidebarThreadRow({
           />
         ) : null}
       </span>
-
-      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
-        <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
-          label={pinned ? "Unpin thread" : "Pin thread"}
-          size="xs"
-          color="secondary"
-          variant="plain"
-          onClick={onPinClick}
-        />
-        <IconButton
-          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
-          label={archived ? "Unarchive thread" : "Archive thread"}
-          size="xs"
-          color="secondary"
-          variant="plain"
-          onClick={onArchiveClick}
-        />
-      </span>
     </>
   )
 
-  const rowClassName = sidebarRowClassName({
-    compact,
-    active: rowIsActive,
-    paddingLeft: indent ? "pl-space-5" : "pl-space-2",
+  const rowProps = sidebarRowProps({
+    active: selected || rowIsActive,
     archived,
+    indent,
+    depth: 0,
   })
 
   const review = item.reviewPage
@@ -566,11 +502,14 @@ export function SidebarThreadRow({
     <Link
       {...reviewPageRoute(review)}
       onClick={(event) => {
-        noteReviewOpenedFromSidebar(review)
         handleNavigate(event)
+        if (!event.defaultPrevented) noteReviewOpenedFromSidebar(review)
       }}
       onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
+      {...rowProps}
+      data-selectable-thread={item.id}
+      data-thread-title={item.title}
+      aria-label={selected ? `${item.title}, selected` : item.title}
     >
       {rowContent}
     </Link>
@@ -580,10 +519,30 @@ export function SidebarThreadRow({
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
+      {...rowProps}
+      data-selectable-thread={item.id}
+      data-thread-title={item.title}
+      aria-label={selected ? `${item.title}, selected` : item.title}
     >
       {rowContent}
     </Link>
+  )
+
+  const menuItems = (menu: "context" | "dropdown") => (
+    <ThreadMenuItems
+      menu={menu}
+      thread={thread}
+      pinned={pinned}
+      archived={archived}
+      isDeleting={isDeleting}
+      onRename={() => setRenameOpen(true)}
+      onTogglePin={onTogglePin}
+      onToggleViewed={() =>
+        setViewed.mutate({ threadId: item.id, viewed: !item.viewed })
+      }
+      onToggleArchived={onToggleArchived}
+      onDelete={() => setDeleteOpen(true)}
+    />
   )
 
   return (
@@ -592,7 +551,7 @@ export function SidebarThreadRow({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              "group/row relative mb-0.5",
+              "group/row relative mb-0.5 select-none [-webkit-touch-callout:none]",
               isDeleting && "opacity-50"
             )}
             onMouseEnter={marquee.measure}
@@ -602,65 +561,102 @@ export function SidebarThreadRow({
               trigger={link}
               card={<ThreadHoverCard item={item} live={live} />}
             />
+            <DropdownMenu onOpenChange={setMoreMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  icon={DotsThreeIcon}
+                  label="Thread actions"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  className={cn(
+                    "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                    moreMenuOpen && "opacity-100"
+                  )}
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="min-w-[10rem] border-default bg-elevated"
+                onClickCapture={(event) => {
+                  menuNavigated.current = Boolean(
+                    (event.target as HTMLElement).closest("a[href]")
+                  )
+                }}
+                onCloseAutoFocus={(event) => {
+                  if (menuNavigated.current) event.preventDefault()
+                  menuNavigated.current = false
+                }}
+              >
+                {item.pr && (
+                  <>
+                    <PullRequestMenuItem pr={item.pr} live={live} />
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                {menuItems("dropdown")}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-[10rem]">
-          <ThreadMenuItems
-            menu="context"
-            thread={thread}
-            pinned={pinned}
-            archived={archived}
-            isDeleting={isDeleting}
-            onTogglePin={onTogglePin}
-            onToggleArchived={onToggleArchived}
-            onDelete={() => setDeleteOpen(true)}
-          />
+        <ContextMenuContent className="min-w-[10rem] border-default bg-elevated">
+          {menuItems("context")}
         </ContextMenuContent>
       </ContextMenu>
       {hasSubagents && !subagentsCollapsed && (
-        <ul aria-label={`Subagents of ${item.title}`}>
+        <SidebarTree
+          label={`Subagents of ${item.title}`}
+          indent={indent}
+          depth={1}
+        >
           {subagents.map((subagent) => (
             <SidebarSubagentRow
               key={subagent.toolCallId}
               threadId={item.id}
               subagent={subagent}
               isActive={activeSubagent === subagent.toolCallId}
-              compact={compact}
               indent={indent}
+              depth={1}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
       {workers.length > 0 && workersExpanded && (
-        <ul aria-label={`Task workers of ${item.title}`}>
+        <SidebarTree
+          label={`Task workers of ${item.title}`}
+          indent={indent}
+          depth={1}
+        >
           {workers.map((worker) => (
             <SidebarTaskWorkerRow
               key={worker.id}
               worker={worker}
               activeSubagentId={activeSubagentId}
               isActive={worker.id === activeThreadId}
-              compact={compact}
               indent={indent}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
+      )}
+      {renameOpen && (
+        <RenameThreadDialog
+          thread={thread}
+          onClose={() => setRenameOpen(false)}
+        />
       )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        threadTitle={item.title}
         isDeleting={isDeleting}
         onConfirm={onConfirmDelete}
         detail={
-          !worktreeThread
-            ? undefined
-            : worktreeThread.managedTaskFolder
-              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
-              : worktreeThread.ownedWorktrees.length
-                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-                : "This removes its history but does not revert changes made to your repository."
+          worktreeThread &&
+          !worktreeThread.managedTaskFolder &&
+          worktreeThread.ownedWorktrees.length
+            ? "This also deletes its worktree and uncommitted changes. Branch and commits are kept."
+            : undefined
         }
       />
     </>
@@ -676,17 +672,15 @@ function SidebarSubagentRow({
   threadId,
   subagent,
   isActive,
-  nested = false,
-  compact,
   indent,
+  depth,
   onNavigate,
 }: {
   threadId: string
   subagent: AgentSubagentSummary
   isActive: boolean
-  nested?: boolean
-  compact: boolean
   indent: boolean
+  depth: number
   onNavigate?: () => void
 }) {
   const marquee = useTitleMarquee()
@@ -697,17 +691,11 @@ function SidebarSubagentRow({
       params={{ threadId }}
       search={{ subagent: subagent.toolCallId }}
       onClick={() => onNavigate?.()}
-      className={sidebarRowClassName({
-        compact,
+      {...sidebarRowProps({
         active: isActive,
-        paddingLeft: nested
-          ? indent
-            ? "pl-18"
-            : "pl-space-9"
-          : indent
-            ? "pl-13.5"
-            : "pl-11.5",
         archived: false,
+        indent,
+        depth,
       })}
     >
       <SidebarRowTitle marquee={marquee} title={subagent.title} />
@@ -732,11 +720,40 @@ function SidebarSubagentRow({
         trigger={link}
         card={<SubagentHoverCard subagent={subagent} />}
       />
+      <TreeBranch />
     </li>
   )
 }
 
-/** Rich preview beside a row; it is a hover card so its links stay clickable. */
+const RowHoverCardContext = createContext<{
+  activeCardId: string | null
+  onOpenChange: (id: string, open: boolean) => void
+}>({
+  activeCardId: null,
+  onOpenChange: (_id: string, _open: boolean) => {},
+})
+
+export function SidebarThreadHoverProvider(props: {
+  children: React.ReactNode
+}) {
+  const [value, onChange] = useState<string | null>(null)
+  const hoverContext = useMemo(
+    () => ({
+      activeCardId: value,
+      onOpenChange: (id: string, open: boolean) =>
+        onChange((current) => (open ? id : current === id ? null : current)),
+    }),
+    [value]
+  )
+
+  return (
+    <RowHoverCardContext value={hoverContext}>
+      {props.children}
+    </RowHoverCardContext>
+  )
+}
+
+/** Rich preview beside a row; only one sidebar preview is open at a time. */
 function RowHoverCard({
   trigger,
   card,
@@ -744,8 +761,18 @@ function RowHoverCard({
   trigger: React.ReactElement
   card: React.ReactNode
 }) {
+  const id = useId()
+  const { activeCardId, onOpenChange } = useContext(RowHoverCardContext)
+
+  useEffect(() => () => onOpenChange(id, false), [id, onOpenChange])
+
   return (
-    <HoverCard openDelay={500} closeDelay={100}>
+    <HoverCard
+      open={activeCardId === id}
+      openDelay={activeCardId === null ? 500 : 0}
+      closeDelay={100}
+      onOpenChange={(open) => onOpenChange(id, open)}
+    >
       <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
       <HoverCardContent
         side="right"
@@ -769,6 +796,15 @@ function ThreadHoverCard({
   const onAMac = runsOnAMac(item.thread)
   const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
   const locationLabel = onAMac ? "This Mac" : "Cloud"
+  const reference = parsePullRequestReference(item.pr?.url ?? "")
+  const prContent = item.pr && (
+    <>
+      <PullRequestIcon state={item.pr.state} live={live} />
+      <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
+    </>
+  )
+  const prClassName =
+    "pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
 
   return (
     <div className="flex min-w-0 flex-col gap-space-2">
@@ -800,18 +836,29 @@ function ThreadHoverCard({
           <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
         </div>
       )}
-      {item.pr && (
-        <a
-          href={item.pr.url}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-space-1 flex min-w-0 items-center gap-space-2 rounded-md px-space-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
-        >
-          <PullRequestIcon state={item.pr.state} live={live} />
-          <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
-        </a>
-      )}
+      {item.pr &&
+        (reference ? (
+          <Link
+            {...reviewPageRoute(reference)}
+            onClick={(event) => {
+              noteReviewOpenedFromSidebar(reference)
+              event.stopPropagation()
+            }}
+            className={prClassName}
+          >
+            {prContent}
+          </Link>
+        ) : (
+          <a
+            href={item.pr.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className={prClassName}
+          >
+            {prContent}
+          </a>
+        ))}
     </div>
   )
 }
@@ -857,18 +904,15 @@ function SidebarTaskWorkerRow({
   worker,
   activeSubagentId,
   isActive,
-  compact,
   indent,
   onNavigate,
 }: {
   worker: AgentThread
   activeSubagentId: string | null
   isActive: boolean
-  compact: boolean
   indent: boolean
   onNavigate?: () => void
 }) {
-  const queryClient = useQueryClient()
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
   const subagents = (worker.subagents ?? []).filter(
@@ -881,9 +925,9 @@ function SidebarTaskWorkerRow({
     `cloud:${worker.id}`
   )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
-  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
-  const status =
-    worker.status === "finished"
+  const status = worker.pendingWorkflowApproval
+    ? "Awaiting approval"
+    : worker.status === "finished"
       ? "Completed"
       : worker.status === "error"
         ? "Failed"
@@ -904,50 +948,25 @@ function SidebarTaskWorkerRow({
         search={{}}
         aria-current={rowIsActive ? "page" : undefined}
         title={`${worker.title} — ${status}`}
-        onClick={() => {
-          markAgentThreadViewed(queryClient, worker.id)
-          onNavigate?.()
-        }}
-        className={sidebarRowClassName({
-          compact,
+        onClick={() => onNavigate?.()}
+        {...sidebarRowProps({
           active: rowIsActive,
-          paddingLeft: indent ? "pl-13.5" : "pl-11.5",
           archived: worker.resolved === true,
+          indent,
+          depth: 1,
         })}
       >
         {subagents.length > 0 && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-expanded={!subagentsCollapsed}
-            aria-label={
+          <DisclosureCaret
+            expanded={!subagentsCollapsed}
+            label={
               subagentsCollapsed
                 ? "Show worker subagents"
                 : "Hide worker subagents"
             }
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              toggleSubagentsCollapsed(`cloud:${worker.id}`)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                event.stopPropagation()
-                toggleSubagentsCollapsed(`cloud:${worker.id}`)
-              }
-            }}
-            className="absolute top-1/2 flex h-5 w-4 -translate-x-full -translate-y-1/2 items-center justify-center text-tertiary transition-colors hover:text-primary"
-          >
-            <SubagentCaret size={12} weight="bold" />
-          </span>
+            onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
+          />
         )}
-        <RobotIcon
-          size={ICON_SIZE}
-          weight="regular"
-          className="shrink-0 text-icon-secondary"
-          aria-label="Asynchronous task worker"
-        />
         <SidebarRowTitle marquee={marquee} title={worker.title} />
         <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
@@ -960,21 +979,25 @@ function SidebarTaskWorkerRow({
         </span>
       </Link>
       {subagents.length > 0 && !subagentsCollapsed && (
-        <ul aria-label={`Subagents of ${worker.title}`}>
+        <SidebarTree
+          label={`Subagents of ${worker.title}`}
+          indent={indent}
+          depth={2}
+        >
           {subagents.map((subagent) => (
             <SidebarSubagentRow
               key={subagent.toolCallId}
               threadId={worker.id}
               subagent={subagent}
               isActive={isActive && activeSubagentId === subagent.toolCallId}
-              compact={compact}
               indent={indent}
-              nested
+              depth={2}
               onNavigate={onNavigate}
             />
           ))}
-        </ul>
+        </SidebarTree>
       )}
+      <TreeBranch />
     </li>
   )
 }

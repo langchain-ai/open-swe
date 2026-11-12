@@ -90,6 +90,7 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     monkeypatch.setattr(graph.PullRequestClient, "as_app", lambda *args: client)
     monkeypatch.setattr(PinnedCheckout, "pin", AsyncMock())
     workspace = MagicMock(complete=False)
+    workspace.pull_request.concise_walkthrough = AsyncMock(return_value=False)
     monkeypatch.setattr(graph, "_workspace", AsyncMock(return_value=workspace))
     original = [HumanMessage(content="Scout this PR"), AIMessage(content="Previous plan")]
     state: dict[str, object] = {"messages": original.copy()}

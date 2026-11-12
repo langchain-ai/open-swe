@@ -342,6 +342,11 @@ async def test_mapped_owner_waits_only_for_temporary_unavailability(
         return users[login]
 
     with (
+        patch.object(
+            HumanReviewRequest,
+            "recent_channel_posters",
+            AsyncMock(return_value={user.id for user in users.values()}),
+        ),
         patch.object(supplementary, "team_members", AsyncMock(return_value=list(users))),
         patch.object(User, "for_login", find_user),
         patch.object(supplementary, "latest_review_states", AsyncMock(return_value=reviews)),
@@ -412,6 +417,11 @@ async def test_concurrent_rotation_reserves_different_available_team_members(
         return login != "optedout"
 
     with (
+        patch.object(
+            HumanReviewRequest,
+            "recent_channel_posters",
+            AsyncMock(return_value={user.id for user in people.values()}),
+        ),
         patch.object(supplementary, "team_members", AsyncMock(return_value=list(people))),
         patch.object(User, "for_login", user_for_login),
         patch.object(supplementary, "latest_review_states", AsyncMock(return_value={})),

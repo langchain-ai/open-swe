@@ -1,6 +1,7 @@
 import secrets
 from datetime import datetime
 from typing import Self
+from urllib.parse import urlsplit
 from uuid import UUID, uuid7
 
 from sqlalchemy import ForeignKey, select
@@ -12,6 +13,33 @@ from openswe.users.models import User
 from openswe.utils.dashboard_links import dashboard_api_base_url
 
 LINKS_PATH = "/dashboard/api/l"
+
+
+def is_https_target(target_url: str) -> bool:
+    """Whether the public redirect route may send a visitor to ``target_url``.
+
+    Only an absolute ``https`` URL with a host and no credentials qualifies, written
+    without whitespace or control characters, so no ``javascript:``, ``data:``,
+    plain-HTTP, protocol-relative or obfuscated target gets through.
+    """
+    if any(ord(char) <= 0x20 or ord(char) == 0x7F for char in target_url):
+        return False
+    try:
+        parsed = urlsplit(target_url)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+    )
+
+
+def require_https_target(target_url: str) -> str:
+    if not is_https_target(target_url):
+        raise ValueError("a short link must point at an absolute https URL")
+    return target_url
 
 
 class ShortLink(Base):
@@ -42,7 +70,7 @@ class ShortLink(Base):
     ) -> Self:
         link = cls(
             token=secrets.token_urlsafe(16),
-            target_url=target_url,
+            target_url=require_https_target(target_url),
             expires_at=expires_at,
             created_by=created_by,
             updated_by=created_by,

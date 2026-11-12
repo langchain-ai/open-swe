@@ -12,7 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import Config
 from pydantic import JsonValue, TypeAdapter
 
-from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
+from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_durable_run, prepare_run_config
 from openswe.input_messages import RunInput, build_run_input
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -23,8 +23,13 @@ from openswe.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
+
+class WakeupRunConfig(Config, total=False):
+    metadata: dict[str, JsonValue]
+
+
 _json = TypeAdapter(dict[str, JsonValue])
-_run_config = TypeAdapter(Config)
+_run_config = TypeAdapter(WakeupRunConfig)
 _run_input = TypeAdapter(RunInput)
 
 _AGENT_ASSISTANT_ID = "agent"
@@ -32,7 +37,7 @@ _MIN_DELAY_SECONDS = 60
 _MAX_DELAY_SECONDS = 86_400
 _END_TIME_PADDING_SECONDS = 90
 
-_WAKEUP_KIND = "thread_wakeup"
+WAKEUP_KIND = "thread_wakeup"
 WAKE_THREAD_JOB = "thread_wakeup"
 _WAKEUP_SENDER_ID = "system:thread-wakeup"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
@@ -90,7 +95,7 @@ async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[st
     offset = 0
     while True:
         page = await client.crons.search(
-            metadata={"kind": _WAKEUP_KIND},
+            metadata={"kind": WAKEUP_KIND},
             limit=_PURGE_PAGE_SIZE,
             offset=offset,
         )
@@ -125,7 +130,7 @@ async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
 
 
 async def cancel_thread_wakeups(thread_id: str) -> None:
-    await queue.cancel_matching({"kind": _WAKEUP_KIND, "thread_id": thread_id})
+    await queue.cancel_matching({"kind": WAKEUP_KIND, "thread_id": thread_id})
     # Wakeups scheduled before the job queue are Agent Server crons.
     client = get_client(url=langgraph_url())
     cron_ids: list[str] = []
@@ -133,7 +138,7 @@ async def cancel_thread_wakeups(thread_id: str) -> None:
     while True:
         page = await client.crons.search(
             thread_id=thread_id,
-            metadata={"kind": _WAKEUP_KIND},
+            metadata={"kind": WAKEUP_KIND},
             limit=_PURGE_PAGE_SIZE,
             offset=offset,
         )
@@ -164,7 +169,7 @@ async def _schedule_wakeup(
 ) -> dict[str, Any]:
     run_config = prepare_run_config(
         {"configurable": configurable},
-        {"kind": _WAKEUP_KIND, "thread_id": thread_id},
+        {"kind": WAKEUP_KIND, "thread_id": thread_id},
     )
     run_input = build_run_input(
         prompt,
@@ -190,7 +195,7 @@ async def _schedule_wakeup(
             }
         ),
         due_at=fire_time,
-        metadata={"kind": _WAKEUP_KIND, "thread_id": thread_id},
+        metadata={"kind": WAKEUP_KIND, "thread_id": thread_id},
     )
     return {
         "success": True,
@@ -227,13 +232,19 @@ async def run_thread_wakeup(
             "Thread wakeup is running late",
             extra={"thread_id": thread_id, "job_id": job_id, "lateness_seconds": lateness_seconds},
         )
+    prepared = await prepare_durable_run(
+        _AGENT_ASSISTANT_ID,
+        config,
+        _object(payload.get("metadata")),
+        source="wakeup",
+    )
     run = await get_client(url=langgraph_url()).runs.create(
         thread_id,
         _AGENT_ASSISTANT_ID,
         # ty does not match a TypedDict against the SDK's TypedDict-like protocol.
         input=run_input,  # ty: ignore[invalid-argument-type]
-        config=None if config is None else _run_config.validate_python(config),
-        metadata=_object(payload.get("metadata")),
+        config=_run_config.validate_python(prepared),
+        metadata=prepared["metadata"],
         multitask_strategy="enqueue",
         webhook=COMPLETION_WEBHOOK_URL or None,
     )
@@ -277,7 +288,6 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         if value is not None:
             wakeup_configurable[key] = value
     active = await get_active_slack_thread(
-        client,
         thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

@@ -21,11 +21,13 @@ from openswe.dashboard.workspace_settings import router as workspace_settings_ro
 from openswe.github.dashboard_routes import router as repos_router
 from openswe.github.pull_request_dashboard_routes import router as pull_requests_router
 from openswe.human_review.routes import router as human_review_router
-from openswe.incidents.document_routes import router as incident_documents_router
 from openswe.incidents.routes import router as incidents_router
 from openswe.mcp.routes import router as mcp_router
 from openswe.merge_queue.routes import router as merge_queue_router
 from openswe.notifications.routes import router as notifications_router
+from openswe.page_commands.routes import router as page_commands_router
+from openswe.plugins.routes import router as plugins_router
+from openswe.projects.routes import router as projects_router
 from openswe.review.conversation import router as review_conversation_router
 from openswe.review.routes import router as review_router
 from openswe.schedules.routes import router as schedules_router
@@ -33,9 +35,11 @@ from openswe.skill_store.routes import router as skills_router
 from openswe.slack.dashboard_routes import router as slack_router
 from openswe.tasks.routes import router as tasks_router
 from openswe.threads.routes import router as threads_router
+from openswe.trace_flight.routes import router as trace_flight_router
 from openswe.transcript.routes import router as transcript_router
 from openswe.ui_invalidations.routes import router as ui_invalidations_router
 from openswe.users.routes import router as users_router
+from openswe.webhooks.routes import router as event_log_router
 from openswe.workspaces.routes import router as workspaces_router
 
 router = APIRouter(
@@ -44,7 +48,6 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 router.include_router(incidents_router)
-router.include_router(incident_documents_router, prefix="/incidents/documents")
 router.include_router(auth_router)
 router.include_router(client_errors_router)
 router.include_router(desktop_environments_router)
@@ -67,7 +70,9 @@ router.include_router(agent_instructions_router)
 router.include_router(skills_router)
 router.include_router(analytics_router)
 router.include_router(audit_logs_router)
+router.include_router(event_log_router)
 router.include_router(schedules_router)
+router.include_router(projects_router)
 router.include_router(threads_router)
 router.include_router(tasks_router)
 router.include_router(transcript_router)
@@ -75,6 +80,9 @@ router.include_router(api_keys_router)
 router.include_router(bridge_router)
 router.include_router(claude_code_router)
 router.include_router(ui_invalidations_router)
+router.include_router(plugins_router)
+router.include_router(page_commands_router)
+router.include_router(trace_flight_router)
 router.include_router(merge_queue_router)
 
 router.include_router(notifications_router)

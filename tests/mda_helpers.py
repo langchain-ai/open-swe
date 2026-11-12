@@ -3,7 +3,8 @@
 from typing import cast
 
 import pytest
-from managed_deepagents._channels.http.endpoint import EndpointDeclined, _run_result
+from managed_deepagents import ChannelReplyResult
+from managed_deepagents._channels.http.endpoint import _run_result
 from managed_deepagents._channels.run_input import NormalizedRunInput, normalize_run_input
 from pydantic import JsonValue
 
@@ -19,10 +20,13 @@ def mda_starts(answer: object) -> NormalizedRunInput:
 
 
 def mda_declines(answer: object) -> str:
-    """What MDA's Linear channel tells the session for an endpoint's decline."""
+    """What MDA's Linear channel tells the session for an endpoint's reply."""
     declined = _run_result(cast(JsonValue, answer))
-    assert isinstance(declined, EndpointDeclined)
-    return declined.message
+    assert isinstance(declined, ChannelReplyResult)
+    assert declined.message["type"] == "content"
+    content = declined.message["content"]
+    assert isinstance(content, str)
+    return content
 
 
 def stub_mda_runtime(monkeypatch: pytest.MonkeyPatch) -> None:

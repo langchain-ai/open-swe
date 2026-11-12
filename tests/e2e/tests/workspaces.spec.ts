@@ -266,8 +266,8 @@ test.describe("Workspaces", () => {
     await deleteWorkspace(page, slug);
     try {
       await page.goto("/workspaces");
-      await page.getByRole("button", { name: "Add workspace" }).click();
-      await page.getByLabel("Workspace name").fill("Initial Build");
+      await page.getByRole("button", { name: "Add environment" }).click();
+      await page.getByLabel("Environment name").fill("Initial Build");
       await page.getByRole("button", { name: "Choose repositories" }).click();
       await page
         .getByLabel("Add a repository by name")
@@ -297,9 +297,9 @@ test.describe("Workspaces", () => {
         });
       });
       await page
-        .getByRole("button", { name: "Create workspace", exact: true })
+        .getByRole("button", { name: "Create environment", exact: true })
         .click();
-      await expect(page.getByLabel("Workspace name")).toHaveCount(0);
+      await expect(page.getByLabel("Environment name")).toHaveCount(0);
       await expect
         .poll(async () => (await findWorkspace(page, slug))?.refresh_status, {
           timeout: 60_000,
@@ -323,7 +323,7 @@ test.describe("Workspaces", () => {
 
     await page.goto("/workspaces");
     const section = page
-      .getByRole("heading", { name: "Workspaces", level: 2 })
+      .getByRole("heading", { name: "Environments", level: 2 })
       .locator("xpath=ancestor::section");
     await expect(section).toBeVisible();
     await expect(section.getByText(DRAFT_NAME)).toBeVisible();
@@ -349,7 +349,7 @@ test.describe("Workspaces", () => {
       .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
       .click();
     await confirmation
-      .getByRole("button", { name: "Delete workspace" })
+      .getByRole("button", { name: "Delete environment" })
       .click();
     await expect(page).toHaveURL(/\/workspaces$/);
     await expect(confirmation).toHaveCount(0);
@@ -368,9 +368,9 @@ test.describe("Workspaces", () => {
     await page.goto("/agents/workspaces");
     await expect(page).toHaveURL(/\/workspaces$/);
     await expect(
-      page.getByRole("heading", { name: "Workspaces", level: 2 }),
+      page.getByRole("heading", { name: "Environments", level: 2 }),
     ).toBeVisible();
-    await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
+    await expect(page.getByText(/ask a Robin admin/)).toBeVisible();
     await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
     await page.goto(`/workspaces/${DRAFT_SLUG}`);
     await expect(page).toHaveURL(/\/workspaces$/);
@@ -403,12 +403,15 @@ test.describe("Workspaces", () => {
     // Exact: the sidebar's "Workspaces" group header is a button too.
     await openNewAgentHome(page);
     await expect(
-      page.getByRole("button", { name: "Workspace", exact: true }),
+      page.getByRole("button", { name: "Environment", exact: true }),
     ).toHaveCount(0);
 
     await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
     await page.reload();
-    const picker = page.getByRole("button", { name: "Workspace", exact: true });
+    const picker = page.getByRole("button", {
+      name: "Environment",
+      exact: true,
+    });
     await expect(picker).toBeVisible();
     // Defaults to the workspace named `default`.
     await expect(picker).toContainText("Default");

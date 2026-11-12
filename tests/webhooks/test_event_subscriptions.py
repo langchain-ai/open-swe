@@ -14,7 +14,9 @@ from openswe.github.comments import (
 )
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.jobs import queue
 from openswe.slack.channels import SlackChannel
+from openswe.ui_invalidations import Topic
 from openswe.webhooks import event_log
 from openswe.webhooks.event_log import EventLog, EventRefs, EventVisibility, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
@@ -84,7 +86,7 @@ async def _subscribe(workspace: dict[str, UUID], **fields: object) -> EventSubsc
 async def _github(event_type: str, payload: dict[str, JsonValue], delivery_id: str) -> None:
     body = json.dumps(payload).encode()
     await EventLog.record(
-        _request("/webhooks/github"),
+        _request("/mda/channel-api/record_github_delivery"),
         body,
         "github",
         event_type=event_type,
@@ -212,22 +214,25 @@ async def test_bot_subscription_refreshes_missing_or_stale_channel_metadata(
     assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
 
+@pytest.mark.parametrize("kind", ["check_run", "check_suite"])
 async def test_payload_match_filters_ci_results_on_the_subscribed_pull_request(
-    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]], kind: str
 ) -> None:
     await _subscribe(
         workspace,
         pull_request_id=workspace["pull_request"],
-        event_types=["check_suite.completed"],
-        payload_match={"check_suite": {"conclusion": "failure"}},
+        event_types=[f"{kind}.completed"],
+        payload_match={kind: {"conclusion": "failure"}},
     )
 
-    await _github("check_suite", _check_suite("success"), "d-success")
-    await _github("check_suite", _check_suite("failure"), "d-failure")
+    for conclusion in ("success", "failure"):
+        payload = _check_suite(conclusion)
+        payload[kind] = payload.pop("check_suite")
+        await _github(kind, payload, f"d-{conclusion}")
 
     owed = await _owed()
     assert [match.delivery_id for match in owed] == ["d-failure"]
-    assert "check_suite.completed" in owed[0].content
+    assert f"{kind}.completed" in owed[0].content
     assert delivered == [(_THREAD, "enqueue")]
     (subscription,) = await EventSubscription.for_thread(_THREAD)
     assert subscription.trigger_count == 1
@@ -244,6 +249,32 @@ async def test_a_one_shot_matches_once_and_ends(
     assert [match.delivery_id for match in await _owed()] == ["d-1"]
     assert await EventSubscription.for_thread(_THREAD) == []
     assert delivered == [(_THREAD, "enqueue")]
+
+
+@pytest.mark.parametrize("event_arrives", [False, True])
+async def test_timeout_wakes_even_without_events_or_after_one_shot_ends(
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    event_arrives: bool,
+) -> None:
+    subscription = await _subscribe(workspace, event_types=["check_suite"], one_shot=True)
+    before = datetime.now(UTC)
+    deadline = await subscription.schedule_timeout(300)
+    assert before + timedelta(seconds=300) <= deadline <= datetime.now(UTC) + timedelta(seconds=300)
+    job = await queue.get(f"event_subscription_timeout:{subscription.id}")
+    assert job is not None
+    if event_arrives:
+        await _github("check_suite", _check_suite("failure"), "d-1")
+        matches = await _owed()
+        await EventMatch.received(_THREAD, [match.id for match in matches])
+        assert await EventSubscription.for_thread(_THREAD) == []
+    await EventSubscription.wake_on_timeout(job)
+    (timeout,) = await _owed()
+    assert str(subscription.id) in timeout.content
+    assert "deadline" in timeout.content
+    assert delivered[-1] == (_THREAD, "enqueue")
+    await EventSubscription.wake_on_timeout(job)
+    assert [match.id for match in await _owed()] == [timeout.id]
 
 
 async def test_matches_are_owed_oldest_first_until_a_run_receives_them(
@@ -325,6 +356,14 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
     assert pull is not None
     request.pull_request = pull
     stored = await request.save()
+    topic = Topic.PULL_REQUESTS.keyed("acme/widgets/7")
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+            )
+            == 1
+        )
     async with HumanReviewRequest.locked(stored.id) as (_, row):
         assert row is not None
         row.state = "cancelled"
@@ -347,6 +386,12 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
             await session.flush()
     assert await HumanReviewRequest.get(stored.id) is None
     async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+            )
+            == 3
+        )
         rows = (
             (
                 await conn.execute(

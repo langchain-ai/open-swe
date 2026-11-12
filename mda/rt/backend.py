@@ -28,6 +28,7 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    add_notification_metadata,
     messages_to_dict,
 )
 from langgraph.runtime import get_runtime
@@ -43,6 +44,7 @@ from pydantic import (
 from runtime_api.catalog import Catalog, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
+from runtime_api.provenance import Provenance
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
@@ -144,10 +146,30 @@ def namespace() -> list[str]:
     return list(_namespace.get())
 
 
+def harness_message(
+    content: str, *, message_id: str, source: str, provenance: Provenance | None = None
+) -> HumanMessage:
+    """A message the harness adds for ``source``, marked so as to the model's integrations
+    and, with ``provenance`` or as ``source``'s context, to code reading what it is."""
+    stamped = provenance or Provenance.harness(source)
+    return add_notification_metadata(
+        HumanMessage(content=content, id=message_id, additional_kwargs=stamped.stamp()),
+        source=source,
+    )
+
+
 def human_messages(messages: Sequence[object]) -> list[dict[str, JsonValue]]:
     return _json_dicts.validate_python(
         messages_to_dict([message for message in messages if isinstance(message, HumanMessage)])
     )
+
+
+def since_last_reply[T](messages: Sequence[T]) -> Sequence[T]:
+    """What the model is handed that it has not answered yet."""
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], AIMessage):
+            return messages[index + 1 :]
+    return messages
 
 
 def issuing_message_id(state: Mapping[str, object], tool_call_id: str) -> str | None:
@@ -245,6 +267,10 @@ class Run:
         self.backend = OpenSweBackend(self)
         # What the run tells the backend happened, until the backend takes it.
         self.outbox = Outbox(self.backend)
+        # The route the run's model calls take, once the run starts; its subagents follow it.
+        self.route: str | None = None
+        # Jev's answers about the run's request, for its trace, once the classifier ran.
+        self.classified: dict[str, str] = {}
         self._locals: dict[object, object] = {}
 
     def local[T](self, key: object, make: Callable[[], T]) -> T:
@@ -320,11 +346,9 @@ class Run:
 
 def current_run() -> Run:
     """The run in progress, which every call the graph makes acts as."""
-    context = get_runtime().context
+    context = getattr(get_runtime(), "context", None)
     if not isinstance(context, RunContext):
-        raise BackendCallError(
-            "This run carries no Open SWE run context; start it through Open SWE"
-        )
+        raise BackendCallError("This run carries no Robin run context; start it through Robin")
     return context.run()
 
 
@@ -356,6 +380,7 @@ class RunContext(BaseModel):
     # A launched task worker's first run: traded for its own run token before anything else.
     worker_grant: str | None = Field(default=None, alias="__worker_grant")
     invocation_id: str | None = None
+    owner_ls_user_id: str | None = None
     # JSON, not Catalog: the gRPC runtime serializes only the context's top level.
     catalog: dict[str, JsonValue] | None = Field(default=None, alias="__catalog")
     _run: Run | None = PrivateAttr(default=None)
@@ -429,9 +454,7 @@ class OpenSweBackend:
         label = path.rsplit("/", 1)[-1]
         bearer = self.run.bearer
         if bearer is None:
-            raise BackendCallError(
-                "This run carries no Open SWE run token; start it through Open SWE"
-            )
+            raise BackendCallError("This run carries no Robin run token; start it through Robin")
         headers = {
             **(TurnTrace.current_headers() if trace is None else trace),
             "Authorization": f"Bearer {bearer}",

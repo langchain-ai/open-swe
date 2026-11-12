@@ -1,7 +1,10 @@
+import { SlackLinks } from "@/lib/slack-links"
+import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { Button } from "@langchain/macaw-components/Button"
 import { Link } from "@langchain/macaw-components/Link"
 import { createContext, memo, useContext, useState } from "react"
 import { toast } from "sonner"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { SlackMrkdwn, useSlackMarkdown } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
@@ -10,29 +13,6 @@ import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 interface ReplyCardProps {
   chunk: ToolExecutionChunk
-}
-
-function SlackIcon() {
-  return (
-    <svg viewBox="0 0 122.8 122.8" width={12} height={12} aria-hidden>
-      <path
-        fill="#e01e5a"
-        d="M25.8 77.6a12.9 12.9 0 1 1-12.9-12.9h12.9zm6.5 0a12.9 12.9 0 0 1 25.8 0v32.3a12.9 12.9 0 0 1-25.8 0z"
-      />
-      <path
-        fill="#36c5f0"
-        d="M45.2 25.8a12.9 12.9 0 1 1 12.9-12.9v12.9zm0 6.5a12.9 12.9 0 0 1 0 25.8H12.9a12.9 12.9 0 0 1 0-25.8z"
-      />
-      <path
-        fill="#2eb67d"
-        d="M97 45.2a12.9 12.9 0 1 1 12.9 12.9H97zm-6.5 0a12.9 12.9 0 0 1-25.8 0V12.9a12.9 12.9 0 0 1 25.8 0z"
-      />
-      <path
-        fill="#ecb22e"
-        d="M77.6 97a12.9 12.9 0 1 1-12.9 12.9V97zm0-6.5a12.9 12.9 0 0 1 0-25.8h32.3a12.9 12.9 0 0 1 0 25.8z"
-      />
-    </svg>
-  )
 }
 
 type Delivery = "pending" | "failed" | "delivered"
@@ -264,23 +244,29 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
     (destination.hostname === "slack.com" ||
       destination.hostname.endsWith(".slack.com")) &&
     /^\/archives\/[A-Z0-9]+\/p\d+$/.test(destination.pathname)
-      ? destination.href
-      : undefined
+      ? SlackLinks.normalize(destination.href)
+      : typeof messageUrl === "string" &&
+          messageUrl.startsWith(`${dashboardApiUrl("/slack/open")}?`)
+        ? messageUrl
+        : undefined
   const label = HEADER_LABELS[isLinear ? "linear" : "slack"][state]
   return (
     <div className="min-w-0 px-space-1 py-0.5">
       <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
         {isLinear ? (
           <ChatCircleIcon size={12} weight="regular" aria-hidden />
-        ) : (
-          <SlackIcon />
-        )}
+        ) : !slackUrl ? (
+          <SlackLogoIcon size={12} weight="fill" aria-hidden />
+        ) : null}
         {slackUrl ? (
           <Link
             href={slackUrl}
             variant="xs"
             target="_blank"
             rel="noopener noreferrer"
+            leftDecorator={SlackLogoIcon}
+            iconWeight="fill"
+            className="gap-space-2"
           >
             {label}
           </Link>

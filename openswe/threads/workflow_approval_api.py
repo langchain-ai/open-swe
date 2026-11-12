@@ -9,10 +9,12 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
 from openswe.source_context import SourceContext
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.plan_api import fetch_thread_metadata
 from openswe.threads.summary import (
     _assert_thread_promptable,
     repo_config_from_metadata,
+    thread_is_bot_triggered,
     thread_is_readable,
     thread_source,
 )
@@ -21,6 +23,7 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.threads.workflow_review import WorkflowReview
 
 workflow_approval_router = APIRouter(
     prefix="/dashboard/api/workflow-approval",
@@ -38,9 +41,15 @@ async def list_workflow_push_approvals(
     if not thread_is_readable(metadata, session["sub"], session.get("email")):
         raise HTTPException(404, "thread not found")
     approvals = await get_workflow_push_approvals(thread_id)
+    review = await WorkflowReview.resolve(
+        thread_id,
+        {**metadata, "workflow_push_approvals": approvals},
+        session["sub"],
+        session.get("email"),
+    )
     return {
         "threadId": thread_id,
-        "approvals": workflow_push_approval_responses(approvals),
+        "approvals": workflow_push_approval_responses(review.records),
     }
 
 
@@ -50,7 +59,11 @@ async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(
+        metadata,
+        session["sub"],
+        allow_bot=ThreadIdentity(session["sub"]).is_admin(session.get("email")),
+    )
     decision = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
@@ -75,7 +88,11 @@ async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(
+        metadata,
+        session["sub"],
+        allow_bot=ThreadIdentity(session["sub"]).is_admin(session.get("email")),
+    )
     decision = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )
@@ -97,11 +114,12 @@ async def dispatch_followup(
     multitask_strategy: str = "interrupt",
 ) -> Run:
     """Continue the existing thread with the decision as a new instruction run."""
+    bot_thread = thread_is_bot_triggered(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": thread_source(metadata) or "slack",
-        "github_login": github_login,
-        "user_email": user_email,
+        "github_login": None if bot_thread else github_login,
+        "user_email": None if bot_thread else user_email,
     }
     repo = repo_config_from_metadata(metadata)
     if repo:
@@ -115,6 +133,15 @@ async def dispatch_followup(
         text,
         configurable,
         source=configurable["source"],
+        context=(
+            {
+                "sender_id": "system:workflow-push-approval",
+                "surface": "automation",
+                "kind": "system",
+            }
+            if bot_thread
+            else None
+        ),
         thread_title=None,
         multitask_strategy=multitask_strategy,
     )

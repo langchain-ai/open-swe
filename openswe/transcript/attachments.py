@@ -18,7 +18,19 @@ from openswe.transcript.snapshot import reading
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 """Matches the per-attachment cap the dashboard command path already enforces."""
 
-ALLOWED_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+ALLOWED_MIME_TYPES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "application/pdf",
+        "text/plain",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
 """The bytes are served back with their stored type, so the list is exact."""
 
 

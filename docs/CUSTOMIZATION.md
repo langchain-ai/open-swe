@@ -1,6 +1,6 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org.
+Robin is designed to be forked and customized for your org.
 Every run's model loop runs on Managed Deep Agents (`mda/`).
 What the run gets from the backend is resolved in one function as the run starts, `agent_catalog()` in `openswe/server.py` (`reviewer_catalog()` and `review_scout_catalog()` for the reviewer and the review scout).
 It records the run's tools, models, subagents and loop rules in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model and tools.
@@ -21,7 +21,7 @@ surface.subagents = [SurfaceSubagent(name="general-purpose", ...)]
 
 ## 1. Sandbox
 
-Open SWE runs each thread in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands.
+Robin runs each thread in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands.
 Managed Deep Agents creates it; the backend connects to it through `openswe/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
@@ -43,7 +43,7 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="604800"                 # Optional, d
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
 The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
-For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
+For LangSmith sandboxes, Robin configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
@@ -104,8 +104,8 @@ ModelChoice("openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort"
 ModelChoice("google_genai:gemini-2.5-pro", {"temperature": 0, "max_tokens": 16_000})
 ```
 
-`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort.
-To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
+`provider_model_kwargs()` in `packages/runtime-api/src/runtime_api/models.py` builds those settings for a catalog model and effort.
+To change how a provider's chat model is built (its client, retries or gateway routing), edit `make_model` there: the backend and the MDA runtime (`mda/rt/models.py`) both build their models with it, from the same model table.
 
 ### Using different models per context
 
@@ -175,11 +175,11 @@ Enable it either way:
 
 The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
-Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`.
+Routing is applied centrally in `make_model` (`packages/runtime-api/src/runtime_api/models.py`), which resolves the effective on/off and wires the gateway's URL and key, on the backend and in the MDA runtime alike.
 **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
-**Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions.
+**Caveat — OpenAI endpoint:** Robin uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions.
 Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled.
 Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions.
 Anthropic, Baseten, and Fireworks are unaffected.
@@ -188,7 +188,7 @@ Anthropic, Baseten, and Fireworks are unaffected.
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents).
+Robin ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents).
 GitHub operations are handled by `gh` inside the sandbox.
 
 | Tool | File | Purpose |
@@ -303,7 +303,7 @@ const { answers } = await tools.classify({
 ### Workspace MCP servers
 
 Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
-Connections belong to this Open SWE deployment and are shared across repositories and remote coding-agent threads.
+Connections belong to this Robin deployment and are shared across repositories and remote coding-agent threads.
 Enabled connections provide baseline tools for all users, limited to the tools selected by an admin.
 Only admins can manage connections or reveal saved credentials.
 
@@ -347,7 +347,7 @@ Reconnect Datadog using the MCP configuration above; legacy saved credentials ar
 Use the JSON import or connection form to add the other MCP servers as needed.
 
 The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the Currents REST API.
-Run its Streamable HTTP server on an HTTPS host reachable by Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY` header.
+Run its Streamable HTTP server on an HTTPS host reachable by Robin, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY` header.
 The Currents REST API URL itself does not speak MCP, and the local `npx @currents/mcp` command cannot be imported as a workspace connection.
 
 Optional reviewer trace resolution and personal LangSmith credential proxying have been removed.
@@ -366,8 +366,11 @@ It opens each connection for review without saving automatically.
 Existing connections keep their enabled state and selected tools.
 Local `command` servers and environment-variable expansion are not supported.
 
+For Linear on an MDA deployment with the Linear channel, use the channel's app token instead of the example below; see [Linear's MCP server on the Linear channel's token](#linears-mcp-server-on-the-linear-channels-token).
+Linear holds one app token per app: a client-credentials token for the channel's app revokes the channel's, and its Linear grant then needs an admin's approval again.
+
 For a Linear OAuth application, enable **Client credentials tokens** in the application's settings, then import this configuration.
-The `oauth` object is an Open SWE extension to the remote MCP JSON format:
+The `oauth` object is a Robin extension to the remote MCP JSON format:
 
 ```json
 {
@@ -389,7 +392,7 @@ The `oauth` object is an Open SWE extension to the remote MCP JSON format:
 ```
 
 Client credentials require no redirect URI.
-Open SWE requests a bearer token, caches it in memory until shortly before expiry, and obtains another when needed.
+Robin requests a bearer token, caches it in memory until shortly before expiry, and obtains another when needed.
 A rejected token is renewed once on HTTP 401.
 Client credentials go only to the configured token URL; bearer tokens go to the MCP server.
 Both destinations use the same public HTTPS address validation and redirect restrictions.
@@ -460,7 +463,7 @@ GitHub PR follow-ups targeting a private thread are rejected unless the commente
 
 ### MCP servers on an MDA connection
 
-An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Open SWE's database.
+An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Robin's database.
 The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
 Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
 
@@ -473,13 +476,34 @@ Create the connection from `mda/` after the deployment's first `mda deploy`, for
 }
 ```
 
-The slug must be `open-swe-mcp-<server>`: a server never gets a credential Open SWE or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+The slug must be `open-swe-mcp-<server>`: a server never gets a credential Robin or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+The one exception is Linear's MCP server, below.
 Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
 The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
 A server with a connection takes no headers or OAuth, and saving it drops those the record had.
 An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
-Open SWE cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
+Robin cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
 A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+
+#### Linear's MCP server on the Linear channel's token
+
+With the Linear channel on the MDA deployment, Linear's MCP server can read the channel's own app token, `mda/linear-token`, which the channel's `mda deploy` keeps and Agent Auth renews.
+Linear's MCP server takes an existing OAuth token as `Authorization: Bearer` ([Linear's MCP docs](https://linear.app/docs/mcp)), and its tools then act as the Open SWE app, as with client credentials.
+Prefer this over the client-credentials example above: Linear holds one app token per app, so a server requesting its own for the channel's app revokes the channel's.
+Save an instance or workspace server with no `oauth` or headers:
+
+```json
+{
+  "name": "linear",
+  "url": "https://mcp.linear.app/mcp",
+  "allowed_tools": ["list_issues", "get_issue"],
+  "connection": {"slug": "mda/linear-token", "owner": "agent"}
+}
+```
+
+The URL must be on `https://mcp.linear.app` (`/mcp`, `/mcp/readonly` or `/sse`), with no port or credentials; the backend refuses the token for any other server, and the MDA run refuses to send it anywhere else.
+Personal servers cannot name it.
+Once the server reads the channel's token, turn off **Client credentials tokens** on the Linear app.
 The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
 
 ### Adding a Python tool
@@ -547,7 +571,7 @@ surface.base_tools = tools
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub.
+Robin supports three invocation surfaces: Linear, Slack, and GitHub.
 Each is implemented as a webhook endpoint in `openswe/webapp.py`.
 You can add, remove, or modify triggers independently.
 
@@ -589,7 +613,7 @@ The shared utility `extract_repo_from_text()` in `openswe/utils/repo.py` handles
 ### Customizing Linear routing
 
 Linear comments use the triggering user's dashboard default repository, then the workspace default repository.
-Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
+Users can override either on a per-comment basis by including `repo:owner/name` in their `@robin` comment (legacy mention aliases remain supported).
 
 ### Customizing Slack routing
 
@@ -686,7 +710,7 @@ Edit a section's file to customize it:
 
 ### Default prompt file
 
-Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on.
+Robin supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on.
 This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
 
 The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
@@ -724,14 +748,14 @@ If the file is missing or empty, it is silently skipped — no error is raised.
 | | `default_prompt.md` | `AGENTS.md` |
 |---|---|---|
 | Scope | All tasks, all repos | Single repository |
-| Location | Open SWE project root | Target repo root |
+| Location | Robin project root | Target repo root |
 | Use for | Default repo, org conventions | Repo-specific coding standards |
 
 ### Using AGENTS.md
 
 Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions.
 The agent reads it from the sandbox at startup and appends it to the system prompt.
-This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
+This is the easiest way to encode conventions per-repo without modifying Robin's code.
 
 ---
 

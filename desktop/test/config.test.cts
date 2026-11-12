@@ -65,7 +65,7 @@ test("renamed app retains original production and isolated development profiles"
   const appDataPath = path.join("/tmp", "open-swe-app-data");
   const expected = {
     isDevelopment: true,
-    name: "Open SWE Development",
+    name: "Robin Development",
     appUserModelId: "com.langchain.openswe.dev",
     userDataPath: path.join(appDataPath, "Open SWE Development"),
   };
@@ -81,7 +81,7 @@ test("renamed app retains original production and isolated development profiles"
     resolveAppRuntime({ argv: [], isPackaged: true, appDataPath }),
     {
       isDevelopment: false,
-      name: "Open SWE",
+      name: "Robin",
       appUserModelId: "com.langchain.openswe",
       userDataPath: path.join(appDataPath, "Open SWE"),
     },
@@ -203,6 +203,23 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
     }),
     "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
+  const recoveryLogin = new URL(
+    connectLoginUrl(
+      "https://backend.example",
+      "github",
+      {
+        challenge: "abc",
+        port: 51234,
+      },
+      "opaque+token&with=reserved?characters",
+    ),
+  );
+  assert.equal(
+    recoveryLogin.searchParams.get("slack_recovery"),
+    "opaque+token&with=reserved?characters",
+  );
+  assert.equal(recoveryLogin.searchParams.get("desktop_handoff"), "abc");
+  assert.equal(recoveryLogin.pathname, "/dashboard/api/github/login");
   assert.equal(
     connectExchangeUrl("https://backend.example", "github"),
     "https://backend.example/dashboard/api/github/desktop/exchange",
@@ -260,7 +277,7 @@ test("localizes backend OAuth callbacks and post-login redirects", () => {
   );
 });
 
-test("opens only dashboard links from the configured backend", () => {
+test("localizes web URLs only from the configured backend", () => {
   const backend = "https://openswe.langchain.dev";
   assert.equal(
     desktopDeepLinkUrl(`${backend}/agents/thread-1?tab=plan#latest`, backend),
@@ -274,14 +291,48 @@ test("opens only dashboard links from the configured backend", () => {
     desktopDeepLinkUrl(`${backend}/agents/local/private-thread`, backend),
     `${APP_URL}agents/local/private-thread`,
   );
+  const localBackend = "http://localhost:2024";
+  assert.equal(
+    desktopDeepLinkUrl(
+      `${localBackend}/agents/thread-1?tab=plan#latest`,
+      localBackend,
+    ),
+    `${APP_URL}agents/thread-1?tab=plan#latest`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl("http://localhost:2025/agents/thread-1", localBackend),
+    null,
+  );
   for (const url of [
+    "http://openswe.langchain.dev/agents/thread-1",
     "https://openswe.vercel.app/agents/thread-1",
-    `${backend}/dashboard/api/auth/callback?code=secret`,
-    `${backend}/assets/app.js`,
+    "https://user:secret@openswe.langchain.dev/agents/thread-1",
     "open-swe://link/agents/thread-1",
     "javascript:alert(1)",
   ])
     assert.equal(desktopDeepLinkUrl(url, backend), null);
+});
+
+test("opens dashboard links on the origins the backend names", () => {
+  const backend = "https://openswe.langchain.dev";
+  const origins = ["https://robin.langchain.dev", backend];
+  assert.equal(
+    desktopDeepLinkUrl(
+      "https://robin.langchain.dev/agents/thread-1?tab=plan#latest",
+      backend,
+      origins,
+    ),
+    `${APP_URL}agents/thread-1?tab=plan#latest`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl("https://robin.langchain.dev/review", backend),
+    null,
+  );
+  for (const url of [
+    "http://robin.langchain.dev/agents/thread-1",
+    "https://other.langchain.dev/agents/thread-1",
+  ])
+    assert.equal(desktopDeepLinkUrl(url, backend, origins), null);
 });
 
 test("keeps static file resolution inside the bundled UI root", () => {

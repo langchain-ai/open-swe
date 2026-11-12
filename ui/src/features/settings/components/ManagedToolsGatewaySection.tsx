@@ -35,7 +35,7 @@ export function ManagedToolsGatewaySection() {
   return (
     <SettingsSection
       title="Managed Tools"
-      description="Pick a tool kit from LangSmith Managed Tools. Private threads in every workspace offer its tools, called with each person's own LangSmith connection; they never load in threads other people can prompt. Build and edit tool kits under LangSmith Settings > Tools."
+      description="Pick a tool kit from LangSmith Managed Tools. Private threads in every environment offer its tools, called with each person's own LangSmith connection; they never load in threads other people can prompt. Build and edit tool kits under LangSmith Settings > Tools."
     >
       <div className="divide-y divide-default">
         <TierRow

@@ -6,6 +6,7 @@ from typing import Any
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.run_config import RunConfig
 from openswe.users import User
 from openswe.users.repository_defaults import RepositoryDefaults
 
@@ -16,7 +17,7 @@ async def resolve_github_login(config: dict[str, Any]) -> str | None:
     """Best-effort resolution of the triggering user's GitHub login from config."""
     configurable = (config or {}).get("configurable") or {}
 
-    if configurable.get("auth_provider") == "langsmith":
+    if RunConfig.unlinked(configurable):
         user_id = configurable.get("user_id")
         if isinstance(user_id, str):
             canonical_id = User.key_id(f"user:{user_id}")

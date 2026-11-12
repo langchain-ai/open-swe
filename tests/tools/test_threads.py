@@ -194,7 +194,7 @@ async def test_langsmith_thread_actor_requires_current_authorization(
     monkeypatch.setattr(
         threads_tool,
         "get_config",
-        lambda: {"configurable": {"auth_provider": "langsmith", "user_id": user_id}},
+        lambda: {"configurable": {"github_linked": False, "user_id": user_id}},
     )
     monkeypatch.setattr(
         threads_tool.ThreadIdentity,
@@ -820,7 +820,7 @@ async def test_list_threads_resolves_slack_reply_link(
     }
     lookup.assert_awaited_once_with(locator)
     get_dashboard_thread.assert_awaited_once_with(
-        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
+        "thread-1", "octocat", email="octocat@example.com"
     )
 
 
@@ -861,7 +861,7 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
     assert result == {
         "success": False,
         "error": (
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
+            "thread_id must be an exact thread ID, Robin dashboard URL, Slack link, or LangSmith trace URL"
         ),
     }
     get_dashboard_thread.assert_not_awaited()

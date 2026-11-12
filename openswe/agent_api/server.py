@@ -35,6 +35,7 @@ from openswe.agent_api.tokens import (
     verify_runtime_token,
     verify_worker_grant,
 )
+from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,7 @@ class RunTokenMiddleware:
             )
             return
         run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
-        if run.configurable.get("auth_provider") == "langsmith":
+        if RunConfig.unlinked(run.configurable):
             from openswe.threads.identity import ThreadIdentity
 
             user_id = run.configurable.get("user_id")

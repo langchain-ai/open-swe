@@ -10,6 +10,9 @@ from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from tests.agent.test_agent_assembly_context import _agent_catalog, _base_config
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _PLANNERS = ["main", "reviewer", "review-scout"]
 
 

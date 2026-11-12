@@ -33,12 +33,14 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import {
   useContinueThreadPrivately,
   useDeleteAgentThread,
+  useSetAgentThreadViewed,
   usePinAgentThread,
   useResolveAgentThread,
   useShareThreadWithWorkspace,
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
+import { copyPageLink } from "@/features/reviews/lib/copyText"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { reportError } from "@/lib/errorReporting"
@@ -55,7 +57,9 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   const repo = thread.repoFullName.trim()
   const repoName =
     cloudRepos.data?.find(
-      (candidate) => candidate.repoFullName.toLowerCase() === repo.toLowerCase()
+      (candidate) =>
+        !candidate.projectId &&
+        candidate.repoFullName?.toLowerCase() === repo.toLowerCase()
     )?.name ?? (repo ? thread.repo || repo : undefined)
   if (!repoName) return null
 
@@ -116,6 +120,7 @@ export function AgentThreadHeader({
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
+  const setViewed = useSetAgentThreadViewed()
   const continuePrivately = useContinueThreadPrivately()
   const shareWithWorkspace = useShareThreadWithWorkspace()
   const session = useSession()
@@ -170,6 +175,7 @@ export function AgentThreadHeader({
   const visibilityMenu = thread ? (
     <ThreadVisibilityMenu
       value={thread.visibility ?? "public"}
+      onCopyLink={thread.visibility === "private" ? undefined : copyPageLink}
       onChange={(next) => {
         if (next === "private") continueThreadPrivately()
         else if (canShare) setShareOpen(true)
@@ -197,11 +203,22 @@ export function AgentThreadHeader({
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
+      onRename={
+        onRename && savingTitle === null
+          ? () => {
+              editingRef.current = true
+              requestAnimationFrame(startRename)
+            }
+          : undefined
+      }
       onTogglePin={() => {
         if (!pinThread.isPending) {
           pinThread.mutate({ threadId: current.id, pinned: !pinned })
         }
       }}
+      onToggleViewed={() =>
+        setViewed.mutate({ threadId: current.id, viewed: !current.viewed })
+      }
       onToggleArchived={() => {
         if (!resolveThread.isPending) {
           resolveThread.mutate({ threadId: current.id, resolved: !archived })
@@ -292,7 +309,7 @@ export function AgentThreadHeader({
                   align="start"
                   sideOffset={4}
                   onCloseAutoFocus={keepRenameFocus}
-                  className="min-w-[10rem]"
+                  className="min-w-[10rem] border-default bg-elevated"
                 >
                   {menuItems("dropdown", thread)}
                 </DropdownMenuContent>
@@ -344,7 +361,7 @@ export function AgentThreadHeader({
         <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
         <ContextMenuContent
           onCloseAutoFocus={keepRenameFocus}
-          className="min-w-[10rem]"
+          className="min-w-[10rem] border-default bg-elevated"
         >
           {menuItems("context", thread)}
         </ContextMenuContent>
@@ -363,16 +380,13 @@ export function AgentThreadHeader({
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        threadTitle={title ?? ""}
         isDeleting={isDeleting}
         onConfirm={confirmDelete}
         detail={
-          worktreeThread
-            ? worktreeThread.managedTaskFolder
-              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
-              : worktreeThread.ownedWorktrees.length
-                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-                : "This removes its history but does not revert changes made to your repository."
+          worktreeThread &&
+          !worktreeThread.managedTaskFolder &&
+          worktreeThread.ownedWorktrees.length
+            ? "This also deletes its worktree and uncommitted changes. Branch and commits are kept."
             : undefined
         }
       />

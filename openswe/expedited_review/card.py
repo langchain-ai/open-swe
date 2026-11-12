@@ -4,26 +4,31 @@ import json
 
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
+from openswe.slack.app_modals import modal_button
 from openswe.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
+    ModalView,
     actions,
     button,
     code_block,
     context,
+    conversation_input,
     divider,
     escape,
     image,
-    option,
+    modal,
     section,
-    static_select,
 )
 
 BUTTON_TYPE = "expedited_review"
 SEND_BLOCK_ID = "expedited_review_send"
 CHANNEL_SELECT_ACTION = "expedited_review_channel"
 OTHER_CHANNEL = "other"
+CHANNEL_MODAL = "expedited_review_channel"
+PICKER_BLOCK = "channel"
+PICKER_ACTION = "channel"
 
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
@@ -45,10 +50,8 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
     if approval.approval_condition:
-        blocks.append(section(f"*Approval condition:* {escape(approval.approval_condition)}"))
-        blocks.append(
-            context(f"Already covered by auto-approval: {escape(approval.auto_approved)}")
-        )
+        blocks.append(section(f"*You're approving:* {escape(approval.approval_condition)}"))
+        blocks.append(context(f"Covered by auto-approve: {escape(approval.auto_approved)}"))
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
@@ -121,9 +124,8 @@ def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
     added = sum(counts[0] for counts in stats.values())
     deleted = sum(counts[1] for counts in stats.values())
     heading = (
-        f"*Covered by the condition above (not shown):* {len(stats)} "
-        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Open SWE's review "
-        "would approve these subject to human approval of the stated condition.\n"
+        f"*Fully described by the change above (not shown):* {len(stats)} "
+        f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}\n"
     )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
@@ -148,7 +150,9 @@ def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
         counts[0] += 1
         counts[1] += entry["additions"]
         counts[2] += entry["deletions"]
-    heading = "*Open SWE judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
+    heading = (
+        "*Robin judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
+    )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
     for guideline, paths in stats.items():
@@ -179,35 +183,41 @@ def _vote_buttons(approval: HumanReviewRequest) -> list[ButtonElement]:
     return [approve, _dismiss_button(approval)]
 
 
+def channel_picker(private_metadata: str | None = None) -> ModalView:
+    """The modal that picks another channel to send the card to."""
+    return modal(
+        callback_id=CHANNEL_MODAL,
+        title="Send expedited review",
+        blocks=[
+            conversation_input(
+                block_id=PICKER_BLOCK, label="Channel", action_id=PICKER_ACTION, include=["public"]
+            )
+        ],
+        submit="Send",
+        close="Cancel",
+        private_metadata=private_metadata,
+    )
+
+
 def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -> list[Block]:
-    """Send the card to its own channel or another one; offered once, while it awaits a vote."""
+    """Send the card to its first channel or another one; offered once, while it awaits a vote.
+
+    Plain buttons: Trigger Server forwards no select's change.
+    """
     if not choices or approval.sent_elsewhere:
         return []
-    configured_only = len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id
-    other = button(
-        "Other channel…",
-        action_id="open_swe_option_select_other",
-        value=_button_value("other", approval),
+    broadcast = button(
+        f"Broadcast in #{choices[0]['name']}",
+        action_id="open_swe_option_select_broadcast",
+        value=_button_value("broadcast", approval),
     )
-    if len(choices) == 1:
-        broadcast = button(
-            f"Broadcast in #{choices[0]['name']}",
-            action_id="open_swe_option_select_broadcast",
-            value=_button_value("broadcast", approval),
-        )
-        return [actions(broadcast, *([] if configured_only else [other]), block_id=SEND_BLOCK_ID)]
-    options = [option(f"#{choice['name']}", choice["id"]) for choice in choices]
-    picker = static_select(
-        action_id=CHANNEL_SELECT_ACTION,
-        options=[*options, option("Other…", f"{OTHER_CHANNEL}:{approval.id}")],
-        initial=options[0],
+    if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
+        # The configured channel is the only place it may go.
+        return [actions(broadcast, block_id=SEND_BLOCK_ID)]
+    other = modal_button(
+        "Other channel…", name=CHANNEL_MODAL, id=str(approval.id), view=channel_picker()
     )
-    send = button(
-        "Broadcast",
-        action_id="open_swe_option_select_send",
-        value=_button_value("send", approval),
-    )
-    return [actions(picker, send, block_id=SEND_BLOCK_ID)]
+    return [actions(broadcast, other, block_id=SEND_BLOCK_ID)]
 
 
 def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
@@ -279,6 +289,7 @@ def open_card(
     diff_image_id: str | None = None,
     choices: list[ChannelChoice] | None = None,
     thread_url: str | None = None,
+    author_login: str = "",
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open card; an approved one collapses to one line.
 
@@ -290,8 +301,11 @@ def open_card(
     if approval.approved and not approval.awaiting_ready:
         label = pr.label
         heading = f"Expedited review: {_vote_summary(approval)}"
-        return f"{heading} — {pr.url}", [
-            section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
+        author_label = f" — Author {escape(author_login)}" if author_login else ""
+        return f"{heading} — {pr.url}{author_label}", [
+            section(
+                f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}{author_label}"
+            )
         ]
     header = _header(approval, title, author)
     if thread_url:
@@ -314,6 +328,7 @@ def closed_card(
     files: list[ChangedFile],
     outcome: str,
     diff_image_id: str | None = None,
+    author_login: str = "",
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn.
 
@@ -321,9 +336,12 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = pr.label
-        return f"Expedited review: {outcome} — {pr.url}", [
-            section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
+        icon = ":merged: " if approval.state == "merged" else ""
+        author_label = f" — Author {escape(author_login)}" if author_login else ""
+        return f"{icon}Expedited review: {outcome} — {pr.url}{author_label}", [
+            section(
+                f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(title)}{author_label}"
+            )
         ]
     blocks: list[Block] = [
         *_header(approval, title, author),
@@ -340,9 +358,10 @@ def author_status(
 ) -> tuple[str, list[Block]]:
     """The persistent author DM record, without a diff or actions."""
     pr = approval.pull_request
-    text = f"Expedited review: {outcome} — {pr.url}"
+    icon = ":merged: " if approval.state == "merged" else ""
+    text = f"{icon}Expedited review: {outcome} — {pr.url}"
     blocks: list[Block] = [
-        section(f"*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
+        section(f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
     ]
     if origin_url:
         blocks.append(context(f"Requested from <{origin_url}|this thread>."))

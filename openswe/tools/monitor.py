@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 
 type MonitorAction = Literal["start", "output", "stop", "list"]
 
-DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
+MIN_INTERVAL_SECONDS = 5
+MAX_INTERVAL_SECONDS = 3600
 _MAX_DESCRIPTION_CHARS = 200
 
 
@@ -50,10 +51,12 @@ async def monitor(
     command: str = "",
     filter: str = "",
     description: str = "",
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
     monitor_id: str = "",
     start_line: int | None = None,
     end_line: int | None = None,
+    interval: int | None = None,
+    *,
+    timeout: int | None = None,
 ) -> dict[str, JsonValue]:
     """Implement the `monitor` tool."""
     if action == "start":
@@ -65,6 +68,10 @@ async def monitor(
             return _error(f"description must be at most {_MAX_DESCRIPTION_CHARS} characters")
         if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
             return _error(f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s")
+        if interval is not None and not MIN_INTERVAL_SECONDS <= interval <= MAX_INTERVAL_SECONDS:
+            return _error(
+                f"interval must be between {MIN_INTERVAL_SECONDS} and {MAX_INTERVAL_SECONDS}s"
+            )
     elif action in {"output", "stop"} and not monitor_id:
         return _error(f"monitor_id is required for {action}")
     try:
@@ -80,6 +87,8 @@ async def monitor(
             if stopped.get("status") != "running":
                 await _track(thread_id, finished=[monitor_id])
             return {"success": True, **stopped}
+        if timeout is None:
+            return _error("timeout is required for start")
         window = await ThreadMonitorBudget(langgraph_client(), thread_id).start()
         state = await monitors.start(
             f"{ID_PREFIX}-{uuid.uuid4()}",
@@ -88,6 +97,7 @@ async def monitor(
             description=description.strip(),
             timeout=min(timeout, window),
             callback=await uses_completion_callback(),
+            interval=interval,
         )
         started = state.model_dump(mode="json")
         if window < timeout:

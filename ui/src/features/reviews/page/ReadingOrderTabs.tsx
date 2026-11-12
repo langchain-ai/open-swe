@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 
 import { useReviewPage } from "./store"
@@ -18,13 +19,18 @@ export function ReadingOrderTabs({
     <GroupedTabs
       size="xs"
       value={order}
-      onChange={setOrder}
+      onChange={(value) => {
+        productAnalytics.featureOpened(
+          value === "guide" ? "walkthrough" : "files"
+        )
+        setOrder(value)
+      }}
       className={className}
       options={[
         {
           value: "guide",
           display: `Walkthrough · ${steps}`,
-          tooltip: "Open SWE's reading order",
+          tooltip: "Robin's reading order",
         },
         {
           value: "files",

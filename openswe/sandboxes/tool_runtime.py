@@ -4,6 +4,7 @@ The model loop runs on Managed Deep Agents, which builds a tool for each of the
 run's tools and calls the backend to run it (``openswe.agent_api``).
 """
 
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -17,7 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck, InboxSpec, LoopRules, McpServerSpec
+from runtime_api.catalog import BrowserSpec, FileCheck, InboxSpec, LoopRules, McpServerSpec
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -28,13 +29,32 @@ _json = TypeAdapter(JsonValue)
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 
 
-def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
+def _parameters(tool: BaseTool) -> dict[str, JsonValue]:
     schema = tool.tool_call_schema
     if isinstance(schema, dict):
         return schema
     if issubclass(schema, BaseModel):
         return schema.model_json_schema()
     return schema.schema()
+
+
+# Each tool's parameters by the tool's identity, while it lives: a tool's schema never
+# changes, and working it out again builds a model of it for every call. Read only.
+_parameters_of: dict[int, tuple[weakref.ref[BaseTool], dict[str, JsonValue]]] = {}
+
+
+def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
+    """The JSON schema of ``tool``'s arguments, worked out once per tool."""
+    key = id(tool)
+    kept = _parameters_of.get(key)
+    if kept is not None and kept[0]() is tool:
+        return kept[1]
+    parameters = _parameters(tool)
+    _parameters_of[key] = (
+        weakref.ref(tool, lambda _gone: _parameters_of.pop(key, None)),
+        parameters,
+    )
+    return parameters
 
 
 def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
@@ -106,6 +126,8 @@ class ToolSurface:
     integration_names: list[str] = field(default_factory=list)
     # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
     mcp_servers: Sequence[McpServerSpec] = ()
+    # A review's browser; None gives a review none. The coding agent always has its own.
+    browser: BrowserSpec | None = None
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
     # Paths in the thread's files this deployment serves rather than the sandbox.
@@ -127,6 +149,18 @@ class ToolSurface:
     model_call_limit: int | None = None
     # Whether the thread coordinates a task through workers rather than synchronous subagents.
     delegates: bool = False
+    # Tools offered to the model in every run of its kind, so its tool list stays the same
+    # from run to run; a run that may not use one is offered it disabled.
+    always_offered: Mapping[str, BaseTool] = field(default_factory=dict)
+
+    def disabled(self) -> frozenset[str]:
+        """The tools offered to the model that this run may not use."""
+        return frozenset(self.always_offered.keys() - self.tools.keys())
+
+    def catalog(self) -> list[ToolDescription]:
+        """Every tool the run offers, the disabled ones too, by name."""
+        offered = {**{name: self.always_offered[name] for name in self.disabled()}, **self.tools}
+        return [describe_tool(name, tool) for name, tool in sorted(offered.items())]
 
     async def prepare(self) -> None:
         tools = {
@@ -143,9 +177,6 @@ class ToolSurface:
             tools.update({tool.name: tool for tool in integrations})
         excluded = self.excluded | EXCLUDED_TOOLS
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
-
-    def catalog(self) -> list[ToolDescription]:
-        return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
 
 
 @dataclass(frozen=True)

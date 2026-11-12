@@ -70,14 +70,14 @@ def _numbered(lines: list[tuple[int, str]]) -> str:
 
 
 def _event_content(monitor: PendingMonitor, event: MonitorEvent) -> str:
-    lines = "\n".join(event.lines)
+    bursts = [(burst.at_raw_line, "\n".join(burst.lines)) for burst in event.bursts]
     return prompt(
         "runs/monitor-event",
         monitor_id=monitor.monitor_id,
         description=monitor.description,
-        at_raw_line=event.at_raw_line,
-        lines=lines,
-        fence=_fence(lines),
+        bursts=bursts,
+        omitted_lines=event.omitted_lines,
+        fence=_fence(*(lines for _, lines in bursts)),
     )
 
 

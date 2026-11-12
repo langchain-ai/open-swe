@@ -8,8 +8,15 @@ import pytest
 from pydantic import SecretStr
 
 from openswe.merge_queue import dispatch
-from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected, WorkflowPolicyMismatch
-from openswe.merge_queue.validation_contract import ValidationRequest
+from openswe.merge_queue.admission import QueuePolicy
+from openswe.merge_queue.configuration import QueueConfiguration
+from openswe.merge_queue.dispatch import (
+    DispatchGateway,
+    DispatchRejected,
+    WorkflowPolicy,
+    WorkflowPolicyMismatch,
+)
+from openswe.merge_queue.validation_contract import ValidationPolicy, ValidationRequest
 
 
 @pytest.mark.parametrize("fault", [None, "signature", "replay"])
@@ -118,3 +125,37 @@ async def test_dispatch_retries_only_authenticated_preflight_failures(
             await gateway.dispatch(contract, deadline)
     assert len(sent) == {"once": 2, "always": 3}.get(retry, 1)
     assert all(request.content == sent[0].content for request in sent)
+
+
+def test_service_suite_policy_requires_new_revision_and_changes_validation_trust():
+    config = QueueConfiguration(
+        workspace_id=uuid7(),
+        repository="acme/widgets",
+        repository_id=42,
+        mode="native",
+        dispatch_url="https://dispatcher.example/dispatch",
+        workflow_digest="a" * 64,
+        sync_workflow_policy=True,
+        workflow_policy_revision=1,
+        check_app_id=456,
+        operator_emails=frozenset({"operator@example.com"}),
+        policy=QueuePolicy(checks={}, validation=ValidationPolicy(dispatch_actor_id=123)),
+    )
+    approved = WorkflowPolicy(
+        nonce=uuid7(),
+        repository=config.repository,
+        repository_id=42,
+        workflow_digest="a" * 64,
+        workflow_policy_revision=1,
+        dispatch_actor_id=123,
+        check_app_id=456,
+        validation_suite="services",
+    )
+    with pytest.raises(ValueError, match="revision"):
+        config.with_workflow_policy(approved)
+    updated = config.with_workflow_policy(
+        approved.model_copy(update={"workflow_policy_revision": 2})
+    )
+    assert updated.policy.validation.suite == "services"
+    assert updated.native_trust != config.native_trust
+    assert updated.generation != config.generation

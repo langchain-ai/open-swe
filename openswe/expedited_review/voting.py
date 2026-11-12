@@ -35,7 +35,7 @@ from openswe.human_review.requests import HumanReviewParticipant, HumanReviewReq
 from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload, context
-from openswe.slack.client import update_slack_message
+from openswe.slack.client import respond_to_slack_interaction, update_slack_message
 from openswe.slack.dm import note_for_concierge
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
@@ -77,7 +77,7 @@ async def handle_vote(
         return Outcome("You already approved this revision.")
     if not await get_valid_access_token(voter.github_login):
         return Outcome(
-            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot submit "
+            f"Robin has no GitHub token for @{voter.github_login}, so it cannot submit "
             f"your review. {github_token_hint()}"
         )
 
@@ -103,7 +103,7 @@ async def handle_vote(
         ),
         title=f"Merge {current.pull_request.repo}#{current.pull_request.number}",
     ):
-        woken = "Open SWE could not be woken to merge it; tag it in the thread to try again."
+        woken = "Robin could not be woken to merge it; tag it in the thread to try again."
         return Outcome(f"{problem} {woken}" if problem else woken)
     return Outcome(problem or "")
 
@@ -115,7 +115,7 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
     runs under the card's row lock, which the merge also holds, so one of them submits.
     """
     pr = approval.pull_request
-    unavailable = "GitHub was unavailable, so Open SWE will submit your review when it merges."
+    unavailable = "GitHub was unavailable, so Robin will submit your review when it merges."
     try:
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
             pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
@@ -137,7 +137,7 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
             return None
         failed = await submit_approval(row, vote, head_sha)
     if failed is not None:
-        return f"{failed} Open SWE will try again when it merges."
+        return f"{failed} Robin will try again when it merges."
     return None
 
 
@@ -154,7 +154,7 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
             )
     except GitHubSignInRequired:
         return Outcome(
-            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
+            f"Robin has no GitHub token for @{voter.github_login}, so it cannot mark the "
             f"pull request ready. {github_token_hint()}"
         )
     except HTTPException as exc:
@@ -181,7 +181,7 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
     if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
         return await request_copy(approval, choices[0]["id"], None, configured=True)
     if not await ReviewCard(approval).broadcast():
-        return Outcome("Open SWE could not send this expedited review to the channel.")
+        return Outcome("Robin could not send this expedited review to the channel.")
     return Outcome("Sent to the channel.")
 
 
@@ -205,13 +205,11 @@ async def request_copy(
     channel = await sendable_channel(channel_id)
     if channel is None:
         return Outcome(
-            "Open SWE only sends expedited reviews to public channels that are not shared "
+            "Robin only sends expedited reviews to public channels that are not shared "
             "outside the workspace."
         )
     if (problem := await ReviewCard(approval).copy_to(channel)) is not None:
-        return Outcome(
-            f"Open SWE could not send this expedited review to <#{channel.id}>. {problem}"
-        )
+        return Outcome(f"Robin could not send this expedited review to <#{channel.id}>. {problem}")
     return Outcome(f"Sent to <#{channel.id}>.")
 
 
@@ -226,21 +224,31 @@ async def process_vote(
     message_ts: str = "",
     message_text: str = "",
     message_blocks: list[JsonObject] | None = None,
+    response_url: str = "",
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally.
 
-    ``target_channel`` is the channel a ``send`` click picked.
+    ``target_channel`` is the channel a ``send`` click picked. The clicked message is
+    updated through the click's ``response_url`` where it has one.
     """
     slack_user_id = split_person_id(person)[1]
+
+    async def update(blocks: list[JsonObject]) -> None:
+        if response_url:
+            body = {"replace_original": True, "text": message_text, "blocks": blocks}
+            if not await respond_to_slack_interaction(response_url, body):
+                logger.warning("Could not update the clicked expedited review card")
+            return
+        try:
+            await update_slack_message(channel_id, message_ts, message_text, blocks=blocks)
+        except SlackRequestError:
+            logger.warning("Could not update the clicked expedited review card", exc_info=True)
 
     async def handle(approval: HumanReviewRequest) -> Outcome:
         if message_ts and message_blocks:
             pending = [block for block in message_blocks if block.get("type") != "actions"]
             pending.extend(block_payload([context("Working on your click…")]))
-            try:
-                await update_slack_message(channel_id, message_ts, message_text, blocks=pending)
-            except SlackRequestError:
-                logger.warning("Could not acknowledge expedited review click", exc_info=True)
+            await update(pending)
         original = (
             approval.state,
             approval.awaiting_ready,
@@ -251,6 +259,15 @@ async def process_vote(
         try:
             outcome = await apply(approval)
             completed = True
+            await approval.log_event(
+                "expedited.click",
+                action=decision,
+                slack_user_id=slack_user_id,
+                slack_channel_id=channel_id,
+                slack_thread_ts=thread_ts,
+                target_channel=target_channel,
+                outcome=outcome.message,
+            )
             return outcome
         finally:
             if message_ts and message_blocks:
@@ -266,9 +283,7 @@ async def process_vote(
                         == original
                         or (current.awaiting_ready and current.state == "open")
                     ):
-                        await update_slack_message(
-                            channel_id, message_ts, message_text, blocks=message_blocks
-                        )
+                        await update(message_blocks)
                     elif current is not None and not completed:
                         await ReviewCard(current).refresh(
                             outcome=current.detail or current.state
@@ -303,4 +318,5 @@ async def process_vote(
         thread_ts=thread_ts,
         slack_user_id=slack_user_id,
         handle=handle,
+        response_url=response_url,
     )

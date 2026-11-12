@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 _PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
 _TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
+_PROJECT_AGENT_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 
 
 def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
@@ -49,9 +50,16 @@ class LangSmithThreadCost:
 
 
 @dataclass(frozen=True)
+class LangSmithErrorLink:
+    url: str
+    is_fallback: bool
+
+
+@dataclass(frozen=True)
 class LangSmithLocator:
     kind: Literal["thread", "run"]
     id: str
+    project_id: str | None = None
 
 
 class LangSmithCostUnavailable(RuntimeError):
@@ -186,7 +194,45 @@ async def _compose_langsmith_project_url(project_name: str | None = None) -> str
     project_id = await _resolve_project_id_by_name(project_name or tracing_project())
     if not project_id:
         return None
-    return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
+    agent_id = await _resolve_project_agent_id(project_id)
+    agent_segment = f"/a/{quote(agent_id, safe='')}" if agent_id else ""
+    return f"{langsmith_host_url()}/o/{tenant_id}{agent_segment}/projects/p/{project_id}"
+
+
+def _is_definitive_client_error(exc: BaseException) -> bool:
+    """Whether a failed request got a 4xx that retrying won't change (not 408 or 429)."""
+    status = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
+    return isinstance(status, int) and 400 <= status < 500 and status not in {408, 429}
+
+
+async def _resolve_project_agent_id(project_id: str) -> str | None:
+    """The single agent owning a tracing project, so links skip LangSmith's agent redirect."""
+    cache_key = _project_cache_key(project_id)
+    if cache_key in _PROJECT_AGENT_CACHE:
+        return _PROJECT_AGENT_CACHE[cache_key] or None
+    client = _build_langsmith_client()
+    if client is None:
+        return None
+    base = ENV.LANGSMITH_ENDPOINT.get().rstrip("/").removesuffix("/api/v1").removesuffix("/api")
+    try:
+        async with asyncio.timeout(5):
+            response = await client._arequest_with_retries(  # noqa: SLF001
+                "GET",
+                f"{base}/api/v1/agents",
+                params={"tracer_session_id": project_id, "page_size": 2},
+                stop_after_attempt=1,
+            )
+        items = response.json().get("items") or []
+    except Exception as exc:  # noqa: BLE001
+        if _is_definitive_client_error(exc):
+            _PROJECT_AGENT_CACHE[cache_key] = ""
+        logger.debug(
+            "Could not resolve the agent for LangSmith project %s", project_id, exc_info=True
+        )
+        return None
+    agent_id = str(items[0].get("id") or "") if len(items) == 1 else ""
+    _PROJECT_AGENT_CACHE[cache_key] = agent_id
+    return agent_id or None
 
 
 async def get_langsmith_trace_url(thread_id: str, project_name: str | None = None) -> str | None:
@@ -198,17 +244,18 @@ async def get_langsmith_trace_url(thread_id: str, project_name: str | None = Non
 
 async def get_langsmith_error_url(
     thread_id: str, invocation_id: str | None, terminal_error: str | None = None
-) -> str | None:
+) -> LangSmithErrorLink | None:
     """Follow the terminal error's unique parent chain, otherwise link to its root."""
     thread_url = await get_langsmith_trace_url(thread_id)
+    fallback = LangSmithErrorLink(thread_url, is_fallback=True) if thread_url else None
     client = _build_langsmith_client()
     if not thread_url or not invocation_id or client is None:
-        return thread_url
+        return fallback
     try:
         async with asyncio.timeout(5):
             project_id = await _resolve_project_id_by_name(tracing_project())
             if not project_id:
-                return thread_url
+                return fallback
             lookup_start = await _project_lookup_start(project_id)
             for field in ("invocation_id", "prepare_run_id"):
                 runs = client.runs.query(
@@ -228,7 +275,7 @@ async def get_langsmith_error_url(
                     run for run in failed_runs if run.dotted_order and "." not in run.dotted_order
                 ]
                 if len(roots) != 1:
-                    return thread_url
+                    return fallback
                 root = failed_run = roots[0]
                 if terminal_error and root.error and terminal_error in root.error:
                     signature = root.error.splitlines()[0]
@@ -244,14 +291,16 @@ async def get_langsmith_error_url(
                             failed_run = root
                             break
                         failed_run = children[0]
-                return f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}"
+                return LangSmithErrorLink(
+                    f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}", is_fallback=False
+                )
     except Exception:
         logger.warning(
             "Could not resolve the failing LangSmith span",
             extra={"thread_id": thread_id, "invocation_id": invocation_id},
             exc_info=True,
         )
-    return thread_url
+    return fallback
 
 
 def _langsmith_web_origins() -> set[str]:
@@ -303,7 +352,16 @@ def parse_langsmith_locator(locator: str) -> LangSmithLocator | None:
             return None
         if not identifier or "/" in identifier:
             return None
-        return LangSmithLocator(kind="thread" if segments[index] == "t" else "run", id=identifier)
+        project_id = (
+            unquote(segments[index - 1])
+            if index >= 3 and segments[index - 3 : index - 1] == ["projects", "p"]
+            else None
+        )
+        return LangSmithLocator(
+            kind="thread" if segments[index] == "t" else "run",
+            id=identifier,
+            project_id=project_id or None,
+        )
     return None
 
 
@@ -321,8 +379,13 @@ async def get_open_swe_thread_id_from_langsmith(locator: str) -> str | None:
     client = _build_langsmith_client()
     if client is None:
         return None
+    project_id = parsed.project_id or await _resolve_project_id_by_name(tracing_project())
+    if not project_id:
+        return None
     try:
-        run = await client.read_run(parsed.id)
+        run = await client.runs.retrieve(
+            parsed.id, project_id=project_id, selects=["METADATA", "EXTRA"]
+        )
     except Exception:  # noqa: BLE001
         logger.debug("Could not resolve LangSmith run %s", parsed.id, exc_info=True)
         return None

@@ -67,7 +67,7 @@ class CreatorDelivery:
                 "Refused automation delivery to a creator who fails the login gate",
                 extra={**log_context, "status_code": exc.status_code},
             )
-            error = f"The automation's creator {login} is no longer authorized to use Open SWE."
+            error = f"The automation's creator {login} is no longer authorized to use Robin."
             await record_run_error(record, error)
             raise DeliveryRefused(f"{error} Nothing was delivered.") from exc
         user = await User.for_login("github", login)

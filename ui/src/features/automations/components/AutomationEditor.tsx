@@ -403,8 +403,8 @@ export function AutomationEditor({
       <div className="mx-auto w-full max-w-3xl px-space-5 pt-space-2 pb-space-9">
         {!canManage && (
           <Banner intent="neutral" className="mb-space-4">
-            This automation is read-only. Only its creator or a workspace admin
-            can change it.
+            This automation is read-only. Only its creator or a Robin admin can
+            change it.
           </Banner>
         )}
         <Input
@@ -435,14 +435,14 @@ export function AutomationEditor({
             selectedSlug={workspace}
             onChange={(slug) => setWorkspaceOverride(slug)}
             disabled={!canManage}
-            placeholder="Choose workspace"
+            placeholder="Choose environment"
             showWithOneWorkspace
           />
         </div>
         {savedWorkspaceMissing && (
           <p role="alert" className="mt-space-2 text-xs text-error-secondary">
-            Workspace {schedule?.workspace} no longer exists, so runs are
-            refused. Pick another workspace and save.
+            Environment {schedule?.workspace} no longer exists, so runs are
+            refused. Pick another environment and save.
           </p>
         )}
 
@@ -597,7 +597,7 @@ export function AutomationEditor({
                     />
                   </div>
                   {hint(
-                    "Top-level messages only. Open SWE must be in the channel; messages reach the run as untrusted context."
+                    "Top-level messages only. Robin must be in the channel; messages reach the run as untrusted context."
                   )}
                 </TriggerCard>
               )
@@ -684,7 +684,7 @@ export function AutomationEditor({
             value={prompt}
             onValueChange={setPrompt}
             disabled={!canManage}
-            placeholder="What should Open SWE do each time this runs?"
+            placeholder="What should Robin do each time this runs?"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-placeholder"
           />
@@ -716,7 +716,7 @@ export function AutomationEditor({
                 id="automation-admin-thread-description"
                 className="mt-0.5 pl-space-5 text-xs text-tertiary"
               >
-                Allow this automation to use workspace admin capabilities.
+                Allow this automation to use Robin admin capabilities.
               </p>
             </div>
           )}

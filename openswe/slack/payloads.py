@@ -6,7 +6,7 @@ Only the fields Open SWE reads are declared; everything else is kept
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
@@ -22,6 +22,7 @@ NOISE_SUBTYPES = frozenset(
 _POSTED_SUBTYPES = frozenset(
     {"", "file_share", "thread_broadcast", "bot_message", "message_changed", "me_message"}
 )
+SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 
 
 class SlackPayload(BaseModel):
@@ -44,7 +45,7 @@ class SlackRef(SlackPayload):
 
 
 class SlackItem(SlackPayload):
-    """``event.item``: the reacted-to message, or a code-channel context-bar item."""
+    """``event.item``: the reacted-to message."""
 
     type: str = ""
     channel: str = ""
@@ -54,20 +55,98 @@ class SlackItem(SlackPayload):
     value: JsonValue = None
 
 
-class SlackMessage(SlackPayload):
-    ts: str = ""
-    thread_ts: str = ""
-    user: str = ""
+class SlackAssistantThread(SlackPayload):
+    """``event.assistant_thread``, where older payloads nest the search grant."""
+
+    action_token: str = ""
+
+
+class SlackPost(SlackPayload):
+    """What a posted message carries: a message event, or the message an edit wraps."""
+
     text: str | None = None
     subtype: str = ""
     bot_id: str = ""
     app_id: str = ""
-    reply_count: int = 0
     attachments: list[JsonObject] = Field(default_factory=list)
 
     @property
     def is_from_bot(self) -> bool:
         return self.subtype == "bot_message" or bool(self.bot_id)
+
+    def text_for(self, user_id: str) -> str | None:
+        """The text, followed by a bot's own card when only the card mentions ``user_id``.
+
+        An alert bot posts a summary line as ``text`` and its message, mention and all, as
+        an attachment.
+        """
+        mention = f"<@{user_id}>"
+        if not (user_id and self.is_from_bot) or mention in (self.text or ""):
+            return self.text
+        card = self.card_text_of({**(self.model_extra or {}), "attachments": self.attachments})
+        if mention not in card:
+            return self.text
+        return "\n".join(part for part in ((self.text or "").strip(), card) if part)
+
+    @staticmethod
+    def is_forwarded(attachment: Mapping[str, object]) -> bool:
+        """Whether an attachment is another message: shared into this one, or a link's preview."""
+        return any(
+            attachment.get(flag) is True
+            for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+        )
+
+    @classmethod
+    def card_text_of(cls, message: Mapping[str, object]) -> str:
+        """Readable text of an app message built from blocks or attachments instead of ``text``.
+
+        Another message forwarded into it and a preview of a link, which carries the URL it
+        came from, are someone else's words, so they are left out.
+        """
+        texts = cls._block_texts(message.get("blocks"))
+        for attachment in cls._dicts(message.get("attachments")):
+            if not (
+                cls.is_forwarded(attachment)
+                or attachment.get("is_app_unfurl") is True
+                or attachment.get("from_url")
+            ):
+                texts += cls._attachment_texts(attachment)
+        return "\n".join(texts)[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS]
+
+    @classmethod
+    def _block_texts(cls, blocks: object) -> list[str]:
+        """Text of Block Kit blocks, skipping action buttons."""
+        texts: list[str] = []
+        for block in cls._dicts(blocks):
+            if block.get("type") == "actions":
+                continue
+            items = [block.get("text"), *cls._dicts(block.get("fields"))]
+            items += cls._dicts(block.get("elements"))
+            texts += cls._strings(item.get("text") for item in items if isinstance(item, dict))
+        return texts
+
+    @classmethod
+    def _attachment_texts(cls, attachment: dict[str, object]) -> list[str]:
+        values = [attachment.get(key) for key in ("pretext", "title", "title_link", "text")]
+        for field in cls._dicts(attachment.get("fields")):
+            values += [field.get("title"), field.get("value")]
+        texts = cls._strings(values) + cls._block_texts(attachment.get("blocks"))
+        return texts or cls._strings([attachment.get("fallback")])
+
+    @staticmethod
+    def _strings(values: Iterable[object]) -> list[str]:
+        return [value.strip() for value in values if isinstance(value, str) and value.strip()]
+
+    @staticmethod
+    def _dicts(value: object) -> list[dict[str, object]]:
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+class SlackMessage(SlackPost):
+    ts: str = ""
+    thread_ts: str = ""
+    user: str = ""
+    reply_count: int = 0
 
     @property
     def sort_key(self) -> float:
@@ -82,6 +161,13 @@ class SlackMessage(SlackPayload):
         """A join or topic-change notice, which carries nothing a reader wants."""
         return self.subtype in NOISE_SUBTYPES
 
+    @property
+    def has_attachment(self) -> bool:
+        """Whether a person attached files or shared a message, not just a link Slack previewed."""
+        return bool((self.model_extra or {}).get("files")) or any(
+            attachment.get("is_share") is True for attachment in self.attachments
+        )
+
     def dump(self) -> JsonObject:
         """The raw-shaped mapping the prompt formatter reads.
 
@@ -91,11 +177,10 @@ class SlackMessage(SlackPayload):
         return self.model_dump(mode="json", exclude_none=True)
 
 
-class SlackEvent(SlackPayload):
+class SlackEvent(SlackPost):
     """The ``event`` of an Events API callback, across every event type Open SWE subscribes to."""
 
     type: str = ""
-    subtype: str = ""
     channel: str | SlackRef = ""
     channel_id: str = ""
     channel_type: str = ""
@@ -106,10 +191,8 @@ class SlackEvent(SlackPayload):
     thread_ts: str = ""
     user: str | SlackRef = ""
     user_id: str = ""
-    text: str | None = None
-    bot_id: str = ""
-    app_id: str = ""
-    attachments: list[JsonObject] = Field(default_factory=list)
+    action_token: str = ""
+    assistant_thread: SlackAssistantThread | None = None
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
     reaction: str = ""
@@ -134,8 +217,11 @@ class SlackEvent(SlackPayload):
         return self.user or self.user_id
 
     @property
-    def is_from_bot(self) -> bool:
-        return self.subtype == "bot_message" or bool(self.bot_id)
+    def search_grant(self) -> str:
+        """The ``action_token`` Slack sent for search, at the top level or nested."""
+        if self.action_token:
+            return self.action_token
+        return self.assistant_thread.action_token if self.assistant_thread else ""
 
 
 class SlackAuthorization(SlackPayload):

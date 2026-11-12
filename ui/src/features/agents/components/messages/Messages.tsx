@@ -1,6 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
-import { memo, useEffect, useMemo } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ConversationFind } from "./ConversationFind"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -8,12 +9,17 @@ import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
+import { TurnFoldRow } from "./timeline/foldRows"
+import { groupQuietRuns } from "./quietRuns"
+import type { QuietStretch } from "./quietRuns"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { SentReply, UserMessage } from "./UserMessage"
+import type { Message } from "@/features/agents/lib/types"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
+import { formatElapsed } from "@/lib/utils"
 import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
@@ -97,6 +103,24 @@ function QueuedMessages({
   )
 }
 
+function quietStretchLabel(stretch: QuietStretch): string {
+  const parts = [`${stretch.runCount} runs without a reply`]
+  if (stretch.durationMs !== null && stretch.durationMs >= 1000)
+    parts.push(formatElapsed(stretch.durationMs))
+  if (stretch.actionCount > 0)
+    parts.push(
+      `${stretch.actionCount} action${stretch.actionCount === 1 ? "" : "s"}`
+    )
+  return parts.join(" · ")
+}
+
+function quietStretchTriggers(stretch: QuietStretch): string | undefined {
+  if (stretch.triggers.length === 0) return undefined
+  return `woken by ${stretch.triggers
+    .map(([name, count]) => (count > 1 ? `${name} ×${count}` : name))
+    .join(", ")}`
+}
+
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
@@ -137,11 +161,24 @@ export const Messages = memo(function MessagesComponent({
     scrollToBottom,
     pinMessage,
     capturePrependAnchor,
-  } = useTranscriptScroll({ scrollKey, messages, isStreaming })
+  } = useTranscriptScroll({ scrollKey, messages, isStreaming, loadEarlier })
 
+  const transcriptRef = useRef<HTMLDivElement>(null)
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
+  )
+  const renderableMessageIds = new Set(
+    visibleMessages
+      .filter(
+        (message) =>
+          message.structuredSenderKind !== "system" ||
+          message.taskEvent ||
+          message.structuredSenderId === "system:sandbox-handoff" ||
+          message.structuredSenderId?.startsWith("system:api_key/") ||
+          message.structuredSenderId?.startsWith("system:github_actions/")
+      )
+      .map((message) => message.id)
   )
   const costsByTurn = useMemo(
     () => turnCosts(visibleMessages, runCosts),
@@ -166,6 +203,21 @@ export const Messages = memo(function MessagesComponent({
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
   const repoPath = localRepo?.path
+  const transcriptEntries = useMemo(
+    () =>
+      groupQuietRuns(
+        visibleMessages,
+        isStreaming ? visibleMessages.at(-1)?.id : undefined
+      ),
+    [visibleMessages, isStreaming]
+  )
+  const [expandedStretches, setExpandedStretches] = useState<
+    Record<string, boolean>
+  >({})
+  const toggleStretch = useCallback((key: string) => {
+    setExpandedStretches((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
+  }, [])
+
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
@@ -184,10 +236,48 @@ export const Messages = memo(function MessagesComponent({
       ? Date.parse(lastMessage.timestamp)
       : undefined
 
+  const renderMessage = (message: Message, index: number) => {
+    if (!renderableMessageIds.has(message.id)) return null
+    const isLastMessage = index === visibleMessages.length - 1
+    const messageIsStreaming = isStreaming && isLastMessage
+    const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+
+    if (
+      message.author === "user" ||
+      message.structuredSenderKind === "system"
+    ) {
+      return (
+        <UserMessage key={message.id} message={message} threadId={threadId} />
+      )
+    }
+
+    return (
+      <AgentTurn
+        key={message.id}
+        message={message}
+        isStreaming={messageIsStreaming && !isOffloading}
+        isMarkdownLive={messageIsMarkdownLive}
+        repoPath={repoPath}
+        activityLabel={messageIsStreaming ? activityLabel : undefined}
+        costUsd={costsByTurn.get(message.id)}
+        onApprove={onApprove}
+        onReject={onReject}
+        onAutoApprove={onAutoApprove}
+        onOpenFile={onOpenFile}
+      />
+    )
+  }
+
   return (
     <TooltipProvider delayDuration={250}>
       <div className="relative min-h-0 min-w-0 flex-1">
+        <ConversationFind
+          key={scrollKey ?? threadId}
+          root={transcriptRef}
+          hasEarlier={Boolean(loadEarlier)}
+        />
         <div
+          data-transcript-scroll
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
@@ -221,35 +311,44 @@ export const Messages = memo(function MessagesComponent({
                   : "Load earlier turns"}
               </Button>
             )}
-            {visibleMessages.length === 0 && emptyState}
-            {visibleMessages.map((message, index) => {
-              const isLastMessage = index === visibleMessages.length - 1
-              const messageIsStreaming = isStreaming && isLastMessage
-              const messageIsMarkdownLive = message.id === liveMarkdownMessageId
-
-              if (
-                message.author === "user" ||
-                message.structuredSenderKind === "system"
-              ) {
-                return <UserMessage key={message.id} message={message} />
-              }
-
-              return (
-                <AgentTurn
-                  key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming && !isOffloading}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  repoPath={repoPath}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  costUsd={costsByTurn.get(message.id)}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
-                />
-              )
-            })}
+            {!isStreaming && renderableMessageIds.size === 0 && emptyState}
+            <div ref={transcriptRef}>
+              {transcriptEntries.map((entry) => {
+                if (entry.type === "message")
+                  return renderMessage(entry.message, entry.index)
+                const { stretch } = entry
+                const expanded = expandedStretches[stretch.key] ?? false
+                return (
+                  <div
+                    key={stretch.key}
+                    className="my-space-2"
+                    data-testid="quiet-stretch"
+                  >
+                    {/* Saved reading positions anchor on message ids. */}
+                    {!expanded &&
+                      stretch.messages.map((message) => (
+                        <span
+                          key={message.id}
+                          aria-hidden
+                          className="block h-0"
+                          data-message-id={message.id}
+                        />
+                      ))}
+                    <TurnFoldRow
+                      label={quietStretchLabel(stretch)}
+                      detail={quietStretchTriggers(stretch)}
+                      active={false}
+                      expanded={expanded}
+                      onToggle={() => toggleStretch(stretch.key)}
+                    />
+                    {expanded &&
+                      stretch.messages.map((message) =>
+                        renderMessage(message, -1)
+                      )}
+                  </div>
+                )
+              })}
+            </div>
             <ReviewChatActions messages={visibleMessages} />
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
@@ -258,6 +357,14 @@ export const Messages = memo(function MessagesComponent({
               <WorkflowApprovalCard
                 threadId={threadId}
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
+                latestUserMessageAt={
+                  visibleMessages.findLast(
+                    (message) =>
+                      message.author === "user" &&
+                      message.structuredSenderKind !== "system" &&
+                      !message.timestampIsFallback
+                  )?.timestamp
+                }
               />
             )}
             {/* Above the queue: the live run's activity, then what waits for it. */}

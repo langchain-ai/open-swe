@@ -14,10 +14,11 @@ unique index enforces that. A participant is a ``users.id``, never a GitHub or S
 handle.
 """
 
+import asyncio
 from collections import Counter
 from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
@@ -41,12 +42,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.expedited_review.eligibility import ExcludedHunk
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import fetch_slack_thread_messages
 from openswe.slack.dm import DmOrigin
+from openswe.slack.payloads import SlackMessage
 from openswe.slack.records import lookup_slack_thread_id
+from openswe.ui_invalidations import Topic
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -212,6 +218,11 @@ class HumanReviewRequest(Base):
         author = await User.get(pr.author_user_id) if pr.author_user_id else None
         return slack_mention(author, pr.author or "the author")
 
+    async def author_login(self) -> str:
+        pr = self.pull_request
+        author = await User.get(pr.author_user_id) if pr.author_user_id else None
+        return (author.github_login if author else "") or pr.author
+
     def is_author(self, user_id: UUID, login: str) -> bool:
         pr = self.pull_request
         if pr.author_user_id is not None:
@@ -238,6 +249,38 @@ class HumanReviewRequest(Base):
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
 
+    async def recent_channel_posters(self) -> set[UUID]:
+        """Linked people who posted in the review channel's recent 30-day message window."""
+        if not self.slack_channel_id:
+            return set()
+        channel = await SlackChannel.load(self.slack_channel_id)
+        if channel is None:
+            return set()
+        messages = await channel.messages(limit=100)
+        threads = await asyncio.gather(
+            *(
+                fetch_slack_thread_messages(channel.id, message.thread_ts or message.ts)
+                for message in messages
+                if message.reply_count
+            )
+        )
+        messages.extend(
+            parsed
+            for thread in threads
+            for item in thread
+            if (parsed := SlackMessage.parse(item)) is not None
+        )
+        since = (datetime.now(UTC) - timedelta(days=30)).timestamp()
+        users = await User.for_identities(
+            "slack",
+            {
+                message.user
+                for message in messages
+                if message.sort_key >= since and not message.is_from_bot and not message.is_noise
+            },
+        )
+        return {user.id for user in users.values()}
+
     @property
     def dm_origin(self) -> DmOrigin | None:
         """The review's Slack thread, which DMs about it are sent on behalf of."""
@@ -259,6 +302,19 @@ class HumanReviewRequest(Base):
             return False
         owner = await lookup_slack_thread_id(self.slack_channel_id, root)
         return owner == thread_id
+
+    async def card_url(self) -> str:
+        """Link to the card even when Slack's permalink lookup is unavailable."""
+        from openswe.slack.client import get_slack_permalink
+        from openswe.slack.links import SlackLink
+
+        channel, timestamp = self.slack_channel_id, self.slack_message_ts
+        if not channel or not timestamp:
+            return ""
+        permalink = await get_slack_permalink(channel, timestamp)
+        if permalink:
+            return permalink
+        return SlackLink(channel, timestamp, self.slack_thread_ts).url
 
     @property
     def slack_location(self) -> tuple[str, str] | None:
@@ -438,6 +494,8 @@ class HumanReviewRequest(Base):
             )
             before = row.event_state() if row is not None else None
             yield row, {name.lower(): at for name, at in rows if name and at is not None}
+            if row is not None and row.event_state() != before:
+                await row.invalidate(session)
         if row is not None and before is not None:
             await row.log_changes(before)
 
@@ -465,8 +523,6 @@ class HumanReviewRequest(Base):
     @classmethod
     async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
         """The Open SWE review-request card this Slack thread holds, with its pull request."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls)
@@ -522,6 +578,28 @@ class HumanReviewRequest(Base):
             "state": self.state,
             "head_sha": self.head_sha,
             "detail": self.detail,
+            "tldr": self.tldr,
+            "diff_fingerprint": self.diff_fingerprint,
+            "excluded_hunks": [
+                {
+                    "path": hunk["path"],
+                    "digest": hunk["digest"],
+                    "header": hunk["header"],
+                    "additions": hunk["additions"],
+                    "deletions": hunk["deletions"],
+                    "guideline": hunk["guideline"],
+                    "reason": hunk["reason"],
+                    "approval_condition": hunk.get("approval_condition", False),
+                }
+                for hunk in self.excluded_hunks
+            ],
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "slack_thread_ts": self.slack_thread_ts,
+            "slack_diff_file_id": self.slack_diff_file_id,
+            "slack_channel_choices": [
+                {"id": choice["id"], "name": choice["name"]}
+                for choice in self.slack_channel_choices
+            ],
             "auto_merge": self.auto_merge,
             "awaiting_ready": self.awaiting_ready,
             "slack_channel_id": self.slack_channel_id,
@@ -556,6 +634,7 @@ class HumanReviewRequest(Base):
                     "assigned_by_agent": p.assigned_by_agent,
                     "joined_at": p.joined_at.isoformat() if p.joined_at else None,
                     "github_review_id": p.github_review_id,
+                    "github_review_sha": p.github_review_sha,
                     "dm_channel_id": p.dm_channel_id,
                     "dm_ts": p.dm_ts,
                 }
@@ -596,6 +675,13 @@ class HumanReviewRequest(Base):
         if changes:
             await self.log_event("request.updated", changes=changes)
 
+    async def invalidate(self, session: AsyncSession) -> None:
+        """Refresh dashboard readers when this request's transaction commits."""
+        pr = self.pull_request
+        await Topic.PULL_REQUESTS.invalidate(
+            session, key=PullRequestKey.of(pr.owner, pr.repo, pr.number)
+        )
+
     async def save(self) -> Self:
         cls = type(self)
         previous = await cls.get(self.id)
@@ -608,6 +694,8 @@ class HumanReviewRequest(Base):
                 .where(cls.id == self.id)
                 .execution_options(populate_existing=True)
             )
+            if stored is not None:
+                await stored.invalidate(session)
         if stored is None:
             raise RuntimeError(f"human review request {self.id} vanished during save")
         if before is None:
@@ -630,6 +718,8 @@ class HumanReviewRequest(Base):
             before = row.event_state() if row is not None else None
             yield session, row
             deleted = row is not None and (row in session.deleted or inspect(row).deleted)
+            if row is not None and (deleted or row.event_state() != before):
+                await row.invalidate(session)
         if row is not None and before is not None:
             if deleted:
                 await row.log_event("request.discarded", snapshot=before)
@@ -654,6 +744,9 @@ class HumanReviewRequest(Base):
             requests = list(rows)
             before = {row.id: row.event_state() for row in requests}
             yield requests
+            for row in requests:
+                if row.event_state() != before[row.id]:
+                    await row.invalidate(session)
         for row in requests:
             await row.log_changes(before[row.id])
 

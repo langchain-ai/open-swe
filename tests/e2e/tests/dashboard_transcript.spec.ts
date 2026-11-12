@@ -5,6 +5,7 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
+  readyComposerEditor,
   threadIdFromUrl,
   threadState,
   typeIntoComposer,
@@ -151,9 +152,15 @@ test.describe("transcript rendering", () => {
       .locator('[data-message-surface="slack"]')
       .filter({ hasText: "Slack docs" })
       .first();
-    await expect(
-      slackMessage.getByRole("img", { name: "Slack" }),
-    ).toBeVisible();
+    const sourceLink = slackMessage.getByRole("link", {
+      name: "View message from Alice in Slack",
+    });
+    await expect(sourceLink).toBeVisible();
+    await expect(sourceLink).toHaveAttribute(
+      "href",
+      /^\/dashboard\/api\/slack\/open\?channel=CDEMO01&message_ts=\d+\.\d+$/,
+    );
+    await expect(sourceLink).toHaveAttribute("target", "_blank");
     await expect(slackMessage.locator("strong")).toHaveText("important");
     await expect(slackMessage).toContainText("R&D");
     await expect(slackMessage.locator("code")).toContainText("code docs");
@@ -266,7 +273,7 @@ test.describe("transcript rendering", () => {
     ).toHaveCount(1);
   });
 
-  test("replies to selected transcript text in the next message", async ({
+  test("sends a selected-text reply without submitting the composer draft", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -274,6 +281,10 @@ test.describe("transcript rendering", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
+
+    const editor = await readyComposerEditor(page);
+    await editor.click();
+    await editor.pressSequentially("Keep this draft");
 
     const passage = page
       .getByText("Opening a pull request.", { exact: true })
@@ -292,18 +303,19 @@ test.describe("transcript rendering", () => {
     await field.press("Enter");
     await expect(
       page.getByRole("list", { name: "Replies in your next message" }),
-    ).toContainText("Which branch?");
+    ).toHaveCount(0);
+    await expect(editor).toHaveText("Keep this draft");
 
-    await typeIntoComposer(page, "Thanks!");
     // The agent gets the selection with a line of context on each side.
     await waitForStateToContain(
       page,
       threadId,
-      "Thanks!\\n<reply>\\nsource: conversation\\nbefore:",
+      "<reply>\\nsource: conversation\\nbefore:",
     );
     const state = await threadState(page, threadId);
     expect(state).toContain("selection: Opening a pull request.\\nafter:\\n");
     expect(state).toContain("comment: Which branch?\\n</reply>");
+    expect(state).not.toContain("Keep this draft");
     const sent = page
       .getByTestId("user-message")
       .filter({ hasText: "Which branch?" });
@@ -421,10 +433,9 @@ test.describe("transcript rendering", () => {
     ).toBeVisible();
     await expect(page.locator("img[data-e2e-injected]")).toHaveCount(0);
     await expect(page.getByText("Automation checks CI")).toHaveCount(0);
-    const systemChip = page.getByRole("button", { name: "Scheduler" });
-    await expect(systemChip).toBeVisible();
-    await systemChip.click();
-    await expect(page.getByText("Automation checks CI")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Scheduler" })).toHaveCount(
+      0,
+    );
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
     await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
       0,
@@ -441,6 +452,6 @@ test.describe("transcript rendering", () => {
       page
         .locator('[data-message-sender-kind="system"]')
         .filter({ hasText: "Automation checks CI" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
   });
 });

@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 
 from deepagents.backends import LocalShellBackend
+from deepagents.backends.protocol import FileDownloadResponse
 
 REAL = os.environ.get("E2E_REAL_SANDBOX") == "1"
 
@@ -56,6 +57,17 @@ class StandInSandbox(LocalShellBackend):
 
     def get_work_dir(self) -> str:
         return str(self.cwd)
+
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
+        """Takes the absolute paths the shell sees, as LangSmith's file API does; virtual mode would re-root them."""
+        root = self.cwd.resolve()
+        virtual = [
+            "/" + str(Path(path).relative_to(root))
+            if Path(path).is_absolute() and Path(path).is_relative_to(root)
+            else path
+            for path in paths
+        ]
+        return await super().adownload_files(virtual)
 
     @property
     def id(self) -> str:

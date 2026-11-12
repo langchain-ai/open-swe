@@ -10,6 +10,7 @@ import { api, type ReviewDetail, type ScoutProgress } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@langchain/macaw-components/Button"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { plural } from "./text"
@@ -38,7 +39,7 @@ export function WalkthroughCallout({
   })
   const running = detail.walkthrough_running || scout.isPending
   const failure = running ? null : detail.walkthrough_error
-  const failureSummary = failure?.split("\n", 1)[0]?.slice(0, 300)
+  const failureSummary = failure?.trim().split("\n", 1)[0]?.slice(0, 300)
   const wasRunning = useRef(detail.walkthrough_running)
   useEffect(() => {
     if (wasRunning.current && !detail.walkthrough_running) {
@@ -72,16 +73,27 @@ export function WalkthroughCallout({
         </p>
         <p className="mt-0.5 text-secondary">
           {running
-            ? "Open SWE is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
-            : "Open SWE orders the changes into narrated steps and moves mechanical edits to the end."}
+            ? "Robin is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
+            : "Robin orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
         {running && detail.walkthrough_progress && (
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
         )}
-        {failureSummary && (
-          <p className="mt-space-1 break-words text-error-secondary">
-            Last attempt failed: {failureSummary}
-          </p>
+        {failure && failureSummary && (
+          <div className="mt-space-1 flex items-start gap-space-1">
+            <p className="min-w-0 break-words text-error-secondary">
+              Last attempt failed: {failureSummary}
+            </p>
+            <CopyErrorButton
+              error={failure}
+              details={{
+                "Pull request": `${pr.owner}/${pr.repo}#${pr.number}`,
+                "Head commit": detail.head_sha,
+                "Scout thread": detail.walkthrough_scout_thread_id,
+              }}
+              className="-my-0.5 shrink-0"
+            />
+          </div>
         )}
         {(running || failure) && detail.walkthrough_scout_thread_id && (
           <Link

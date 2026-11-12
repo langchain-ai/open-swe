@@ -70,11 +70,20 @@ async def test_gateway_status_reads_missing_services_under_either_policy(monkeyp
         "verification_url": "https://smith.langchain.com/connect/linear",
         "auth_id": "linear-auth",
     }
+    # The kit lists the unconnected service's tool too; it is not callable until Linear is connected.
+    linear_tool = {"name": "linear_list_issues", "inputSchema": {"type": "object"}}
     listing: list[object] = [
         ListToolsResult.model_validate(
             {
-                "tools": [{"name": "notion_search", "inputSchema": {"type": "object"}}],
-                "_meta": {"com.langchain.langsmith/missingCredentials": [linear]},
+                "tools": [
+                    {"name": "notion_search", "inputSchema": {"type": "object"}},
+                    linear_tool,
+                ],
+                "_meta": {
+                    "com.langchain.langsmith/missingCredentials": [
+                        {**linear, "tools": [linear_tool]}
+                    ]
+                },
             }
         )
     ]

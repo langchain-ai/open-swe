@@ -4,8 +4,6 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk.client import LangGraphClient
-
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_links import breakout_root_blocks
 from openswe.slack.client import (
@@ -14,7 +12,6 @@ from openswe.slack.client import (
     post_slack_top_level_message_with_ts,
     slack_thread_mutation_lock,
 )
-from openswe.slack.code_channels import is_code_channel_session
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import (
     bind_slack_thread_id,
@@ -22,10 +19,11 @@ from openswe.slack.records import (
     lookup_slack_thread_run_mapping,
     store_slack_run_mapping,
 )
-from openswe.slack.thinking import release_slack_location_status, sync_slack_background_status
+from openswe.slack.thinking import refresh_slack_background_status, release_slack_location_status
 from openswe.source_context import SlackThreadRef, SourceContext
+from openswe.threads.store import THREADS
 from openswe.utils.dashboard_links import dashboard_thread_url
-from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +66,14 @@ def _new_slack_context(current: SlackThreadRef, channel_id: str, thread_ts: str)
     )
 
 
-async def _current_location(client: LangGraphClient, thread_id: str) -> tuple[str, str] | None:
-    active = await get_active_slack_thread(client, thread_id)
+async def _current_location(thread_id: str) -> tuple[str, str] | None:
+    active = await get_active_slack_thread(thread_id)
     return SlackThreadRef.model_validate(active).location if active else None
 
 
-async def _restore_binding(client: LangGraphClient, thread_id: str, previous: JsonObject) -> bool:
+async def _restore_binding(thread_id: str, previous: JsonObject) -> bool:
     try:
-        await client.threads.update(thread_id=thread_id, metadata=previous)
+        await THREADS.update(thread_id, previous)
     except Exception:
         logger.warning(
             "Could not restore the thread's Slack binding after a failed rebind",
@@ -94,15 +92,12 @@ async def _carry_run_mapping(source: SlackThreadRef, destination: SlackThreadRef
         destination.channel_id,
         destination.thread_ts,
         source_run.run_id,
-        message_ts=(
-            None if is_code_channel_session(destination.thread_ts) else destination.thread_ts
-        ),
+        message_ts=(None if destination.thread_ts == "0" else destination.thread_ts),
         triggering_user_id=source_run.triggering_user_id,
     )
 
 
 async def rebind_slack_thread(
-    client: LangGraphClient,
     thread_id: str,
     source: SlackThreadRef,
     destination: SlackThreadRef,
@@ -118,7 +113,7 @@ async def rebind_slack_thread(
     previous: JsonObject | None = None
     try:
         async with slack_thread_mutation_lock(
-            client, *source_location, thread_id=thread_id
+            *source_location, thread_id=thread_id
         ) as locked_active:
             current = (
                 SlackThreadRef.model_validate(locked_active).location if locked_active else None
@@ -126,24 +121,25 @@ async def rebind_slack_thread(
             if current == target_location:
                 await bind_slack_thread_id(*target_location, thread_id)
             elif current == source_location:
-                metadata = thread_metadata(await client.threads.get(thread_id))
+                thread = await THREADS.get(thread_id)
+                metadata = dict(thread.metadata) if thread is not None else {}
                 await bind_slack_thread_id(*target_location, thread_id)
                 bound_here = True
                 previous = {key: metadata[key] for key in _BINDING_KEYS if key in metadata}
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={
+                await THREADS.update(
+                    thread_id,
+                    {
                         "source": "slack",
                         "source_context": SourceContext(slack_thread=destination).dump(),
                     },
                 )
-                if await _current_location(client, thread_id) != target_location:
+                if await _current_location(thread_id) != target_location:
                     raise RuntimeError("destination metadata did not persist")
             else:
                 raise RuntimeError("Slack thread moved concurrently; retry")
     except Exception as exc:
         # Revert a possibly-landed write first, or callers discard a location still in use.
-        if previous is not None and not await _restore_binding(client, thread_id, previous):
+        if previous is not None and not await _restore_binding(thread_id, previous):
             raise SlackRebindError(str(exc), moved=True) from exc
         if bound_here:
             try:
@@ -161,14 +157,13 @@ async def rebind_slack_thread(
     try:
         await _carry_run_mapping(source, destination)
         await release_slack_location_status(*source_location)
-        await sync_slack_background_status(client, thread_id, resume=True)
+        await refresh_slack_background_status(thread_id, resume=True)
         await delete_slack_thread_associations(*source_location, expected_thread_id=thread_id)
     except Exception as exc:
         raise SlackRebindError(str(exc), moved=True) from exc
 
 
 async def move_slack_thread(
-    client: LangGraphClient,
     thread_id: str,
     source: Mapping[str, Any],
     target_channel: str,
@@ -192,10 +187,24 @@ async def move_slack_thread(
             "hint": _slack_error_hint(exc.code),
         }
 
+    return await record_slack_move(thread_id, source, target_channel, new_ts)
+
+
+async def record_slack_move(
+    thread_id: str,
+    source: Mapping[str, Any],
+    target_channel: str,
+    new_ts: str,
+) -> dict[str, Any]:
+    """Move the thread's Slack binding to the root at `new_ts`, which someone already posted.
+
+    `move_slack_thread` posts it with the bot token; a run MDA's Slack channel holds posts
+    it through MDA, which hands the thread to the new Slack thread (``channel_moves``).
+    """
     source_ref = SlackThreadRef.model_validate(dict(source))
     try:
         await rebind_slack_thread(
-            client, thread_id, source_ref, _new_slack_context(source_ref, target_channel, new_ts)
+            thread_id, source_ref, _new_slack_context(source_ref, target_channel, new_ts)
         )
     except SlackRebindError as exc:
         if exc.moved:

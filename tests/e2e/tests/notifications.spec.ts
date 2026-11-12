@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   loginAs,
+  readyComposerEditor,
   SAME_USER,
   OTHER_USER,
   seedOpenPullRequest,
@@ -277,8 +278,7 @@ for (const review of [false, true]) {
     } else {
       await page.goto("/agents", { waitUntil: "domcontentloaded" });
     }
-    const editor = page.getByTestId("composer-editor");
-    await expect(editor).toBeVisible();
+    const editor = await readyComposerEditor(page);
     await editor.click();
     await editor.pressSequentially("Please ask @bob");
     await page.getByRole("option", { name: /@Bob @bob/ }).click();
@@ -289,11 +289,11 @@ for (const review of [false, true]) {
       .poll(async () =>
         (await new Notifications(page).dms())
           .slice(beforeDms)
-          .filter((n) => n.text.includes("alice mentioned you in Open SWE")),
+          .filter((n) => n.text.includes("alice mentioned you in Robin")),
       )
       .toHaveLength(1);
     expect(await desktop.titles()).not.toContain(
-      "alice mentioned you in Open SWE",
+      "alice mentioned you in Robin",
     );
     await recipient.close();
   });
@@ -302,7 +302,7 @@ for (const review of [false, true]) {
 test("Escape dismisses empty mention suggestions", async ({ page }) => {
   await loginAs(page, SAME_USER);
   await page.goto("/agents", { waitUntil: "domcontentloaded" });
-  const editor = page.getByTestId("composer-editor");
+  const editor = await readyComposerEditor(page);
   await editor.click();
   await editor.pressSequentially("@no-matching-person-or-file");
   await expect(page.getByText("No matching people or files.")).toBeVisible();

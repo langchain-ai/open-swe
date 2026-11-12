@@ -32,7 +32,7 @@ content:
 ```
 
 ```xml
-<input-message sender="user:<alice>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-1>" explicit_bot_mention="true">
+<input-message sender="user:<alice>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-1>" slack_message_ts="<slack-ts-1>" explicit_bot_mention="true">
 @open-swe add a greet() helper
 </input-message>
 ```
@@ -59,7 +59,7 @@ Then: her envelope alone — the channel is described, her turn-1 message and th
 
 ### dispatch appends
 ```xml
-<input-message sender="user:<alice>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-2>" explicit_bot_mention="true">
+<input-message sender="user:<alice>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-2>" slack_message_ts="<slack-ts-2>" explicit_bot_mention="true">
 @open-swe also add a docstring
 </input-message>
 ```
@@ -74,7 +74,7 @@ Then: the run adds his block; Alice's is not re-sent, and dispatch does not desc
 
 ### dispatch appends
 ```xml
-<input-message sender="user:<bob>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-3>" explicit_bot_mention="true">
+<input-message sender="user:<bob>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-3>" slack_message_ts="<slack-ts-3>" explicit_bot_mention="true">
 @open-swe make it return bytes
 </input-message>
 ```
@@ -129,7 +129,7 @@ Then: only Bob's block is re-sent, now carrying his instructions
 
 ### dispatch appends
 ```xml
-<input-message sender="user:<bob>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-4>" explicit_bot_mention="true">
+<input-message sender="user:<bob>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-4>" slack_message_ts="<slack-ts-4>" explicit_bot_mention="true">
 @open-swe open the PR
 </input-message>
 ```
@@ -152,8 +152,8 @@ standing_instructions:
 </dynamic-context>
 ```
 
-## Turn 6: Carol, with no Open SWE account, chimes in
-Given: Carol never signed in to Open SWE, so nothing links her Slack account to a GitHub one
+## Turn 6: Carol, with no Robin account, chimes in
+Given: Carol never signed in to Robin, so her Slack account has no authorized LangSmith identity
 When: she replies: can it handle unicode?
 Then: no run starts and the thread is untouched; Slack gets an account-link prompt instead
 

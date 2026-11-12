@@ -1,10 +1,6 @@
 import type { OpenPullRequest } from "@/lib/api"
 import { PullRequestLinks } from "../PullRequestLinks"
-import {
-  canAttemptMerge,
-  canUpdateBranch,
-  pullRequestFixes,
-} from "../lib/status"
+import { canAttemptMerge, canUpdateBranch, needsFixUp } from "../lib/status"
 import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
@@ -42,7 +38,6 @@ export function PullRequestActions({
     onSettled(next)
     return () => onSettled(undefined)
   }
-  const fixes = pullRequestFixes(pr)
   return (
     <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2">
       {outcome && (
@@ -55,9 +50,7 @@ export function PullRequestActions({
         hidden={Boolean(outcome)}
         className="flex flex-wrap items-center gap-x-space-2 gap-y-space-2"
       >
-        {fixes.length > 0 && (
-          <PullRequestThreadAction pr={pr} login={login} actions={fixes} />
-        )}
+        {needsFixUp(pr) && <PullRequestThreadAction pr={pr} login={login} />}
         {pr.draft === true && (
           <MarkPullRequestReady pr={pr} onReady={onReady} />
         )}

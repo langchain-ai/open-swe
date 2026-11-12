@@ -12,6 +12,7 @@ and renders their state back as a user-facing UI.
 
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import sys
@@ -21,6 +22,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
+from types import ModuleType
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
@@ -33,6 +35,7 @@ patches.apply()
 
 import fakes  # noqa: E402
 import httpx2  # noqa: E402
+from cryptography.fernet import Fernet  # noqa: E402
 from e2e_env import (  # noqa: E402
     BASE_BRANCH,
     BASE_URL,
@@ -57,6 +60,7 @@ from fastapi.responses import (  # noqa: E402
     RedirectResponse,
     Response,
 )
+from oauth_fakes import OAuthProviders  # noqa: E402
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
 # by the automated tests plus the named manual-test users. ``U_CAROL`` is in
@@ -79,11 +83,12 @@ from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from openswe.slack import mda_forwarding  # noqa: E402
 from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
-GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
+MDA_SERVICE_SECRET = os.environ["MDA_SERVICE_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -94,6 +99,20 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 # webhook dedupes against is persisted — so event ids need a per-process salt or
 # a rerun's mentions look like redeliveries of the previous run's.
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
+
+_FORWARD_TO_TRIGGER_SERVER = mda_forwarding.forward_to_trigger_server
+
+
+async def _clicks_stay_here(url: str, *args: Any, **kwargs: Any) -> None:
+    """No Trigger Server knows this Slack app, so it refuses every click the backend
+    forwards, and the backend acts on it after all; anything else goes as before."""
+    if url != mda_forwarding.TRIGGER_INTERACTIVITY_URL:
+        await _FORWARD_TO_TRIGGER_SERVER(url, *args, **kwargs)
+    elif (on_refused := kwargs.get("on_refused")) is not None:
+        await on_refused()
+
+
+mda_forwarding.forward_to_trigger_server = _clicks_stay_here
 
 fakes.seed_bare_remotes()
 
@@ -199,9 +218,8 @@ async def _reset_durable_pr_state() -> None:
 
     from openswe.database import postgres
 
-    if postgres.configured():
-        async with postgres.transaction() as connection:
-            await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
+    async with postgres.transaction() as connection:
+        await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")
@@ -398,7 +416,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
 
 @app.post("/control/github-event")
 async def control_github_event(request: Request) -> JSONResponse:
-    """Deliver a signed GitHub webhook to the real ``/webhooks/github`` route.
+    """Deliver a GitHub event as MDA's GitHub channel does, to the backend's channel API.
 
     The mirror of ``/mock/slack/action`` for the other side: CI and review
     events arrive asynchronously in production, and the only faithful way to
@@ -409,10 +427,8 @@ async def control_github_event(request: Request) -> JSONResponse:
     payload = body.get("payload")
     if not event or not isinstance(payload, dict):
         raise HTTPException(400, "An event name and payload object are required")
-    response = await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
     return JSONResponse(
-        {"status_code": response.status_code, "body": response.json()},
-        status_code=response.status_code,
+        await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
     )
 
 
@@ -666,6 +682,8 @@ async def _seed_test_user_mappings() -> None:
             email=user["email"],
             display_name=user["name"],
         )
+        if not os.environ.get("E2E_OAUTH"):
+            signed_in = await oauth_providers.provision(signed_in, user["email"])
         await signed_in.link(
             "slack", user["slack_id"], login=user["login"], email=user["email"], team_id="T_E2E"
         )
@@ -697,21 +715,28 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
         return await client.post("/webhooks/slack", content=raw, headers=headers)
 
 
+def _github_channel() -> ModuleType:
+    """``tests/github_channel.py``: delivers as MDA's GitHub channel does."""
+    path = Path(__file__).parents[1] / "github_channel.py"
+    spec = importlib.util.spec_from_file_location("e2e_github_channel", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 async def _deliver_github_event(
     event: str, payload: dict[str, Any], delivery: str = ""
-) -> httpx2.Response:
-    """POST a signed GitHub webhook delivery to the real /webhooks/github route."""
-    raw = json.dumps(payload).encode()
-    signature = hmac.new(GITHUB_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
-    headers = {
-        "Content-Type": "application/json",
-        "X-GitHub-Event": event,
-        "X-GitHub-Delivery": delivery or str(uuid.uuid7()),
-        "X-Hub-Signature-256": f"sha256={signature}",
+) -> dict[str, Any]:
+    """Deliver a GitHub event as MDA's GitHub channel does, to the real channel API."""
+    delivered = await _github_channel().deliver_as_mda(
+        app, event, payload, secret=MDA_SERVICE_SECRET, delivery_id=delivery or None
+    )
+    return {
+        "work": list(delivered.work),
+        "issue_run": delivered.issue_run.model_dump(mode="json") if delivered.issue_run else None,
     }
-    transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
-        return await client.post("/webhooks/github", content=raw, headers=headers)
 
 
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
@@ -732,7 +757,7 @@ async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response
 async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> JSONResponse:
     event = payload["event"]
     channel = str(event["channel"])
-    thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
+    thread_ts = str(event["thread_ts"])
     thread_id = await lookup_slack_thread_id(channel, thread_ts)
     if thread_id is None and channel.startswith("D"):
         # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
@@ -863,10 +888,12 @@ async def _signed_in(login: str, email: str) -> User:
     """The ``users`` row a real sign-in would give ``login``, created like the OAuth callback does."""
     await _seed_test_user_mappings()
     user = await User.for_login("github", login)
-    if user is not None:
-        return user
-    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
-    return await User.sign_in("github", github_id, login=login, email=email)
+    if user is None:
+        github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
+        user = await User.sign_in("github", github_id, login=login, email=email)
+    if not os.environ.get("E2E_OAUTH"):
+        user = await oauth_providers.provision(user, user.email or email)
+    return user
 
 
 @app.post("/control/notifications")
@@ -986,17 +1013,17 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
             for u in TEST_USERS
         )
         return HTMLResponse(
-            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Open SWE</title>
+            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Robin</title>
             <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
             <main data-testid="fake-github-login">
-              <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
+              <h1 style="font-size:1.1rem">Authorize Robin</h1>
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
-                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Open SWE</button>
+                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Robin</button>
               </form>
             </main>
             </body>"""
@@ -1019,19 +1046,18 @@ for _i, _route in enumerate(app.router.routes):
         break
 
 
-if os.environ.get("E2E_OAUTH"):
-    from cryptography.fernet import Fernet
-    from oauth_fakes import OAuthProviders
+oauth_providers = OAuthProviders(BASE_URL)
+oauth_providers.install(app)
+os.environ["LANGSMITH_CONNECTION_URL"] = oauth_providers.issuer
+os.environ["LANGSMITH_OAUTH_CLIENT_ID"] = "e2e-langsmith"
+os.environ["LANGSMITH_OAUTH_CLIENT_SECRET"] = "e2e-langsmith-secret"
+os.environ["LANGSMITH_ENDPOINT"] = oauth_providers.issuer
+os.environ["LANGSMITH_API_KEY"] = "e2e-deployment-key"
+os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
+if os.environ.get("E2E_OAUTH"):
     from openswe.dashboard import auth_routes, github_link
 
-    oauth_providers = OAuthProviders(BASE_URL)
-    oauth_providers.install(app)
-    os.environ["LANGSMITH_CONNECTION_URL"] = oauth_providers.issuer
-    os.environ["LANGSMITH_OAUTH_CLIENT_ID"] = "e2e-langsmith"
-    os.environ["LANGSMITH_OAUTH_CLIENT_SECRET"] = "e2e-langsmith-secret"
-    os.environ["LANGSMITH_LOGIN_ORG_ID"] = "e2e-org"
-    os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
     os.environ["GITHUB_APP_CLIENT_ID"] = "e2e-github"
     auth_routes.GITHUB_AUTHORIZE_URL = BASE_URL + "/fake-gh/link/authorize"
     github_link.exchange_code = oauth_providers.exchange_github
@@ -1058,7 +1084,9 @@ async def control_account_recovery_thread() -> JSONResponse:
             "graph_id": "agent",
         },
     )
-    return JSONResponse({"thread_id": thread.thread_id, "login": login, "email": email})
+    return JSONResponse(
+        {"thread_id": thread.thread_id, "login": login, "email": email, "user_id": str(user.id)}
+    )
 
 
 @app.post("/control/logout")
@@ -1093,12 +1121,17 @@ async def mock_users() -> JSONResponse:
 
 
 @app.get("/mock/slack/messages")
-async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse:
+async def slack_messages(
+    channel: str = "", thread_ts: str = "", current_thread: bool = False
+) -> JSONResponse:
     selected_channel = channel or CURRENT_THREAD["channel"]
     assert selected_channel is not None
+    selected_thread = thread_ts or (CURRENT_THREAD["thread_ts"] if current_thread else "")
     msgs = (
-        fakes.slack_thread(selected_channel, thread_ts)
-        if thread_ts
+        fakes.slack_thread(selected_channel, selected_thread)
+        if selected_thread
+        else []
+        if current_thread
         else fakes.slack_messages(selected_channel)
     )
     return JSONResponse(
@@ -1124,22 +1157,16 @@ async def slack_state(channel: str = "") -> JSONResponse:
     selected_channel = (
         current_channel if current_channel != DEMO_CHANNEL else channel or DEMO_CHANNEL
     )
-    channels = [{"id": DEMO_CHANNEL, "name": "demo", "code_channel": False}]
+    channels = [{"id": DEMO_CHANNEL, "name": "demo"}]
     channels.extend(
         {
             "id": message_channel,
             "name": "direct-message"
             if message_channel.startswith("D")
             else message_channel.lower(),
-            "code_channel": False,
         }
         for message_channel in fakes.slack_channels()
-        if message_channel != DEMO_CHANNEL and message_channel not in fakes.CODE_CHANNELS
-    )
-    channels.extend(
-        {**value, "code_channel": True}
-        for value in fakes.CODE_CHANNELS.values()
-        if not value.get("archived")
+        if message_channel != DEMO_CHANNEL
     )
     return JSONResponse({"selected_channel": selected_channel, "channels": channels})
 
@@ -2004,8 +2031,7 @@ _CHANNEL_NAMES = {REVIEW_CHANNEL: "reviews"}
 
 @app.get("/fake-slack/conversations.info")
 async def slack_conversations_info(channel: str = "") -> JSONResponse:
-    code_channel = fakes.CODE_CHANNELS.get(channel)
-    name = code_channel["name"] if code_channel else _CHANNEL_NAMES.get(channel, "demo")
+    name = _CHANNEL_NAMES.get(channel, "demo")
     data: dict[str, Any] = {
         "id": channel,
         "name": name,
@@ -2019,8 +2045,6 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "topic": {"value": "Demo channel topic"},
         "purpose": {"value": "Demo channel purpose"},
     }
-    if code_channel:
-        data["properties"] = {"record_channel": {"record_type": "agent_channel"}}
     return _ok({"channel": data})
 
 
@@ -2064,71 +2088,6 @@ async def slack_conversations_history(channel: str = "") -> JSONResponse:
             ]
         }
     )
-
-
-@app.post("/fake-slack/agents.conversations.create")
-async def slack_create_code_channel(request: Request) -> JSONResponse:
-    channel = fakes.create_code_channel(await request.json())
-    return _ok({"channel": {"id": channel["id"]}})
-
-
-@app.post("/fake-slack/agents.sessions.setStatus")
-async def slack_set_code_channel_status(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(
-        str(body.get("channel_id") or ""), status=body.get("status")
-    )
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.sessions.rename")
-async def slack_rename_code_channel(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(str(body.get("channel_id") or ""), name=body.get("title"))
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.conversations.setProperties")
-async def slack_set_code_channel_properties(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel_id = str(body.get("channel_id") or "")
-    code_channel = body.get("code_channel") if isinstance(body.get("code_channel"), dict) else {}
-    values: dict[str, Any] = {}
-    if "context_bar_items" in code_channel:
-        values["context_bar_items"] = code_channel["context_bar_items"]
-    if "summary_message" in code_channel:
-        values["summary_message"] = code_channel["summary_message"]
-    if "agent_resource" in body:
-        values["agent_resource"] = body["agent_resource"]
-    channel = fakes.update_code_channel(channel_id, **values)
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.conversations.setCommands")
-async def slack_set_code_channel_commands(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(
-        str(body.get("channel_id") or ""), commands=body.get("commands", [])
-    )
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.conversations.setView")
-async def slack_set_code_channel_view(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.CODE_CHANNELS.get(str(body.get("channel_id") or ""))
-    if channel is None:
-        return JSONResponse({"ok": False, "error": "channel_not_found"})
-    view = {**body, "view_id": f"V{len(channel['views']) + 1}"}
-    channel["views"].append(view)
-    return _ok(view)
-
-
-@app.post("/fake-slack/agents.conversations.archive")
-async def slack_archive_code_channel(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(str(body.get("channel_id") or ""), archived=True)
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
 
 
 @app.get("/fake-slack/chat.getPermalink")

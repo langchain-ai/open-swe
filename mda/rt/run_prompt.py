@@ -10,7 +10,7 @@ goes first:
 2. the run's prompt (``ModelCall.system_prompt``), the same for every thread of the
    deployment;
 3. the workspace's prompt (``ModelCall.workspace_prompt``), the same for every thread
-   of the workspace that opened since its curator last published;
+   of the workspace;
 4. the run's skills, the same for the runs of people who see the same skills;
 5. what only the thread's prompt says (``ModelCall.thread_prompt``).
 

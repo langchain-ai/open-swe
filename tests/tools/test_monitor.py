@@ -1,16 +1,25 @@
 import asyncio
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
+from sqlalchemy import text
 
-from openswe.database import postgres
+from openswe.database import postgres, transaction
 from openswe.monitors import budget, delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
-from openswe.monitors.sandbox import MonitorEnd, MonitorEvent, PendingMonitor, SandboxMonitors
+from openswe.monitors.sandbox import (
+    MonitorBurst,
+    MonitorEnd,
+    MonitorEvent,
+    PendingMonitor,
+    SandboxMonitors,
+)
 from openswe.sandboxes.scripts import SandboxScript, source
 from openswe.sandboxes.tool_access import ToolAccess
 from openswe.webhooks import event_matches
@@ -59,7 +68,9 @@ async def test_filter_picks_events_while_raw_output_keeps_every_line(
     ended = await _ended(monitors)
 
     assert (ended.status, ended.exit_code, ended.filter_exit_code) == ("failed", 3, 0)
-    assert [line for event in ended.events_pending for line in event.lines] == [
+    assert [
+        line for event in ended.events_pending for burst in event.bursts for line in burst.lines
+    ] == [
         "ERROR one",
         "ERROR two",
     ]
@@ -91,6 +102,96 @@ async def test_timeout_without_events_still_reports_the_raw_tail(
     assert ended.events_pending == []
     assert ended.end is not None
     assert ended.end.tail == [(1, "waiting for port 8080")]
+
+
+async def test_output_arriving_during_the_wait_is_held_into_one_event_until_too_noisy(
+    monitors: SandboxMonitors, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fast = (
+        source("monitor.py")
+        .replace("DEBOUNCE_SECONDS = 2", "DEBOUNCE_SECONDS = 0.3")
+        .replace("MAX_HELD_EVENTS = 10", "MAX_HELD_EVENTS = 3")
+    )
+    monkeypatch.setattr(
+        sandbox, "monitor_script", lambda: SandboxScript("monitor.py", str(tmp_path), text=fast)
+    )
+    await monitors.start(
+        "mon-4",
+        command="while :; do echo ERROR; sleep 0.05; done",
+        filter="",
+        description="errors",
+        timeout=30,
+        callback=False,
+    )
+
+    events: list[MonitorEvent] = []
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        [monitor] = await monitors.pending()
+        # Until the monitor ends, a read never finds more than one event waiting.
+        assert len(monitor.events_pending) <= 1 or monitor.end is not None
+        events.extend(monitor.events_pending)
+        last = monitor.events_pending[-1].seq if monitor.events_pending else 0
+        await monitors.ack("mon-4", seq=last, end=monitor.end is not None)
+        if monitor.end is not None:
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise AssertionError("monitor did not end")
+
+    assert (monitor.status, monitor.stop_reason) == (
+        "too_noisy",
+        "3 of its events in a row arrived while it was waiting between events",
+    )
+    assert [event.seq for event in events] == [1, 2, 3, 4]
+    # The waits double, so each held event gathers more bursts than the one before.
+    counts = [len(event.bursts) for event in events]
+    assert counts == sorted(counts) and counts[-1] > counts[0]
+    bursts = [burst for event in events for burst in event.bursts]
+    assert [burst.at_raw_line for burst in bursts[1:]] == [
+        burst.at_raw_line + len(burst.lines) for burst in bursts[:-1]
+    ]
+
+
+async def test_output_after_a_quiet_stretch_is_not_held_even_when_acks_come_late(
+    monitors: SandboxMonitors, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fast = (
+        source("monitor.py")
+        .replace("DEBOUNCE_SECONDS = 2", "DEBOUNCE_SECONDS = 0.2")
+        .replace("MAX_HELD_EVENTS = 10", "MAX_HELD_EVENTS = 1")
+    )
+    monkeypatch.setattr(
+        sandbox, "monitor_script", lambda: SandboxScript("monitor.py", str(tmp_path), text=fast)
+    )
+    await monitors.start(
+        "mon-5",
+        command="sleep 0.3; for i in 1 2 3 4 5 6; do echo ERROR $i; sleep 1; done",
+        filter="",
+        description="errors",
+        timeout=30,
+        callback=False,
+    )
+
+    events: list[MonitorEvent] = []
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        # Acks come every few seconds, like the polling job's, so events go
+        # out well after the output they hold.
+        await asyncio.sleep(3)
+        [monitor] = await monitors.pending()
+        events.extend(monitor.events_pending)
+        last = monitor.events_pending[-1].seq if monitor.events_pending else 0
+        await monitors.ack("mon-5", seq=last, end=monitor.end is not None)
+        if monitor.end is not None:
+            break
+    else:
+        raise AssertionError("monitor did not end")
+
+    assert monitor.status == "completed"
+    assert [line for event in events for burst in event.bursts for line in burst.lines] == [
+        f"ERROR {i}" for i in range(1, 7)
+    ]
 
 
 async def test_raw_log_rotates_and_keeps_numbering_across_segments(
@@ -187,7 +288,13 @@ async def test_spent_wake_budget_holds_monitor_output_on_every_delivery_path(
 
 @pytest.mark.usefixtures("registry_db")
 async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
-    event = MonitorEvent(seq=1, at_raw_line=2, lines=["ERROR one"])
+    event = MonitorEvent(
+        seq=1,
+        bursts=[
+            MonitorBurst(at_raw_line=2, lines=["ERROR one"]),
+            MonitorBurst(at_raw_line=9, lines=["ERROR two"]),
+        ],
+    )
     ended = PendingMonitor(
         monitor_id="mon-1",
         description="errors",
@@ -204,15 +311,32 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
 
     owed = await EventMatch.owed("thread-1")
     assert [match.delivery_id for match in owed] == ["mon-1:1", "mon-1:end"]
-    assert "ERROR one" in owed[0].content
+    assert "ERROR one" in owed[0].content and "Raw line 9:\n\n```text\nERROR two" in owed[0].content
     assert "the command failed" in owed[1].content
 
 
-async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_running(
+@pytest.mark.usefixtures("registry_db")
+async def test_dashboard_lists_event_listeners_without_waking_an_idle_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.threads import background_work
+    from openswe.webhooks.event_subscriptions import EventSubscription
 
+    workspace_id = uuid4()
+    async with transaction() as conn:
+        await conn.execute(
+            text("INSERT INTO workspace (id, slug, name) VALUES (:id, 'acme', 'Acme')"),
+            {"id": workspace_id},
+        )
+    await EventSubscription(
+        thread_id="thread-1",
+        workspace_id=workspace_id,
+        multitask_strategy="enqueue",
+        run_config={"thread_id": "thread-1"},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        event_types=["check_suite.completed"],
+        instructions="Recheck CI.",
+    ).create()
     metadata = {"sandbox_id": "sandbox-a", "running_background_tasks": [], "running_monitors": []}
     monkeypatch.setattr(
         background_work, "_readable_thread_metadata", AsyncMock(return_value=metadata)
@@ -224,6 +348,10 @@ async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_runnin
     work = await background_work.get_dashboard_thread_background_work("thread-1", "alice")
 
     assert (work.commands, work.monitors) == ([], [])
+    assert [
+        (listener.target, listener.event_types, listener.instructions)
+        for listener in work.listeners
+    ] == [("workspace", ["check_suite.completed"], "Recheck CI.")]
 
 
 async def test_dashboard_shows_no_output_of_another_threads_command(
@@ -275,6 +403,7 @@ class FakeThreads:
 def _human(text: str) -> dict[str, object]:
     return {
         "id": text,
+        "type": "human",
         "content": f'<input-message sender="u" surface="web" kind="human">{text}</input-message>',
     }
 
@@ -319,7 +448,9 @@ async def test_events_past_the_allowance_stop_the_monitors(
         monitor_id="mon-noisy",
         status="running",
         events_pending=[
-            MonitorEvent(seq=seq, at_raw_line=seq, lines=[f"ERROR {seq}"]) for seq in range(1, 61)
+            # The single-burst shape runners started by an earlier script still write.
+            MonitorEvent.model_validate({"seq": seq, "at_raw_line": seq, "lines": [f"ERROR {seq}"]})
+            for seq in range(1, 61)
         ],
     )
     stopped: dict[str, str] = {}

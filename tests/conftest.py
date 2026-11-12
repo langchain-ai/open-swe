@@ -2,8 +2,6 @@
 
 import asyncio
 import hashlib
-import hmac
-import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -11,20 +9,28 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import httpx
 import httpx2
 import pytest
+from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue, TypeAdapter
 
+from openswe.dashboard.langsmith_login import LangSmithLogin
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, index, listing, proxy, runs, summary
 from openswe.threads.index import IndexedThread
 from openswe.threads.store import CommandReply, ThreadStore
 from openswe.tools import access as tool_access
+from openswe.users import User
+from openswe.users.models import Provider, UserIdentity
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
+from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_url
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
@@ -91,6 +97,10 @@ class ThreadStoreOverClient(ThreadStore):
     async def state(self, thread_id: str) -> dict[str, Any] | None:
         return await proxy.langgraph_client().threads.get_state(thread_id)
 
+    async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
+        state = await proxy.langgraph_client().threads.get_state(thread.thread_id)
+        return TypeAdapter(dict[str, JsonValue]).validate_python(dict(state))
+
     async def command(
         self, thread_id: str, body: bytes, *, user_id: str | None = None
     ) -> CommandReply:
@@ -102,6 +112,89 @@ class ThreadStoreOverClient(ThreadStore):
         return CommandReply(
             response.status_code, response.content, response.headers.get("content-type")
         )
+
+
+class LangSmithUsers:
+    """Explicit test people with linked, currently authorized LangSmith accounts."""
+
+    def __init__(self) -> None:
+        self.people: dict[UUID, User] = {}
+        self.revoked: set[UUID] = set()
+        self.original_get = User.get
+        self.original_for_login = User.for_login
+        self.original_for_identity = User.for_identity
+        self.original_for_session = User.for_session
+
+    def add(self, login: str, *, user_id: UUID | None = None) -> User:
+        user = User(identities=[UserIdentity(provider="langsmith", external_id=f"ls-{login}")])
+        if user_id is not None:
+            user.id = user_id
+        if not login.startswith("user:"):
+            user.identities.append(UserIdentity(provider="github", external_id=login, login=login))
+        self.people[user.id] = user
+        return user
+
+    async def get(self, user_id: UUID) -> User | None:
+        return self.people.get(user_id) or await self.original_get(user_id)
+
+    async def for_session(self, user_id: UUID | None, login: str) -> User | None:
+        if user_id is not None and user_id in self.people:
+            return self.people[user_id]
+        user = next((user for user in self.people.values() if user.github_login == login), None)
+        return user or await self.original_for_session(user_id, login)
+
+    async def for_login(self, provider: Provider, login: str) -> User | None:
+        user = next(
+            (
+                user
+                for user in self.people.values()
+                if any(
+                    item.provider == provider and item.login == login for item in user.identities
+                )
+            ),
+            None,
+        )
+        return user or await self.original_for_login(provider, login)
+
+    async def for_identity(self, provider: Provider, external_id: str) -> User | None:
+        user = next(
+            (
+                user
+                for user in self.people.values()
+                if any(
+                    item.provider == provider and item.external_id == external_id
+                    for item in user.identities
+                )
+            ),
+            None,
+        )
+        return user or await self.original_for_identity(provider, external_id)
+
+    async def authorize_session(self, principal: DashboardPrincipal) -> str:
+        user = self.people.get(principal.user_id) if principal.user_id else None
+        if (
+            user is None
+            or user.id in self.revoked
+            or not any(
+                identity.provider == "langsmith"
+                and identity.external_id == principal.langsmith_subject
+                for identity in user.identities
+            )
+        ):
+            raise HTTPException(401, "LangSmith login expired — sign in again")
+        return "langsmith-test-token"
+
+
+@pytest.fixture
+def langsmith_users(monkeypatch: pytest.MonkeyPatch) -> LangSmithUsers:
+    """Fake only explicitly seeded people and the external LangSmith authorization check."""
+    users = LangSmithUsers()
+    monkeypatch.setattr(User, "get", users.get)
+    monkeypatch.setattr(User, "for_session", users.for_session)
+    monkeypatch.setattr(User, "for_login", users.for_login)
+    monkeypatch.setattr(User, "for_identity", users.for_identity)
+    monkeypatch.setattr(LangSmithLogin, "authorize_session", users.authorize_session)
+    return users
 
 
 class FakeUserRecords:
@@ -129,6 +222,13 @@ def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
         value = fake.items.get((self.kind, login.strip().lower(), key))
         return None if value is None else dict(value)
 
+    async def for_keys(self: UserRecords, login: str, keys: list[str]) -> dict[str, JsonObject]:
+        return {
+            key: dict(value)
+            for (kind, person, key), value in fake.items.items()
+            if kind == self.kind and person == login.strip().lower() and key in keys
+        }
+
     async def put(self: UserRecords, login: str, value: dict[str, Any], key: str = "") -> None:
         fake.seed(self.kind, login, value, key)
 
@@ -136,6 +236,7 @@ def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
         return fake.pop(self.kind, login, key)
 
     monkeypatch.setattr(UserRecords, "get", get)
+    monkeypatch.setattr(UserRecords, "for_keys", for_keys)
     monkeypatch.setattr(UserRecords, "put", put)
     monkeypatch.setattr(UserRecords, "delete", pop)
     monkeypatch.setattr(UserRecords, "pop", pop)
@@ -153,6 +254,48 @@ def grant_tool_access(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     return grant
 
 
+def serve_threads_from(monkeypatch: pytest.MonkeyPatch, get: Any) -> None:
+    """Serve the thread store's reads (``THREADS.get``) from a test's ``threads.get`` mock.
+
+    The backend reads a thread's metadata from its index, as its own ``/threads`` routes
+    do; a test that fakes a LangGraph client's ``threads.get`` keeps its threads, and its
+    errors, that way.
+    """
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from openswe.threads.store import THREADS  # noqa: PLC0415 - imports the app
+
+    async def indexed(thread_id: str) -> SimpleNamespace | None:
+        thread = await get(thread_id)
+        if not isinstance(thread, dict):
+            return None
+        return SimpleNamespace(
+            thread_id=thread_id, runtime="mda", metadata=thread.get("metadata") or {}
+        )
+
+    monkeypatch.setattr(THREADS, "get", indexed)
+
+
+def serve_runs_from(monkeypatch: pytest.MonkeyPatch, client: Any) -> None:
+    """Serve thread reads and run checks from a test's fake LangGraph ``client``.
+
+    The backend reads the thread from its index (``THREADS``) and asks the thread's
+    runtime whether a run is still pending or running; both come from ``client`` here,
+    and ``client.threads.get`` counts only the metadata reads.
+    """
+    from openswe.slack import thinking  # noqa: PLC0415 - imports the app
+
+    serve_threads_from(monkeypatch, client.threads.get)
+
+    async def has_active_run(thread_id: str) -> bool:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return True
+        return False
+
+    monkeypatch.setattr(thinking, "_thread_has_active_runs", has_active_run)
+
+
 def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
     """Treat ``logins`` as registered Open SWE users."""
     from openswe.users import User
@@ -163,37 +306,6 @@ def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> Non
         return frozenset(c.lower() for c in candidates if c.lower() in registered)
 
     monkeypatch.setattr(User, "known_logins", known_logins)
-
-
-async def post_signed_github_webhook(
-    event_type: str,
-    payload: Mapping[str, object],
-    *,
-    secret: str,
-    delivery_id: str | None = None,
-) -> httpx.Response:
-    """POST a signed GitHub webhook to the real app, on the test's own event loop.
-
-    An in-process ``httpx.AsyncClient`` rather than ``TestClient``: a
-    workspace-backed route reads ownership through ``registry_db``'s engine,
-    which is bound to the loop the test runs on, while ``TestClient`` drives the
-    request from a worker thread with an event loop of its own.
-    """
-    from openswe.api.app import app
-
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    headers = {
-        "Content-Type": "application/json",
-        "X-GitHub-Event": event_type,
-        "X-Hub-Signature-256": f"sha256={signature}",
-    }
-    if delivery_id is not None:
-        headers["X-GitHub-Delivery"] = delivery_id
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        return await client.post("/webhooks/github", content=body, headers=headers)
 
 
 _TEST_POSTGRES_URI_SETTING = "TEST_ANALYTICS_POSTGRES_URI"
@@ -211,21 +323,6 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
         pytest.skip(f"{_TEST_POSTGRES_URI_SETTING} is required for PostgreSQL regressions")
     async with isolated_database(uri, monkeypatch):
         yield
-
-
-@pytest.fixture
-async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[bool]:
-    """``registry_db`` when a database is configured; otherwise the unconfigured path.
-
-    Lets tests whose code under test degrades without PostgreSQL run both ways.
-    """
-    uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
-    if not uri:
-        monkeypatch.delenv("POSTGRES_URI", raising=False)
-        yield False
-        return
-    async with isolated_database(uri, monkeypatch):
-        yield True
 
 
 @pytest.fixture
@@ -444,3 +541,11 @@ def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
     monkeypatch.setattr(event_claims, "release", claims.release)
     monkeypatch.setattr(event_claims, "held", claims.is_held)
     return claims
+
+
+@pytest.fixture(autouse=True)
+def _no_dropped_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests see every event; the ones about ``DROPPED_EVENTS`` set it themselves."""
+    from openswe.webhooks import event_log
+
+    monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset())

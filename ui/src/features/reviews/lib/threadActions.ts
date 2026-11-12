@@ -4,8 +4,6 @@ import {
   type PullRequestThreadResult,
 } from "@/lib/api"
 
-export type PullRequestThreadActionName = "fix" | "address-comments"
-
 export interface ThreadActionLabels {
   idle: string
   running: string
@@ -27,38 +25,20 @@ export interface ThreadAction {
   run: (pr: OpenPullRequest) => Promise<PullRequestThreadResult>
 }
 
-export const threadActions: Record<PullRequestThreadActionName, ThreadAction> =
-  {
-    fix: {
-      labels: {
-        idle: "Fix",
-        running: "Fixing",
-        checking: "Checking…",
-        unavailable: "Fix unavailable",
-        queued: "Fix queued",
-        retry: "Retry fix",
-      },
-      toasts: {
-        queued: "Fix queued for",
-        running: "Already fixing",
-        failed: "Could not queue a fix for",
-      },
-      run: (pr) => api.fixPullRequest(pr),
-    },
-    "address-comments": {
-      labels: {
-        idle: "Address comments",
-        running: "Addressing comments",
-        checking: "Checking…",
-        unavailable: "Address comments unavailable",
-        queued: "Comment fixes queued",
-        retry: "Retry address comments",
-      },
-      toasts: {
-        queued: "Queued comment fixes for",
-        running: "Already addressing comments for",
-        failed: "Could not queue comment fixes for",
-      },
-      run: (pr) => api.addressPullRequestComments(pr),
-    },
-  }
+/** The one button that asks the agent to look the PR over and fix what is clearly broken. */
+export const fixUpAction: ThreadAction = {
+  labels: {
+    idle: "Fix up",
+    running: "Fixing up",
+    checking: "Checking…",
+    unavailable: "Fix up unavailable",
+    queued: "Fix up queued",
+    retry: "Retry fix up",
+  },
+  toasts: {
+    queued: "Fix up queued for",
+    running: "Already fixing up",
+    failed: "Could not queue a fix up for",
+  },
+  run: (pr) => api.fixUpPullRequest(pr),
+}

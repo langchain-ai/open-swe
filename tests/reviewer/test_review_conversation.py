@@ -114,7 +114,11 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
             "in_reply_to_id": reply_to,
             "user": _user("carol"),
             "created_at": f"2025-12-31T00:00:{comment_id:02d}Z",
-            "body": f"note {comment_id} <!-- open-swe-review-comment {{}} -->",
+            "body": (
+                f"note {comment_id} <!-- open-swe-review-comment {{}} -->\n\n---\n"
+                f"*Your feedback helps {'Robin' if comment_id % 2 else 'Open SWE'} learn. "
+                "React with 👍 or 👎 to tell us if this review comment was useful.*"
+            ),
             "html_url": f"https://github.com/acme/app/pull/7#discussion_r{comment_id}",
             "path": "src/app.py",
             "line": line,
@@ -147,7 +151,8 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
                                 "isOutdated": False,
                                 "comments": {"nodes": [{"fullDatabaseId": "21"}]},
                             }
-                        ]
+                        ],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "next"},
                     }
                 }
             }
@@ -156,11 +161,45 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/graphql":
+            payload = json.loads(request.content)
+            assert "comments(first: 1)" in payload["query"]
+            assert "body" not in payload["query"]
+            if payload["variables"]["cursor"] == "next":
+                return httpx2.Response(
+                    200,
+                    json={
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": [
+                                            {
+                                                "id": "PRRT_23",
+                                                "isResolved": False,
+                                                "isOutdated": True,
+                                                "comments": {"nodes": [{"fullDatabaseId": "23"}]},
+                                            }
+                                        ],
+                                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                    }
+                                }
+                            }
+                        }
+                    },
+                )
             return httpx2.Response(200, json=thread_states)
         page = request.url.params["page"]
         match request.url.path:
             case "/repos/acme/app/issues/7/comments":
-                return httpx2.Response(200, json=full_page if page == "1" else [late_comment])
+                return httpx2.Response(
+                    200,
+                    json=full_page if page == "1" else [late_comment],
+                    headers={
+                        "Link": '<https://api.github.com/repos/acme/app/issues/7/comments?page=2>; rel="next"'
+                    }
+                    if page == "1"
+                    else {},
+                )
             case "/repos/acme/app/pulls/7/reviews":
                 return httpx2.Response(200, json=reviews)
             case "/repos/acme/app/pulls/7/comments":
@@ -206,7 +245,7 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
     assert author is not None and (author.login, author.bot) == ("carol", False)
     assert (outdated.id, outdated.node_id, outdated.resolved, outdated.outdated) == (
         23,
-        None,
+        "PRRT_23",
         False,
         True,
     )

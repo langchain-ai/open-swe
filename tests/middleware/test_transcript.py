@@ -68,11 +68,9 @@ def _install(
     *,
     transcribed: bool,
     turn_id: UUID | None = None,
-    postgres_configured: bool = True,
 ) -> FakeEngine:
     engine = FakeEngine()
     monkeypatch.setattr(mw, "append", engine.append)
-    monkeypatch.setattr(mw.postgres, "configured", lambda: postgres_configured)
 
     async def _has_transcript(thread_id: str) -> bool:
         return transcribed
@@ -492,8 +490,11 @@ async def test_a_follow_up_closes_the_turn_its_interrupted_predecessor_left_runn
     assert states[first_turn] == ("completed" if reuses_turn else "interrupted")
 
 
+@pytest.mark.parametrize("surface, expected_kind", [("slack", "slack"), ("web", "dashboard")])
 async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    expected_kind: str,
 ) -> None:
     """Who sent a message, on which surface, is carried by the envelope alone."""
     engine = _install(monkeypatch, transcribed=True, turn_id=None)
@@ -505,7 +506,7 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
         id="entity-channel",
     )
     envelope = (
-        '<input-message sender="slack:U1" surface="slack" kind="human">\n'
+        f'<input-message sender="slack:U1" surface="{surface}" kind="human">\n'
         "add a greet() helper\n</input-message>"
     )
     human = HumanMessage(content=envelope, id="human-1")
@@ -530,6 +531,7 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
         command.event for command in engine.commands if command.command_id.endswith(":requested")
     )
     assert requested.text == envelope
+    assert requested.sender.kind == expected_kind
     # The introduction that names the sender is recorded too, though it renders
     # as nothing: without it the reader has no display name to attribute by.
     recorded = [command for command in engine.commands if command.command_id.startswith("human:")]

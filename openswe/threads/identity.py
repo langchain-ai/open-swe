@@ -38,14 +38,14 @@ class ThreadIdentity:
         return self.github_login is not None and is_admin(email, login=self.subject)
 
     async def authorize(self) -> None:
-        if self.user_id is None:
-            return
         from fastapi import HTTPException
 
         from openswe.dashboard.langsmith_login import LangSmithLogin
 
-        if await LangSmithLogin().access_token(self.subject) is None:
-            raise HTTPException(401, "LangSmith login expired — sign in again")
+        user = await self.user()
+        if user is None:
+            raise HTTPException(401, "Sign in with LangSmith to use Robin")
+        await LangSmithLogin().authorize_user(user)
 
     async def user(self) -> User | None:
         if self.user_id is not None:

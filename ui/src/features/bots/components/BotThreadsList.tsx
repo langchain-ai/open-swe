@@ -1,3 +1,4 @@
+import { SlackLinks } from "@/lib/slack-links"
 import {
   ArrowLeftIcon,
   CaretRightIcon,
@@ -74,7 +75,7 @@ export function BotThreadsList({
         <p className="mt-space-1 text-xs text-secondary">
           Threads started by Slack bots on the allowlist. They are read-only
           here: reply in the Slack thread to steer one.
-          {!isAdmin && " Workspace admins manage which bots are allowed."}
+          {!isAdmin && " Robin admins manage which bots are allowed."}
         </p>
 
         {!bot &&
@@ -168,7 +169,7 @@ export function BotThreadsList({
               <EmptyState
                 icon={RobotIcon}
                 title="No bot threads yet"
-                description="They appear here once an allowed bot mentions Open SWE in Slack."
+                description="They appear here once an allowed bot mentions Robin in Slack."
                 className="rounded-xl border border-dashed border-default"
               />
             ) : (
@@ -217,7 +218,8 @@ function BotThreadRow({
   thread: AgentThread
   entry?: AllowedSlackBotEntry
 }) {
-  const slackUrl = thread.sourceAppUrl ?? thread.sourceUrl
+  const sourceUrl = thread.sourceAppUrl ?? thread.sourceUrl
+  const slackUrl = sourceUrl ? SlackLinks.normalize(sourceUrl) : undefined
   return (
     <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
       <Link

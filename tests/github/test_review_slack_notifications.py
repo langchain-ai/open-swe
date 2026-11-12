@@ -13,6 +13,7 @@ from openswe.slack import thinking
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.webhooks import common
+from tests.conftest import serve_runs_from
 
 
 @pytest.fixture
@@ -37,11 +38,11 @@ def review_notice(
     @asynccontextmanager
     async def locked(*args: object, thread_id: str) -> AsyncIterator[dict[str, object] | None]:
         async with lock:
-            yield await notifications.get_active_slack_thread(client, thread_id)
+            yield await notifications.get_active_slack_thread(thread_id)
 
     post = AsyncMock(return_value="1700000001.123456")
-    monkeypatch.setattr(notifications, "get_client", lambda **kwargs: client)
     monkeypatch.setattr(notifications, "slack_thread_mutation_lock", locked)
+    serve_runs_from(monkeypatch, client)
     monkeypatch.setattr(notifications, "post_slack_thread_reply_with_ts", post)
     return client, post
 
@@ -64,7 +65,6 @@ async def test_review_wakeup_posts_one_linked_notice(
     client, post = review_notice
     monkeypatch.setattr(common, "get_client", lambda **kwargs: client)
     monkeypatch.setattr(PullRequest, "link_thread", AsyncMock())
-    monkeypatch.setattr(webhook.postgres, "configured", lambda: False)
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="octo@example.com"))
     monkeypatch.setattr(User, "known_logins", AsyncMock(return_value=frozenset({"octo"})))
     monkeypatch.setattr(common, "get_or_resolve_thread_github_token", AsyncMock(return_value="t"))

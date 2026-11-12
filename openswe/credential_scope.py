@@ -5,9 +5,11 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from openswe.run_config import RunConfig
+from openswe.source_context import SourceContext
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread
+from openswe.workspaces.store import WORKSPACES
 
 
 class PrAuthorNotAParticipant(RuntimeError):
@@ -57,9 +59,7 @@ def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | No
     if metadata.get("visibility", "public") == "public":
         return None
     owner = metadata.get("owner_login")
-    login = (
-        (cfg.sender_id or "") if cfg.auth_provider == "langsmith" else cfg.github_login or ""
-    ).strip()
+    login = ((cfg.sender_id or "") if not cfg.github_linked else cfg.github_login or "").strip()
     if not isinstance(owner, str) or not login or owner.strip().lower() != login.lower():
         return None
     return login
@@ -80,7 +80,7 @@ async def private_credential_login(
 ) -> str | None:
     """Personal integrations require the saved private owner to start the run."""
     cfg, metadata = await _thread_scope(config, thread_id=thread_id)
-    if cfg.auth_provider == "langsmith":
+    if not cfg.github_linked:
         if (
             not cfg.user_id
             or metadata.get("owner_login") != f"user:{cfg.user_id}"
@@ -104,6 +104,17 @@ class GitHubCredentialScope:
         return "personal" if self.login is not None else "system"
 
     @classmethod
+    async def is_public_ask(cls, config: Mapping[str, Any] | None = None) -> bool:
+        _, metadata = await _thread_scope(config)
+        slack = SourceContext.from_metadata(metadata).slack_thread
+        return (
+            metadata.get("visibility", "public") == "public"
+            and slack is not None
+            and bool(slack.channel_id)
+            and await WORKSPACES.is_ask_channel(slack.channel_id)
+        )
+
+    @classmethod
     async def for_thread(
         cls, config: Mapping[str, object] | None = None, *, thread_id: str | None = None
     ) -> GitHubCredentialScope:
@@ -118,10 +129,19 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
-    if cfg.auth_provider == "langsmith":
-        raise PermissionError("Agent Workspace has no GitHub repository access")
+    if not cfg.github_linked:
+        raise PermissionError("GitHub is not linked for this thread")
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
+    if await GitHubCredentialScope.is_public_ask():
+        if cfg.background_task_completion:
+            if participant := _requested_participant(requested, metadata):
+                return participant
+            raise RuntimeError("Ask background completion requires a named thread participant")
+        login = (cfg.github_login or "").strip()
+        if not login:
+            raise RuntimeError("Ask PR creation requires an authenticated requester")
+        return login
     owner = metadata.get("owner_login")
     has_owner = isinstance(owner, str) and bool(owner.strip())
     shared_user_thread = metadata.get("owner_type") != "system" and (

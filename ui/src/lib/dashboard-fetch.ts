@@ -1,7 +1,8 @@
 import { createIsomorphicFn } from "@tanstack/react-start"
-import { getRequestHeader } from "@tanstack/react-start/server"
+import { getRequest, getRequestHeader } from "@tanstack/react-start/server"
 
 import { dashboardApiBase } from "./api-base"
+import { PUBLIC_ORIGIN_HEADER, publicOrigin } from "./public-origin"
 
 /**
  * Origin for dashboard API requests. The browser uses a relative base so calls
@@ -14,13 +15,19 @@ export const dashboardRequestOrigin = createIsomorphicFn()
 
 /**
  * `credentials: "include"` means nothing on the server, so the session cookie
- * has to be copied off the incoming request by hand.
+ * has to be copied off the incoming request by hand. A server render calls the
+ * backend directly rather than through the proxy, so it also names the domain
+ * the browser used, the same way the proxy does.
  */
 export const dashboardForwardedHeaders = createIsomorphicFn()
   .client((): Record<string, string> => ({}))
   .server((): Record<string, string> => {
+    const headers: Record<string, string> = {
+      [PUBLIC_ORIGIN_HEADER]: publicOrigin(getRequest()),
+    }
     const cookie = getRequestHeader("cookie")
-    return cookie ? { cookie } : {}
+    if (cookie) headers.cookie = cookie
+    return headers
   })
 
 export function dashboardApiUrl(path: string): string {
@@ -35,13 +42,20 @@ export function newRequestId(): string {
 
 /** A dashboard API call that failed; `requestId` matches the server's logs. */
 export class DashboardRequestError extends Error {
+  readonly retryAfterMs?: number
+
   constructor(
     public readonly status: number,
     message: string,
     public readonly requestId?: string,
-    options?: ErrorOptions
+    options?: ErrorOptions,
+    retryAfter?: string | null
   ) {
     super(message, options)
+    const seconds =
+      retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN
+    if (Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 2_147_483)
+      this.retryAfterMs = seconds * 1000
   }
 }
 

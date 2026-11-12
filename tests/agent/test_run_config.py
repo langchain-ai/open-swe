@@ -1,10 +1,10 @@
 from openswe.run_config import RunConfig
 
 
-def test_langsmith_login_cannot_enable_github_credentials():
+def test_unlinked_github_cannot_enable_github_credentials():
     cfg = RunConfig.parse(
         {
-            "auth_provider": "langsmith",
+            "github_linked": False,
             "github_login": "admin",
             "github_user_id": 123,
             "repo": {"owner": "private", "name": "repo"},
@@ -14,6 +14,17 @@ def test_langsmith_login_cannot_enable_github_credentials():
     assert cfg.github_user_id is None
     assert cfg.repo is None
     assert cfg.repo_explicitly_none is True
+    assert cfg.dump()["auth_provider"] == "langsmith"
+    assert RunConfig.parse(cfg.dump()).github_linked is False
+
+
+def test_legacy_langsmith_auth_provider_means_unlinked():
+    raw = {"auth_provider": "langsmith", "github_login": "admin"}
+    assert RunConfig.unlinked(raw)
+    cfg = RunConfig.parse(raw)
+    assert cfg.github_linked is False
+    assert cfg.github_login is None
+    assert cfg.dump()["auth_provider"] == "langsmith"
 
 
 def test_github_login_is_preserved():

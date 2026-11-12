@@ -79,6 +79,12 @@ class QueueConfiguration(BaseModel):
                     if self.sync_workflow_policy or self.workflow_policy_revision
                     else {}
                 ),
+                **(
+                    {"validation_suite": self.policy.validation.suite}
+                    if self.policy.validation is not None
+                    and self.policy.validation.suite != "smoke"
+                    else {}
+                ),
                 "checks": self.policy.model_dump(mode="json")["checks"],
                 "dispatch_actor_id": self.policy.validation.dispatch_actor_id
                 if self.policy.validation is not None
@@ -99,13 +105,23 @@ class QueueConfiguration(BaseModel):
             raise ValueError("Workflow policy does not match the configured queue identities")
         if approved.workflow_policy_revision < self.workflow_policy_revision or (
             approved.workflow_policy_revision == self.workflow_policy_revision
-            and approved.workflow_digest != self.workflow_digest
+            and (
+                approved.workflow_digest != self.workflow_digest
+                or approved.validation_suite != validation.suite
+            )
         ):
             raise ValueError("Workflow policy revision is stale or was reused")
         return self.model_copy(
             update={
                 "workflow_digest": approved.workflow_digest,
                 "workflow_policy_revision": approved.workflow_policy_revision,
+                "policy": self.policy.model_copy(
+                    update={
+                        "validation": validation.model_copy(
+                            update={"suite": approved.validation_suite}
+                        )
+                    }
+                ),
             }
         )
 
@@ -118,8 +134,11 @@ class QueueConfiguration(BaseModel):
             or not self.policy.checks
             or self.dispatch_url is None
             or self.workflow_digest is None
+            or self.policy.validation.suite != "smoke"
         ):
-            raise ValueError("The queue needs validation and required-check provenance")
+            raise ValueError(
+                "The custom queue needs smoke validation and required-check provenance"
+            )
         if self.check_app_id is not None and (
             self.mode != "native"
             or self.policy.validation is None

@@ -1,3 +1,7 @@
+import {
+  invalidationTopic,
+  type InvalidationTopic,
+} from "@/lib/invalidations/topics"
 import type {
   AgentSource,
   AgentStatus,
@@ -182,42 +186,52 @@ export function sortSidebarThreads(
   return [...threads].sort(mode === "created" ? byCreation : byRecency)
 }
 
-export interface SidebarAgeGroup {
-  key: "today" | "yesterday" | "older"
+export interface SidebarDayGroup {
+  key: string
   label: string
   threads: Array<SidebarThreadItem>
 }
 
-/** Buckets threads into Today, Yesterday and Older by when they were last updated, each ordered by creation. */
-export function groupSidebarThreadsByAge(
+/** Buckets threads by their local creation day, newest first, each day ordered by creation. */
+export function groupSidebarThreadsByDay(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
-): Array<SidebarAgeGroup> {
+): Array<SidebarDayGroup> {
   const today = new Date(now).setHours(0, 0, 0, 0)
   const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
-  const buckets: Record<SidebarAgeGroup["key"], Array<SidebarThreadItem>> = {
-    today: [],
-    yesterday: [],
-    older: [],
-  }
+  const days = new Map<number, Array<SidebarThreadItem>>()
   for (const thread of threads) {
-    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
-    buckets[
-      day >= today ? "today" : day >= yesterday ? "yesterday" : "older"
-    ].push(thread)
+    const day = new Date(thread.createdAt).setHours(0, 0, 0, 0)
+    const items = days.get(day) ?? []
+    items.push(thread)
+    days.set(day, items)
   }
-  return (
-    [
-      ["today", "Today"],
-      ["yesterday", "Yesterday"],
-      ["older", "Older"],
-    ] as const
-  )
-    .filter(([key]) => buckets[key].length > 0)
-    .map(([key, label]) => ({
-      key,
-      label,
-      threads: buckets[key].sort(byCreation),
+  return [...days.entries()]
+    .sort(([left], [right]) => right - left)
+    .map(([day, items]) => ({
+      // Collapsed sections are saved by key, so Today and Yesterday keep theirs
+      // as the days roll over, and an older day keeps its date.
+      key:
+        day === today
+          ? "today"
+          : day === yesterday
+            ? "yesterday"
+            : new Date(day).toLocaleDateString("en-CA"),
+      label:
+        day === today
+          ? "Today"
+          : day === yesterday
+            ? "Yesterday"
+            : new Date(day).toLocaleDateString([], {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                year:
+                  new Date(day).getFullYear() === now.getFullYear()
+                    ? undefined
+                    : "numeric",
+              }),
+      threads: items.sort(byCreation),
     }))
 }
 
@@ -275,15 +289,20 @@ export function sidebarItemContains(
 export function sidebarRefreshInterval(
   threads: ReadonlyArray<AgentThread> = []
 ): number | false {
-  if (
-    threads.some((thread) =>
-      threadFamily(thread).some((member) => member.status === "running")
-    )
-  )
-    return 2000
-  return threads.some((thread) => thread.taskMembership?.role === "coordinator")
+  const members = threads.flatMap(threadFamily)
+  if (members.some((member) => member.status === "running")) return 2000
+  return members.some((member) => member.pendingWorkflowApproval)
     ? 30_000
     : false
+}
+
+/** What tells a sidebar list that a thread it shows gained or lost a worker, its first included. */
+export function taskWorkerTopics(
+  threads: ReadonlyArray<AgentThread> = []
+): Array<InvalidationTopic> {
+  return threads
+    .filter((thread) => thread.taskMembership?.role !== "worker")
+    .map((thread) => invalidationTopic("task-workers", thread.id))
 }
 
 export function pinnedThreadShortcuts(

@@ -20,7 +20,11 @@ from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.pr_links import SlackPullRequestLink
 from openswe.slack.records import SlackMessage
 from openswe.slack.request import SlackRequest
+from openswe.users import User, UserIdentity
 from openswe.webhooks import common as webhook_common
+from openswe.workspaces import routing
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class _FakeThreads:
@@ -534,3 +538,34 @@ async def test_message_update_rejects_changed_sender_identity() -> None:
 
     assert response == {"status": "ignored", "reason": "Updated message identity changed"}
     assert background_tasks.tasks == []
+
+
+@pytest.mark.parametrize("sender", ["U1", "U2"])
+@pytest.mark.parametrize("reply", [False, True])
+async def test_personal_kitchen_only_handles_the_selected_users_messages(
+    monkeypatch: pytest.MonkeyPatch, sender: str, reply: bool
+) -> None:
+    person = User(
+        preferences={"personal_kitchen_channel_id": "C1"},
+        identities=[UserIdentity(provider="slack", external_id="U1")],
+    )
+    monkeypatch.setattr(routing.WORKSPACES, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(side_effect=lambda _, user: person if user == "U1" else None),
+    )
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", routing.is_kitchen_channel)
+    payload = _message_payload("please fix this", f"Ev-personal-{sender}-{reply}")
+    payload["event"]["user"] = sender
+    if not reply:
+        del payload["event"]["thread_ts"]
+    background_tasks = _FakeBackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+    assert response["status"] == ("accepted" if sender == "U1" else "ignored")
+    if sender == "U1":
+        request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+        assert request.kitchen_channel
+        assert request.treat_all_messages_as_mentions

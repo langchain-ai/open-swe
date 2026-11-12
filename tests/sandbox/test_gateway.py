@@ -12,9 +12,8 @@ from fireworks import AsyncFireworks
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
-
-from openswe.utils import model
-from openswe.utils.model import OpenAIReasoning
+from runtime_api import models as model
+from runtime_api.models import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",
@@ -137,6 +136,75 @@ async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
             await client.close()
 
     assert paths == ["/fireworks/v1/chat/completions"]
+
+
+async def test_gemini_sdk_uses_allowlisted_gateway_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths: list[str] = []
+    services: list[str | None] = []
+    expected_path = "/gemini/v1beta/models/gemini-4-carbon:streamGenerateContent"
+
+    async def handler(request: web.Request) -> web.Response:
+        paths.append(request.path)
+        services.append(request.headers.get(model.GATEWAY_SERVICE_HEADER))
+        if request.path != expected_path:
+            return web.json_response({"error": "path not allow-listed by gateway"}, status=501)
+        return web.Response(
+            content_type="text/event-stream",
+            text='data: {"candidates":[{"content":{"parts":[{"text":"ok"}],'
+            '"role":"model"},"finishReason":"STOP"}]}\n\n',
+        )
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "dummy")
+    async with _http_server(handler) as base_url:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
+        chat_model = model.build_chat_model(
+            "google_genai:gemini-4-carbon",
+            {"max_retries": 1, "max_output_tokens": 64000, "reasoning_effort": "medium"},
+            use_gateway=True,
+        )
+        chunks = [chunk async for chunk in chat_model.astream("hi")]
+
+    assert "".join(str(chunk.content) for chunk in chunks) == "ok"
+    assert paths == [expected_path]
+    assert services == ["robin"]
+
+
+@pytest.mark.parametrize(
+    ("model_id", "kwargs"),
+    [
+        ("openai:gpt-5.6-sol", {}),
+        ("anthropic:claude-opus-5-5", {}),
+        ("baseten:zai-org/GLM-5", {}),
+        (
+            "fireworks:accounts/fireworks/models/glm-5p2",
+            {"model_kwargs": {"reasoning_effort": "high"}},
+        ),
+    ],
+)
+async def test_gateway_calls_name_robin_as_the_service(
+    monkeypatch: pytest.MonkeyPatch, model_id: str, kwargs: dict[str, object]
+) -> None:
+    """Every gateway-routed provider sends the service header, keeping its own request settings."""
+    requests: list[tuple[str | None, bytes]] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requests.append((request.headers.get(model.GATEWAY_SERVICE_HEADER), await request.read()))
+        return web.json_response({"error": {"message": "stop"}}, status=400)
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "dummy")
+    async with _http_server(handler) as base_url:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
+        chat_model = model.build_chat_model(
+            model_id, {"max_retries": 0, **kwargs}, use_gateway=True
+        )
+        with pytest.raises(Exception):  # noqa: B017, PT011 - the stub always answers 400
+            await chat_model.ainvoke("hi")
+
+    assert [service for service, _ in requests] == ["robin"]
+    if "model_kwargs" in kwargs:
+        assert b'"reasoning_effort":"high"' in requests[0][1].replace(b" ", b"")
 
 
 # --- resolve_gateway_enabled --------------------------------------------------

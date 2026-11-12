@@ -20,6 +20,9 @@ from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurfa
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads.inbox import ThreadInbox
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
@@ -58,6 +61,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
         {
+            "save_user_instructions",
             "save_user_settings",
             "save_user_skill",
             "delete_user_skill",
@@ -69,7 +73,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
-    from runtime_api.skills import RunSkills
+    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillsRequest
 
     from openswe.agent_api.agent import AgentKind
     from openswe.agent_api.run_calls import TokenRun
@@ -98,6 +102,13 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert "Do it." in personal.content
     # The runtime answers reads of skills itself; the files API serves none of them.
     assert not set(surface.skill_sources) & set(surface.backend_paths)
+    # A runtime from before serving the bundled skills itself still has them listed.
+    assert any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
+
+    # A runtime that serves them gets PostgreSQL's skills alone.
+    served = SkillsRequest(served=[BUNDLED_SKILLS]).model_dump()
+    own = RunSkills.model_validate(await TokenRun.answer(AgentKind(), run, "skills", served))
+    assert own.files and not any(f.path.startswith(BUNDLED_SKILLS) for f in own.files)
 
 
 @pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])
@@ -165,7 +176,10 @@ async def test_existing_task_keeps_controls_without_delegation(
     )
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
-        coordinator_thread_id="coordinator", title="Existing task", workspace_id=workspace.id
+        coordinator_thread_id="coordinator",
+        title="Existing task",
+        workspace_id=workspace.id,
+        delegated=True,
     )
     task.workspace = workspace
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
@@ -298,7 +312,6 @@ async def _agent_catalog(
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await agent_catalog(config, surface)
@@ -346,7 +359,10 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
 
 
 @pytest.mark.asyncio
-async def test_routed_default_route_uses_fast_tier_not_profile_default() -> None:
+async def test_routed_default_route_uses_balanced_tier_not_profile_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     config = _base_config()
     config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
     profile = {
@@ -356,7 +372,7 @@ async def test_routed_default_route_uses_fast_tier_not_profile_default() -> None
     }
     agent = await _agent_catalog(config, profile=profile)
 
-    assert _main_model(agent).model_id == "google_genai:gemini-3.8-flash"
+    assert _main_model(agent).model_id == "openai:gpt-6.1-sol"
 
 
 @pytest.mark.asyncio
@@ -591,8 +607,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     parent_names = {_registered_tool_name(tool) for tool in parent_tools}
     subagent_names = set(gp.tools)
     slack_names = {
-        "manage_code_channel",
-        "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_list_channel_members",
@@ -624,13 +638,13 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     ("thread_scope", "source", "channel_reads", "thread_reads"),
     [
         ("private", "slack", True, True),
-        ("public", "slack", False, True),
+        ("public", "slack", True, True),
         ("bot", "slack", True, True),
         ("private", "dashboard", True, True),
-        ("public", "dashboard", False, False),
+        ("public", "dashboard", True, True),
     ],
 )
-async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
+async def test_slack_reads_are_always_bound_and_refuse_at_call_time(
     thread_scope: str,
     source: str,
     channel_reads: bool,
@@ -663,7 +677,6 @@ async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
 
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert ("slack_read_channel_messages" in tool_names) is channel_reads
-    # A run started from Slack reads threads with the bot's own reach; a web one as channel history.
     assert ("slack_read_thread_messages" in tool_names) is thread_reads
 
     gp = next(item for item in subagents if item.name == "general-purpose")
@@ -739,8 +752,9 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 
 @pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
 async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
-    route: Literal["fast", "balanced", "performance"],
+    route: Literal["fast", "balanced", "performance"], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
@@ -767,11 +781,11 @@ async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_effort"),
     [
-        (None, "google_genai:gemini-3.8-flash", "low"),
+        (None, "openai:gpt-6.1-sol", "medium"),
         (
             {"default_model": "anthropic:claude-opus-5-5", "reasoning_effort": "high"},
-            "google_genai:gemini-3.8-flash",
-            "low",
+            "openai:gpt-6.1-sol",
+            "medium",
         ),
     ],
 )
@@ -813,14 +827,62 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         assert prepare._requested_models is None
 
 
-@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
-async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
-    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+async def test_a_concierge_dm_is_routed_in_the_routed_arm(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
+    monkeypatch.setattr("openswe.server._slack_concierge_run", lambda _cfg: True)
+    config = _base_config()
+    config["configurable"].update(
+        model_selection="explicit",
+        agent_model_id="anthropic:claude-opus-5-5",
+        agent_effort="high",
+    )
+    captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
+
+    # A DM is in the experiment like any other message: the route decides, not the pick.
+    assert _main_model(captured).model_id == "openai:gpt-6.1-sol"
+    routing = cast(ToolSurface, captured["surface"]).loop.routing
+    assert routing is not None and routing.mode == "auto"
+
+
+@pytest.mark.parametrize("routed", [True, False])
+async def test_routing_ignores_a_picked_model_but_records_it(
+    routed: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto" if routed else None)
+    config = _base_config()
+    config["configurable"].update(
+        source="dashboard",
+        model_selection="explicit",
+        agent_model_id="anthropic:claude-opus-5-5",
+        agent_effort="high",
+    )
+    captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
+
+    routing = cast(ToolSurface, captured["surface"]).loop.routing
+    if routed:
+        # The routed arm starts on Balanced and leaves the model to the route.
+        assert _main_model(captured).model_id == "openai:gpt-6.1-sol"
+        assert routing is not None and routing.mode == "auto"
+    else:
+        # The other arm runs the model the person picked.
+        assert _main_model(captured).model_id == "anthropic:claude-opus-5-5"
+        assert routing is None or routing.mode is None
+    metadata = cast(dict[str, object], config["metadata"])
+    assert metadata["user_model_choice"] == "anthropic:claude-opus-5-5"
+    assert metadata["user_effort_choice"] == "high"
+
+
+@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+async def test_slack_question_is_routed_after_dashboard_handoff(
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, langsmith_users
+) -> None:
+    langsmith_users.add("octocat")
     from openswe.threads.runs import _build_dashboard_configurable
 
     monkeypatch.setattr("openswe.threads.runs.resolve_run_email", AsyncMock(return_value=None))
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "fast")
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     source_context = {
         "slack_ask": True,
         "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
@@ -838,9 +900,9 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
         )
         captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
         routing = cast(ToolSurface, captured["surface"]).loop.routing
-        # A Slack question keeps the default route; the dashboard's routes to the fast tier.
+        # A Slack question is routed like any other message.
         assert routing is not None
-        assert routing.mode == ("fast" if source == "dashboard" else None)
+        assert routing.mode == "auto"
 
 
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
@@ -870,7 +932,10 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 
 
 @pytest.mark.asyncio
-async def test_historical_personal_models_and_routing_do_not_override_workspace() -> None:
+async def test_historical_personal_models_and_routing_do_not_override_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     captured = await _agent_catalog(
         profile={
             "default_model": "anthropic:claude-opus-5-5",
@@ -894,6 +959,7 @@ async def test_anthropic_title_model_omits_thinking_without_affecting_agent() ->
                 "default_agent_reasoning_effort": "high",
                 "default_thread_title_model": "anthropic:claude-haiku-5-5",
                 "default_thread_title_reasoning_effort": "high",
+                "model_routing_enabled": False,
             }
         )
     )

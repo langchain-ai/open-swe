@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks
-from langgraph_sdk.client import LangGraphClient
 from starlette.requests import Request
 
 from openswe.slack import routes, solo_threads
@@ -97,11 +96,9 @@ def harness(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> _Harness:
     state.history.append({"ts": "1000.0", "user": "U1", "text": "initial question"})
     monkeypatch.setattr(solo_threads.SlackClient, "bot", state.bot)
     monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", state.mutation_lock)
-    monkeypatch.setattr(routes, "get_langgraph_client", lambda: cast(LangGraphClient, state))
     monkeypatch.setattr(routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(routes.service, "process_slack_mention", state.process)
     monkeypatch.setattr(common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(common, "is_code_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(common, "get_slack_repo_config", AsyncMock(return_value=None))
     monkeypatch.setattr(common, "claim_slack_event", state.claim)

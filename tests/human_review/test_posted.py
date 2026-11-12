@@ -13,7 +13,7 @@ from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.pr_links import linked_pull_requests
-from openswe.users import User, UserIdentity, UserPreferences
+from openswe.users import User, UserIdentity
 from tests.support.slack_api import SlackAPI
 
 
@@ -90,15 +90,18 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         reactions = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.add" and params["name"] != "white_check_mark"
+            if method == "reactions.add"
         }
         assert reactions == expected
         removed = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.remove" and params["name"] != "white_check_mark"
+            if method == "reactions.remove"
         }
-        assert removed == ({"warning", "construction", "pencil2"} - expected) | {"x"}
+        assert removed == ({"warning", "construction", "pencil2"} - expected) | {
+            "x",
+            "white_check_mark",
+        }
         assert all(
             params["channel"] == "C1" and params["timestamp"] == "1.0"
             for _, params in slack_api.calls[start:]
@@ -132,28 +135,10 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
     await settle_with_reactions(set())
 
-    preferences = UserPreferences()
-
-    async def owner_preferences(login: str) -> UserPreferences:
-        assert login == "ada"
-        return preferences
-
-    monkeypatch.setattr(User, "preferences_for_login", owner_preferences)
-    await settle_with_reactions(set())
     snapshot.check_state = "failure"
     await settle_with_reactions(set())
     snapshot.mergeable = False
-    await settle_with_reactions({"construction"})
-    snapshot.mergeable = None
-    preferences.pr_failure_reactions = True
-    await settle_with_reactions({"warning"})
-    preferences.pr_failure_reactions = False
-    await settle_with_reactions(set())
-    preferences.pr_failure_reactions = True
-    snapshot.mergeable = False
     snapshot.mergeable_state = "dirty"
-    await settle_with_reactions({"warning", "construction"})
-    snapshot.check_state = "success"
     await settle_with_reactions({"construction"})
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
@@ -166,7 +151,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     assert stored is not None and stored.state == "merged"
 
 
-async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failures(
+async def test_multiple_prs_clear_approval_reactions_but_keep_blockers(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = User(identities=[UserIdentity(provider="slack", external_id="U1")])
@@ -197,22 +182,15 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         reactions.discard(emoji)
         return True
 
-    wake = AsyncMock()
     monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
     monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
-    monkeypatch.setattr(lifecycle, "wake_thread_owner", wake)
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(pr_failure_reactions=True)),
-    )
     first, second = map(ReviewCard, requests)
-    reactions.add("x")
+    reactions.update({"x", "white_check_mark"})
     await first.mark_approved()
     assert "x" not in reactions
     assert "white_check_mark" not in reactions
     await second.mark_approved()
-    assert "white_check_mark" in reactions
+    assert "white_check_mark" not in reactions
     snapshot = PullRequestSnapshot(
         state="open",
         merged=False,
@@ -227,29 +205,20 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         unresolved_threads=0,
     )
     await first.update_blocked_reactions(snapshot)
-    assert {"warning", "construction"} <= reactions
-    assert wake.await_count == 1
-    args = wake.await_args.args
-    assert args[:3] == ("C1", "1.0", "U1")
-    assert urls[0] in args[3] and "unit tests" in args[3]
-    await first.update_blocked_reactions(snapshot)
-    assert wake.await_count == 1
+    assert "construction" in reactions
+    assert "warning" not in reactions
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
     snapshot.check_state = "success"
     await second.update_blocked_reactions(snapshot)
-    assert {"warning", "construction"} <= reactions
+    assert "construction" in reactions
     await first.update_blocked_reactions(snapshot)
-    assert not reactions & {"warning", "construction"}
+    assert "construction" not in reactions
     async with HumanReviewRequest.locked(requests[1].id) as (_, row):
         assert row is not None
         row.approved_at = None
     await second.update_post_reactions()
     assert "white_check_mark" not in reactions
-    snapshot.check_state = "failure"
-    await second.update_blocked_reactions(snapshot)
-    assert wake.await_count == 2
-    assert urls[1] in wake.await_args.args[3]
     snapshot.draft = True
     await second.update_blocked_reactions(snapshot)
     assert "pencil2" in reactions
@@ -264,7 +233,6 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
 async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock, skip: str
 ) -> None:
-    monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
     monkeypatch.setattr(
         supplementary.SupplementaryReviews,
         "policies",
@@ -324,7 +292,7 @@ async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     monkeypatch.setattr(posted, "settle", settle)
     await posted.watch_post("C1", "1.0", "U1", " ".join(pr.url for pr in pulls.values()))
     assert [request.pull_request.number for request in requests] == [7, 9]
-    assert approved_after_settle == [False, True]
+    assert approved_after_settle == [False, False]
     await ReviewCard(requests[0]).mark_merged()
     assert "merged" not in reactions
     await ReviewCard(requests[1]).mark_merged()

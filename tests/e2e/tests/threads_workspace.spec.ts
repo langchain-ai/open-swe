@@ -84,6 +84,7 @@ function baseMetadata(
 ): Record<string, unknown> {
   return {
     participant_logins: { [USER.login]: true },
+    owner_login: USER.login,
     title,
     source: "dashboard",
     origin: "dashboard",
@@ -400,6 +401,7 @@ test.describe("threads workspace", () => {
       id: THREAD_IDS.shared,
       metadata: {
         ...baseMetadata(Date.now(), TITLES.shared, 1_000, {
+          owner_login: "teammate",
           github_login: "teammate",
           triggering_user_email: "teammate@example.com",
           source: "slack",
@@ -415,16 +417,30 @@ test.describe("threads workspace", () => {
 
     const row = page.getByRole("link", { name: TITLES.shared }).first();
     await expect(row).toBeVisible();
-    await row.hover();
-    await row.getByRole("button", { name: "Pin thread" }).click();
+    await row.click({ button: "right" });
+    const pinResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/dashboard/api/threads/${THREAD_IDS.shared}/pin` &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
+    expect((await pinResponse).ok()).toBeTruthy();
+    await page.reload();
 
     const pinned = sidebarSection(page.locator("aside"), "Pinned");
     const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
     await expect(pinnedRow).toBeVisible();
-    await expect(pinnedRow).toBeVisible();
 
     await pinnedRow.press("Shift+F10");
-    await page.getByRole("menuitem", { name: "Unpin thread" }).click();
+    const unpinResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/dashboard/api/threads/${THREAD_IDS.shared}/pin` &&
+        response.request().method() === "DELETE",
+    );
+    await page.getByRole("menuitem", { name: "Unpin", exact: true }).click();
+    expect((await unpinResponse).ok()).toBeTruthy();
     await expect(pinned).toHaveCount(0);
   });
 
@@ -538,10 +554,16 @@ test.describe("threads workspace", () => {
     await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar.getByRole("button", { name: "Repositories options" }).click();
-    await page
-      .getByRole("menuitemradio", { name: "Last updated", exact: true })
-      .click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await expect(
+      page.getByRole("menuitemcheckbox", {
+        name: "Only my threads",
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Last updated", exact: true }),
+    ).toHaveCount(0);
     await page.keyboard.press("Escape");
     const workspaceLinks = sidebar.locator(
       `a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`,
@@ -587,7 +609,7 @@ test.describe("threads workspace", () => {
     await betaGroup.click();
     await expect(workspaceLinks).toHaveCount(5);
 
-    await sidebar.getByRole("button", { name: "Repositories options" }).click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await page
       .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
       .click();
@@ -598,16 +620,16 @@ test.describe("threads workspace", () => {
         sidebar.getByRole("button", { name: group, exact: true }),
       ).toHaveCount(0);
     }
-    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 21");
     const showMore = alphaGroup.getByRole("button", {
       name: "Show more",
       exact: true,
     });
     await showMore.click();
     await showMore.click();
-    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 19");
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 03");
     await showMore.click();
-    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 21");
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
     await expect(sidebar).toContainText(TITLES.done);
     await expect(showMore).toHaveCount(0);
 
@@ -619,7 +641,7 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("groups repository-less chats in a pinnable No repository folder", async ({
+  test("groups repository-less chats in a pinnable No project folder", async ({
     page,
     request,
   }, testInfo) => {
@@ -629,6 +651,7 @@ test.describe("threads workspace", () => {
         id: THREAD_IDS.noRepo,
         metadata: baseMetadata(now, TITLES.noRepo, 1_000, {
           participant_logins: { [ADMIN_USER.login]: true },
+          owner_login: ADMIN_USER.login,
           repo_owner: "",
           repo_name: "",
         }),
@@ -637,6 +660,7 @@ test.describe("threads workspace", () => {
         id: THREAD_IDS.pinnedRepo,
         metadata: baseMetadata(now, TITLES.pinnedRepo, 2_000, {
           participant_logins: { [ADMIN_USER.login]: true },
+          owner_login: ADMIN_USER.login,
         }),
       },
     ]);
@@ -651,26 +675,32 @@ test.describe("threads workspace", () => {
 
     const sidebar = page.locator("[data-sidebar-frame]");
     const noRepo = sidebar.getByRole("button", {
-      name: "No repository",
+      name: "No project",
       exact: true,
     });
     await expect(noRepo).toBeVisible();
     await expect(sidebar).toContainText(TITLES.noRepo);
 
-    await sidebar.getByRole("button", { name: "Repositories options" }).click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await expect(
+      page.getByRole("menuitemcheckbox", {
+        name: "Only my threads",
+        exact: true,
+      }),
+    ).toBeChecked();
     await expect(
       page.getByRole("menuitemradio", { name: "Created", exact: true }),
-    ).toBeChecked();
-    const sortScreenshotPath = testInfo.outputPath("sort-by-created.png");
-    await page.screenshot({ path: sortScreenshotPath });
-    await testInfo.attach("sort-by-created", {
-      path: sortScreenshotPath,
+    ).toHaveCount(0);
+    const viewScreenshotPath = testInfo.outputPath("project-view-options.png");
+    await page.screenshot({ path: viewScreenshotPath });
+    await testInfo.attach("project-view-options", {
+      path: viewScreenshotPath,
       contentType: "image/png",
     });
     await page.keyboard.press("Escape");
 
     const pinNoRepo = sidebar.getByRole("button", {
-      name: "Pin No repository",
+      name: "Pin No project",
       includeHidden: true,
     });
     // Rows seeded by earlier tests can still shift the folder after the hover lands.
@@ -680,14 +710,14 @@ test.describe("threads workspace", () => {
     }).toPass();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
-      sidebar.getByRole("button", { name: "No repository", exact: true }),
+      sidebar.getByRole("button", { name: "No project", exact: true }),
     ).toBeVisible();
 
     await page.reload();
     await dismissOnboardingIfShown(page);
     await expect(sidebar).toContainText(TITLES.noRepo);
     const unpinNoRepo = sidebar.getByRole("button", {
-      name: "Unpin No repository",
+      name: "Unpin No project",
       includeHidden: true,
     });
     await expect(async () => {

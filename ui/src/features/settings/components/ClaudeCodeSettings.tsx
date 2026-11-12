@@ -8,7 +8,7 @@ import type { ClaudeCodeSyncToken, MintedClaudeCodeSyncToken } from "@/lib/api"
 import { SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { ConfirmDialog } from "./ConfirmDialog"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 
 const TOKENS_KEY = ["claudeCodeSyncTokens"]
 const SETTINGS_FILE = "~/.claude/settings.json"
@@ -163,8 +163,8 @@ export function ClaudeCodeSetupSection() {
           </p>
           <p>
             Nothing appears? Run <Code>/hooks</Code> in Claude Code: you should
-            see Open SWE’s hooks under eight events. If you don’t, check the
-            file is valid JSON.
+            see Robin’s hooks under eight events. If you don’t, check the file
+            is valid JSON.
           </p>
         </Step>
       </ol>
@@ -285,8 +285,8 @@ export function ClaudeCodeAboutSection() {
         <dl className="divide-y divide-default">
           <Fact term="What it is">
             A secret starting with <Code>occ_</Code>. Claude Code sends it with
-            every hook event so Open SWE knows the session is yours. Open SWE
-            keeps only a hash of it, which is why it’s shown once.
+            every hook event so Robin knows the session is yours. Robin keeps
+            only a hash of it, which is why it’s shown once.
           </Fact>
           <Fact term="Where it lives">
             In plain text in <Code>{SETTINGS_FILE}</Code> on that machine, in
@@ -319,8 +319,8 @@ export function ClaudeCodeAboutSection() {
             <Code>gh pr create</Code> is linked to the thread.
           </Fact>
           <Fact term="Who sees it">
-            Only you and workspace admins. Threads are read-only here: continue
-            them in Claude Code.
+            Only you and Robin admins. Threads are read-only here: continue them
+            in Claude Code.
           </Fact>
           <Fact term="Your sessions">
             Claude Code waits for each hook, so they give up fast: 2 seconds for

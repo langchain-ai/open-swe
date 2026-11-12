@@ -19,16 +19,19 @@ from typing_extensions import TypeIs
 
 from managed_deepagents._channel_icon import validate_channel_icon_path
 from managed_deepagents._channels.actor import endpoint_actor
+from managed_deepagents._channels.auto_post import channel_auto_post
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
-from managed_deepagents._channels.http.endpoint import is_endpoint_handler
+from managed_deepagents._channels.http.input_state import input_state_reader
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
+    EventReceived,
     channel_name,
     check_event_keys,
     event_snapshot,
     finish_events,
     read_deployment_secret,
+    receive_events,
     reset_deployment_secrets,
     resolve_endpoints,
     run_event_handler,
@@ -96,9 +99,11 @@ if TYPE_CHECKING:
         HttpChannelRequest,
         HttpDelivery,
         HttpFinishedDelivery,
+        HttpOnReceived,
         HttpPostedMessage,
         JsonValue,
     )
+    from managed_deepagents._channels.reply import ChannelReplyResult
     from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.types import ChannelReply
@@ -109,11 +114,13 @@ def linear_channel(
     on_event: LinearHandlers | None = None,
     app: LinearAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
-    reply: ChannelReply = "auto",
+    auto_post: bool | None = None,
+    reply: ChannelReply | None = None,
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
+    on_received: EventReceived[LinearEvent, LinearChannelThread] | None = None,
 ) -> HttpChannel:
     """Options for ``channels.linear(...)``: the app's scope, event handlers and sessions.
 
@@ -127,7 +134,10 @@ def linear_channel(
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
-            message, or state), or ``None`` to skip. A handler may also be an
+            message, or state), or ``None`` to skip. MDA answers Linear before it
+            asks the handler, so a handler may take longer than Linear waits; one
+            that raises starts nothing, and its error is logged, and an agent
+            session hears that something went wrong. A handler may also be an
             endpoint, a URL or an ``httpx.Request`` carrying headers: MDA POSTs it
             the event and its thread, and starts the run it answers with.
         app: The Linear app ``mda deploy`` sets up; team allowlist.
@@ -136,10 +146,11 @@ def linear_channel(
             run and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
-        reply: Whether the channel posts the run's final answer, as a comment
-            or the session's response: ``"auto"`` (the default) or ``"none"``,
-            to leave replying to the agent. Session acknowledgements, Stop and
-            error notices still post.
+        auto_post: Whether the channel posts the run's final answer, as a
+            comment or the session's response: ``True`` (the default) or
+            ``False``, to leave replying to the agent. Session
+            acknowledgements, Stop and error notices still post.
+        reply: Deprecated: ``auto_post``. ``"none"`` is ``auto_post=False``.
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
@@ -151,9 +162,16 @@ def linear_channel(
             Experimental: sessions use Linear's Agents API, a Developer
             Preview, so they may change as Linear changes it.
         ignore_bots: Ignore changes made by other apps and integrations (a
-            delivery whose actor isn't a person, or the creation of an issue
-            or comment with a ``botActor``), so automations don't trigger each
+            delivery whose actor isn't a person or is no longer known, or the
+            creation of an issue or comment with a ``botActor``), so automations don't trigger each
             other. The app's own changes are always ignored.
+        on_received: A delivery of a handled event reached its thread, once,
+            with the event and its thread, before MDA reads the thread or asks
+            the handler, as ``channels.github``'s ``on_received`` is. It runs
+            after the channel acknowledges an agent session, fires even when
+            the thread then waits on a decision or the handler declines, and
+            runs in the background, before ``on_finish``; failures are logged
+            and don't stop the run.
         on_finish: A delivery of a handled event is done, once, with the
             event, its thread, the run it started and how that run ended, as
             LangGraph names it, and the decisions the thread waits on. A
@@ -195,8 +213,12 @@ def linear_channel(
 
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
-    ) -> ChannelRunResult | None:
-        thread = LinearChannelThread(id=message["thread_id"], channel=ChannelName(name=name()))
+    ) -> ChannelRunResult | ChannelReplyResult | None:
+        thread = LinearChannelThread(
+            id=message["thread_id"],
+            channel=ChannelName(name=name()),
+            _get_state=input_state_reader(),
+        )
         return await _handler_input(handlers, raw_event, thread)
 
     channel = http_channel(
@@ -206,7 +228,15 @@ def linear_channel(
         input=run_input,
         post=_post_reply,
         on_error=_report_error,
-        on_received=_acknowledge_session,
+        on_received=_received_after_acknowledgement(
+            receive_events(
+                on_received,
+                _event,
+                lambda thread_id: LinearChannelThread(
+                    id=thread_id, channel=ChannelName(name=name())
+                ),
+            )
+        ),
         on_finish=finish_events(
             _notify_finished,
             on_finish,
@@ -218,7 +248,7 @@ def linear_channel(
         # mda deploy sets up the Linear app from this.
         provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
-        reply=reply,
+        auto_post=channel_auto_post(auto_post, reply, label="channels.linear(...)"),
     )
     channel.paused_notice = _notify_paused
     # Deploy provides the app's token at this name.
@@ -350,7 +380,19 @@ async def _parse(
         handlers.get(key) is None and not (filters.sessions and key in SESSION_EVENT_KEYS)
     ):
         return {"type": "ignore", "response": response}
-    event = _linear_event(key, record, delivery_id)
+    receipt_log = json.dumps(
+        {"event": logger.log_identifier(key), "deliveryId": logger.log_identifier(delivery_id)}
+    )
+    reason = _starts_nothing(key, cast("Mapping[str, object]", record), filters)
+    if reason is not None:
+        logger.info("linear event ignored: %s %s", reason, receipt_log)
+        return {"type": "ignore", "response": response}
+    try:
+        event = _linear_event(key, record, delivery_id)
+    except ValidationError as error:
+        # Name the fields, never their values.
+        logger.warning("linear payload rejected: %s %s", _invalid_fields(error), receipt_log)
+        raise
 
     if await _ignored(event, filters):
         return {"type": "ignore", "response": response}
@@ -370,14 +412,8 @@ async def _parse(
         "target": _target(event),
         "delivery_key": delivery_id,
     }
-    # An endpoint may take longer to answer than Linear waits. A session's
-    # person can't wait for Linear's retries, an hour apart after the first:
-    # its run starts in the background too, and a failed start says so in the
-    # session at once.
-    if is_endpoint_handler(handlers.get(key)) or isinstance(
-        event, LinearSessionCreatedEvent | LinearSessionPromptedEvent
-    ):
-        message["background"] = True
+    # A handler may take longer to decide than Linear waits, so Linear hears first.
+    message["background"] = True
     # Stop in a session cancels the session's run.
     if _is_stop(event):
         return {
@@ -401,6 +437,44 @@ async def _parse(
     if event.actor is not None:
         result["actor"] = event.actor
     return result
+
+
+_MAX_LOGGED_FIELDS = 8
+"""How many of a rejected payload's fields its log line names."""
+
+
+def _starts_nothing(key: str, record: Mapping[str, object], filters: _Filters) -> str | None:
+    """Why a delivery starts nothing whatever else it says, when it does."""
+    # Linear delivers comments on documents and project updates too. Only an
+    # issue's comment has a thread to answer in.
+    if key == "Comment.create" and not _on_issue(record.get("data")):
+        return "its comment is not on an issue"
+    # Linear sends a null actor once the user or integration that made the
+    # change is deleted, so nothing says a person made it.
+    if (
+        filters.ignore_bots
+        and key not in SESSION_EVENT_KEYS
+        and "actor" in record
+        and record["actor"] is None
+    ):
+        return "Linear no longer knows who made the change"
+    return None
+
+
+def _on_issue(comment: object) -> bool:
+    if not isinstance(comment, Mapping):
+        # Not a comment at all: its schema says what is wrong with it.
+        return True
+    return bool(comment.get("issueId"))
+
+
+def _invalid_fields(error: ValidationError) -> str:
+    """The fields a payload failed on and why, such as ``data.title: missing``."""
+    fields = [
+        logger.log_identifier(f"{'.'.join(str(part) for part in issue['loc'])}: {issue['type']}")
+        for issue in error.errors(include_input=False, include_context=False, include_url=False)
+    ]
+    return ", ".join(fields[:_MAX_LOGGED_FIELDS])
 
 
 def _by_bot(
@@ -631,8 +705,9 @@ async def _handler_input(
     handlers: Mapping[str, LinearEventCallback],
     raw_event: JsonValue | None,
     thread: LinearChannelThread,
-) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips or fails."""
+) -> ChannelRunResult | ChannelReplyResult | None:
+    """What the event's handler starts a run with, or the reply MDA posts instead;
+    ``None`` when it skips or fails."""
     event = _event(raw_event)
     if event is None:
         return None
@@ -646,19 +721,18 @@ async def _handler_input(
     )
     if outcome.type == "input":
         return outcome.input
+    # MDA posts a reply: a session hears it as its response.
+    if outcome.reply is not None:
+        return outcome.reply
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
-    # raised failed; one that returned nothing declined, and an endpoint may
-    # say why.
+    # raised failed; one that returned nothing declined.
     if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
             if outcome.type == "failed"
-            else {
-                "type": "response",
-                "body": outcome.decline or "I'm not set up to work on this request.",
-            },
+            else {"type": "response", "body": "I'm not set up to work on this request."},
         )
     return None
 
@@ -783,6 +857,28 @@ def _release_session(session_id: str) -> None:
     del _keepalives[session_id]
 
 
+def _received_after_acknowledgement(
+    on_received: HttpOnReceived | None,
+) -> HttpOnReceived:
+    """The channel's own acknowledgement of an agent session, then the author's
+    ``on_received``, which hears every handled delivery even when acknowledging
+    fails: that failure is logged, as the author's own is by the channel."""
+
+    async def received(target: JsonValue, delivery: HttpDelivery) -> None:
+        try:
+            await _acknowledge_session(target, delivery)
+        except Exception as error:
+            if on_received is None:
+                raise
+            logger.warning(
+                "Linear session could not be acknowledged (%s)", logger.safe_error_label(error)
+            )
+        if on_received is not None:
+            await on_received(target, delivery)
+
+    return received
+
+
 async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> None:
     """Acknowledge a session at once, keep it alive until the delivery is done,
     and link a new one to its thread in Studio.
@@ -818,11 +914,11 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
     if _is_linear_target(target) and "sessionId" in target:
         _release_session(target["sessionId"])
     # A session would keep "working" on a run that never started; its runs
-    # start in the background, so nothing retries them. An issue's or
-    # comment's delivery Linear retries (``retry``) may still start, so it
-    # hears nothing yet.
+    # start in the background, so nothing retries them. An issue's event may
+    # be one its handler would have skipped, so its failure is only logged.
     if delivery["type"] == "failed" and delivery["reason"] == "start":
-        await _report_error(RuntimeError("channel run could not be started"), target)
+        if _is_linear_target(target) and "sessionId" in target:
+            await _report_error(RuntimeError("channel run could not be started"), target)
         return
     pending = pending_decision(delivery)
     if pending is not None:

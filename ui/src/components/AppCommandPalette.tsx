@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -19,7 +20,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CommandIcon } from "@phosphor-icons/react/dist/ssr/Command"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
@@ -29,6 +30,7 @@ import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { parsePullRequestReference } from "@/features/reviews/search"
 import { useShortcutLabel } from "@/lib/hotkeys"
+import { cn, formatRelativeTime } from "@/lib/utils"
 
 interface CommandResult {
   id: string
@@ -54,16 +56,18 @@ interface PullRequestResult {
 
 type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
 
+type PaletteScope = "all" | "cloud-thread" | "pull-request" | "command"
+
+const SCOPES: ReadonlyArray<{ value: PaletteScope; display: string }> = [
+  { value: "all", display: "All" },
+  { value: "cloud-thread", display: "Threads" },
+  { value: "pull-request", display: "Pull requests" },
+  { value: "command", display: "Commands" },
+]
+
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
   return <Kbd className="ml-auto">{label}</Kbd>
-}
-
-function commandMatches(command: AppCommand, query: string): boolean {
-  const haystack = [command.label, ...(command.aliases ?? [])]
-    .join(" ")
-    .toLowerCase()
-  return haystack.includes(query.toLowerCase())
 }
 
 export function buildPaletteResults(
@@ -76,13 +80,13 @@ export function buildPaletteResults(
   const searchQuery = actionsOnly
     ? normalizedQuery.slice(1).trim()
     : normalizedQuery
-  const commandResults: Array<CommandResult> = commands
-    .filter(
-      (command) =>
-        command.run &&
-        command.showInPalette !== false &&
-        (!searchQuery || commandMatches(command, searchQuery))
+  const commandResults: Array<CommandResult> = new FuzzySearch(searchQuery)
+    .rank(
+      commands,
+      (command) => command.label,
+      (command) => command.aliases?.join(" ") ?? ""
     )
+    .filter((command) => command.run && command.showInPalette !== false)
     .map((command) => ({
       id: `command:${command.id}`,
       kind: "command",
@@ -112,8 +116,12 @@ export function AppCommandPalette({
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
+  const [scope, setScope] = useState<PaletteScope>("all")
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const actionsOnly = query.trim().startsWith(">")
+  const actionsOnly = scope === "command" || query.trim().startsWith(">")
+  const showThreads = !actionsOnly && scope !== "pull-request"
+  const showPullRequests = !actionsOnly && scope !== "cloud-thread"
   const prReference = actionsOnly ? null : parsePullRequestReference(query)
   const threadQuery = prReference
     ? `https://github.com/${prReference.owner}/${prReference.repo}/pull/${prReference.number}`
@@ -124,6 +132,7 @@ export function AppCommandPalette({
       // oxlint-disable-next-line react/set-state-in-effect
       setQuery("")
       setDebouncedQuery("")
+      setScope("all")
       return
     }
     const timer = window.setTimeout(() => setDebouncedQuery(threadQuery), 180)
@@ -135,21 +144,21 @@ export function AppCommandPalette({
       q: debouncedQuery || undefined,
       scope: prReference ? "all" : "interactive",
     },
-    { enabled: open && !actionsOnly, staleWhileRevalidate: true }
+    { enabled: open && showThreads, staleWhileRevalidate: true }
   )
   const pullRequests = usePullRequestSearch(
     query,
-    open && !actionsOnly && !prReference
+    open && showPullRequests && !prReference
   )
   const results: Array<PaletteResult> = [
     ...buildPaletteResults(
-      commands,
-      debouncedQuery === threadQuery
+      actionsOnly || scope === "all" ? commands : [],
+      showThreads && debouncedQuery === threadQuery
         ? (cloudThreads.data?.pages.flatMap((page) => page.items) ?? [])
         : [],
       query
     ),
-    ...(prReference
+    ...(prReference && showPullRequests
       ? [
           {
             id: `pr:${prReference.owner}/${prReference.repo}#${prReference.number}`,
@@ -162,7 +171,7 @@ export function AppCommandPalette({
           },
         ]
       : []),
-    ...(open && !actionsOnly && !prReference
+    ...(open && showPullRequests && !prReference
       ? (pullRequests.data?.pages.flatMap((page) =>
           page.pull_requests.map((pr): PullRequestResult => ({
             id: `pr:${pr.repo}#${pr.number}`,
@@ -208,9 +217,9 @@ export function AppCommandPalette({
   const showLoading =
     ((!actionsOnly &&
       (debouncedQuery !== threadQuery || cloudThreads.isFetching)) ||
-      pullRequests.isSearching) &&
+      (showPullRequests && pullRequests.isSearching)) &&
     results.length === 0
-  const showError = cloudThreads.isError && results.length === 0
+  const showError = showThreads && cloudThreads.isError && results.length === 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -234,7 +243,8 @@ export function AppCommandPalette({
         >
           <CommandInput
             autoFocus
-            className="h-12 shrink-0 rounded-none border-0 border-b border-default bg-transparent px-space-4 focus-within:border-default"
+            ref={inputRef}
+            className="h-12 shrink-0 rounded-none border-0 bg-transparent px-space-4"
             leftDecorator={
               <MagnifyingGlassRegularIcon
                 className="text-icon-secondary"
@@ -248,6 +258,29 @@ export function AppCommandPalette({
             value={query}
             variant="plain"
           />
+          <div className="flex shrink-0 gap-space-1 border-b border-default px-space-3 pb-space-3">
+            {SCOPES.map((option) => (
+              <Button
+                aria-pressed={scope === option.value}
+                className={cn(
+                  "border-0",
+                  scope === option.value
+                    ? "bg-elevated-selected text-primary hover:bg-elevated-selected dark:hover:bg-elevated-selected"
+                    : "text-secondary hover:text-primary"
+                )}
+                color="secondary"
+                key={option.value}
+                onClick={() => {
+                  setScope(option.value)
+                  inputRef.current?.focus()
+                }}
+                size="sm"
+                variant="plain"
+              >
+                {option.display}
+              </Button>
+            ))}
+          </div>
           <CommandList className="max-h-none min-h-20 flex-1 p-space-2">
             {showLoading ? (
               <div className="flex items-center justify-center gap-space-2 py-space-7 text-xs text-secondary">
@@ -296,6 +329,16 @@ export function AppCommandPalette({
                               </span>
                             )}
                           </span>
+                          {result.kind === "cloud-thread" && (
+                            <span className="shrink-0 text-xs text-secondary">
+                              {[
+                                result.thread.repoFullName,
+                                formatRelativeTime(result.thread.updatedAt),
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          )}
                           {command?.shortcuts?.[0] && (
                             <ShortcutHint shortcut={command.shortcuts[0]} />
                           )}
@@ -304,7 +347,7 @@ export function AppCommandPalette({
                     })}
                   </CommandGroup>
                 ))}
-                {pullRequests.hasNextPage && !query.trim().startsWith(">") && (
+                {pullRequests.hasNextPage && showPullRequests && (
                   <Button
                     className="w-full"
                     color="secondary"
@@ -317,7 +360,7 @@ export function AppCommandPalette({
                     Load more pull requests
                   </Button>
                 )}
-                {cloudThreads.hasNextPage && (
+                {cloudThreads.hasNextPage && showThreads && (
                   <Button
                     className="w-full"
                     color="secondary"
@@ -332,16 +375,14 @@ export function AppCommandPalette({
                 )}
               </>
             )}
-            {query.trim() &&
-              !query.trim().startsWith(">") &&
-              pullRequests.isError && (
-                <p
-                  role="alert"
-                  className="px-space-3 py-space-2 text-xs text-error-secondary"
-                >
-                  Pull request search is unavailable.
-                </p>
-              )}
+            {query.trim() && showPullRequests && pullRequests.isError && (
+              <p
+                role="alert"
+                className="px-space-3 py-space-2 text-xs text-error-secondary"
+              >
+                Pull request search is unavailable.
+              </p>
+            )}
           </CommandList>
         </Command>
       </DialogContent>

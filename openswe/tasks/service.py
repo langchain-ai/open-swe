@@ -21,6 +21,7 @@ from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.source_context import SourceContext
 from openswe.tasks import presentation, store
@@ -36,6 +37,7 @@ from openswe.threads.status import refresh_thread_status
 from openswe.threads.summary import assert_thread_postable, assert_thread_readable
 from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
 from openswe.tools.threads import resolve_thread_actor
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import (
@@ -95,7 +97,7 @@ class Actor:
         user = await user_for_login(self.login)
         if user is None:
             raise PermissionError(
-                "Task operations require the thread owner to have an Open SWE account"
+                "Task operations require the thread owner to have a Robin account"
             )
         owner = await metadata.owner()
         is_owner = owner.id == user.id
@@ -167,7 +169,7 @@ async def authorized_context(
         # Participants steer only from the coordinator; a worker thread stays owner-only.
         await authorized_metadata(actor)
     workspace = metadata.workspace or metadata.environment
-    if workspace and workspace != context.task.workspace.slug:
+    if workspace and workspace != context.task.workspace.slug and context.task.delegated:
         raise PermissionError("The thread no longer belongs to the task's workspace")
     if coordinator and (
         context.membership.role != "coordinator"
@@ -226,7 +228,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         identity = ThreadIdentity(login)
         if identity.user_id is not None:
             if identity.user_id != owner.id:
-                raise PermissionError("Task delivery requires the Agent Workspace owner")
+                raise PermissionError("Task delivery requires the thread owner")
             await identity.authorize()
         else:
             await enforce_github_login_gate(login)
@@ -242,6 +244,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         if identity.user_id is not None:
             config |= {
                 "user_id": str(owner.id),
+                "github_linked": False,
                 "auth_provider": "langsmith",
             }
         else:
@@ -334,9 +337,7 @@ async def _status_owner_actor(actor: Actor) -> Actor:
     email = config.get("user_email")
     return Actor(
         actor.thread_id,
-        f"user:{config['user_id']}"
-        if config.get("auth_provider") == "langsmith"
-        else str(config["github_login"]),
+        f"user:{config['user_id']}" if RunConfig.unlinked(config) else str(config["github_login"]),
         email if isinstance(email, str) else None,
     )
 
@@ -518,7 +519,9 @@ class Delegation:
         workspace_value = metadata.workspace or metadata.environment
         workspace = await resolve_workspace(
             thread_workspace=(
-                context.task.workspace.slug if context is not None else workspace_value
+                context.task.workspace.slug
+                if context is not None and context.task.delegated
+                else workspace_value
             ),
             login=actor.login,
         )
@@ -531,7 +534,7 @@ class Delegation:
         self, worker_thread_id: str, instructions: str, request_id: str
     ) -> tuple[store.Task, store.TaskDelegation]:
         title = self.metadata.title
-        return await store.Task.reserve_worker(
+        reserved = await store.Task.reserve_worker(
             self.actor.thread_id,
             worker_thread_id,
             title=title.strip() if title and title.strip() else "Delegated work",
@@ -541,6 +544,8 @@ class Delegation:
             effort=self.effort,
             launch_request_id=request_id,
         )
+        await Topic.TASK_WORKERS.invalidate(key=self.actor.thread_id)
+        return reserved
 
     async def launched_by(self, request_id: str) -> tuple[store.Task, store.TaskDelegation] | None:
         """The async worker this coordinator's tool call ``request_id`` already launched."""
@@ -756,6 +761,8 @@ async def cancel_worker(worker_thread_id: str, *, silently: bool = False) -> Non
         await TaskMessage.withdraw(coordinator_thread_id, sender_thread_id=worker_thread_id)
     await interrupt_transcript_turns(worker_thread_id, run_ids)
     await cancel_thread_wakeups(worker_thread_id)
+    if coordinator_thread_id is not None:
+        await Topic.TASK_WORKERS.invalidate(key=coordinator_thread_id)
 
 
 async def control_worker(

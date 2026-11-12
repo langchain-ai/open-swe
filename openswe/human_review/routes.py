@@ -23,7 +23,7 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.review_queue import ReviewQueue
 from openswe.human_review.standard import Origin, RequestResult, review_blockers
-from openswe.slack.client import GitHubPrRef, get_slack_permalink
+from openswe.slack.client import GitHubPrRef
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -109,11 +109,7 @@ async def api_human_review_availability(
     return HumanReviewAvailability(
         available=bool(channel),
         active=active is not None,
-        permalink=(
-            await get_slack_permalink(active.slack_channel_id, active.slack_message_ts) or ""
-            if active is not None
-            else ""
-        ),
+        permalink=await active.card_url() if active is not None else "",
         blockers=blockers or [],
     )
 
@@ -131,7 +127,7 @@ async def api_request_human_review(
     login = str(session["sub"])
     requester = await User.for_login("github", login)
     if requester is None:
-        raise HTTPException(403, "No Open SWE user record for this login")
+        raise HTTPException(403, "No Robin user record for this login")
     token = await require_repo_access_for_user(login, f"{owner}/{repo}")
     options = body or HumanReviewRequestBody()
     inline_summary = options.inline_summary
@@ -142,6 +138,10 @@ async def api_request_human_review(
         inline_summary=inline_summary,
     )
     if not result.success:
+        if result.retry_after_seconds is not None:
+            raise HTTPException(
+                503, result.error, headers={"Retry-After": str(result.retry_after_seconds)}
+            )
         raise HTTPException(409, result.error)
     return result
 

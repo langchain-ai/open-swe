@@ -243,7 +243,7 @@ describe("AutomationEditor", () => {
     })
 
     expect(
-      screen.getByRole("button", { name: "Workspace" }).textContent
+      screen.getByRole("button", { name: "Environment" }).textContent
     ).toContain("Default")
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
@@ -258,7 +258,7 @@ describe("AutomationEditor", () => {
       wrapper: TooltipProvider,
     })
 
-    fireEvent.keyDown(screen.getByRole("button", { name: "Workspace" }), {
+    fireEvent.keyDown(screen.getByRole("button", { name: "Environment" }), {
       key: "Enter",
     })
     fireEvent.click(screen.getByRole("menuitem", { name: /^Core/ }))
@@ -296,7 +296,7 @@ describe("AutomationEditor", () => {
       )
 
       expect(screen.getByText(/gone.*no longer exists/)).toBeTruthy()
-      fireEvent.keyDown(screen.getByRole("button", { name: "Workspace" }), {
+      fireEvent.keyDown(screen.getByRole("button", { name: "Environment" }), {
         key: "Enter",
       })
       expect(screen.getByRole("menuitem", { name: /^Default/ })).toBeTruthy()

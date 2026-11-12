@@ -21,11 +21,13 @@ from sqlalchemy import ARRAY, Text, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.database import postgres
+from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.transcript import attachments as attachment_store
 from openswe.transcript import listener, projections, tool_output
 from openswe.transcript.events import (
     SCHEMA_VERSION,
     ActorKind,
+    MessageCompleted,
     StoredEvent,
     ToolCompleted,
     TranscriptEvent,
@@ -159,8 +161,6 @@ async def delete_transcript(thread_id: str) -> bool:
     would deduplicate a thread recreated under the same id out of ever being
     created. Returns whether a transcript was deleted.
     """
-    if not postgres.configured():
-        return False
     async with postgres.transaction() as conn:
         await conn.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
@@ -261,6 +261,8 @@ async def _write(
         run_id=run_id,
         occurred_at=occurred_at,
     )
+    if isinstance(event, MessageCompleted):
+        await THREAD_READ_STATES.record_response(conn, thread_id, version, event)
     await conn.execute(
         text(
             """

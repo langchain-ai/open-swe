@@ -19,7 +19,9 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langsmith import tracing_context
 from runtime_api.catalog import McpServerSpec
+from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
@@ -61,6 +63,20 @@ class MCPTools(list[BaseTool]):
     @property
     def catalog_note(self) -> str:
         return catalog_note(self.failures)
+
+    def without(self, tool_name: str) -> MCPTools:
+        """These tools less every one named ``tool_name`` on its server, wherever it runs."""
+        kept = MCPTools(
+            (t for t in self if (t.metadata or {}).get("mcp_tool_name") != tool_name),
+            (
+                server.model_copy(
+                    update={"tools": {k: v for k, v in server.tools.items() if k != tool_name}}
+                )
+                for server in self.runtime_servers
+            ),
+        )
+        kept.failures = list(self.failures)
+        return kept
 
 
 def catalog_note(failures: Sequence[str]) -> str:
@@ -193,7 +209,7 @@ def _discovery_slots() -> asyncio.Semaphore:
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     if record.connection is not None:
         raise MCPDiscoveryError(
-            "Only an MDA run reads this server's connection, so Open SWE cannot list its "
+            "Only an MDA run reads this server's connection, so Robin cannot list its "
             "tools; enter the names of the tools to allow"
         )
 
@@ -278,9 +294,16 @@ def _wrap_tool(
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
             # Call the coroutine directly so remote arguments LangChain reserves pass through.
-            result = await asyncio.wait_for(fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS)
+            with tracing_context(enabled=False):
+                try:
+                    content, artifact = await asyncio.wait_for(
+                        fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                    )
+                except ToolException as exc:
+                    raise ToolException(McpResult.scrub(str(exc))) from None
+                protected = McpResult(content, artifact).withheld(HELD_SESSIONS.get())
             is_error = False
-            return result
+            return protected
         except ToolException:
             is_error = True
             raise
@@ -383,7 +406,7 @@ def _runtime_server(
     connection = record.connection
     if (
         connection is None
-        or not connection.for_mcp_server
+        or not connection.for_mcp_server(record.url)
         or connection.owner != CONNECTION_OWNERS.get(source.scope)
     ):
         logger.warning(

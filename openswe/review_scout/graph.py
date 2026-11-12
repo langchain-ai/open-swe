@@ -21,6 +21,8 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.models import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -44,7 +46,6 @@ from openswe.runtime import (
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.tools.plan_walkthrough import (
-    walkthrough_describe_other,
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
     walkthrough_split_hunks,
@@ -53,7 +54,6 @@ from openswe.tools.record_human_input import record_human_input
 from openswe.tools.suggest_task import suggest_task
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
@@ -193,6 +193,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
+            concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
         )
         run_context = prompt(
             "review-scout/run-context",
@@ -208,7 +209,13 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
-            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
+            "messages": [
+                HumanMessage(
+                    content=run_context,
+                    id=f"run-context:{uuid.uuid4()}",
+                    additional_kwargs=Provenance.harness("run_context").stamp(),
+                )
+            ],
             "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,
@@ -287,7 +294,6 @@ def scout_tools() -> list[BaseTool]:
             walkthrough_plan_chunk,
             walkthrough_split_hunks,
             walkthrough_move_to_other,
-            walkthrough_describe_other,
             record_human_input,
             suggest_task,
         ]

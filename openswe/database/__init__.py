@@ -2,7 +2,6 @@
 
 from openswe.database.postgres import (
     close,
-    configured,
     connection,
     engine,
     migrate,
@@ -13,7 +12,6 @@ from openswe.database.postgres import (
 
 __all__ = [
     "close",
-    "configured",
     "connection",
     "engine",
     "migrate",

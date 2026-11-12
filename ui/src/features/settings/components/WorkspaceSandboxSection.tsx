@@ -104,12 +104,12 @@ export function WorkspaceSandboxSection({
   return (
     <SettingsSection
       title="Sandbox Image"
-      description="Every run in this workspace boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
+      description="Every run in this environment boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
     >
       {record.slug !== "default" && (
         <SettingsRow
           label="Inherit sandbox from default"
-          description="Use the default workspace’s latest image, sizing, and update script. Creation settings, cloud identity, instructions, and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
+          description="Use the default environment’s latest image, sizing, and update script. Creation settings, cloud identity, instructions, and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this environment."
           control={
             <Checkbox
               aria-label="Inherit sandbox from default"

@@ -21,7 +21,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
-import { invalidationTopic } from "@/lib/invalidations/topics"
+import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -159,8 +159,7 @@ async function invalidateWorkspaces() {
   await act(async () => {
     await clients.at(-1)?.invalidateQueries({
       predicate: (query) =>
-        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
-        false,
+        queryTopics(query).includes(invalidationTopic("workspaces")),
     })
     await vi.advanceTimersByTimeAsync(1)
   })
@@ -170,7 +169,7 @@ describe("WorkspaceSettingsPanel", () => {
   it("preserves saved effort while a subagent uses the parent model", () => {
     const onChange = vi.fn()
     const props = {
-      label: "Open SWE Agent subagents",
+      label: "Robin Agent subagents",
       models: [
         {
           id: "openai:gpt-6.1-sol",
@@ -190,7 +189,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
     const effort = () =>
       screen.getByRole("combobox", {
-        name: "Open SWE Agent subagents reasoning effort",
+        name: "Robin Agent subagents reasoning effort",
       }) as HTMLButtonElement
     expect(effort().disabled).toBe(true)
     expect(effort().textContent).toContain("Parent run")
@@ -249,7 +248,7 @@ describe("WorkspaceSettingsPanel", () => {
     expect(repository.getAttribute("target")).toBe("_blank")
     const channel = await screen.findByRole("link", { name: "#oss-help" })
     expect(channel.getAttribute("href")).toBe(
-      "https://slack.com/app_redirect?channel=C1"
+      "/dashboard/api/slack/open?channel=C1"
     )
     expect(channel.getAttribute("target")).toBe("_blank")
   })
@@ -270,16 +269,16 @@ describe("WorkspaceSettingsPanel", () => {
     expect(
       screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
     ).toContain("C2")
-    const secondKitchen = screen.getByRole("switch", {
-      name: "Kitchen mode for Slack channel 2",
+    const secondMode = screen.getByRole("combobox", {
+      name: "Channel type for Slack channel 2",
     })
-    fireEvent.click(secondKitchen)
-    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    fireEvent.click(secondMode)
+    fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+    expect(secondMode.textContent).toContain("Ask")
     expect(
-      screen
-        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
-        .getAttribute("aria-checked")
-    ).toBe("false")
+      screen.getByRole("combobox", { name: "Channel type for Slack channel 1" })
+        .textContent
+    ).toContain("Mention-only")
     await act(async () => finish({ channels: [], refreshing: false }))
     expect(channel.textContent).toBe("Slack channel 1")
   })
@@ -302,11 +301,11 @@ describe("WorkspaceSettingsPanel", () => {
     expect(remove).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Delete OSS" }))
-    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
     await waitFor(() =>
       expect(reportError).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: "Couldn't delete workspace",
+          title: "Couldn't delete environment",
           error: expect.objectContaining({
             message: "Could not delete the workspace",
           }),
@@ -323,7 +322,7 @@ describe("WorkspaceSettingsPanel", () => {
           finish = resolve
         })
     )
-    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
     expect(
       (await screen.findByRole("button", { name: "Deleting…" })).hasAttribute(
         "disabled"
@@ -342,7 +341,7 @@ describe("WorkspaceSettingsPanel", () => {
   it("does not offer deletion without admin access", async () => {
     mockApis()
     renderPage(false)
-    await screen.findByLabelText("Workspace name")
+    await screen.findByLabelText("Environment name")
     expect(await screen.findByRole("link", { name: "#oss-help" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
@@ -354,7 +353,7 @@ describe("WorkspaceSettingsPanel", () => {
       .mockResolvedValue({ ...RECORD, name: "OSS support" })
     renderPage()
 
-    const name = await screen.findByLabelText("Workspace name")
+    const name = await screen.findByLabelText("Environment name")
     expect((name as HTMLInputElement).value).toBe("OSS")
     expect(
       ((await screen.findByLabelText("Instructions")) as HTMLTextAreaElement)
@@ -380,12 +379,13 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        ask_channel_ids: [],
         prompt: "Run make test.",
       })
     )
     await waitFor(() =>
       expect(
-        (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+        (screen.getByLabelText("Environment name") as HTMLInputElement).value
       ).toBe("OSS support")
     )
     expect(screen.queryByRole("status")).toBeNull()
@@ -533,7 +533,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
     renderPage()
 
-    fireEvent.change(await screen.findByLabelText("Workspace name"), {
+    fireEvent.change(await screen.findByLabelText("Environment name"), {
       target: { value: "Renamed" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -742,7 +742,7 @@ describe("WorkspaceSettingsPanel", () => {
     ).toBe("make setup && make build")
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-    fireEvent.change(screen.getByLabelText("Workspace name"), {
+    fireEvent.change(screen.getByLabelText("Environment name"), {
       target: { value: "Unsaved workspace name" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
@@ -764,7 +764,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
 
     expect(
-      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+      (screen.getByLabelText("Environment name") as HTMLInputElement).value
     ).toBe("Unsaved workspace name")
     expect(
       (

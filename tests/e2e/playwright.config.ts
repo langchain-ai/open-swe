@@ -14,7 +14,9 @@ const harnessURL = `http://127.0.0.1:${PORT}`;
 const serverEnv = {
   ...process.env,
   E2E_BUSY_HOLD_SECONDS: "8",
+  MDA_AGENT_AUTH_PRINCIPAL_ID: "e2e-local-caller",
   E2E_EXIT_WHEN_ORPHANED: "1",
+  DROPPED_EVENTS: "",
 };
 // The app's own server, as a deployed browser sees it: it serves the pages and
 // fronts `/dashboard/api/*` itself. Driving the harness origin instead skipped

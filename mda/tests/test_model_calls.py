@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
+from datetime import timedelta
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -34,15 +35,18 @@ from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
+    MODEL_OUTAGE_MESSAGE,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
+    call_with_fallback,
     model_call_guards,
 )
 from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
+from runtime_api.model_errors import is_model_failure_reply
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
 _OPENAI = ChatOpenAI(
@@ -213,56 +217,6 @@ async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None
     assert raised.value is error
 
 
-@pytest.mark.parametrize(
-    "primary_stalls,fallback_stalls", [(False, True), (True, True), (True, False)]
-)
-async def test_primary_and_fallback_share_one_elapsed_budget(
-    monkeypatch: pytest.MonkeyPatch, primary_stalls: bool, fallback_stalls: bool
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, *, use_gateway: _OPENAI)
-    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
-    call = ModelCall(
-        system_prompt="prompt",
-        fallback=ModelSpec(model_id="openai:fallback", kwargs={}),
-        use_gateway=False,
-    )
-    messages: list[AnyMessage] = [HumanMessage(content="go")]
-    request = ModelRequest(
-        model=_ANTHROPIC,
-        messages=messages,
-        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
-    )
-    attempted: list[BaseChatModel | str] = []
-    cancelled: list[BaseChatModel | str] = []
-
-    async def handler(request: ModelRequest) -> ModelResponse:
-        attempted.append(request.model)
-        try:
-            if request.model is _ANTHROPIC:
-                await asyncio.sleep(60 if primary_stalls else 0.03)
-                raise TimeoutError("provider timeout")
-            await asyncio.sleep(60 if fallback_stalls else 0)
-            return ModelResponse(result=[AIMessage(content="too late")])
-        except asyncio.CancelledError:
-            cancelled.append(request.model)
-            raise
-
-    middleware = BackendRunMiddleware(run.backend, model_timeout_seconds=0.05)
-    if fallback_stalls:
-        with pytest.raises(ModelCallTimeoutError):
-            await middleware.awrap_model_call(request, handler)
-    else:
-        response = await middleware.awrap_model_call(request, handler)
-        assert isinstance(response, ModelResponse)
-        assert response.result[0].content == "too late"
-
-    assert attempted == [_ANTHROPIC, _OPENAI]
-    assert cancelled == ([_ANTHROPIC] if primary_stalls else []) + (
-        [_OPENAI] if fallback_stalls else []
-    )
-
-
 @pytest.mark.parametrize("with_image", [True, False])
 async def test_a_text_only_model_hands_images_to_the_vision_model(
     monkeypatch: pytest.MonkeyPatch, with_image: bool
@@ -342,7 +296,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     async def handler(request: ModelRequest) -> ModelResponse:
         sent.append(request)
         if request.model is _ANTHROPIC:
-            raise RuntimeError("overloaded")
+            raise TimeoutError("overloaded")
         return ModelResponse(result=[AIMessage(content="ok")])
 
     layers: list[AgentMiddleware] = [
@@ -397,6 +351,186 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     ]
     assert first_fallback.model_settings == {}
     assert static.content == "The graph's own instructions"
+
+
+def _status_error(status: int, body: dict[str, object] | None = None) -> openai.APIStatusError:
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx2.Response(status, request=request, json=body or {})
+    return openai.APIStatusError("provider error", response=response, body=body)
+
+
+class _Attempts:
+    """A provider that fails each attempt with the next error, then answers."""
+
+    def __init__(self, *errors: BaseException) -> None:
+        self.errors = list(errors)
+        self.models: list[object] = []
+
+    async def __call__(self, request: ModelRequest) -> ModelResponse:
+        self.models.append(request.model)
+        if self.errors:
+            raise self.errors.pop(0)
+        return ModelResponse(result=[AIMessage(content="answered")])
+
+
+def _fallback_call(
+    attempts: _Attempts, schedule: tuple[float, ...] = (0.0, 0.0, 0.0)
+) -> Awaitable[ModelResponse]:
+    return call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        lambda: _OPENAI,
+        backoff_schedule=schedule,
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("stalled"),
+        ModelCallTimeoutError("deadline"),
+        _status_error(503),
+        _status_error(529),
+        httpx2.RemoteProtocolError("peer closed connection (incomplete chunked read)"),
+        # A streamed overload carries no status, only its message.
+        openai.APIError(
+            "Our servers are currently overloaded. Please try again later.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
+        ),
+    ],
+)
+async def test_a_transient_failure_goes_to_the_fallback(error: BaseException) -> None:
+    attempts = _Attempts(error)
+
+    response = await _fallback_call(attempts)
+
+    assert response.result[0].content == "answered"
+    assert attempts.models == [_ANTHROPIC, _OPENAI]
+
+
+async def test_attempts_alternate_between_the_model_and_its_fallback() -> None:
+    attempts = _Attempts(_status_error(503), _status_error(502))
+
+    await _fallback_call(attempts)
+
+    assert attempts.models == [_ANTHROPIC, _OPENAI, _ANTHROPIC]
+
+
+async def test_attempts_wait_out_the_backoff_with_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr(
+        "rt.model_calls.asyncio",
+        MagicMock(
+            sleep=sleep,
+            get_running_loop=asyncio.get_running_loop,
+            timeout_at=asyncio.timeout_at,
+        ),
+    )
+    monkeypatch.setattr("rt.model_calls.random.uniform", lambda low, high: high)
+    attempts = _Attempts(TimeoutError(), TimeoutError())
+
+    await _fallback_call(attempts, schedule=(0.0, 8.0))
+
+    # The failover is immediate; the next attempt waits its delay and up to a quarter more.
+    sleep.assert_awaited_once_with(10.0)
+
+
+@pytest.mark.parametrize("error", [ValueError("not transient"), _status_error(400)])
+async def test_an_error_another_attempt_would_repeat_raises_at_once(error: BaseException) -> None:
+    attempts = _Attempts(error)
+
+    with pytest.raises(type(error)):
+        await _fallback_call(attempts)
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_a_lasting_outage_ends_with_a_message_instead_of_failing_the_run() -> None:
+    attempts = _Attempts(*[_status_error(503) for _ in range(4)])
+
+    response = await _fallback_call(attempts, schedule=(0.0, 0.0, 0.0))
+
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert is_model_failure_reply(response.result[0])
+    assert attempts.models == [_ANTHROPIC, _OPENAI, _ANTHROPIC, _OPENAI]
+
+
+async def test_a_model_the_workspace_cannot_use_says_so() -> None:
+    body: dict[str, object] = {
+        "error": {"code": "model_not_found", "message": "The model does not exist."}
+    }
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx2.Response(404, request=request, json=body)
+    attempts = _Attempts(openai.NotFoundError("not found", response=response, body=body))
+
+    answer = await _fallback_call(attempts)
+
+    content = answer.result[0].content
+    assert isinstance(content, str) and "OpenAI returned: The model does not exist." in content
+    assert attempts.models == [_ANTHROPIC]
+    assert is_model_failure_reply(answer.result[0])
+
+
+async def test_without_a_fallback_the_call_is_made_once() -> None:
+    attempts = _Attempts(TimeoutError("stalled"))
+
+    with pytest.raises(TimeoutError):
+        await call_with_fallback(ModelRequest(model=_ANTHROPIC, messages=[]), attempts, None)
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_a_fallback_that_cannot_be_built_leaves_the_retries_to_the_model() -> None:
+    attempts = _Attempts(TimeoutError("stalled"), TimeoutError("stalled"))
+
+    def unbuildable() -> BaseChatModel:
+        raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
+
+    response = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        unbuildable,
+        backoff_schedule=(0.0, 0.0, 0.0),
+    )
+
+    assert response.result[0].content == "answered"
+    assert attempts.models == [_ANTHROPIC, _ANTHROPIC, _ANTHROPIC]
+
+
+async def test_the_retries_end_within_the_budget() -> None:
+    """However the attempts stall, the call answers before the budget is out, so the
+    backend's stalled-run sweep (twice ``MODEL_CALL_BUDGET``) never takes a live run."""
+
+    async def stalled(request: ModelRequest) -> ModelResponse:
+        await asyncio.sleep(60)
+        raise AssertionError("cut off by the budget")
+
+    clock = asyncio.get_running_loop()
+    started = clock.time()
+    response = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        stalled,
+        lambda: _OPENAI,
+        backoff_schedule=(0.0, 0.0),
+        budget=timedelta(seconds=0.05),
+    )
+
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert clock.time() - started < 1
+
+
+async def test_a_wait_that_would_outlast_the_budget_is_not_waited() -> None:
+    attempts = _Attempts(TimeoutError("stalled"))
+
+    response = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        lambda: _OPENAI,
+        backoff_schedule=(30.0,),
+        budget=timedelta(seconds=5),
+    )
+
+    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    assert attempts.models == [_ANTHROPIC]
 
 
 @pytest.mark.parametrize("status,expected_attempts", [(429, 3), (401, 1), (503, 6)])
@@ -573,15 +707,19 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     model = ChatOpenAI(model="test", api_key="test", max_retries=0)
-    backend_middleware = BackendRunMiddleware(
-        run.backend, model_timeout_seconds=2.0 if outcome == "exhausted" else 0.15
-    )
+    backend_middleware = BackendRunMiddleware(run.backend)
     monkeypatch.setattr(backend_middleware, "_before_agent", AsyncMock(return_value=(None, False)))
     for name in ("_before_model", "_after_model", "_after_agent"):
         monkeypatch.setattr(backend_middleware, name, AsyncMock(return_value=None))
     graph = create_agent(
         model=model,
-        middleware=cast(list[AgentMiddleware], [backend_middleware, *model_call_guards()]),
+        middleware=cast(
+            list[AgentMiddleware],
+            [
+                backend_middleware,
+                *model_call_guards(timeout_seconds=2.0 if outcome == "exhausted" else 0.15),
+            ],
+        ),
     )
     call = ModelCall(
         system_prompt="prompt",
@@ -591,30 +729,20 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
         {"messages": [HumanMessage(content="go")], "open_swe_call": call.model_dump()},
         stream_mode="messages",
     )
-    chunks = []
-    if outcome == "stall":
-        with pytest.raises(ModelCallTimeoutError):
-            async for chunk in stream:
-                chunks.append(chunk)
-        assert attempts == 1
-    else:
-        chunks = cast(
-            list[tuple[BaseMessage, dict[str, object]]], [chunk async for chunk in stream]
-        )
-        expected = 7 if outcome == "exhausted" else 1 if outcome == "continues" else 2
-        assert attempts == expected
-        superseded = {
-            message.id
+    chunks = cast(list[tuple[BaseMessage, dict[str, object]]], [chunk async for chunk in stream])
+    # A stalled stream times out its attempt, and the fallback answers.
+    expected = 7 if outcome == "exhausted" else 1 if outcome == "continues" else 2
+    assert attempts == expected
+    superseded = {
+        message.id for message, _ in chunks if message.response_metadata.get("open_swe_superseded")
+    }
+    assert superseded == {f"attempt-{index}" for index in range(1, expected)}
+    if expected > 1:
+        assert any(
+            message.id == f"attempt-{expected}" and "recovered" in str(message.content)
             for message, _ in chunks
-            if message.response_metadata.get("open_swe_superseded")
-        }
-        assert superseded == {f"attempt-{index}" for index in range(1, expected)}
-        if expected > 1:
-            assert any(
-                message.id == f"attempt-{expected}" and "recovered" in str(message.content)
-                for message, _ in chunks
-            )
-        assert f"attempt-{expected}" not in superseded
+        )
+    assert f"attempt-{expected}" not in superseded
 
 
 @pytest.mark.parametrize("jitter", ["lower", "upper"])

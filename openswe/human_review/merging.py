@@ -13,7 +13,7 @@ from openswe.human_review.requests import HumanReviewRequest
 
 logger = logging.getLogger(__name__)
 
-_MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write"}
+_MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write", "workflows": "write"}
 
 MergeStatus = Literal[
     "merged",
@@ -74,7 +74,7 @@ async def _merge(
     except GitHubError as refused:
         return MergeResult(
             "refused",
-            f"GitHub refused the merge: {refused.message}. Open SWE never bypasses branch "
+            f"GitHub refused the merge: {refused.message}. Robin never bypasses branch "
             "protection; ask a maintainer if the rules need someone else's approval.",
         )
     except httpx2.HTTPError:

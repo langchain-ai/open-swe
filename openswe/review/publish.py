@@ -20,7 +20,7 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from html import escape
 from typing import Any, Literal, TypedDict
 
@@ -149,7 +149,7 @@ def render_inline_comment_body(finding: Finding) -> str:
         [
             "",
             "---",
-            "*Your feedback helps Open SWE learn. React with 👍 or 👎 to tell us if this review comment was useful.*",
+            "*Your feedback helps Robin learn. React with 👍 or 👎 to tell us if this review comment was useful.*",
         ]
     )
     body = "\n".join(body_parts)
@@ -315,7 +315,7 @@ class ReviewAssessment(BaseModel):
         if self.decision == "would_approve":
             return "Would approve"
         if self.decision == "would_approve_conditionally":
-            return "Would approve subject to human approval of the stated condition"
+            return "Would approve once a person approves the change below"
         return "Needs human review"
 
     def settled(self, findings: list[Finding]) -> ReviewAssessment:
@@ -349,12 +349,16 @@ class PublishSelection:
         re_review: bool,
         head_sha: str,
         severity_threshold: Severity = "medium",
+        earlier: Collection[str] = (),
     ) -> None:
+        """``earlier`` names findings this publish leaves alone, such as the code review's
+        when a run for a deployed preview publishes only what its apps' work turned up."""
         self.unpublished = [
             finding
             for finding in findings
             if not self._published(finding, destination)
             and (not re_review or finding.get("first_seen_sha") == head_sha)
+            and finding.get("id") not in earlier
         ]
         self.severity_threshold: Severity = severity_threshold
 
@@ -423,20 +427,20 @@ def render_review_body(
     has_additional = additional_findings_count > 0
     if surfaced_count == 0 and not out_of_diff_findings:
         headline = (
-            "## ✅ Open SWE Review: No issues found\n\n"
-            "Open SWE reviewed this PR and found no potential bugs to report."
+            "## ✅ Robin Review: No issues found\n\n"
+            "Robin reviewed this PR and found no potential bugs to report."
         )
     elif surfaced_count == 0:
-        headline = "**Open SWE Review** found no issues in the changed lines."
+        headline = "**Robin Review** found no issues in the changed lines."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
-        headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
+        headline = f"**Robin Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
     if config_errors:
         parts.append(
-            "**Changes requested: invalid Open SWE configuration.** "
-            "This pull request changes Open SWE configuration that cannot be applied:\n\n"
+            "**Changes requested: invalid Robin configuration.** "
+            "This pull request changes Robin configuration that cannot be applied:\n\n"
             + "\n".join(f"- {escape(error)}" for error in config_errors)
         )
     if approval_errors:
@@ -457,11 +461,9 @@ def render_review_body(
         suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
         if assessment.approval_condition:
-            parts.append(f"**Approval condition:** {escape(assessment.approval_condition)}")
+            parts.append(f"**Needs a person to approve:** {escape(assessment.approval_condition)}")
         if assessment.auto_approved:
-            parts.append(
-                f"**Already covered by auto-approval:** {escape(assessment.auto_approved)}"
-            )
+            parts.append(f"**Covered by auto-approve:** {escape(assessment.auto_approved)}")
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
@@ -476,7 +478,7 @@ def render_review_body(
             + "\n\n</details>"
         )
         feedback_link = (
-            f", or [rate the latest assessment in Open SWE]({ui_url}#assessment-feedback)"
+            f", or [rate the latest assessment in Robin]({ui_url}#assessment-feedback)"
             if ui_url
             else ""
         )
@@ -485,7 +487,7 @@ def render_review_body(
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
     if trace_url:
-        links.append(f"[View Open SWE trace]({trace_url})")
+        links.append(f"[View Robin trace]({trace_url})")
     if links:
         parts.append(" • ".join(links))
     parts.append(review_summary_marker(pr_number))
@@ -509,13 +511,13 @@ def render_status_comment(
     "Open in Web" link while the run is live; deleted once ``publish_review``
     posts the review (which carries the same link).
     """
-    parts = ["## 🔍 Open SWE Review: in progress\n\nOpen SWE is reviewing this PR…"]
+    parts = ["## 🔍 Robin Review: in progress\n\nRobin is reviewing this PR…"]
     links = []
     ui_url = dashboard_thread_url(thread_id) if thread_id else None
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
     if trace_url:
-        links.append(f"[View Open SWE trace]({trace_url})")
+        links.append(f"[View Robin trace]({trace_url})")
     if links:
         parts.append(" • ".join(links))
     parts.append(status_comment_marker(pr_number))
@@ -529,9 +531,9 @@ def render_failed_status_comment(*, pr_number: int, thread_id: str, reason: str)
     it when it starts or publishes.
     """
     parts = [
-        "## ⚠️ Open SWE Review: couldn't run\n\n"
-        f"Open SWE stopped before it could review this PR: {reason}. "
-        "Push a commit or re-request a review from Open SWE to run it again."
+        "## ⚠️ Robin Review: couldn't run\n\n"
+        f"Robin stopped before it could review this PR: {reason}. "
+        "Push a commit or re-request a review from Robin to run it again."
     ]
     if ui_url := dashboard_thread_url(thread_id):
         parts.append(f"[Open in Web]({ui_url})")
@@ -626,6 +628,19 @@ async def clear_review_started_comment(
     await set_reviewer_thread_metadata(thread_id, extra={"status_comment_id": None})
 
 
+class ReviewCheckResult(BaseModel):
+    conclusion: CheckConclusion
+    title: str = "Review completed"
+    summary: str = ""
+
+
+class TrackedReviewCheck(BaseModel):
+    """The ``Robin Review`` check a reviewer thread's metadata tracks."""
+
+    review_check_run_id: int | None = None
+    review_check_pending_result: ReviewCheckResult | None = None
+
+
 async def settle_review_check_run(
     *,
     thread_id: str,
@@ -636,7 +651,7 @@ async def settle_review_check_run(
     title: str,
     summary: str,
 ) -> None:
-    """Complete the tracked ``Open SWE Review`` check run, if one is open.
+    """Complete the tracked ``Robin Review`` check run, if one is open.
 
     The dispatching webhook stores ``review_check_run_id`` in reviewer thread
     metadata when it creates the check. No-op when none is tracked. The id is

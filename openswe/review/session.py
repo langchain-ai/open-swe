@@ -104,6 +104,8 @@ class ReviewSession(BaseModel):
                 "kind": REVIEW_CHAT_SOURCE,
                 "source": REVIEW_CHAT_SOURCE,
                 "github_login": self.login,
+                "owner_type": "user",
+                "owner_login": self.login,
                 "repo_owner": self.owner,
                 "repo_name": self.repo,
                 "pr_number": self.pr_number,

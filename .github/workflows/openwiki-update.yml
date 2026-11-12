@@ -11,6 +11,10 @@ permissions:
 
 jobs:
   update:
+    # Off on langchain-ai/open-swe: its main is exported from LangChain's
+    # internal monorepo, so a PR opened here would be reverted by the next
+    # export. OpenWiki updates move to the monorepo.
+    if: github.repository != 'langchain-ai/open-swe'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

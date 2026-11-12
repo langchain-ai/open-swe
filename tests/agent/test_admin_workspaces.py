@@ -15,6 +15,9 @@ from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
 from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate, WorkspaceUpdate
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
 

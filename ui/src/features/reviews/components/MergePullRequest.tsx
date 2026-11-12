@@ -2,6 +2,7 @@ import { CheckIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
@@ -13,6 +14,7 @@ import {
   readPreferredMergeMethod,
   writePreferredMergeMethod,
 } from "../lib/mergeMethod"
+import { mergesLater } from "../lib/status"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
 
 /** GitHub's merge button: one click merges; the caret picks how. */
@@ -28,6 +30,7 @@ export function MergePullRequest({
   const [choice, setChoice] = useState<MergeMethod | null>(null)
   const [preferred] = useState(readPreferredMergeMethod)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const allowed = useQuery({
     queryKey: ["repo-merge-methods", pr.repo],
     queryFn: () => api.repoMergeMethods(pr.repo),
@@ -53,77 +56,98 @@ export function MergePullRequest({
       (candidate): candidate is MergeMethod =>
         !!candidate && options.includes(candidate)
     ) ?? null
-  const autoMerge = pr.ci === "pending" && pr.mergeState === "blocked"
+  const autoMerge = mergesLater(pr)
   const merge = usePullRequestAction({
     pr,
     action: "merge",
     method: method ?? undefined,
     apply: autoMerge ? undefined : apply,
-    onDone: () => {
+    onDone: (queued) => {
       if (method) writePreferredMergeMethod(method)
-      if (!autoMerge) onMerged?.()
+      if (!queued) onMerged?.()
     },
   })
   const busy = merge.isPending || merge.isSuccess || pr.autoMerge === true
-  const labels = autoMerge
-    ? {
-        idle: "Enable auto-merge",
-        pending: "Enabling auto-merge…",
-        done: "Auto-merge enabled",
-        retry: "Retry auto-merge",
-      }
-    : githubActions.merge.labels
+  const labels =
+    autoMerge || merge.data === true
+      ? {
+          idle: "Enable auto-merge",
+          pending: "Enabling auto-merge…",
+          done: "Auto-merge enabled",
+          retry: "Retry auto-merge",
+        }
+      : githubActions.merge.labels
   const state = actionLabel(labels, merge)
+  const rulesUnknown = pr.conversationResolutionRequired == null
+  const blocking =
+    pr.conversationResolutionRequired === true ||
+    (rulesUnknown && pr.mergeState !== "clean")
+      ? (pr.unresolvedThreads ?? 0)
+      : 0
+  const conversations = `${blocking} unresolved conversation${blocking === 1 ? "" : "s"}`
+  const start = () => {
+    if (!method) setMenuOpen(true)
+    else if (blocking > 0) setConfirming(true)
+    else merge.mutate()
+  }
   return (
-    <SplitButton
-      disabled={
-        !pr.headSha ||
-        (!autoMerge && pr.requiredChecksPassing !== true) ||
-        busy ||
-        allowed.isPending
-      }
-      onClick={() => (method ? merge.mutate() : setMenuOpen(true))}
-      menuLabel={`Merge method for PR #${pr.number}`}
-      menuDisabled={busy}
-      menuOpen={menuOpen}
-      onMenuOpenChange={setMenuOpen}
-      menu={
-        options.length > 1 &&
-        options.map((option) => (
-          <DropdownMenuItem
-            key={option}
-            role="menuitemradio"
-            aria-checked={option === method}
-            onSelect={() => setChoice(option)}
-            className="w-72 items-start"
-          >
-            <CheckIcon
-              aria-hidden
-              size={14}
-              weight="bold"
-              className={option === method ? "mt-0.5" : "invisible mt-0.5"}
-            />
-            <span>
-              <span className="block font-medium">
-                {mergeMethodCopy[option].label}
+    <>
+      <SplitButton
+        disabled={!pr.headSha || busy || allowed.isPending}
+        onClick={start}
+        menuLabel={`Merge method for PR #${pr.number}`}
+        menuDisabled={busy}
+        menuOpen={menuOpen}
+        onMenuOpenChange={setMenuOpen}
+        menu={
+          options.length > 1 &&
+          options.map((option) => (
+            <DropdownMenuItem
+              key={option}
+              role="menuitemradio"
+              aria-checked={option === method}
+              onSelect={() => setChoice(option)}
+              className="w-72 items-start"
+            >
+              <CheckIcon
+                aria-hidden
+                size={14}
+                weight="bold"
+                className={option === method ? "mt-0.5" : "invisible mt-0.5"}
+              />
+              <span>
+                <span className="block font-medium">
+                  {mergeMethodCopy[option].label}
+                </span>
+                <span className="block text-secondary">
+                  {mergeMethodCopy[option].description}
+                </span>
               </span>
-              <span className="block text-secondary">
-                {mergeMethodCopy[option].description}
-              </span>
-            </span>
-          </DropdownMenuItem>
-        ))
-      }
-    >
-      {pr.autoMerge
-        ? "Auto-merge enabled"
-        : allowed.isPending
-          ? "Merge"
-          : !method
-            ? "Choose how to merge"
-            : !autoMerge && state === labels.idle
-              ? mergeMethodCopy[method].button
-              : state}
-    </SplitButton>
+            </DropdownMenuItem>
+          ))
+        }
+      >
+        {pr.autoMerge
+          ? "Auto-merge enabled"
+          : allowed.isPending
+            ? "Merge"
+            : !method
+              ? "Choose how to merge"
+              : !autoMerge && state === labels.idle
+                ? mergeMethodCopy[method].button
+                : state}
+      </SplitButton>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`${conversations} on PR #${pr.number}`}
+        description={`${rulesUnknown ? `Could not confirm whether ${pr.repo} requires conversations to be resolved before merging.` : `${pr.repo} requires every conversation to be resolved before merging.`} Resolve ${blocking === 1 ? "it" : `all ${blocking}`} and ${autoMerge ? "enable auto-merge" : "merge"}?`}
+        confirmLabel={`Resolve and ${autoMerge ? "enable auto-merge" : "merge"}`}
+        onConfirm={() => {
+          setConfirming(false)
+          merge.mutate({ resolveConversations: true })
+        }}
+      />
+    </>
   )
 }

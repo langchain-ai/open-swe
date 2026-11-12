@@ -137,8 +137,8 @@ export function DefaultRepoSection({
       title="Default Repository"
       description={
         scoped
-          ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
-          : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
+          ? "Where a run in this environment lands when nothing names a repository. Any repository the GitHub App can access will do."
+          : "Where a run lands when nothing names a repository and the environment sets no default of its own."
       }
     >
       <div className="divide-y divide-default">
@@ -234,8 +234,8 @@ export function ModelDefaultsSection({
       title="Model Defaults"
       description={
         scoped
-          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
-          : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
+          ? "Models for runs in this environment. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
+          : "Models for runs in every environment that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
       <div className="divide-y divide-default">
@@ -258,15 +258,15 @@ export function ModelDefaultsSection({
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Agent"
-          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
+          label="Robin Agent"
+          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Robin Agent."
           modelField="default_agent_model"
           effortField="default_agent_reasoning_effort"
         />
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Agent subagents"
+          label="Robin Agent subagents"
           description="Model used by delegated main-agent tasks."
           modelField="default_agent_subagent_model"
           effortField="default_agent_subagent_reasoning_effort"
@@ -306,7 +306,7 @@ export function ModelDefaultsSection({
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Reviewer"
+          label="Robin Reviewer"
           description="Model used for PR review runs."
           modelField="default_reviewer_model"
           effortField="default_reviewer_reasoning_effort"
@@ -314,7 +314,7 @@ export function ModelDefaultsSection({
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Reviewer subagents"
+          label="Robin Reviewer subagents"
           description="Model used by delegated reviewer tasks."
           modelField="default_reviewer_subagent_model"
           effortField="default_reviewer_subagent_reasoning_effort"

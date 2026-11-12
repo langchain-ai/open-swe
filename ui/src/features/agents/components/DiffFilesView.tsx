@@ -434,7 +434,7 @@ const FileDiffSection = memo(
                 ref={textareaRef}
                 size="md"
                 aria-label="Comment on selected code"
-                placeholder="Ask Open SWE about these lines…"
+                placeholder="Ask Robin about these lines…"
                 value={comment}
                 onChange={setComment}
                 onKeyDown={(event) => {
@@ -470,7 +470,7 @@ const FileDiffSection = memo(
                   size="xs"
                   disabled={sending || !comment.trim()}
                 >
-                  {sending ? "Sending…" : "Send to Open SWE"}
+                  {sending ? "Sending…" : "Send to Robin"}
                 </Button>
               </div>
             </form>

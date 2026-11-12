@@ -26,6 +26,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
 from managed_deepagents._agent_auth import AgentAuth, AgentAuthContext
+from managed_deepagents._channels.binding import handler_threads_key
 from managed_deepagents._connections import (
     PLATFORM_API_URL_ENV,
     TRUSTED_BACKEND_PROVIDER,
@@ -46,6 +47,7 @@ from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
 from openswe.utils.langsmith import resolve_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,12 @@ _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
 # as, which decides whether its catalog names that person's connections.
-_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", ACTING_USER_KEY)
+_TOKEN_METADATA_KEYS: Final = (
+    "event_match_ids",
+    "ls_attribution_identifier",
+    ACTING_USER_KEY,
+    *BILLING_FIELDS,
+)
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
@@ -72,6 +79,13 @@ CHANNEL_SERVICE_USER: Final = "mda:channel"
 _PRINCIPAL_HEADER: Final = "x-mda-agent-auth-principal-id"
 # How many channel threads' conversations an ``MdaRuntime`` keeps.
 _CHANNEL_CONVERSATIONS_LIMIT: Final = 4096
+#: How long a channel thread's conversation is kept before MDA is asked again: a run
+#: may hand its thread to another conversation, a Slack thread it moved to.
+_CHANNEL_CONVERSATION_SECONDS: Final = 60.0
+# Connections each MDA client holds at once: the short calls, then the streams, which
+# stay open as long as someone watches a thread.
+_MDA_CONNECTIONS: Final = 100
+_MDA_STREAM_CONNECTIONS: Final = 1000
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -165,13 +179,20 @@ class _SdkThreads:
         """The thread's current state here."""
         return _object.validate_python(dict(await self.client.threads.get_state(thread_id)))
 
+    async def has_active_run(self, thread_id: str) -> bool:
+        """Whether a run on the thread here is still pending or running."""
+        for status in ("pending", "running"):
+            if await self.client.runs.list(thread_id, status=status, limit=1):
+                return True
+        return False
+
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
             thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
-        await self.client.threads.update(thread_id, metadata=dict(metadata))
+        await self.client.threads.update(thread_id, metadata=dict(metadata), return_minimal=True)
 
     async def delete(self, thread_id: str) -> None:
         try:
@@ -206,18 +227,24 @@ class MdaRuntime:
     def __init__(self, url: str) -> None:
         self.url = url
         self._mda_threads: set[str] = set()
-        # Each channel thread's conversation on MDA, (provider, key), which never changes;
+        # Each channel thread's conversation on MDA, (provider, key), with when it was read;
         # the most recently used ones.
-        self._channel_conversations: OrderedDict[str, tuple[str, str]] = OrderedDict()
+        self._channel_conversations: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
         self._http: httpx.AsyncClient | None = None
         self._read_http: httpx.AsyncClient | None = None
+        self._stream_http: httpx.AsyncClient | None = None
 
-    def _client(self, extra: Mapping[str, str]) -> httpx.AsyncClient:
+    def _client(
+        self, extra: Mapping[str, str], *, max_connections: int = _MDA_CONNECTIONS
+    ) -> httpx.AsyncClient:
         headers = dict(extra)
         if api_key := mda_runtime_api_key():
             headers["x-api-key"] = api_key
         return httpx.AsyncClient(
-            base_url=self.url, headers=headers, timeout=httpx.Timeout(30.0, read=None)
+            base_url=self.url,
+            headers=headers,
+            timeout=httpx.Timeout(30.0, read=None),
+            limits=httpx.Limits(max_connections=max_connections),
         )
 
     @property
@@ -234,6 +261,18 @@ class MdaRuntime:
             self._read_http = self._client(MDA_STUDIO_READ_HEADERS)
         return self._read_http
 
+    @property
+    def stream_http(self) -> httpx.AsyncClient:
+        """For reads held open until a run ends or a tab closes: thread and run streams, joins.
+
+        Their own pool, so open dashboard tabs never leave runs unable to start or stop.
+        """
+        if self._stream_http is None:
+            self._stream_http = self._client(
+                MDA_STUDIO_READ_HEADERS, max_connections=_MDA_STREAM_CONNECTIONS
+            )
+        return self._stream_http
+
     def sdk(self) -> LangGraphClient:
         """For writes, scoped to the threads the backend owns."""
         return get_client(url=self.url, api_key=mda_runtime_api_key())
@@ -244,8 +283,9 @@ class MdaRuntime:
         MDA's trusted-backend ingress: its ingress secret, the ``MDA_INGRESS_SECRET``
         the deployment gets with the value of the ``MDA_SERVICE_SECRET`` the two share,
         with the reserved headers naming the conversation that owns the thread, read
-        from MDA once. The thread keeps that owner, so the conversation's later
-        messages still reach it. Raises ``ChannelThreadError`` without the secret or
+        from MDA and kept for a minute. The thread keeps that owner, so the
+        conversation's later messages still reach it, unless a run hands the thread to
+        a Slack thread it moved to (:meth:`forget_channel_conversation`). Raises ``ChannelThreadError`` without the secret or
         when MDA names no channel conversation as the thread's owner.
 
         ``user_id`` is the Open SWE user the write is for, so a person's run here has
@@ -256,9 +296,10 @@ class MdaRuntime:
         secret = ENV.MDA_SERVICE_SECRET.optional()
         if not secret:
             raise ChannelThreadError("No MDA_SERVICE_SECRET to act on MDA's channel threads")
-        conversation = self._channel_conversations.get(thread_id)
-        if conversation is not None:
+        cached = self._channel_conversations.get(thread_id)
+        if cached is not None and time.monotonic() - cached[2] < _CHANNEL_CONVERSATION_SECONDS:
             self._channel_conversations.move_to_end(thread_id)
+            conversation = cached[:2]
         else:
             response = await self.read_http.get(f"/threads/{thread_id}")
             response.raise_for_status()
@@ -269,10 +310,43 @@ class MdaRuntime:
             provider, _, key = owner.removeprefix(_CHANNEL_OWNER_PREFIX).partition(":")
             if not provider or not key:
                 raise ChannelThreadError(f"MDA names no conversation owning thread {thread_id}")
-            conversation = self._channel_conversations[thread_id] = (provider, key)
-            if len(self._channel_conversations) > _CHANNEL_CONVERSATIONS_LIMIT:
-                self._channel_conversations.popitem(last=False)
+            conversation = (provider, key)
+            self._remember_conversation(thread_id, provider, key)
         provider, key = conversation
+        return await self._conversation_write(secret, provider, key, user_id=user_id)
+
+    async def create_handler_thread(self, thread_id: str, *, provider: str, channel: str) -> None:
+        """Make ``thread_id`` on MDA one of the threads ``channel``'s handlers choose.
+
+        Such a thread is owned by the channel's handler threads (``handler_threads_key``),
+        not by one conversation, so the handler can start later runs on it for whichever
+        conversation it joins, as it does on the side threads it opens itself. The
+        backend creates it before it starts its first run there (:meth:`channel_write`).
+        Raises ``ChannelThreadError`` without the secret.
+        """
+        secret = ENV.MDA_SERVICE_SECRET.optional()
+        if not secret:
+            raise ChannelThreadError("No MDA_SERVICE_SECRET to act on MDA's channel threads")
+        key = handler_threads_key(channel)
+        write = await self._conversation_write(secret, provider, key)
+        response = await self.http.post(
+            "/threads",
+            json={"thread_id": thread_id, "if_exists": "do_nothing"},
+            headers=write.headers,
+        )
+        response.raise_for_status()
+        self._remember_conversation(thread_id, provider, key)
+
+    def _remember_conversation(self, thread_id: str, provider: str, key: str) -> None:
+        self._channel_conversations[thread_id] = (provider, key, time.monotonic())
+        self._channel_conversations.move_to_end(thread_id)
+        if len(self._channel_conversations) > _CHANNEL_CONVERSATIONS_LIMIT:
+            self._channel_conversations.popitem(last=False)
+
+    async def _conversation_write(
+        self, secret: str, provider: str, key: str, *, user_id: str | None = None
+    ) -> ChannelWrite:
+        """MDA's trusted-backend ingress for the conversation ``(provider, key)``."""
         principal = await self.user_principal(user_id) if user_id else None
         headers = {
             "x-mda-ingress-secret": secret,
@@ -282,6 +356,11 @@ class MdaRuntime:
             "x-mda-source-thread-id": key,
         }
         return ChannelWrite(MappingProxyType(headers), user_id if principal else None)
+
+    def forget_channel_conversation(self, thread_id: str) -> None:
+        """Ask MDA again which conversation owns ``thread_id`` on its next write: a run
+        handed the thread to the Slack thread it moved to."""
+        self._channel_conversations.pop(thread_id, None)
 
     async def user_principal(self, user_id: str) -> str | None:
         """The Agent Auth principal an Open SWE user's channel runs have, or ``None``.
@@ -383,6 +462,28 @@ class MdaRuntime:
             active += sorted(_runs.validate_python(response.json()), key=lambda run: run.created_at)
         return active
 
+    async def _owner_ls_user_id(self, thread_id: str) -> str | None:
+        from openswe.tasks.schemas import ThreadMetadata
+        from openswe.threads.store import THREADS
+
+        try:
+            thread = await THREADS.get(thread_id)
+            if thread is None or thread.metadata.get("owner_type") != "user":
+                return None
+            metadata = ThreadMetadata.model_validate(thread.metadata)
+            if metadata.owner_user_id is None:
+                return None
+            owner = await metadata.owner()
+            identities = [item for item in owner.identities if item.provider == "langsmith"]
+            return identities[0].external_id if len(identities) == 1 else None
+        except Exception:
+            logger.warning(
+                "Could not resolve original trace owner",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            return None
+
     async def run_payload(
         self,
         thread_id: str,
@@ -410,6 +511,48 @@ class MdaRuntime:
         assistant_id = payload.get("assistant_id")
         if not isinstance(assistant_id, str):
             raise ValueError("A run needs an assistant_id")
+        run_metadata.pop("billed_user_id", None)
+        run_metadata["created_by"] = None
+        run_metadata.setdefault(
+            "billing_bucket", "channel" if dispatch.channel_of(thread_metadata) else "system"
+        )
+        actor = run_metadata.get(ACTING_USER_KEY)
+        if (
+            assistant_id == "agent"
+            and isinstance(actor, str)
+            and actor != run_metadata.get("billed_robin_user_id")
+        ):
+            from uuid import UUID
+
+            from openswe.users import User
+
+            for key in BILLING_USER_FIELDS:
+                run_metadata.pop(key, None)
+            run_metadata["billing_bucket"] = (
+                "channel" if dispatch.channel_of(thread_metadata) else "system"
+            )
+            try:
+                user = await User.get(UUID(actor))
+                if user is not None:
+                    run_metadata.update(user.billing_trace_metadata())
+            except Exception:
+                logger.warning("Could not resolve acting user for trace metadata", exc_info=True)
+        if run_metadata.get("user_id") != run_metadata.get("billed_robin_user_id"):
+            run_metadata.pop("user_id", None)
+        owner_ls_user_id = await self._owner_ls_user_id(thread_id)
+        run_metadata["owner_ls_user_id"] = owner_ls_user_id
+        raw_config_metadata = config.get("metadata")
+        if isinstance(raw_config_metadata, dict):
+            config["metadata"] = {
+                **{
+                    key: value
+                    for key, value in raw_config_metadata.items()
+                    if key not in BILLING_FIELDS and key != "billed_user_id"
+                },
+                **{key: run_metadata[key] for key in BILLING_FIELDS if key in run_metadata},
+                "owner_ls_user_id": owner_ls_user_id,
+                "created_by": None,
+            }
         context = dict(
             await remote_run_context(
                 configurable,
@@ -418,6 +561,7 @@ class MdaRuntime:
                 assistant_id=assistant_id,
             )
         )
+        context["owner_ls_user_id"] = owner_ls_user_id
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
@@ -553,6 +697,16 @@ class _MdaThreads(_SdkThreads):
         response = await self.reads.get(f"/threads/{thread_id}/state")
         response.raise_for_status()
         return _object.validate_python(response.json())
+
+    async def has_active_run(self, thread_id: str) -> bool:
+        for status in ("pending", "running"):
+            response = await self.reads.get(
+                f"/threads/{thread_id}/runs", params={"status": status, "limit": 1}
+            )
+            response.raise_for_status()
+            if response.json():
+                return True
+        return False
 
 
 class Runtimes:

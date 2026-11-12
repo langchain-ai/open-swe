@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Mapping, Sequence
 
-from openswe.database import postgres
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.store import TaskMembership, sidebar_memberships
@@ -69,7 +68,7 @@ class RoutedWork:
             return True
         if await TaskMessage.pending_threads([self.thread_id]):
             return True
-        return postgres.configured() and bool(await QueuedMessage.for_thread(self.thread_id))
+        return bool(await QueuedMessage.for_thread(self.thread_id))
 
     async def delegated_active(
         self,

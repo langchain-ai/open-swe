@@ -1,10 +1,8 @@
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 
 
@@ -45,16 +43,13 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     configurable = get_config().get("configurable", {})
     source = configurable.get("source") or "agent"
     github_login = configurable.get("github_login", "")
-    # Goal-mode agents review their own drafts and report the outcome themselves once ready.
-    goal_mode = bool(github_login) and (await User.preferences_for_login(github_login)).goal_mode
-    slack_thread = configurable.get("slack_thread") or {}
     thread_id = configurable.get("thread_id")
+    slack_thread = configurable.get("slack_thread") or {}
     active = await get_active_slack_thread(
-        get_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
-    slack_thread = {} if goal_mode else active or {}
+    slack_thread = active or {}
     result = await trigger_pr_review_from_ref(
         pr_ref,
         source=source,
@@ -62,7 +57,6 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         github_user_id=configurable.get("github_user_id"),
         slack_channel_id=slack_thread.get("channel_id", ""),
         slack_thread_ts=slack_thread.get("thread_ts", ""),
-        allow_draft=goal_mode,
     )
     if result.get("success") and (
         review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)

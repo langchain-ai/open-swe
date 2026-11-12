@@ -7,9 +7,10 @@ from urllib.parse import parse_qs, urlparse
 import jwt
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 
+from openswe.api.public_origin import PublicOriginMiddleware
 from openswe.dashboard import auth_routes, github_link, routes
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
@@ -21,17 +22,17 @@ from openswe.dashboard.oauth import (
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from openswe.utils.dashboard_links import PUBLIC_ORIGIN_HEADER
 
 
 @pytest.mark.parametrize(
-    ("configured", "unavailable", "status"),
-    [(True, False, 401), (True, True, 200), (False, False, 200)],
+    ("unavailable", "status"),
+    [(False, 401), (True, 500)],
 )
 def test_me_reauthenticates_only_a_confirmed_missing_account(
-    monkeypatch: pytest.MonkeyPatch, configured: bool, unavailable: bool, status: int
+    monkeypatch: pytest.MonkeyPatch, unavailable: bool, status: int
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
-    monkeypatch.setattr(auth_routes.postgres, "configured", lambda: configured)
     monkeypatch.setattr(
         auth_routes.User,
         "for_session",
@@ -43,11 +44,11 @@ def test_me_reauthenticates_only_a_confirmed_missing_account(
     monkeypatch.setattr(
         auth_routes,
         "get_user_preferences",
-        AsyncMock(return_value={"follow_up_behavior": "queue"}),
+        AsyncMock(return_value={"follow_up_behavior": "queue", "auto_show_changes": True}),
     )
     app = FastAPI()
     app.include_router(routes.router)
-    with TestClient(app) as client:
+    with TestClient(app, raise_server_exceptions=False) as client:
         client.cookies.set(
             COOKIE_NAME,
             issue_session(login="alice", email=None, avatar_url=None, user_id=str(User().id)),
@@ -57,6 +58,68 @@ def test_me_reauthenticates_only_a_confirmed_missing_account(
     assert response.status_code == status
     if status == 200:
         assert response.json()["login"] == "alice"
+
+
+@pytest.mark.parametrize("failure", ["lookup", "revocation"])
+def test_logout_clears_cookie_when_database_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    monkeypatch.setattr(
+        DashboardPrincipal,
+        "user",
+        AsyncMock(
+            return_value=User(),
+            side_effect=RuntimeError("database unavailable") if failure == "lookup" else None,
+        ),
+    )
+    monkeypatch.setattr(
+        auth_routes.LangSmithLogin,
+        "logout",
+        AsyncMock(side_effect=RuntimeError("database unavailable")),
+    )
+    app = FastAPI()
+    app.include_router(auth_routes.router, prefix="/dashboard/api")
+    with TestClient(app) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(User().id)),
+            domain="testserver.local",
+            path="/",
+        )
+        response = client.post("/dashboard/api/auth/logout")
+        assert response.status_code == 204
+        assert COOKIE_NAME not in client.cookies
+
+
+@pytest.mark.parametrize("provider", ["github", "langsmith"])
+@pytest.mark.parametrize("stored_avatar", ["https://avatars.example/alice.png", ""])
+@pytest.mark.parametrize("session_avatar", [None, "https://avatars.example/old.png"])
+async def test_me_returns_current_avatar_on_first_load(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    stored_avatar: str,
+    session_avatar: str | None,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    user = User(avatar_url=stored_avatar)
+    monkeypatch.setattr(DashboardPrincipal, "user", AsyncMock(return_value=user))
+    monkeypatch.setattr(
+        auth_routes,
+        "get_user_preferences",
+        AsyncMock(return_value={"follow_up_behavior": "queue", "auto_show_changes": True}),
+    )
+    session = {
+        "sub": f"user:{user.id}",
+        "user_id": str(user.id),
+        "provider": provider,
+        "langsmith_subject": "ls-alice",
+        "avatar_url": session_avatar,
+    }
+
+    result = await auth_routes.me(Response(), session)
+
+    assert result["avatar_url"] == (stored_avatar or session["avatar_url"])
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
@@ -106,6 +169,16 @@ def test_sanitize_redirect_to_rejects_unsafe_targets(monkeypatch) -> None:
         "https://dashboard.example/dashboard/api/auth/callback",
     ):
         assert sanitize_redirect_to(target) == "https://dashboard.example"
+
+
+@pytest.mark.parametrize("target", ["/\\evil.example/agents", "/agents\\..\\\\evil.example"])
+def test_sanitize_redirect_to_rejects_backslash_paths_without_a_dashboard_url(
+    monkeypatch, target: str
+) -> None:
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+
+    assert sanitize_redirect_to(target) == ""
 
 
 def test_login_hands_every_sign_in_to_langsmith(monkeypatch) -> None:
@@ -158,8 +231,17 @@ def linking(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def fake_upsert(login: str, email: str, data: dict[str, Any]) -> None:
         collected["tokens"] = {"login": login, "email": email, "data": data}
 
-    async def fake_join(self: User, external_id: str, *, login: str, email: str) -> User:
+    async def fake_join(
+        self: User,
+        external_id: str,
+        *,
+        login: str,
+        email: str,
+        recovery_slack_id: str | None = None,
+    ) -> User:
         collected["join"] = {"user": self, "external_id": external_id, "login": login}
+        if recovery_slack_id:
+            collected["recovery_slack_id"] = recovery_slack_id
         return joined
 
     async def fake_user(self: DashboardPrincipal) -> User:
@@ -177,10 +259,16 @@ def linking(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return collected
 
 
-def _langsmith_client(person: User) -> TestClient:
+def _langsmith_client(person: User, *, through: str | None = None) -> TestClient:
+    """A signed-in browser on the dashboard, or on the alias domain ``through``."""
     app = FastAPI()
     app.include_router(routes.router)
-    client = TestClient(app, base_url="https://dashboard.example")
+    app.add_middleware(PublicOriginMiddleware)
+    client = TestClient(
+        app,
+        base_url=through or "https://dashboard.example",
+        headers={PUBLIC_ORIGIN_HEADER: through} if through else None,
+    )
     client.cookies.set(
         COOKIE_NAME,
         issue_session(
@@ -195,13 +283,19 @@ def _langsmith_client(person: User) -> TestClient:
     return client
 
 
-def test_linking_github_turns_the_langsmith_session_into_its_github_login(
-    linking: dict[str, Any],
+@pytest.mark.parametrize("recovery", [False, True])
+async def test_linking_github_turns_the_langsmith_session_into_its_github_login(
+    linking: dict[str, Any], recovery: bool
 ) -> None:
+    from openswe.slack.recovery import SlackRecovery
+
+    proof = await SlackRecovery(linking["person"].id, "U-legacy").issue() if recovery else None
     target = "/agents?from=slack"
     with _langsmith_client(linking["person"]) as client:
         start = client.get(
-            "/dashboard/api/github/login", params={"redirect_to": target}, follow_redirects=False
+            "/dashboard/api/github/login",
+            params={"redirect_to": target, **({"slack_recovery": proof} if proof else {})},
+            follow_redirects=False,
         )
         authorize = parse_qs(urlparse(start.headers["location"]).query)
         assert authorize["redirect_uri"] == [
@@ -214,13 +308,45 @@ def test_linking_github_turns_the_langsmith_session_into_its_github_login(
         )
 
         assert callback.status_code == 302
-        assert callback.headers["location"] == f"https://dashboard.example{target}"
+        assert callback.headers["location"] == (
+            "https://dashboard.example/my-settings/connections"
+            if recovery
+            else f"https://dashboard.example{target}"
+        )
         session = decode_session(callback.cookies[COOKIE_NAME])
         assert (session["sub"], session["provider"]) == ("alice", "langsmith")
         assert session["user_id"] == str(linking["joined"].id)
 
     assert linking["join"] == {"user": linking["person"], "external_id": "42", "login": "alice"}
     assert linking["tokens"] == {"login": "alice", "email": "alice@example.com", "data": _TOKENS}
+
+
+@pytest.mark.parametrize(
+    ("through", "lands_on"),
+    [
+        ("https://robin.example", "https://robin.example"),
+        # An origin the deployment doesn't list is answered as the canonical domain.
+        ("https://evil.example", "https://dashboard.example"),
+    ],
+)
+def test_linking_github_through_an_alias_domain_stays_on_it(
+    linking: dict[str, Any], monkeypatch: pytest.MonkeyPatch, through: str, lands_on: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_ALIAS_URLS", "https://robin.example")
+    with _langsmith_client(linking["person"], through=through) as client:
+        start = client.get(
+            "/dashboard/api/github/login", params={"redirect_to": "/agents"}, follow_redirects=False
+        )
+        authorize = parse_qs(urlparse(start.headers["location"]).query)
+        assert authorize["redirect_uri"] == [f"{lands_on}/dashboard/api/auth/callback"]
+        callback = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": authorize["state"][0]},
+            follow_redirects=False,
+        )
+
+    assert callback.status_code == 302
+    assert callback.headers["location"] == f"{lands_on}/agents"
 
 
 def test_linking_github_rejects_a_callback_without_its_state_cookie(
@@ -241,11 +367,42 @@ def test_linking_github_rejects_a_callback_without_its_state_cookie(
     assert "join" not in linking
 
 
-def test_desktop_github_link_hands_back_only_encrypted_tokens(linking: dict[str, Any]) -> None:
+@pytest.mark.parametrize("desktop", [False, True])
+def test_expired_slack_recovery_does_not_start_github_link(
+    linking: dict[str, Any], desktop: bool
+) -> None:
+    with _langsmith_client(linking["person"]) as client:
+        response = client.get(
+            "/dashboard/api/github/login",
+            params={
+                "slack_recovery": "invalid-proof",
+                **({"desktop_handoff": _CHALLENGE, "desktop_port": 51234} if desktop else {}),
+            },
+            follow_redirects=False,
+        )
+    assert response.status_code == (400 if desktop else 302)
+    if not desktop:
+        location = urlparse(response.headers["location"])
+        assert location.path == "/my-settings/connections"
+        assert "connect Slack again" in parse_qs(location.query)["recovery_error"][0]
+    assert "join" not in linking
+
+
+@pytest.mark.parametrize("recovery", [False, True])
+async def test_desktop_github_link_hands_back_only_encrypted_tokens(
+    linking: dict[str, Any], recovery: bool
+) -> None:
+    from openswe.slack.recovery import SlackRecovery
+
+    proof = await SlackRecovery(linking["person"].id, "U-legacy").issue() if recovery else None
     with _langsmith_client(linking["person"]) as app_client:
         start = app_client.get(
             "/dashboard/api/github/login",
-            params={"desktop_handoff": _CHALLENGE, "desktop_port": 51234},
+            params={
+                "desktop_handoff": _CHALLENGE,
+                "desktop_port": 51234,
+                **({"slack_recovery": proof} if proof else {}),
+            },
             follow_redirects=False,
         )
         state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
@@ -273,6 +430,9 @@ def test_desktop_github_link_hands_back_only_encrypted_tokens(linking: dict[str,
     assert exchange.status_code == 200
     assert linking["join"]["login"] == "alice"
     assert linking["tokens"]["data"] == _TOKENS
+    assert decode_session(exchange.json()["session"])["user_id"] == str(linking["joined"].id)
+    if recovery:
+        assert linking["recovery_slack_id"] == "U-legacy"
 
 
 @pytest.mark.parametrize(

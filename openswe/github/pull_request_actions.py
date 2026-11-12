@@ -1,6 +1,8 @@
 """Act on a pull request using the signed-in user's GitHub permissions."""
 
 import logging
+import re
+from collections.abc import Collection
 from typing import Annotated, ClassVar, Literal
 
 import httpx2
@@ -39,6 +41,7 @@ mutation MarkPullRequestReady($pullRequestId: ID!) {
 class PullRequestActionResult(BaseModel):
     action: PullRequestActionName
     done: bool
+    auto_merge: bool = False
 
 
 def _graphql_error_message(payload: dict[str, object]) -> str | None:
@@ -67,7 +70,10 @@ class _PullRequestActionBase(BaseModel):
     invalid_response: ClassVar[str]
     unconfirmed: ClassVar[str]
 
-    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+    async def perform(
+        self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
+    ) -> bool | None:
+        """Act on the PR; a merge answers whether it queued auto-merge instead."""
         raise NotImplementedError
 
     async def _request(
@@ -111,11 +117,15 @@ class _PullRequestActionBase(BaseModel):
             raise self._refusal(response, parsed)
 
 
+_MERGEABLE_NOW = re.compile(r"\b(clean|unstable) status\b", re.IGNORECASE)
+
+
 class MergeAction(_PullRequestActionBase):
     action: Literal["merge"]
     sha: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
     merge_method: MergeMethod
     auto_merge: bool = False
+    resolve_conversations: bool = False
 
     transport_failure: ClassVar[str] = (
         "Could not confirm merge. Refresh to check the PR before retrying."
@@ -125,27 +135,99 @@ class MergeAction(_PullRequestActionBase):
     )
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
-    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> bool:
+        pull = GitHubClient(client).repo(owner, repo).pull_request(number)
+        resolved: list[str] = []
+        if self.resolve_conversations:
+            current = await pull.pull()
+            head = current.get("head")
+            if not isinstance(head, dict) or head.get("sha") != self.sha:
+                raise HTTPException(
+                    409, "The PR head changed. Refresh before resolving conversations."
+                )
+            if (
+                current.get("state") != "open"
+                or current.get("draft") is not False
+                or current.get("mergeable") is not True
+            ):
+                raise HTTPException(
+                    409, "The PR is not ready to merge. No conversations were resolved."
+                )
+            result = await resolve_review_threads(pull)
+            resolved = result.resolved
+            if result.failed:
+                raise HTTPException(
+                    502,
+                    f"Could not resolve {len(result.failed)} conversations; nothing was merged. "
+                    f"{len(resolved)} conversations were already resolved; review them on GitHub before retrying.",
+                )
+        try:
+            return await self._merge(client, owner, repo, number, pull)
+        except HTTPException as exc:
+            if resolved:
+                raise HTTPException(
+                    exc.status_code,
+                    f"{exc.detail} {len(resolved)} conversations were already resolved; "
+                    "review them on GitHub before retrying.",
+                ) from exc
+            raise
+
+    async def _merge(
+        self,
+        client: httpx2.AsyncClient,
+        owner: str,
+        repo: str,
+        number: int,
+        pull: PullRequestClient,
+    ) -> bool:
         message = (
             await self._squash_message(client, owner, repo, number)
             if self.merge_method == "squash"
             else None
         )
         if self.auto_merge:
-            pull = GitHubClient(client).repo(owner, repo).pull_request(number)
             try:
-                await pull.enable_auto_merge(
-                    sha=self.sha, method=self.merge_method, commit_message=message
-                )
-            except GitHubError as exc:
-                raise HTTPException(exc.response.status_code, exc.message) from exc
-            except GraphQLError as exc:
-                raise HTTPException(422, exc.message) from exc
-            except (httpx2.HTTPError, ValueError) as exc:
-                raise HTTPException(
-                    502, "Could not confirm auto-merge. Refresh before retrying."
-                ) from exc
-            return
+                await self._enable_auto_merge(pull, message)
+                return True
+            except HTTPException as exc:
+                if exc.status_code != 422 or not _MERGEABLE_NOW.search(str(exc.detail)):
+                    raise
+            await self._merge_now(client, owner, repo, number, message)
+            return False
+        try:
+            await self._merge_now(client, owner, repo, number, message)
+            return False
+        except HTTPException as refusal:
+            if refusal.status_code != 405:
+                raise
+            try:
+                await self._enable_auto_merge(pull, message)
+            except HTTPException as exc:
+                raise refusal from exc
+            return True
+
+    async def _enable_auto_merge(self, pull: PullRequestClient, message: str | None) -> None:
+        try:
+            await pull.enable_auto_merge(
+                sha=self.sha, method=self.merge_method, commit_message=message
+            )
+        except GitHubError as exc:
+            raise HTTPException(exc.response.status_code, exc.message) from exc
+        except GraphQLError as exc:
+            raise HTTPException(422, exc.message) from exc
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise HTTPException(
+                502, "Could not confirm auto-merge. Refresh before retrying."
+            ) from exc
+
+    async def _merge_now(
+        self,
+        client: httpx2.AsyncClient,
+        owner: str,
+        repo: str,
+        number: int,
+        message: str | None,
+    ) -> None:
         payload: dict[str, object] = {"sha": self.sha, "merge_method": self.merge_method}
         if message is not None:
             payload["commit_message"] = message
@@ -372,9 +454,9 @@ async def _resolve_review_thread(client: httpx2.AsyncClient, thread_id: str) -> 
 
 
 async def resolve_review_threads(
-    pull: PullRequestClient, body: ResolveReviewThreads
+    pull: PullRequestClient, thread_ids: Collection[str] | None = None
 ) -> ResolveReviewThreadsResult:
-    """Resolve review threads, limited to this PR's open threads."""
+    """Resolve ``thread_ids`` among this PR's open threads, or all of them when ``None``."""
     owner, repo, number = pull.repo.owner, pull.repo.name, pull.number
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
@@ -386,10 +468,11 @@ async def resolve_review_threads(
         )
         raise HTTPException(502, "GitHub did not return the review threads")
     open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
+    wanted = open_ids if thread_ids is None else dict.fromkeys(thread_ids)
     resolved: list[str] = []
     failed: list[str] = []
     # Serial on purpose: GitHub's secondary rate limit punishes concurrent mutations.
-    for thread_id in dict.fromkeys(body.thread_ids):
+    for thread_id in wanted:
         if thread_id not in open_ids:
             continue
         resolved_now = await _resolve_review_thread(pull.repo.github.http, thread_id)
@@ -404,7 +487,7 @@ async def act_on_pull_request(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     try:
-        await action.perform(pull.repo.github.http, owner, repo, number)
+        queued = await action.perform(pull.repo.github.http, owner, repo, number)
     except HTTPException as exc:
         logger.warning(
             "Pull request action failed",
@@ -418,4 +501,4 @@ async def act_on_pull_request(
             exc_info=exc.__cause__ is not None,
         )
         raise
-    return PullRequestActionResult(action=action.action, done=True)
+    return PullRequestActionResult(action=action.action, done=True, auto_merge=queued is True)

@@ -8,6 +8,7 @@ import uuid
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
+import httpx
 import httpx2
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
@@ -15,6 +16,7 @@ from langgraph_sdk.errors import NotFoundError
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from openswe.dispatch import channel_of
+from openswe.plugins.records import PluginChat
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -42,8 +44,10 @@ from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
     _now_ms,
+    chats_beside_plugin,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -300,12 +304,26 @@ async def proxy_dashboard_thread_commands(
     )
     try:
         reply = await THREADS.command(thread_id, outgoing, user_id=sender)
-    except Exception:
-        # Answered like the runtime's own failure, so a refused start still closes its turn.
-        logger.exception("Delivering a thread command failed", extra={"thread_id": thread_id})
+    except Exception as exc:
+        logger.exception(
+            "Delivering a thread command failed",
+            extra={
+                "thread_id": thread_id,
+                "command_method": method,
+                "error_type": type(exc).__name__,
+            },
+        )
         reply = CommandReply(
             500,
-            json.dumps({"detail": "the command could not be delivered"}).encode(),
+            json.dumps(
+                {
+                    "detail": (
+                        "No connection was available to start the message. Try sending it again."
+                        if method == "run.start" and isinstance(exc, httpx.PoolTimeout)
+                        else "the command could not be delivered"
+                    )
+                }
+            ).encode(),
             "application/json",
         )
 
@@ -332,7 +350,11 @@ async def proxy_dashboard_thread_commands(
             mentions.dispatch()
             return 200, json.dumps(requeued).encode(), "application/json"
     if run_start_refused:
-        await _fail_requested_turn(thread_id, enriched)
+        await _fail_requested_turn(thread_id, enriched, reply)
+    if run_start_succeeded and not principal.machine and chats_beside_plugin(metadata):
+        user = await User.for_person(ThreadIdentity(login).person)
+        if user:
+            await PluginChat.deliver_input(thread_id, user.id, enriched["params"].get("input"))
     if run_start_succeeded and not creating and not relayed_from:
         await _SlackWebHandoff(thread_id, metadata).notify()
 
@@ -408,14 +430,31 @@ async def _queue_if_thread_turned_busy(
     )
 
 
-async def _fail_requested_turn(thread_id: str, enriched: dict[str, Any]) -> None:
-    """Close the turn a refused start requested, so no later follow-up joins it."""
+async def _fail_requested_turn(
+    thread_id: str,
+    enriched: dict[str, Any],
+    reply: CommandReply,
+) -> None:
+    """Record a failed start and close its turn so later follow-ups cannot join it."""
     turn_id = enriched["params"]["config"]["configurable"].get("transcript_turn_id")
+    logger.warning(
+        "Dashboard run start failed",
+        extra={
+            "thread_id": thread_id,
+            "turn_id": turn_id,
+            "status_code": reply.status,
+        },
+    )
     if not isinstance(turn_id, str):
         return
     try:
         await fail_unstarted_turn(
-            thread_id, uuid.UUID(turn_id), error="the message could not be started"
+            thread_id,
+            uuid.UUID(turn_id),
+            error=(
+                "The message could not be started. Try sending it again. "
+                "If it fails again, share the debug details with the Robin team."
+            ),
         )
     except Exception:
         logger.warning(

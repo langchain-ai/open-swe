@@ -9,6 +9,10 @@ from openswe.slack import move as slack_move
 from openswe.slack import webhook
 from openswe.slack.request import SlackRequest
 from openswe.slack.tools import move_thread
+from openswe.threads.identity import ThreadIdentity
+from openswe.users import User
+from openswe.users.models import UserIdentity
+from tests.conftest import serve_threads_from
 
 
 @pytest.mark.asyncio
@@ -154,7 +158,17 @@ async def test_private_slack_edit_rejects_non_owner(monkeypatch):
     monkeypatch.setattr(webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook.common, "get_client", lambda **kwargs: client)
     monkeypatch.setattr(webhook.common, "get_slack_user_info", AsyncMock(return_value={}))
-    monkeypatch.setattr(webhook, "slack_login", AsyncMock(return_value="bob"))
+    monkeypatch.setattr(
+        webhook.SlackAuthorization,
+        "resolve",
+        AsyncMock(
+            return_value=webhook.SlackAuthorization(
+                "BOB",
+                User(identities=[UserIdentity(provider="github", external_id="2", login="bob")]),
+                ThreadIdentity("bob"),
+            )
+        ),
+    )
     queue = AsyncMock()
     monkeypatch.setattr(webhook, "queue_message_for_thread", queue)
     request = SlackRequest(
@@ -184,16 +198,9 @@ async def test_private_slack_move_cannot_publish_to_channel(monkeypatch):
             }
         },
     )
-    monkeypatch.setattr(
-        move_thread,
-        "langgraph_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(
-                    return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}
-                )
-            )
-        ),
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}),
     )
     post = AsyncMock()
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", post)

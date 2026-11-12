@@ -36,7 +36,7 @@ const ITEMS: Array<PickerItem> = [
   {
     id: "C4",
     label: "#community-announce",
-    warning: "Open SWE is not in this channel",
+    warning: "Robin is not in this channel",
   },
 ]
 
@@ -200,9 +200,9 @@ describe("OwnershipPicker", () => {
   it("groups rows by ownership and keeps other workspaces' rows unselectable", async () => {
     renderPicker()
 
-    expect(await screen.findByText("In this workspace · 1")).toBeTruthy()
+    expect(await screen.findByText("In this environment · 1")).toBeTruthy()
     expect(screen.getByText("Available · 1")).toBeTruthy()
-    expect(screen.getByText("Owned by another workspace · 1")).toBeTruthy()
+    expect(screen.getByText("Owned by another environment · 1")).toBeTruthy()
     const taken = screen.getByRole("checkbox", { name: "#commits" })
     expect(taken.hasAttribute("disabled")).toBe(true)
     expect(screen.getByText("Core")).toBeTruthy()
@@ -222,7 +222,7 @@ describe("OwnershipPicker", () => {
     const revealed = screen.getByRole("checkbox", {
       name: "#community-announce",
     })
-    expect(screen.getByText("Open SWE is not in this channel")).toBeTruthy()
+    expect(screen.getByText("Robin is not in this channel")).toBeTruthy()
     fireEvent.click(revealed)
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-maintainers" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))
@@ -244,7 +244,7 @@ describe("OwnershipPicker", () => {
     expect(
       screen.getByRole("checkbox", { name: "#oss-maintainers" })
     ).toBeTruthy()
-    expect(screen.getByText("In this workspace · 2")).toBeTruthy()
+    expect(screen.getByText("In this environment · 2")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
     expect(onChange).not.toHaveBeenCalled()
@@ -263,7 +263,7 @@ describe("OwnershipPicker", () => {
     fireEvent.change(input, { target: { value: "c0999" } })
     fireEvent.click(screen.getByRole("button", { name: "Add" }))
     expect(screen.getByRole("checkbox", { name: "C0999" })).toBeTruthy()
-    expect(screen.getByText("In this workspace · 1")).toBeTruthy()
+    expect(screen.getByText("In this environment · 1")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(onChange).toHaveBeenCalledWith(["C0999"])
@@ -317,6 +317,6 @@ describe("OwnershipPicker", () => {
     renderPicker({ selected: ["C1", "C0OLD"] })
 
     expect(await screen.findByRole("checkbox", { name: "C0OLD" })).toBeTruthy()
-    expect(screen.getByText("In this workspace · 2")).toBeTruthy()
+    expect(screen.getByText("In this environment · 2")).toBeTruthy()
   })
 })

@@ -167,7 +167,12 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
 
 
 async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(setup):
-    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    from openswe.review.routes import api_get_review_chat
+
+    chat = await api_get_review_chat("acme", "app", 12, {"sub": "alice"})
+    assert chat == {"available": True, "assistant_id": "agent", "thread_id": "existing"}
+    pr_fixes.require_repo_access_for_user.assert_awaited_once_with("alice", "acme/app")
+    setup.client.threads.get.assert_awaited_once_with("existing")
     setup.client.threads.update.assert_not_awaited()
     setup.threads["existing"]["metadata"]["review_chat"] = True
     await pr_fixes.start_pull_request_thread(
@@ -182,10 +187,17 @@ async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(set
     assert setup.client.threads.update.await_args.kwargs["metadata"]["review_chat"] is False
 
 
-async def test_denied_repo_never_reads_or_starts_threads(setup):
+@pytest.mark.parametrize("intent", [OPEN, FIX])
+async def test_denied_repo_never_reads_or_starts_threads(setup, intent):
+    from openswe.review.routes import api_get_review_chat
+
     pr_fixes.require_repo_access_for_user.side_effect = HTTPException(403, "denied")
-    with pytest.raises(HTTPException):
-        await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
+    with pytest.raises(HTTPException) as error:
+        if intent is OPEN:
+            await api_get_review_chat("acme", "app", 12, {"sub": "alice"})
+        else:
+            await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+    assert error.value.status_code == 403
     setup.client.threads.get.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     pr_fixes.dispatch_agent_run.assert_not_awaited()
@@ -209,9 +221,14 @@ async def test_single_comment_run_rejects_a_comment_from_another_pull_request(se
     pr_fixes.dispatch_agent_run.assert_not_awaited()
 
 
-async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypatch):
+async def test_new_thread_supplies_pr_context_to_first_user_run(
+    setup, monkeypatch, langsmith_users
+):
+    from openswe.dashboard import profiles
     from openswe.threads import runs
 
+    langsmith_users.add("alice")
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="github-token"))
     FakeRegistry.thread_ids = []
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
     metadata = setup.client.threads.update.await_args.kwargs["metadata"]
@@ -234,13 +251,7 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
         "status": "busy",
         "metadata": {"source": "slack", "graph_id": "agent"},
     }
-    setup.threads["duplicate"] = {
-        "thread_id": "duplicate",
-        "status": "idle",
-        "updated_at": "2099-01-01",
-        "metadata": {"source": "dashboard"},
-    }
-    FakeRegistry.thread_ids = ["duplicate", "slack-thread"]
+    FakeRegistry.thread_ids = ["slack-thread", "existing"]
 
     assert await pr_fixes.pull_request_thread_running(
         "acme", "app", 12, "alice"
@@ -254,3 +265,56 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     pr_fixes.dispatch_agent_run.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     setup.client.threads.update.assert_not_awaited()
+
+
+async def test_fix_up_is_announced_as_a_button_click_with_open_findings(setup, monkeypatch):
+    finding = {
+        "title": "Off by one",
+        "severity": "high",
+        "file": "app.py",
+        "end_line": 3,
+        "description": "Loop skips the last item.",
+        "suggestion": None,
+    }
+    monkeypatch.setattr(
+        pr_fixes,
+        "list_findings",
+        AsyncMock(
+            return_value=[
+                {**finding, "status": "open"},
+                {**finding, "title": "Already fixed", "status": "resolved"},
+            ]
+        ),
+    )
+    await pr_fixes.start_pull_request_thread(
+        "acme", "app", 12, "alice", intent=pr_fixes.FixUpIntent(intent="fix-up")
+    )
+    call = pr_fixes.dispatch_agent_run.await_args
+    assert call.args[1] is None
+    message = call.kwargs["input"]["messages"][-1]["content"]
+    assert 'sender="system:pull-request-fix-up"' in message
+    assert "@alice clicked **Fix up**" in message
+    assert "Off by one" in message
+    assert "Already fixed" not in message
+
+
+@pytest.mark.parametrize("status", ["idle", "busy"])
+async def test_a_thread_linked_later_never_replaces_the_one_that_opened_the_pr(setup, status):
+    setup.threads["opener"] = {
+        "thread_id": "opener",
+        "status": "idle",
+        "updated_at": "2026-11-10T12:00:00Z",
+        "metadata": {"source": "slack", "graph_id": "agent"},
+    }
+    setup.threads["github-comment"] = {
+        "thread_id": "github-comment",
+        "status": status,
+        "updated_at": "2099-01-01",
+        "metadata": {"source": "github", "graph_id": "agent"},
+    }
+    FakeRegistry.thread_ids = ["opener", "github-comment"]
+
+    for intent in (OPEN, FIX):
+        thread = await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+        assert thread.thread_id == "opener"
+    pr_fixes.create_dashboard_thread_record.assert_not_awaited()

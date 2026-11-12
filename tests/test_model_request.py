@@ -1,4 +1,5 @@
 import contextvars
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -6,8 +7,19 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from langsmith import get_current_run_tree, trace, tracing_context
 
+from openswe.agent_api.run_state import as_messages
 from openswe.dashboard.options import available_requested_models
+from openswe.input_messages import human_input
 from openswe.model_request import ModelRequestIntent, infer_requested_model
+
+
+def _said(text: str) -> HumanMessage:
+    """What a person wrote, as the backend records it."""
+    [message] = as_messages(
+        [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
+    )
+    assert isinstance(message, HumanMessage)
+    return message
 
 
 @pytest.mark.parametrize("trigger_kind", ["missing", "system"])
@@ -26,7 +38,7 @@ async def test_slack_request_never_falls_back_to_unrelated_human(
             )
         )
     classify = AsyncMock()
-    monkeypatch.setattr("openswe.model_request.select_jev_choices", classify)
+    monkeypatch.setattr("openswe.model_request.JEV", SimpleNamespace(choose=classify))
     intent = await infer_requested_model(
         messages=messages,
         requested_models=available_requested_models(fable_enabled=False),
@@ -49,7 +61,7 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
         observed.append(task)
         return {"runtime_model": "anthropic:claude-opus-5-5", "runtime_effort": "max"}
 
-    monkeypatch.setattr("openswe.model_request.select_jev_choices", classify)
+    monkeypatch.setattr("openswe.model_request.JEV", SimpleNamespace(choose=classify))
     token = stream.set("agent-stream")
     config_token = var_child_runnable_config.set({"configurable": {"secret": "not-for-classifier"}})
     try:
@@ -116,10 +128,10 @@ async def test_effort_selection_preserves_model_failure_safety(
     async def classify(task: str, **kwargs: object) -> dict[str, str | None]:
         return {"runtime_model": model_choice, "runtime_effort": effort_choice}
 
-    monkeypatch.setattr("openswe.model_request.select_jev_choices", classify)
+    monkeypatch.setattr("openswe.model_request.JEV", SimpleNamespace(choose=classify))
     assert (
         await infer_requested_model(
-            messages=[HumanMessage(content="Use Opus with max reasoning effort")],
+            messages=[_said("Use Opus with max reasoning effort")],
             requested_models=available_requested_models(fable_enabled=False),
         )
         == expected

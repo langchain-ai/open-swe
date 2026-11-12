@@ -87,3 +87,28 @@ def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
     assert model == SUPPORTED_ANTHROPIC
     assert model not in FABLE_MODEL_IDS
     assert effort == "high"
+
+
+def test_retired_deployment_default_keeps_its_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", "google_genai:gemini-4-argon")
+    assert options.default_model_pair() == ("google_genai:gemini-4-carbon", "medium")
+
+
+def test_workspace_settings_carry_a_retired_model_to_its_successor() -> None:
+    update = WorkspaceSettingsUpdate(
+        default_agent_model="google_genai:gemini-4-argon", default_agent_reasoning_effort="high"
+    )
+    assert update.default_agent_model == "google_genai:gemini-4-carbon"
+    assert update.default_agent_reasoning_effort == "high"
+
+
+def test_an_unknown_model_is_rejected_rather_than_remapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValueError, match="unsupported agent model"):
+        WorkspaceSettingsUpdate(
+            default_agent_model="openai:gpt-6.1-slo", default_agent_reasoning_effort="high"
+        )
+    monkeypatch.setenv("LLM_MODEL_ID", "openai:gpt-6.1-slo")
+    with pytest.raises(ValueError, match="Unsupported default LLM_MODEL_ID"):
+        options.default_model_pair()

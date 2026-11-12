@@ -19,7 +19,9 @@ import {
   collapsedWorkItems,
   countWorkActions,
   segmentTurn,
+  WorkTail,
 } from "../renderItems"
+import { LiveWorkTail } from "./LiveWorkTail"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
@@ -86,7 +88,8 @@ function EditWorkEntry({
   repoPath?: string
 }) {
   const diff = latestDiff(chunk)
-  if (!diff) return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
+  if (!diff || chunk.status === "error")
+    return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, repoPath)}
@@ -501,13 +504,22 @@ export function AgentTurn({
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />
+        {live && !expanded && (
+          <LiveWorkTail
+            tail={new WorkTail(segment.items)}
+            repoPath={repoPath}
+          />
+        )}
         {visible.map(renderItem)}
       </Fragment>
     )
   }
 
   return (
-    <div className="group/turn my-space-2 min-w-0 space-y-space-2">
+    <div
+      className="group/turn my-space-2 min-w-0 space-y-space-2"
+      data-message-id={message.id}
+    >
       {segments.map((segment, index) =>
         segment.type === "reply"
           ? renderItem(segment.item)

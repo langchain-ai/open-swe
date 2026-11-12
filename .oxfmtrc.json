@@ -30,6 +30,10 @@
     "ui/dev-dist/**",
     "ui/dist/**",
     "desktop/build/**",
-    "ui/src/routeTree.gen.ts"
+    "mobile/ios/**",
+    "mobile/android/**",
+    "mobile/.expo/**",
+    "ui/src/routeTree.gen.ts",
+    "plugins/docs/src/routeTree.gen.ts"
   ]
 }

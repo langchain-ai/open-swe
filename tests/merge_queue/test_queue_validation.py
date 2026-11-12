@@ -12,8 +12,15 @@ from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.git import Candidate, PullHead
 from openswe.merge_queue.models import Attempt, Batch, Lease
 from openswe.merge_queue.store import MergeQueue, ValidationWork
-from openswe.merge_queue.validation import CandidateValidation
-from openswe.merge_queue.validation_contract import ValidationPolicy, ValidationRequest
+from openswe.merge_queue.validation import (
+    CandidateValidation,
+    InvalidValidation,
+)
+from openswe.merge_queue.validation_contract import (
+    SERVICE_JOBS,
+    ValidationPolicy,
+    ValidationRequest,
+)
 
 
 @pytest.fixture
@@ -263,3 +270,57 @@ async def test_base_change_discards_successful_results(
     controller.queue.invalidate.assert_awaited_once_with(work.batch.id, lease)
     assert isinstance(controller.queue.finish_validation, AsyncMock)
     controller.queue.finish_validation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("services", [False, True])
+@pytest.mark.parametrize(
+    "outcome",
+    ["valid", "missing_gate", "skipped_gate", "failed_child", "successful_child", "unexpected_job"],
+)
+async def test_evidence_requires_gates_and_allows_only_valid_service_jobs(
+    validation, services, outcome
+):
+    controller, work, _ = validation
+    request = ValidationRequest.model_validate(
+        {
+            **work.request.model_dump(),
+            "version": 2 if services else 1,
+            "base_sha": work.request.workflow_sha if services else None,
+            "expected_jobs": SERVICE_JOBS if services else ("candidate-smoke",),
+        }
+    )
+    required = (*request.expected_jobs, "candidate-result")
+    gate = SERVICE_JOBS[-1] if services else "candidate-smoke"
+    child = "candidate-services / tests / selected"
+    jobs = []
+    for i, name in enumerate((*SERVICE_JOBS, "candidate-result", child), 1):
+        if name == gate and outcome == "missing_gate":
+            continue
+        conclusion = "success" if name in required else "skipped"
+        if name == gate and outcome == "skipped_gate":
+            conclusion = "skipped"
+        if name == child:
+            if outcome == "failed_child":
+                conclusion = "failure"
+            elif outcome == "successful_child":
+                conclusion = "success"
+            elif outcome == "unexpected_job":
+                name = "unrelated-job"
+        jobs.append(
+            ValidationJob(
+                id=i, run_id=42, run_attempt=1, name=name, status="completed", conclusion=conclusion
+            )
+        )
+    repo = controller.repo
+    report = {**repo.artifact_json.return_value, **request.model_dump(mode="json")}
+    repo.validation_jobs = AsyncMock(return_value=tuple(jobs))
+    repo.artifact_json = AsyncMock(return_value=report)
+    if outcome == "valid" or (services and outcome == "successful_child"):
+        assert await controller.evidence.result(request, 42) == {
+            **report,
+            "artifact_id": 7,
+            "job_ids": [job.id for job in jobs],
+        }
+    else:
+        with pytest.raises(InvalidValidation):
+            await controller.evidence.result(request, 42)

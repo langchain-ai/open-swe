@@ -223,7 +223,7 @@ ENV.var(
 ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
-    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
+    "signs each call its channels make to /mda/channel-api/* with it "
     "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
     "and GitHub channels.",
     secret=True,
@@ -271,13 +271,13 @@ ENV.var(
 ENV.var(
     "LANGCHAIN_API_KEY",
     "Legacy SDK alias.",
-    deprecated="Open SWE reads LANGSMITH_API_KEY; this legacy alias is ignored.",
+    deprecated="Robin reads LANGSMITH_API_KEY; this legacy alias is ignored.",
     replaced_by="LANGSMITH_API_KEY",
 )
 ENV.var(
     "LANGCHAIN_TRACING_V2",
     "Legacy SDK alias.",
-    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
+    deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Robin.",
     replaced_by="LANGSMITH_TRACING",
 )
 # --- GitHub ------------------------------------------------------------------------------
@@ -292,7 +292,6 @@ ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
-ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
@@ -321,6 +320,10 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
+ENV.var(
+    "SLACK_ALERTS_CHANNEL_ID",
+    "Slack channel for rate-limited operational alerts; unset disables Slack delivery, not local logging.",
+)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
@@ -361,6 +364,12 @@ ENV.var(
 )
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
+    "DASHBOARD_ALIAS_URLS",
+    "Comma-separated other origins whose dashboard proxy also serves this backend (e.g. a "
+    "second domain). A request arriving through one gets its sign-in and MCP URLs there; "
+    "each needs its OAuth callbacks registered first.",
+)
+ENV.var(
     "DASHBOARD_JWT_SECRET",
     "HMAC secret for dashboard session cookies and OAuth state.",
     secret=True,
@@ -387,11 +396,6 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "LANGSMITH_LOGIN_ORG_ID",
-    "Organization allowed to sign in to Agent Workspace with LangSmith. Unset disables "
-    "LangSmith login without affecting personal LangSmith connections.",
-)
-ENV.var(
     "LMT_TENANT_ID",
     "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
     "person chose when connecting LangSmith.",
@@ -414,12 +418,27 @@ ENV.var(
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var(
+    "OPENSWE_SOURCE_REPO",
+    "GitHub repository (owner/name) the agent changes when asked to change Open SWE itself.",
+    default="langchain-ai/open-swe",
+)
+ENV.var(
+    "OPENSWE_SOURCE_PATH",
+    "Directory of OPENSWE_SOURCE_REPO that holds Open SWE, when it is not the repository root.",
+)
+ENV.var(
     "POSTHOG_API_KEY",
     "Optional PostHog project API key; public by design, it is also served to the dashboard "
     "for browser capture.",
     default="",
 )
 ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var(
+    "SEGMENT_BROWSER_WRITE_KEY",
+    "Optional public Segment source write key for browser and backend capture, served to "
+    "the web and desktop UI. Unset disables Segment; use a separate source per environment.",
+    default="",
+)
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
@@ -506,6 +525,30 @@ ENV.var(
     "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
     "Deadline for capturing a builder sandbox as a workspace's snapshot.",
     aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
+)
+
+# --- Object storage ----------------------------------------------------------------------------
+ENV.var(
+    "OBJECT_STORE_URL",
+    "Endpoint of the object storage that keeps large files, such as app attachments: "
+    "https://storage.googleapis.com for GCS (its XML API, with an HMAC key), or an S3, R2 or "
+    "MinIO endpoint. Unset, PostgreSQL keeps every file.",
+)
+ENV.var("OBJECT_STORE_BUCKET", "Bucket the object storage keeps those files in.")
+ENV.var(
+    "OBJECT_STORE_REGION",
+    "Region requests to the object storage are signed for: the bucket's region on S3; GCS takes "
+    "auto, the default.",
+    default="auto",
+)
+ENV.var(
+    "OBJECT_STORE_ACCESS_KEY_ID",
+    "Access key for the object storage; on GCS, the access ID of a service account's HMAC key.",
+)
+ENV.var(
+    "OBJECT_STORE_SECRET_ACCESS_KEY",
+    "Secret of OBJECT_STORE_ACCESS_KEY_ID.",
+    secret=True,
 )
 
 # --- Debugging -------------------------------------------------------

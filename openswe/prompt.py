@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from runtime_api.provenance import Provenance
+
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
@@ -93,7 +95,7 @@ class SystemPrompt:
     conversation. What can change from one turn to the next is a ``TurnContext``.
 
     ``shared`` is the same for every thread of the deployment, ``workspace`` for every
-    thread of its workspace that opened since its curator last published, and
+    thread of its workspace, and
     ``thread`` is what only this thread's says. Each part is shared by fewer threads
     than the one before it, so a new thread's first model call reads the parts ahead
     of its own from the cache earlier threads wrote.
@@ -126,17 +128,19 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
-    workspace_memory: str = "",
-    agent_workspace: bool = False,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
     shared = prompt(
         "system/main",
-        agent_workspace=agent_workspace,
         dashboard_context_section=prompt(
             "system/dashboard-context",
             environment=ENV.OPENSWE_ENV.optional(),
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
+        ),
+        self_awareness_section=prompt(
+            "system/self-awareness",
+            source_repo=ENV.OPENSWE_SOURCE_REPO.get(),
+            source_path=ENV.OPENSWE_SOURCE_PATH.get().strip("/"),
         ),
         default_prompt_section=_load_default_prompt(),
         collaboration_section=_render_collaboration_section(),
@@ -155,16 +159,7 @@ def construct_system_prompt(
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
     )
-    workspace = "\n\n".join(
-        section
-        for section in (
-            _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
-            prompt("system/workspace-memory", memory=workspace_memory.strip())
-            if workspace_memory.strip()
-            else "",
-        )
-        if section
-    )
+    workspace = _render_workspace_section(workspace_name, workspace_instructions, workspace_repos)
     return SystemPrompt(shared=shared, workspace=workspace, thread=thread)
 
 
@@ -183,15 +178,13 @@ class TurnContext:
     """
 
     working_dir: str
-    agent_workspace: bool = False
+    working_folder: bool = False
     source: str = "dashboard"
     slack_context: bool = False
     slack_ask: bool = False
     slack_breakout: bool = False
     slack_by_the_way: bool = False
     slack_follow_up_suggestions: bool = False
-    # The sender only wants to hear about blockers and reviewed, ready PRs.
-    goal_mode: bool = False
     implementation_walkthrough_enabled: bool = False
     sandbox_file_downloads: bool = False
     local_checkout: bool = False
@@ -208,7 +201,7 @@ class TurnContext:
             else "system/working-environment",
             working_dir=self.working_dir,
             desktop=self.local_checkout_client == "desktop",
-            agent_workspace=self.agent_workspace,
+            working_folder=self.working_folder,
             sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
         if self.implementation_walkthrough_enabled:
@@ -223,8 +216,6 @@ class TurnContext:
         sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
         if not self.local_checkout and (scope := _render_repository_scope_section()):
             sections.append(scope)
-        if self.goal_mode:
-            sections.append(prompt("system/goal-mode"))
         return "\n\n".join(sections)
 
     def _source_guidance(self) -> str:
@@ -255,14 +246,18 @@ class TurnContext:
 
     def messages(self, visible: Collection[str]) -> list[RunMessage]:
         """The blocks the model does not see as they now are, given the ``visible`` context hashes."""
-        blocks = [
-            run_context("environment", self.environment()),
-            run_context("source", self.source_guidance()),
-        ]
+        guidance = {"environment": self.environment(), "source": self.source_guidance()}
         if self.recent_threads:
-            blocks.append(run_context("recent-threads", self.recent_threads))
+            guidance["recent-threads"] = self.recent_threads
+        blocks = {
+            context_id: run_context(context_id, text) for context_id, text in guidance.items()
+        }
         return [
-            {"role": "user", "content": block}
-            for block in blocks
+            {
+                "role": "user",
+                "content": block,
+                "additional_kwargs": Provenance(kind="context", sender=f"run:{context_id}").stamp(),
+            }
+            for context_id, block in blocks.items()
             if dynamic_context_hash(block) not in visible
         ]

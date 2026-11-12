@@ -13,6 +13,7 @@ import { Thought } from "@/features/agents/components/messages/thought"
 
 export type WorkEntryIconName =
   | "bot"
+  | "brain"
   | "check"
   | "circle-alert"
   | "eye"
@@ -50,6 +51,7 @@ function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
 
   switch (chunk.toolKind) {
     case "execute":
+    case "background":
       return "terminal"
     case "read":
       return "eye"
@@ -182,15 +184,13 @@ export function describeWorkEntry(
   repoPath?: string
 ): WorkEntryView {
   const diff = latestDiff(chunk)
-  if (diff) {
+  if (diff && chunk.status !== "error") {
     const heading =
-      chunk.status === "error"
-        ? "Failed to edit"
-        : chunk.status === "completed"
-          ? diff.isNewFile
-            ? "Created"
-            : "Edited"
-          : "Editing"
+      chunk.status === "completed"
+        ? diff.isNewFile
+          ? "Created"
+          : "Edited"
+        : "Editing"
     const pathDisplay = formatPathDisplayParts(heading, diff.filePath)
     return {
       icon: "square-pen",
@@ -244,6 +244,8 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
       return active ? "Querying" : "Queried"
     case "execute":
       return active ? "Running" : "Ran"
+    case "background":
+      return active ? "Starting in background" : "Started in background"
     case "edit":
     case "delete":
     case "move":

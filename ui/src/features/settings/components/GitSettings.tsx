@@ -122,7 +122,7 @@ export function GitSettings() {
   const draftReviewItems: Array<{ value: DraftReviewChoice; label: string }> = [
     {
       value: "team_default",
-      label: `Workspace default (${teamDefaultOn ? "on" : "off"})`,
+      label: `Environment default (${teamDefaultOn ? "on" : "off"})`,
     },
     { value: "always_on", label: "Always" },
     { value: "always_off", label: "Never" },
@@ -136,7 +136,7 @@ export function GitSettings() {
       >
         <SettingsRow
           label="Default Repository"
-          description="Used unless you set a workspace-specific default or name a repository."
+          description="Used unless you set an environment-specific default or name a repository."
           control={
             <div className="w-56">
               <RepoSelector
@@ -152,11 +152,11 @@ export function GitSettings() {
           }
         />
         <SettingsRow
-          label="Workspace"
-          description="Choose a workspace to customize your default repository."
+          label="Environment"
+          description="Choose an environment to customize your default repository."
           control={
             <Select
-              aria-label="Repository workspace"
+              aria-label="Repository environment"
               size="md"
               value={repositoryWorkspace}
               options={
@@ -172,8 +172,8 @@ export function GitSettings() {
           }
         />
         <SettingsRow
-          label="Workspace Default Repository"
-          description="Overrides your global default only in the selected workspace."
+          label="Environment Default Repository"
+          description="Overrides your global default only in the selected environment."
           control={
             <div className="w-56">
               <RepoSelector
@@ -206,7 +206,7 @@ export function GitSettings() {
           field="branch_prefix"
           label="Branch prefix"
           description="Prefix for branches the agent creates."
-          placeholder="open-swe/"
+          placeholder="robin/"
         />
       </SettingsSection>
 
@@ -226,7 +226,7 @@ export function GitSettings() {
         />
         <SettingsRow
           label="Review my drafts"
-          description="Whether Open SWE Review runs on draft pull requests you open."
+          description="Whether Robin Review runs on draft pull requests you open."
           control={
             <Select
               aria-label="Review my drafts"

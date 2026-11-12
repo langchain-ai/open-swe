@@ -68,7 +68,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
   const scopes: Record<MCPScope, MCPScopeConfig> = {
     instance: {
       description:
-        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers that every environment inherits. An environment or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["instanceMCPs"],
       list: api.getInstanceMCPs,
       save: api.saveInstanceMCP,
@@ -78,7 +78,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     },
     workspace: {
       description:
-        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers for this environment's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["workspaceMCPs", workspace],
       list: () => api.getWorkspaceMCPs(workspace),
       save: (body) => api.saveWorkspaceMCP(workspace, body),
@@ -88,7 +88,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     },
     user: {
       description:
-        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces an environment connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["myMCPs"],
       list: api.getMyMCPs,
       save: api.saveMyMCP,
@@ -751,7 +751,7 @@ export function MCPConnectionsSection({
                       </div>
                       <span className="text-xs text-secondary">
                         {replaced
-                          ? "Replaced by this workspace's connection"
+                          ? "Replaced by this environment's connection"
                           : "Edit under Admin"}
                       </span>
                     </li>

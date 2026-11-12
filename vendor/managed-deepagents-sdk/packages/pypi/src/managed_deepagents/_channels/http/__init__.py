@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from langgraph_sdk.schema import MultitaskStrategy
 
 from managed_deepagents._channel import Channel, ChannelEventsContext
+from managed_deepagents._channels.auto_post import channel_auto_post, reply_of
 from managed_deepagents._channels.http.threads import channel_thread_id
 from managed_deepagents._channels.http.types import (
     ChannelName,
@@ -29,7 +30,6 @@ from managed_deepagents._channels.http.types import (
     ParseHttpRequest,
     VerifyHttpRequest,
 )
-from managed_deepagents._channels.types import CHANNEL_REPLIES
 from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES
 
 if TYPE_CHECKING:
@@ -58,7 +58,8 @@ class HttpChannel(Channel):
         on_error: HttpOnError | None = None,
         input: HttpInput | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
-        reply: ChannelReply = "auto",
+        auto_post: bool | None = None,
+        reply: ChannelReply | None = None,
         on_received: HttpOnReceived | None = None,
         on_finish: HttpOnFinish | None = None,
     ) -> None:
@@ -66,10 +67,10 @@ class HttpChannel(Channel):
             raise TypeError(
                 "channel multitask_strategy must be enqueue, interrupt, rollback or reject"
             )
-        if reply not in CHANNEL_REPLIES:
-            raise TypeError("channel reply must be auto or none")
+        posts = channel_auto_post(auto_post, reply, label="channel")
         self.multitask_strategy: MultitaskStrategy = multitask_strategy
-        self.reply: ChannelReply = reply
+        self.auto_post: bool = posts
+        self.reply: ChannelReply = reply_of(posts)
         self.provider_config = provider_config or {}
         self.kind = _nonblank(provider, "channels.http provider")
         self.verify = verify
@@ -82,6 +83,9 @@ class HttpChannel(Channel):
         self.messaging = self._build_messaging if post is not None else None
         #: Internal: the notice a paused run posts as it ends (GitHub, Linear).
         self.paused_notice: PausedNotice | None = None
+        #: Internal: what is asked instead of ``input`` while the event's
+        #: conversation waits on a decision (GitHub, which tells its handler).
+        self.interrupted_input: HttpInput | None = None
         #: Internal: the ``mda/`` agent connections the channel's setup
         #: provides, such as ``mda/github-token``, so deploy knows them.
         self.agent_connections: list[str] = []
@@ -155,7 +159,8 @@ def http_channel(
     on_error: HttpOnError | None = None,
     input: HttpInput | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
-    reply: ChannelReply = "auto",
+    auto_post: bool | None = None,
+    reply: ChannelReply | None = None,
     on_received: HttpOnReceived | None = None,
     on_finish: HttpOnFinish | None = None,
 ) -> HttpChannel:
@@ -168,6 +173,10 @@ def http_channel(
     starts nothing. Messages to a thread that waits on an interrupt start
     nothing either way.
 
+    ``auto_post`` is whether a run on a message's thread posts its final answer
+    there with ``post`` (the default) or leaves replying to the agent. ``reply``
+    is its deprecated form: ``"none"`` is ``auto_post=False``.
+
     ``on_received`` hears about every message that reaches a thread, before
     MDA decides what it does, for providers that expect a prompt
     acknowledgement. ``on_finish`` then hears once it is done: with the run it
@@ -178,7 +187,7 @@ def http_channel(
 
     !!! warning "Experimental"
 
-        ``input``, ``multitask_strategy``, ``reply``, ``on_received``,
+        ``input``, ``multitask_strategy``, ``auto_post``, ``on_received``,
         ``on_finish`` and ``cancel`` results may change in a minor release.
     """
     return HttpChannel(
@@ -190,6 +199,7 @@ def http_channel(
         on_error=on_error,
         input=input,
         multitask_strategy=multitask_strategy,
+        auto_post=auto_post,
         reply=reply,
         on_received=on_received,
         on_finish=on_finish,

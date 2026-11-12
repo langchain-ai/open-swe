@@ -5,8 +5,6 @@ from typing import Any
 from fastapi import HTTPException
 
 from openswe.config import ENV
-from openswe.dashboard.profiles import get_valid_access_token
-from openswe.github.http import github_reauth_message
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
@@ -33,11 +31,7 @@ async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
-    if ThreadIdentity(login).user_id is not None:
-        return
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, github_reauth_message(login))
+    await ThreadIdentity(login).authorize()
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:

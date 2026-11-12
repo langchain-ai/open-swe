@@ -11,7 +11,6 @@ from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
-from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
 from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, CheckoutError, PinnedCheckout
 from openswe.walkthrough.diff import Carry, DiffIndex
@@ -263,13 +262,7 @@ async def test_approved_lines_stay_approved_after_a_rebase(
         "f, rebased",
     )
     new_index, carry = await _carry(checkout, head, new_base, new_head)
-    plan = Plan.start(new_head, new_index)
-    _place(plan, new_index, "Everything", FileHunks(path="core.py", hunks=["-4"]))
-    _place(plan, new_index, "CLI", FileHunks(path="cli.py", hunks=["+1"]))
-    reader = Reader.of(Walk(head_sha=new_head), plan, carry.lines(seen))
-
-    assert [c.title for c in plan.chunks if reader.remaining(c.lines)] == ["CLI"]
-    assert reader.next_chunk() is plan.chunks[1]
+    assert carry.lines(seen) == new_index.lines.only(["core.py"])
     # Deleted lines are numbered at the old merge base, so without it they are dropped, not guessed.
     blind = await checkout.carry(head, "", new_index)
     assert blind is not None
@@ -530,11 +523,11 @@ async def test_a_head_change_during_planning_ends_the_scout(
     stored.head_sha = _commit(repo, {"cli.py": "print(2)\n"}, "push")
 
     operation = RunOperation(
-        name="walkthrough_describe_other",
-        arguments={"summary": "Noise"},
+        name="walkthrough_move_to_other",
+        arguments={"files": [{"path": "cli.py", "hunks": ["+1"]}]},
         state={"scout_nothing_to_plan": False},
         request_id="call-1",
-        grant=run.grant("walkthrough_describe_other"),
+        grant=run.grant("walkthrough_move_to_other"),
     )
     result = OperationResult.model_validate(
         await TokenRun.answer(
@@ -543,7 +536,7 @@ async def test_a_head_change_during_planning_ends_the_scout(
     )
     # The scout's loop ends the run before its next model call once this is set.
     assert result.state == {"scout_nothing_to_plan": True}
-    assert workspace.plan.other_summary == ""
+    assert not workspace.plan.other
     session.commit.assert_not_awaited()
 
 

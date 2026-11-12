@@ -6,9 +6,40 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import {
+  queueEntryToTurn,
   visiblePendingMessages,
   visibleQueuedMessages,
 } from "@/features/agents/lib/queuedMessages"
+
+describe("queueEntryToTurn", () => {
+  it("retains reply-only messages for display and cancellation recovery", () => {
+    const replies = [
+      {
+        source: "conversation" as const,
+        before: "",
+        selection: "Opening a pull request.",
+        after: "",
+        comment: "Which branch?",
+      },
+    ]
+    const turn = queueEntryToTurn(
+      {
+        id: "queued-turn",
+        runId: "queued-run",
+        createdAt: new Date(2_000),
+        values: {
+          messages: [
+            { id: "context", content: "Context" },
+            { id: "reply", content: "", additional_kwargs: { replies } },
+          ],
+        },
+      },
+      "alice"
+    )
+
+    expect(turn?.message).toMatchObject({ id: "reply", chunks: [], replies })
+  })
+})
 
 describe("visibleQueuedMessages", () => {
   it("reconciles a queued follow-up by exact message id", () => {

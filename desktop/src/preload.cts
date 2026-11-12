@@ -37,9 +37,12 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
+  linkProject: (input) =>
+    ipcRenderer.invoke("desktop:link-project", { ...input }),
   writeClipboard: (value) =>
     ipcRenderer.invoke("desktop:write-clipboard", value),
   copyPageLink: () => ipcRenderer.invoke("desktop:copy-page-link"),
+  openInBrowser: (path) => ipcRenderer.invoke("desktop:open-in-browser", path),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
@@ -48,8 +51,10 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:update-state", listener);
     return () => ipcRenderer.removeListener("desktop:update-state", listener);
   },
-  connectService: (provider) =>
-    ipcRenderer.invoke("desktop:connect-service", provider),
+  connectService: (provider, options) =>
+    ipcRenderer.invoke("desktop:connect-service", provider, options),
+  cancelConnectService: (provider) =>
+    ipcRenderer.invoke("desktop:cancel-connect-service", provider),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
@@ -80,6 +85,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),
   listWorkspaceFiles: (localSessionId) =>
     ipcRenderer.invoke("desktop:list-workspace-files", localSessionId),
+  previewWorkspaceFile: (input) =>
+    ipcRenderer.invoke("desktop:preview-workspace-file", { ...input }),
   onLocalThreadsChanged: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("desktop:local-threads-changed", listener);

@@ -4,8 +4,21 @@ from openswe.utils.run_usage import summarize_run_usage
 
 
 def _message(
-    *, model: str, input_tokens: int, output_tokens: int, cache_read_tokens: int = 0
+    *,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int | None = 0,
+    cache_creation_tokens: int | None = None,
 ) -> AIMessage:
+    details = {
+        key: value
+        for key, value in (
+            ("cache_read", cache_read_tokens),
+            ("cache_creation", cache_creation_tokens),
+        )
+        if value is not None
+    }
     return AIMessage(
         content="",
         response_metadata={"model_name": model},
@@ -13,7 +26,7 @@ def _message(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
-            "input_token_details": {"cache_read": cache_read_tokens},
+            "input_token_details": details,
         },
     )
 
@@ -66,3 +79,53 @@ def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
     assert summary.total_tokens == 500
     assert summary.input_tokens == 1_000
     assert summary.output_tokens == 100
+    assert summary.cache_read_tokens == 600
+    assert summary.cache_creation_tokens is None
+
+
+def test_summarize_run_usage_sums_cache_tokens_and_keeps_unreported_unknown() -> None:
+    summary = summarize_run_usage(
+        {
+            "messages": [
+                HumanMessage(content="current"),
+                _message(
+                    model="model-a",
+                    input_tokens=1_000,
+                    output_tokens=100,
+                    cache_read_tokens=600,
+                    cache_creation_tokens=300,
+                ),
+                _message(
+                    model="model-a",
+                    input_tokens=500,
+                    output_tokens=50,
+                    cache_read_tokens=None,
+                ),
+                _message(
+                    model="model-a",
+                    input_tokens=2_000,
+                    output_tokens=20,
+                    cache_read_tokens=1_500,
+                    cache_creation_tokens=0,
+                ),
+            ]
+        }
+    )
+
+    assert summary is not None
+    assert summary.total_tokens == 1_570
+    assert summary.cache_read_tokens == 2_100
+    assert summary.cache_creation_tokens == 300
+
+    unreported = summarize_run_usage(
+        {
+            "messages": [
+                HumanMessage(content="current"),
+                _message(model="model-a", input_tokens=10, output_tokens=1, cache_read_tokens=None),
+            ]
+        }
+    )
+
+    assert unreported is not None
+    assert unreported.cache_read_tokens is None
+    assert unreported.cache_creation_tokens is None

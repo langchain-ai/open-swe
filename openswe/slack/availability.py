@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.prompts import prompt
-from openswe.utils.jev import select_jev_choice
+from openswe.utils.jev import JEV
 
 
 class SlackProfile(BaseModel):
@@ -43,7 +43,7 @@ class SlackUserInfo(BaseModel):
             return False
         if not status.status_text.strip() and not status.status_emoji.strip():
             return False
-        choice = await select_jev_choice(
+        choice = await JEV.choose_one(
             status.model_dump_json(include={"status_text", "status_emoji"}),
             question="out_of_office",
             instructions=prompt("slack/availability-instructions", now=now.isoformat()),

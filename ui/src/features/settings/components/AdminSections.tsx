@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
@@ -9,10 +9,9 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { Switch } from "@langchain/macaw-components/Switch"
 
 import type { AdminUser } from "@/lib/api"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsSection } from "@/components/AppShell"
 import { TablePagination } from "@/components/TablePagination"
 import { api } from "@/lib/api"
 import {
@@ -25,9 +24,6 @@ import {
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
 
-const SLACK_CODE_CHANNELS_STORAGE_KEY =
-  "open-swe.admin.slack-code-channels-enabled"
-
 export function SlackIntegrationSection({
   backendUrl,
   children,
@@ -35,23 +31,9 @@ export function SlackIntegrationSection({
   backendUrl?: string
   children?: ReactNode
 }) {
-  const [enabled, setEnabled] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle"
   )
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setEnabled(
-      window.localStorage.getItem(SLACK_CODE_CHANNELS_STORAGE_KEY) === "true"
-    )
-  }, [])
-
-  const setCodeChannelsEnabled = (next: boolean) => {
-    setEnabled(next)
-    setCopyState("idle")
-    window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
-  }
 
   const manifestConfig = {
     backendUrl:
@@ -63,9 +45,7 @@ export function SlackIntegrationSection({
 
   const copyManifest = async () => {
     try {
-      await navigator.clipboard.writeText(
-        slackAppManifestJson(enabled, manifestConfig)
-      )
+      await navigator.clipboard.writeText(slackAppManifestJson(manifestConfig))
       setCopyState("copied")
     } catch {
       setCopyState("failed")
@@ -75,25 +55,8 @@ export function SlackIntegrationSection({
   return (
     <SettingsSection
       title="Slack Integration"
-      description="Configure Slack and choose which bots can start Open SWE runs."
+      description="Configure Slack and choose which bots can start Robin runs."
     >
-      <SettingsRow
-        htmlFor="slack-code-channels"
-        label="Slack Code Channels"
-        description={
-          enabled
-            ? "Early-access Code Channels manifest selected. Reinstall or re-authorize the Slack app after updating its manifest."
-            : "Legacy Slack manifest selected. Messages continue to use app mentions and Slack threads."
-        }
-        control={
-          <Switch
-            id="slack-code-channels"
-            aria-label="Slack Code Channels"
-            checked={enabled}
-            onChange={setCodeChannelsEnabled}
-          />
-        }
-      />
       <div className="flex flex-col gap-space-3 px-space-4 py-space-3 sm:flex-row sm:items-center sm:justify-between sm:gap-space-6">
         <div className="flex flex-col gap-space-1">
           <span className="text-sm/none font-medium text-primary">
@@ -101,8 +64,8 @@ export function SlackIntegrationSection({
           </span>
           <span className="text-xs/relaxed text-secondary">
             {placeholdersRemain
-              ? "Copy the selected manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
-              : "Copy the selected manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
+              ? "Copy the manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
+              : "Copy the manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
           </span>
         </div>
         <Button
@@ -151,7 +114,7 @@ export function RunningAgentsSection() {
   return (
     <SettingsSection
       title="Running Agents"
-      description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
+      description="Instance-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
     >
       <div className="flex flex-col gap-space-3 p-space-4">
         <div className="flex items-center justify-between">
@@ -261,7 +224,7 @@ export function TriggerReviewSection() {
   return (
     <SettingsSection
       title="Trigger a Review"
-      description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
+      description="Manually start a Robin Review run on a pull request. The repository must be enabled for review."
     >
       <div className="flex flex-col gap-space-2 p-space-4">
         <div className="flex items-center gap-space-2">

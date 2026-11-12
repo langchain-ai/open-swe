@@ -80,6 +80,10 @@ pub(crate) struct GitHubChannelStatus {
     pub(crate) app: GitHubApp,
     #[serde(default)]
     pub(crate) installations: Vec<GitHubInstallation>,
+    /// Whether the App has more installations than `installations` lists:
+    /// Agent Auth reports only the first 100.
+    #[serde(default)]
+    pub(crate) installations_truncated: bool,
     #[serde(default)]
     pub(crate) installation_requests: Vec<GitHubInstallationRequest>,
 }

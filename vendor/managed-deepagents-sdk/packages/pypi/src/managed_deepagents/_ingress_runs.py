@@ -21,6 +21,7 @@ from langgraph_sdk.schema import (
 )
 
 from managed_deepagents._channels.types import ChannelError
+from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import (
     TRACE_ID_METADATA_KEY,
     current_log_context,
@@ -51,6 +52,14 @@ class IngressThreadOrigin(TypedDict):
     binding: ChannelBinding
     #: The sender's principal id, as the run's ``x-mda-user-id``.
     sender: str
+
+
+#: Key under which the values a join returns carry the error a run ended with.
+_JOIN_ERROR_KEY = "__error__"
+#: The errors the Agent Server ends a cancelled run with: stopped, or replaced.
+_JOIN_CANCELLED_ERRORS = frozenset({"UserInterrupt", "UserRollback"})
+#: Keys a join can return without the run's values, which say nothing of its end.
+_JOIN_INCONCLUSIVE_KEYS = frozenset({"__feedback__"})
 
 
 class IngressRunObservation(TypedDict):
@@ -258,14 +267,15 @@ async def cancel_ingress_runs(*, client: LangGraphClient, thread_id: str) -> lis
         and isinstance(run_id := run.get("run_id"), str)
     ]
     cancelled = await asyncio.gather(
-        *(_cancel_run(client, thread_id, run_id) for run_id in run_ids)
+        *(cancel_ingress_run(client, thread_id, run_id) for run_id in run_ids)
     )
     cancelled_ids = [run_id for run_id, done in zip(run_ids, cancelled, strict=True) if done]
     record_log("INFO", "channel runs cancelled", attributes={"runs_cancelled": len(cancelled_ids)})
     return cancelled_ids
 
 
-async def _cancel_run(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
+async def cancel_ingress_run(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
+    """Cancel one queued or running run, keeping its progress; whether it was still active."""
     try:
         await client.runs.cancel(thread_id, run_id, wait=False, action="interrupt")
     except Exception as error:
@@ -352,6 +362,7 @@ async def resume_ingress_run(
     context: Context | None = None,
     config: Config | None = None,
     thread_origin: IngressThreadOrigin | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> StartedIngressRun:
     """Enqueue a keyed interrupt response without creating a thread."""
     if thread_origin is not None:
@@ -362,7 +373,7 @@ async def resume_ingress_run(
         assistant_id,
         command=Command(resume=resume),
         multitask_strategy="enqueue",
-        **_run_options(context, config),
+        **_run_options(context, config, metadata),
     )
     return _started_run(thread_id, run)
 
@@ -399,12 +410,49 @@ def _started_run(thread_id: str, run: Mapping[str, object]) -> StartedIngressRun
     return {"thread_id": thread_id, "run_id": run_id}
 
 
+def _joined_status(values: object) -> RunStatus | None:
+    """How a joined run ended, read from the values its join returned.
+
+    ``None`` when the join does not say: a run joined after it ended, whose
+    events are gone, returns no values, and so does one cancelled before it
+    emitted any. The Agent Server puts the error a run ended with under
+    ``__error__``, and a cancelled run's is its ``UserInterrupt``.
+    """
+    if not isinstance(values, Mapping) or not values.keys() - _JOIN_INCONCLUSIVE_KEYS:
+        return None
+    if _JOIN_ERROR_KEY not in values:
+        return "success"
+    error = values[_JOIN_ERROR_KEY]
+    if isinstance(error, Mapping) and error.get("error") in _JOIN_CANCELLED_ERRORS:
+        return "interrupted"
+    return "error"
+
+
 async def observe_ingress_run(
     *, client: LangGraphClient, thread_id: str, run_id: str
 ) -> IngressRunObservation:
     """Join an accepted run and read its status for the transport to validate."""
     values = await client.runs.join(thread_id, run_id)
-    run = await client.runs.get(thread_id, run_id)
+    try:
+        run = await client.runs.get(thread_id, run_id)
+    except Exception as error:
+        # An answer with a status is the caller's to read: ``rollback`` deletes
+        # the run a newer message replaced, so its status read is a 404.
+        if lookup_status(error) is not None:
+            raise
+        # No answer at all. An Agent Server that is shutting down finishes the
+        # join it was serving and accepts no new connection, so the status read
+        # fails although the run ended. The join says how, when it has values.
+        joined = _joined_status(values)
+        if joined is None:
+            raise
+        logger.warning(
+            "channel run status could not be read; its join result stands (%s, status=%s)",
+            logger.safe_error_label(error),
+            joined,
+        )
+        set_log_attributes({"run_status": joined})
+        return {"values": values, "status": joined}
     status = run.get("status") if isinstance(run, Mapping) else None
     if isinstance(status, str):
         set_log_attributes({"run_status": status})

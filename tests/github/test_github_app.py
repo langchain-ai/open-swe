@@ -1,13 +1,17 @@
+import asyncio
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import httpx2
 import pytest
+from githubkit import GitHub
 from langgraph.runtime import Runtime
 
 from openswe.agent_api.runs import in_graph_context
 from openswe.github import app as github_app
+from openswe.github import sdk
 from tests.support.github_sdk import mock_github_sdk
 
 
@@ -54,9 +58,22 @@ async def test_installation_lookup_fails_closed(
     assert await github_app.get_github_app_installation_id_for_repo("acme", "api") is None
 
 
-@pytest.mark.parametrize("minutes,expected_requests", [(60, 1), (2, 2)])
+@pytest.mark.parametrize(
+    "minutes,min_lifetime,force_refresh,expected_requests",
+    [
+        (60, None, False, 1),
+        (2, None, False, 2),
+        (45, None, False, 1),
+        (45, timedelta(minutes=50), False, 2),
+        (60, None, True, 2),
+    ],
+)
 async def test_token_cache_respects_expiry(
-    monkeypatch: pytest.MonkeyPatch, minutes: int, expected_requests: int
+    monkeypatch: pytest.MonkeyPatch,
+    minutes: int,
+    min_lifetime: timedelta | None,
+    force_refresh: bool,
+    expected_requests: int,
 ) -> None:
     expires_at = (datetime.now(UTC) + timedelta(minutes=minutes)).isoformat()
     requests: list[httpx2.Request] = []
@@ -69,7 +86,14 @@ async def test_token_cache_respects_expiry(
 
     mock_github_sdk(monkeypatch, handle)
     first, expiry = await github_app.get_github_app_installation_token_with_expiry()
-    second, _ = await github_app.get_github_app_installation_token_with_expiry()
+    if min_lifetime is None:
+        second, _ = await github_app.get_github_app_installation_token_with_expiry(
+            force_refresh=force_refresh
+        )
+    else:
+        second, _ = await github_app.get_github_app_installation_token_with_expiry(
+            min_lifetime=min_lifetime
+        )
     assert first == "token-1"
     assert second == f"token-{expected_requests}"
     assert expiry == expires_at
@@ -101,6 +125,20 @@ async def test_cache_separates_repository_installation_and_permission_scopes(
                     assert token is not None
     assert len(requests) == 8
     assert len({(path, json.dumps(body, sort_keys=True)) for path, body in requests}) == 8
+    refreshed, _ = await github_app.get_github_app_installation_token_with_expiry(
+        installation_id=2,
+        repository_ids=[11],
+        permissions={"contents": "read"},
+        force_refresh=True,
+    )
+    assert refreshed == "token-9"
+    assert (
+        await github_app.get_github_app_installation_token(
+            installation_id=2, repository_ids=[11], permissions={"contents": "write"}
+        )
+        == "token-2"
+    )
+    assert len(requests) == 9
 
 
 async def test_repository_names_and_full_installation_have_distinct_scopes(
@@ -183,4 +221,41 @@ async def test_langsmith_run_cannot_borrow_a_cached_installation_token(
         return await github_app.get_github_app_installation_token()
 
     with pytest.raises(PermissionError, match="cannot use GitHub App credentials"):
-        await in_graph_context({"configurable": {"auth_provider": "langsmith"}}, mint)
+        await in_graph_context({"configurable": {"github_linked": False}}, mint)
+
+
+async def test_forced_refresh_keeps_a_concurrently_minted_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = asyncio.Event()
+    release = asyncio.Event()
+    requests = 0
+    expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        nonlocal requests
+        requests += 1
+        number = requests
+        if number == 2:
+            pending.set()
+            await release.wait()
+        return httpx2.Response(201, json={"token": f"token-{number}", "expires_at": expiry})
+
+    mock_github_sdk(monkeypatch, lambda request: httpx2.Response(500))
+    monkeypatch.setattr(
+        sdk, "GitHub", partial(GitHub, async_transport=httpx2.MockTransport(handle))
+    )
+    assert await github_app.get_github_app_installation_token() == "token-1"
+    refreshing = asyncio.create_task(
+        github_app.get_github_app_installation_token_with_expiry(force_refresh=True)
+    )
+    await pending.wait()
+    try:
+        newer, _ = await github_app.get_github_app_installation_token_with_expiry(
+            force_refresh=True
+        )
+    finally:
+        release.set()
+    refreshed, _ = await refreshing
+    assert refreshed == newer == "token-3"
+    assert await github_app.get_github_app_installation_token() == "token-3"

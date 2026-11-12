@@ -27,7 +27,6 @@ from openswe.bridge.constants import (
 )
 from openswe.bridge.protocol import JsonObject
 from openswe.bridge.store import BridgeInUseError, BridgeStore, ClaimedRequest
-from openswe.database import postgres
 from openswe.threads.principals import PrincipalDep
 
 logger = logging.getLogger(__name__)
@@ -77,11 +76,6 @@ class BridgeReplyBody(BaseModel):
         return self
 
 
-def _require_postgres() -> None:
-    if not postgres.configured():
-        raise HTTPException(503, "sandbox bridges require PostgreSQL")
-
-
 async def _touch(bridge_id: str, owner_id: str) -> None:
     """Refresh the bridge's heartbeat, or say why the caller may not use it."""
     if await BridgeStore.heartbeat(bridge_id, owner_id=owner_id):
@@ -98,7 +92,6 @@ async def api_open_bridge(
     body: BridgeOpenBody,
     principal: PrincipalDep,
 ) -> BridgeOpenResponse:
-    _require_postgres()
     try:
         bridge = await BridgeStore.register(
             owner_id=principal.sender_id,
@@ -133,7 +126,6 @@ async def api_bridge_heartbeat(
     bridge_id: str,
     principal: PrincipalDep,
 ) -> Response:
-    _require_postgres()
     await _touch(bridge_id, principal.sender_id)
     return Response(status_code=204)
 
@@ -144,7 +136,6 @@ async def api_claim_bridge_requests(
     body: BridgeClaimBody,
     principal: PrincipalDep,
 ) -> BridgeRequestsResponse:
-    _require_postgres()
     await _touch(bridge_id, principal.sender_id)
     await BridgeStore.release_unheld(bridge_id, held=body.held)
     wait, limit = body.wait, body.limit
@@ -174,7 +165,6 @@ async def api_answer_bridge_request(
     body: BridgeReplyBody,
     principal: PrincipalDep,
 ) -> Response:
-    _require_postgres()
     await _touch(bridge_id, principal.sender_id)
     outcome = await BridgeStore.complete(
         bridge_id, request_id, result=body.result, error=body.error
@@ -192,7 +182,6 @@ async def api_close_bridge(
     bridge_id: str,
     principal: PrincipalDep,
 ) -> Response:
-    _require_postgres()
     if not await BridgeStore.close(bridge_id, owner_id=principal.sender_id):
         raise HTTPException(404, "sandbox bridge not found")
     logger.info("Closed a sandbox bridge", extra={"bridge_id": bridge_id})

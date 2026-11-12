@@ -1,3 +1,4 @@
+import { productAnalytics } from "@/lib/analytics"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   GlobeRegularIcon,
@@ -24,6 +25,7 @@ import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
+import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import type {
@@ -45,6 +47,8 @@ interface RightPanelTabsProps {
   widthStorageKey?: string
   /** Forwarded to RightPanelShell as the initial width before a user resize. */
   defaultWidth?: number
+  /** Forwarded to RightPanelShell: mounted, but out of sight. */
+  hidden?: boolean
   layoutControls?: ReactNode
   surfaces: ReadonlyArray<RightPanelSurface>
   activeSurfaceId: string | null
@@ -63,6 +67,8 @@ interface RightPanelTabsProps {
   onAddBrowser?: () => void
   /** Offered only where a thread can run commands and monitors in the background. */
   onAddBackgroundWork?: () => void
+  /** Offered once the thread's agent previews an app it builds. */
+  onAddApp?: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
   browserAvailable?: boolean
@@ -94,6 +100,7 @@ type SurfaceLauncherProps = Pick<
   | "onAddFiles"
   | "onAddBrowser"
   | "onAddBackgroundWork"
+  | "onAddApp"
   | "terminalAvailable"
   | "diffAvailable"
   | "browserAvailable"
@@ -123,7 +130,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       available: props.terminalAvailable,
       disabledReason: "Terminals are only available from a running workspace.",
       unavailableHint: "Available once the workspace is running.",
-      onClick: props.onAddTerminal,
+      onClick: () => {
+        productAnalytics.featureOpened("terminal")
+        props.onAddTerminal?.()
+      },
     },
     {
       label: "Changes",
@@ -133,7 +143,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       disabledReason:
         "Changes are only available for threads with a repository.",
       unavailableHint: "Available for Git repositories.",
-      onClick: props.onAddDiff,
+      onClick: () => {
+        productAnalytics.featureOpened("diff")
+        props.onAddDiff?.()
+      },
     },
     {
       label: "Files",
@@ -143,7 +156,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       available: props.terminalAvailable,
       disabledReason: "Files are only available from a running workspace.",
       unavailableHint: "Available once the workspace is running.",
-      onClick: props.onAddFiles,
+      onClick: () => {
+        productAnalytics.featureOpened("files")
+        props.onAddFiles?.()
+      },
     },
     ...(props.onAddBrowser
       ? [
@@ -157,7 +173,10 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
             disabledReason:
               "The browser is available once this thread's agent has started.",
             unavailableHint: "Available once the thread starts.",
-            onClick: props.onAddBrowser,
+            onClick: () => {
+              productAnalytics.featureOpened("browser")
+              props.onAddBrowser?.()
+            },
           },
         ]
       : []),
@@ -171,7 +190,27 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
             disabledReason:
               "Nothing is running in the background for this thread.",
             unavailableHint: "Available while a command or monitor runs.",
-            onClick: props.onAddBackgroundWork,
+            onClick: () => {
+              productAnalytics.featureOpened("background")
+              props.onAddBackgroundWork?.()
+            },
+          },
+        ]
+      : []),
+    ...(props.onAddApp
+      ? [
+          {
+            label: "App",
+            description: "Use the app the agent is building.",
+            icon: PuzzlePieceIcon,
+            shortcut: "A",
+            available: true,
+            disabledReason: "",
+            unavailableHint: "",
+            onClick: () => {
+              productAnalytics.featureOpened("app")
+              props.onAddApp?.()
+            },
           },
         ]
       : []),
@@ -450,6 +489,8 @@ export function surfaceTitle(
       return "Browser"
     case "background":
       return "Background work"
+    case "app":
+      return "App"
   }
 }
 
@@ -461,6 +502,7 @@ const SURFACE_ICONS = {
   terminal: TerminalWindowIcon,
   agents: RobotIcon,
   background: PulseIcon,
+  app: PuzzlePieceIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
@@ -519,6 +561,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       {...(props.defaultWidth !== undefined
         ? { defaultWidth: props.defaultWidth }
         : {})}
+      {...(props.hidden ? { hidden: true } : {})}
     >
       <div
         className="flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-space-1 px-space-2"
@@ -546,7 +589,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       onAuxClick={(event) => handleTabAuxClick(event, surface)}
                       onContextMenu={(event) => event.stopPropagation()}
                       className={cn(
-                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-space-2 pl-space-1 text-xs",
+                        "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-space-2 pl-space-1 text-xs select-none [-webkit-touch-callout:none]",
                         active
                           ? "bg-selected text-primary"
                           : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"
@@ -585,7 +628,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           role="tab"
                           aria-selected={active}
                           className="h-auto min-w-0 shrink cursor-pointer px-0 text-inherit hover:bg-transparent dark:hover:bg-transparent"
-                          onClick={() => props.onActivate(surface)}
+                          onClick={() => {
+                            productAnalytics.featureOpened(
+                              surface.kind === "preview"
+                                ? "browser"
+                                : surface.kind
+                            )
+                            props.onActivate(surface)
+                          }}
                         >
                           <span className="truncate">{title}</span>
                         </Button>

@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import { PluginTabs } from "@/features/plugins/components/PluginTabs"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -67,6 +68,7 @@ function AgentsLayout() {
       activeThreadId={activeThreadId ?? activeReviewThreadId}
     >
       <Outlet />
+      <PluginTabs />
     </AgentsShell>
   )
 }

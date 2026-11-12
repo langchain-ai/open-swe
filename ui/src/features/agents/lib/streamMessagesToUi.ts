@@ -15,7 +15,7 @@ import type { Chunk, ImageChunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return undefined
-  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
+  if (entity?.openSweAccount === "unlinked") return "not a Robin user"
   return undefined
 }
 
@@ -41,6 +41,7 @@ export function toolKind(name: string): ToolKind {
   if (lowered.startsWith("mcp_")) return "other"
   if (lowered === "task") return "task"
   if (lowered === "eval") return "code"
+  if (lowered === "background_execute") return "background"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
   if (lowered === "connect_managed_tools") return "managed-tools"
@@ -358,6 +359,9 @@ export function streamMessagesToUi(
               structuredSenderId: parsed.sender,
               structuredSenderKind: parsed.senderKind,
               structuredSurface: parsed.surface,
+              ...(parsed.slackMessageUrl
+                ? { slackMessageUrl: parsed.slackMessageUrl }
+                : {}),
               ...(replies ? { replies } : {}),
               structuredSenderName:
                 entity?.displayName ??

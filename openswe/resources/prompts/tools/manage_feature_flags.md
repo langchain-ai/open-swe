@@ -21,6 +21,7 @@ Supported flags are the agent-manageable boolean fields in the shared workspace 
 When enabled, implementation threads use the existing planning tools to complete shared walkthroughs before delivering a PR, including drafts.
 PR opens and head updates skip the background scout while a linked implementation thread is busy, including before its PR record is saved.
 When the implementation thread is idle, head updates trigger automatic refreshes.
+`concise_walkthrough_enabled` is off by default; when enabled, walkthrough plans and automated review finding descriptions for the workspace's repositories use short bullet fragments.
 Unknown fields, including credentials, model defaults, and approval automation, are rejected.
 Fable's model safety policy applies when disabling its flag.
 Approval modes are managed per repository by `manage_review_approval_mode`; set `approve` only when explicitly requested.

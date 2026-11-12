@@ -1,5 +1,6 @@
 """GitHub repository access checks for dashboard actions."""
 
+import asyncio
 import logging
 
 import httpx2
@@ -7,7 +8,7 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.app import get_github_app_installation_token
-from openswe.github.http import github_reauth_message
+from openswe.github.http import GitHubError, github_reauth_message
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
@@ -15,15 +16,40 @@ from openswe.utils.http_pool import pooled_transport
 logger = logging.getLogger(__name__)
 
 
-def _raise_for_github_repo_status(status_code: int) -> None:
-    if status_code == 401:
-        raise HTTPException(401, "GitHub credentials rejected")
-    if status_code == 404:
-        raise HTTPException(404, "repository not found")
-    if status_code == 403:
-        raise HTTPException(403, "no access to this private repository")
-    if status_code != 200:
-        raise HTTPException(502, f"github API error ({status_code})")
+class RepoAccessResponse:
+    @staticmethod
+    def require(response: httpx2.Response) -> None:
+        status_code = response.status_code
+        if status_code in (403, 429) and GitHubError(response).rate_limited:
+            logger.warning(
+                "GitHub repository access check rate limited",
+                extra={
+                    "github_status": status_code,
+                    "github_request_id": response.headers.get("X-GitHub-Request-Id"),
+                    "github_rate_limit_remaining": response.headers.get("X-RateLimit-Remaining"),
+                    "github_rate_limit_reset": response.headers.get("X-RateLimit-Reset"),
+                    "github_retry_after": response.headers.get("Retry-After"),
+                },
+            )
+            retry_after = response.headers.get("Retry-After", "")
+            headers = (
+                {"Retry-After": retry_after}
+                if retry_after.isascii() and retry_after.isdecimal()
+                else None
+            )
+            raise HTTPException(
+                429,
+                "GitHub API rate limit reached. Try again later; relinking GitHub will not help.",
+                headers=headers,
+            )
+        if status_code == 401:
+            raise HTTPException(401, "GitHub credentials rejected")
+        if status_code == 404:
+            raise HTTPException(404, "repository not found")
+        if status_code == 403:
+            raise HTTPException(403, "no access to this private repository")
+        if status_code != 200:
+            raise HTTPException(502, f"github API error ({status_code})")
 
 
 async def assert_repo_access(full_name: str, token: str) -> str:
@@ -41,29 +67,61 @@ async def assert_repo_access(full_name: str, token: str) -> str:
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,
         )
-        _raise_for_github_repo_status(response.status_code)
+        RepoAccessResponse.require(response)
     return full_name
 
 
-async def require_repo_access_for_user(login: str, full_name: str) -> str:
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, github_reauth_message(login))
-    try:
-        await assert_repo_access(full_name, token)
-    except HTTPException as exc:
-        if exc.status_code != 401:
-            raise
-        token = await get_valid_access_token(login, force_refresh=True)
+class RepoAccessChecks:
+    """GitHub repository read checks in flight, so a page's parallel reads share one.
+
+    A check's answer is never kept past the check itself: access revoked on GitHub
+    takes effect on the next request, and every waiter gets the token the check confirmed.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[tuple[str, str, int], asyncio.Future[str]] = {}
+
+    async def require(self, login: str, full_name: str) -> str:
+        key = (
+            login.lower(),
+            normalize_repo_full_name(full_name).lower(),
+            id(asyncio.get_running_loop()),
+        )
+        pending = self._pending.get(key)
+        if pending is None:
+            pending = asyncio.ensure_future(self._confirm(login, full_name))
+            self._pending[key] = pending
+            pending.add_done_callback(lambda _: self._pending.pop(key, None))
+        return await asyncio.shield(pending)
+
+    @staticmethod
+    async def _confirm(login: str, full_name: str) -> str:
+        token = await get_valid_access_token(login)
         if not token:
-            raise HTTPException(401, github_reauth_message(login)) from exc
+            raise HTTPException(401, github_reauth_message(login))
         try:
             await assert_repo_access(full_name, token)
-        except HTTPException as refreshed_exc:
-            if refreshed_exc.status_code == 401:
-                raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
-            raise
-    return token
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            token = await get_valid_access_token(login, force_refresh=True)
+            if not token:
+                raise HTTPException(401, github_reauth_message(login)) from exc
+            try:
+                await assert_repo_access(full_name, token)
+            except HTTPException as refreshed_exc:
+                if refreshed_exc.status_code == 401:
+                    raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
+                raise
+        return token
+
+
+_ACCESS_CHECKS = RepoAccessChecks()
+
+
+async def require_repo_access_for_user(login: str, full_name: str) -> str:
+    """The person's GitHub token, once GitHub confirms it can read ``full_name``."""
+    return await _ACCESS_CHECKS.require(login, full_name)
 
 
 async def require_repo_access_for_workspace(full_name: str) -> str:

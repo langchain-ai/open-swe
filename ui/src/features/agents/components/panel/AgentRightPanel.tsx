@@ -27,6 +27,7 @@ import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
+import { productAnalytics } from "@/lib/analytics"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface AgentRightPanelProps {
@@ -44,12 +45,16 @@ export interface AgentRightPanelProps {
   /** Rendered for the Background work surface, which only cloud threads offer. */
   renderBackgroundWork?: () => ReactNode
   backgroundWorkAvailable?: boolean
+  /** Rendered for the App surface, once the thread's agent previews an app. */
+  renderApp?: () => ReactNode
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
   onTerminalAddToChat?: (text: string) => void
   /** Offers Reply on text selected in an open file. */
   onReply?: (reply: PassageReply) => void
+  /** Whether the thread's run is going; an open file refreshes when it ends. */
+  running?: boolean
 }
 
 function useIsNarrowLayout(): boolean {
@@ -155,6 +160,10 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     openSurface(threadRef, "background")
   }, [openSurface, threadRef])
 
+  const handleAddApp = useCallback(() => {
+    openSurface(threadRef, "app")
+  }, [openSurface, threadRef])
+
   const handleActivate = useCallback(
     (surface: RightPanelSurface) => {
       activateSurface(threadRef, surface.id)
@@ -188,6 +197,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       return
     }
     onCollapsedChange(false)
+    productAnalytics.featureOpened("terminal")
     const existing = surfaces.find((surface) => surface.kind === "terminal")
     if (existing) handleActivate(existing)
     else handleAddTerminal()
@@ -223,6 +233,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
                   if (!collapsed && activeSurface?.kind === "diff") {
                     onCollapsedChange(true)
                   } else {
+                    productAnalytics.featureOpened("diff")
                     onCollapsedChange(false)
                     handleAddDiff()
                   }
@@ -255,19 +266,25 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     )
   )
 
-  if (collapsed) {
-    return (
-      <IconButton
-        className="fixed top-2 right-2 z-sidebar size-7"
-        color="secondary"
-        icon={SidebarSimpleIcon}
-        label="Show panel"
-        onClick={() => onCollapsedChange(false)}
-        tooltipProps={{ side: "left" }}
-        variant="plain"
-      />
-    )
-  }
+  const showPanel = (
+    <IconButton
+      className="fixed top-2 right-2 z-sidebar size-7"
+      color="secondary"
+      icon={SidebarSimpleIcon}
+      label="Show panel"
+      onClick={() => onCollapsedChange(false)}
+      tooltipProps={{ side: "left" }}
+      variant="plain"
+    />
+  )
+  // An app answers the agent's calls to its tools from its frame, so while
+  // one is open the inline panel collapses out of sight instead of unmounting.
+  const keepsApp =
+    !narrow &&
+    props.renderApp !== undefined &&
+    surfaces.some((surface) => surface.kind === "app")
+  if (collapsed && !keepsApp) return showPanel
+  const shown = collapsed ? null : activeSurface
 
   const layoutControls = (
     <div className="flex shrink-0 items-center">
@@ -303,27 +320,37 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const body = (
     <>
-      {activeSurface?.kind === "diff"
+      {shown?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
         : null}
-      {activeSurface?.kind === "preview" && props.renderBrowser
+      {shown?.kind === "preview" && props.renderBrowser
         ? props.renderBrowser()
         : null}
-      {activeSurface?.kind === "background" && props.renderBackgroundWork
+      {shown?.kind === "background" && props.renderBackgroundWork
         ? props.renderBackgroundWork()
         : null}
-      {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
+      {/* The app stays mounted while hidden, behind another tab or in the
+          collapsed panel, so it keeps its state and goes on answering the
+          agent's calls to its tools. */}
+      {props.renderApp && surfaces.some((surface) => surface.kind === "app") ? (
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            shown?.kind !== "app" && "hidden"
+          )}
+        >
+          {props.renderApp()}
+        </div>
+      ) : null}
+      {shown?.kind === "files" || shown?.kind === "file" ? (
         <FilesPanel
           key={workspaceTargetKey(terminalTarget)}
           target={terminalTarget}
-          relativePath={
-            activeSurface.kind === "file" ? activeSurface.relativePath : null
-          }
-          revealRequestId={
-            activeSurface.kind === "file" ? activeSurface.revealRequestId : 0
-          }
+          relativePath={shown.kind === "file" ? shown.relativePath : null}
+          revealRequestId={shown.kind === "file" ? shown.revealRequestId : 0}
           onOpenFile={(path) => openFileSurface(threadRef, path)}
           onReply={props.onReply}
+          running={props.running}
         />
       ) : null}
       {/* Terminals stay mounted while hidden so their scrollback survives tab
@@ -391,9 +418,11 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
             backgroundWorkAvailable: props.backgroundWorkAvailable ?? false,
           }
         : {})}
+      {...(props.renderApp ? { onAddApp: handleAddApp } : {})}
       terminalAvailable={terminalAvailable}
       diffAvailable={diffAvailable}
       layoutControls={layoutControls}
+      hidden={collapsed}
     >
       {body}
     </RightPanelTabs>
@@ -406,7 +435,12 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       </RightPanelSheet>
     )
   }
-  return tabs
+  return (
+    <>
+      {collapsed && showPanel}
+      {tabs}
+    </>
+  )
 }
 
 const EMPTY_PENDING_SURFACE_IDS: ReadonlySet<string> = new Set<string>()

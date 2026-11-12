@@ -15,11 +15,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
+from openswe.github.branch_config import BranchConfig
 from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
-from openswe.github.required_check_cache import RequiredCheckCache
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,21 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
               url
             }
           }
+        }
+      }
+    }
+  }
+}
+"""
+_REVIEW_THREAD_ROOTS_QUERY = """
+query PullRequestReviewThreadRoots($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated
+          comments(first: 1) { nodes { fullDatabaseId } }
         }
       }
     }
@@ -228,6 +243,7 @@ class OpenPullRequest(BaseModel):
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
     unresolved_threads: int | None = None
+    conversation_resolution_required: bool | None = None
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
@@ -576,16 +592,15 @@ class PullRequestClient:
     async def delete_review(self, review_id: int) -> None:
         await self.repo.delete(f"pulls/{self.number}/reviews/{review_id}")
 
-    async def review_threads(self) -> list[dict[str, Any]]:
-        """Every review thread with its position and comments, pending ones included."""
+    async def review_threads(self, *, roots_only: bool = False) -> list[dict[str, Any]]:
+        """Every review thread, optionally with only its root comment's identity."""
+        query = _REVIEW_THREAD_ROOTS_QUERY if roots_only else _ALL_REVIEW_THREADS_QUERY
         threads: list[dict[str, Any]] = []
         cursor: str | None = None
         seen: set[str] = set()
         while True:
             pull = _graphql_pull(
-                await self.repo.graphql(
-                    _ALL_REVIEW_THREADS_QUERY, {"number": self.number, "cursor": cursor}
-                )
+                await self.repo.graphql(query, {"number": self.number, "cursor": cursor})
             )
             connection = pull.get("reviewThreads") if pull is not None else None
             if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):
@@ -656,14 +671,14 @@ class PullRequestClient:
         self,
         *,
         reason: str,
-        keep_review_id: int | None = None,
         keep_commit: str | None = None,
         scope_to_review_id: int | None = None,
         state: Literal["approved", "changes_requested"] = "approved",
     ) -> list[int]:
-        """Dismiss Open SWE's standing reviews in ``state`` other than the kept ones; the ids GitHub refused.
+        """Dismiss Robin's standing reviews in ``state`` except those of ``keep_commit``; the ids GitHub refused.
 
-        ``scope_to_review_id`` limits this to that review's login. An unknown review dismisses nothing.
+        ``scope_to_review_id`` limits this to that review's login and the reviews up to it.
+        An unknown review dismisses nothing.
         """
         reviews = _GITHUB_REVIEWS.validate_python(await self.reviews())
         only_login: str | None = None
@@ -679,15 +694,14 @@ class PullRequestClient:
                 or review.user is None
                 or review.user.login.lower() not in OPEN_SWE_GITHUB_LOGINS
                 or (only_login is not None and review.user.login.lower() != only_login)
-                or review.id == keep_review_id
+                or (scope_to_review_id is not None and review.id > scope_to_review_id)
                 or (keep_commit is not None and review.commit_id == keep_commit)
             ):
                 continue
             try:
                 await self.dismiss_review(review.id, reason)
             except httpx2.HTTPStatusError as exc:
-                if exc.response.status_code == 404:
-                    continue
+                # A submitted review cannot be deleted, so a 404 hides one that still stands.
                 logger.warning(
                     "GitHub refused to dismiss a stale Open SWE approval",
                     extra={
@@ -1054,6 +1068,19 @@ class PullRequestClient:
         )
         result.review_required = review_state.review_required
         result.unresolved_threads = review_state.unresolved_threads
+        base = pull.get("base")
+        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
+        config = None
+        if base_ref is not None and (
+            review_state.unresolved_threads or result.merge_state != "clean"
+        ):
+            config = await BranchConfig(self.repo.full_name, base_ref).read(self.repo.github.login)
+            if config is not None:
+                result.conversation_resolution_required = config.requires_conversation_resolution
+                # GitHub's reviewDecision is often null under rulesets, so count approvals too.
+                if reviewers is not None and config.required_approving_reviews:
+                    approvals = sum(reviewer.state == "approved" for reviewer in reviewers)
+                    result.review_required |= approvals < config.required_approving_reviews
         if runs is None or statuses is None:
             return result
         failed, _, _ = _normalize_checks(runs, statuses)
@@ -1084,25 +1111,19 @@ class PullRequestClient:
             if runs or statuses
             else "none"
         )
-        base = pull.get("base")
-        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        if base_ref is not None and result.merge_state != "clean":
-            required = await RequiredCheckCache(self.repo.full_name, base_ref).read(
-                self.repo.github.login
+        if config is not None and result.merge_state != "clean":
+            required = config.checks
+            passing_runs = [
+                run
+                for run in runs
+                if run.get("status") == "completed"
+                and run.get("conclusion") in {"success", "neutral", "skipped"}
+            ]
+            passing_statuses = [status for status in statuses if status.get("state") == "success"]
+            result.required_checks_passing = all(
+                check.reported_by(passing_runs, passing_statuses) for check in required
             )
-            if required is not None:
-                passing_runs = [
-                    run
-                    for run in runs
-                    if run.get("status") == "completed"
-                    and run.get("conclusion") in {"success", "neutral", "skipped"}
-                ]
-                passing_statuses = [
-                    status for status in statuses if status.get("state") == "success"
-                ]
-                result.required_checks_passing = all(
-                    check.reported_by(passing_runs, passing_statuses) for check in required
-                )
+            if not pending:
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 

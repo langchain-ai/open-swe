@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "./api"
 
 vi.mock("@tanstack/react-start/server", () => ({
+  getRequest: () => new Request("http://localhost:3000/"),
   getRequestHeader: () => undefined,
 }))
 

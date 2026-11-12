@@ -34,7 +34,10 @@ async def test_thread_reads_and_writes_take_their_own_clients(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.method, request.url.path, request.headers.get("x-auth-scheme")))
-        if request.url.path == "/threads/search":
+        if request.method == "PATCH":
+            assert request.headers["Prefer"] == "return=minimal"
+            return httpx.Response(204)
+        if request.url.path in {"/threads/search", "/threads/t1/runs"}:
             return httpx.Response(200, json=[])
         return httpx.Response(200, json={"thread_id": "t1", "metadata": {}, "values": {}})
 
@@ -50,12 +53,15 @@ async def test_thread_reads_and_writes_take_their_own_clients(
     await threads.get("t1")
     await threads.indexed("t1")
     await threads.state("t1")
+    assert not await threads.has_active_run("t1")
     await threads.update("t1", {"title": "x"})
 
     assert seen == [
         ("GET", "/threads/t1", "langsmith"),
         ("POST", "/threads/search", "langsmith"),
         ("GET", "/threads/t1/state", "langsmith"),
+        ("GET", "/threads/t1/runs", "langsmith"),
+        ("GET", "/threads/t1/runs", "langsmith"),
         ("PATCH", "/threads/t1", None),
     ]
 

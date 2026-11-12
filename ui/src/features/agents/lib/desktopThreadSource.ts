@@ -7,10 +7,10 @@ const listeners = new Set<() => void>()
 let storageListenerAttached = false
 
 export function readStoredDesktopThreadSource(): DesktopThreadSource {
-  if (typeof window === "undefined") return "local"
-  return window.localStorage.getItem(STORAGE_KEY) === "cloud"
-    ? "cloud"
-    : "local"
+  if (typeof window === "undefined") return "cloud"
+  return window.localStorage.getItem(STORAGE_KEY) === "local"
+    ? "local"
+    : "cloud"
 }
 
 function handleStorage(event: StorageEvent): void {
@@ -53,7 +53,7 @@ export function useDesktopThreadSource(): [
   const source = useSyncExternalStore(
     subscribe,
     readStoredDesktopThreadSource,
-    (): DesktopThreadSource => "local"
+    (): DesktopThreadSource => "cloud"
   )
   return [source, writeStoredDesktopThreadSource]
 }

@@ -1,8 +1,6 @@
 """GitHub webhook comment utilities."""
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import re
 from collections.abc import Collection
@@ -24,10 +22,8 @@ __all__ = [
     "PrState",
     "build_pr_prompt",
     "derive_pr_state",
-    "describe_open_swe_tags",
     "extract_pr_context",
     "fetch_github_thread_participants",
-    "fetch_issue_comments",
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
@@ -37,10 +33,9 @@ __all__ = [
     "post_github_comment",
     "react_to_github_comment",
     "sanitize_github_comment_body",
-    "verify_github_signature",
 ]
 
-_DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
+_DEFAULT_OPEN_SWE_TAGS = ("@robin-agent", "@openswe", "@open-swe", "@openswe-dev")
 
 
 def _load_open_swe_tags() -> tuple[str, ...]:
@@ -51,13 +46,14 @@ def _load_open_swe_tags() -> tuple[str, ...]:
 
 
 OPEN_SWE_TAGS = _load_open_swe_tags()
+ROBIN_NOTIFICATION_MARKER = "<!-- robin-notification -->"
 
 PrState = Literal["open", "draft", "merged", "closed"]
 
 # Deployments sharing a workspace each own a distinct handle, so a tag must not
 # match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
 _OPEN_SWE_TAG_RE = re.compile(
-    "(?:"
+    r"(?<![\w.@-])(?:"
     + "|".join(re.escape(tag) for tag in sorted(OPEN_SWE_TAGS, key=len, reverse=True))
     + r")(?![\w-])",
     re.IGNORECASE,
@@ -67,11 +63,6 @@ _OPEN_SWE_TAG_RE = re.compile(
 def mentions_open_swe(text: str | None) -> bool:
     """Whether text mentions one of this deployment's handles."""
     return bool(text) and _OPEN_SWE_TAG_RE.search(text or "") is not None
-
-
-def describe_open_swe_tags() -> str:
-    """Human-readable handle list for ignore reasons in webhook responses."""
-    return " or ".join(OPEN_SWE_TAGS)
 
 
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
@@ -101,28 +92,6 @@ _GRAPHQL_REACTIONS: dict[str, str] = {
 }
 
 PAGINATED_MAX_PAGES = 50
-
-
-def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool:
-    """Verify the GitHub webhook signature (X-Hub-Signature-256).
-
-    Args:
-        body: Raw request body bytes.
-        signature: The X-Hub-Signature-256 header value.
-        secret: The webhook signing secret.
-
-    Returns:
-        True if signature is valid or no secret is configured.
-    """
-    if not secret:
-        logger.warning("GITHUB_WEBHOOK_SECRET is not configured — rejecting webhook request")
-        return False
-
-    if not signature:
-        return False
-
-    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
 
 
 def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> PrState:
@@ -278,7 +247,7 @@ async def post_github_comment(
         try:
             response = await client.post(
                 url,
-                json={"body": body},
+                json={"body": f"{body}\n\n{ROBIN_NOTIFICATION_MARKER}"},
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Accept": "application/vnd.github+json",
@@ -351,39 +320,6 @@ async def fetch_github_thread_participants(
         and login.strip()
         and not login.lower().endswith("[bot]")
     }
-
-
-async def fetch_issue_comments(
-    repo_config: dict[str, str], issue_number: int, *, token: str | None = None
-) -> list[dict[str, Any]]:
-    """Fetch all comments for a GitHub issue."""
-    owner = repo_config.get("owner", "")
-    repo = repo_config.get("name", "")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
-    ) as http_client:
-        comments = await _fetch_paginated(
-            http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
-            headers,
-        )
-
-    return [
-        {
-            "body": comment.get("body", ""),
-            "author": comment.get("user", {}).get("login", "unknown"),
-            "created_at": comment.get("created_at", ""),
-            "comment_id": comment.get("id"),
-        }
-        for comment in comments
-    ]
 
 
 async def fetch_pr_comments_since_last_tag(

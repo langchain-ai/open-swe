@@ -48,6 +48,17 @@ function server(
   bodies: Record<string, string> = {
     "/_shell.html": `shell ${version}`,
     "/assets/lazy.js": `lazy ${version}`,
+    "/desktop-routes.json": JSON.stringify({
+      version: 1,
+      paths: [
+        "/",
+        "/agents/$threadId",
+        "/agents/$threadId/plan",
+        "/agents/plugins/$name/$",
+        "/login",
+        ...(version === "v2" ? ["/new-page"] : []),
+      ],
+    }),
   },
 ): Fetch {
   const archive = archiveOf(bodies);
@@ -84,6 +95,20 @@ test("persists a complete server UI across restarts, including unopened lazy rou
   assert.equal(await response.text(), "shell v1");
   assert.equal(response.headers.get("set-cookie"), null);
   assert.equal(response.headers.get("content-encoding"), null);
+  for (const pathname of [
+    "/",
+    "/agents/thread-1/plan/",
+    "/agents/plugins/demo/deep/path",
+  ])
+    assert.equal(await ui.hasPage(pathname), true, pathname);
+  for (const pathname of [
+    "/login",
+    "/dashboard/api/l/token",
+    "/assets/lazy.js",
+    "/agents/thread-1/unknown",
+    "/new-page",
+  ])
+    assert.equal(await ui.hasPage(pathname), false, pathname);
   const restarted = new DesktopUi(
     "https://backend.example",
     offline,
@@ -150,7 +175,9 @@ test("promotes complete updates on next navigation without changing active page 
   assert.equal(await (await ui.serve(page())).text(), "shell v1");
   await ui.refresh();
   assert.equal(await (await ui.serve(asset())).text(), "lazy v1");
+  assert.equal(await ui.hasPage("/new-page"), false);
   assert.equal(await (await ui.serve(page())).text(), "shell v2");
+  assert.equal(await ui.hasPage("/new-page"), true);
   await ui.refresh();
   assert.equal(await (await ui.serve(asset())).text(), "lazy v2");
 });
@@ -170,7 +197,7 @@ test("rejects untrusted archive URLs", async (t) => {
       root,
       serveFile,
     );
-    await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
+    await assert.rejects(ui.serve(page()), /Could not load the Robin UI/);
   }
 });
 
@@ -185,7 +212,7 @@ test("reports a bridge mismatch as a desktop update, on first install and over a
       root,
       serveFile,
     ).serve(page()),
-    /Update the Open SWE desktop app/,
+    /Update the Robin desktop app/,
   );
   await new DesktopUi(
     "https://backend.example",
@@ -221,7 +248,7 @@ test("rejects archive traversal before extracting a checksum-valid download", as
     root,
     serveFile,
   );
-  await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
+  await assert.rejects(ui.serve(page()), /Could not load the Robin UI/);
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -237,8 +264,38 @@ test("installs a local archive on every load instead of contacting the backend",
   );
   await writeFile(archive, archiveOf({ "/_shell.html": "local v1" }));
   assert.equal(await (await ui.serve(page())).text(), "local v1");
+  assert.equal(await ui.hasPage("/agents/thread-1/plan"), false);
   await writeFile(archive, archiveOf({ "/_shell.html": "local v2" }));
   assert.equal(await (await ui.serve(page())).text(), "local v2");
+});
+
+test("unsupported or malformed route metadata never prevents loading the UI", async (t) => {
+  const root = await fixture(t);
+  for (const metadata of [
+    JSON.stringify({
+      version: 1,
+      paths: ["/agents/$threadId/plan", "/agents/$/unexpected", "/{-$lang}"],
+    }),
+    JSON.stringify({ version: 2, paths: ["/agents/$threadId/plan"] }),
+    "invalid json",
+  ]) {
+    const ui = new DesktopUi(
+      "https://backend.example",
+      server("v1", undefined, {
+        "/_shell.html": "shell",
+        "/desktop-routes.json": metadata,
+      }),
+      await mkdtemp(path.join(root, "cache-")),
+      serveFile,
+    );
+    assert.equal(await (await ui.serve(page())).text(), "shell");
+    assert.equal(
+      await ui.hasPage("/agents/thread/plan"),
+      metadata.includes('"version":1'),
+    );
+    assert.equal(await ui.hasPage("/agents/thread/unexpected"), false);
+    assert.equal(await ui.hasPage("/en"), false);
+  }
 });
 
 test("prunes superseded versions and crashed installs, keeping the one being served", async (t) => {

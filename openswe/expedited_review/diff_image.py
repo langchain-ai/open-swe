@@ -320,7 +320,10 @@ class DiffImageRenderer:
             + (_CODE_COLUMNS + 3) * self._char_width
             + self._metrics.gutter_padding
         )
-        height = sum(self._file_height(rows) for _, rows in flowed) + self._metrics.padding
+        height = (
+            sum(self._file_height(file, rows, width) for file, rows in flowed)
+            + self._metrics.padding
+        )
 
         image = Image.new("RGB", (width, height), self._theme.background)
         draw = ImageDraw.Draw(image)
@@ -377,15 +380,25 @@ class DiffImageRenderer:
             out.append(span.slice(max(start - span_start, 0), min(stop, span_end) - span_start))
         return out
 
-    def _fit_path(self, path: str, available: float) -> str:
-        """``path`` shortened from the left, so the basename always survives."""
-        if self._fonts.bold.getlength(path) <= available:
-            return path
-        keep = max(int(available / self._char_width) - 1, 1)
-        return "…" + path[-keep:]
+    def _path_width(self, file: DiffFile, width: int) -> float:
+        counts_width = self._fonts.bold.getlength(self._counts(file))
+        return width - self._metrics.padding * 2 - self._metrics.gutter_padding * 3 - counts_width
 
-    def _file_height(self, rows: list[Row]) -> int:
-        return self._metrics.header_height + len(rows) * self._metrics.line_height + 14
+    @staticmethod
+    def _counts(file: DiffFile) -> str:
+        return f"+{file.additions}  \u2212{file.deletions}"
+
+    def _path_lines(self, path: str, available: float) -> list[str]:
+        """``path`` wrapped in full, never elided, so approvers see exactly which file changed."""
+        columns = max(int(available / self._char_width), 1)
+        return [path[start : start + columns] for start in range(0, len(path), columns)] or [""]
+
+    def _header_height(self, file: DiffFile, width: int) -> int:
+        extra = len(self._path_lines(file.filename, self._path_width(file, width))) - 1
+        return self._metrics.header_height + extra * self._metrics.line_height
+
+    def _file_height(self, file: DiffFile, rows: list[Row], width: int) -> int:
+        return self._header_height(file, width) + len(rows) * self._metrics.line_height + 14
 
     def _draw_file(
         self,
@@ -401,20 +414,22 @@ class DiffImageRenderer:
         metrics = self._metrics
         left = metrics.padding
         right = width - metrics.padding
-        header_bottom = top + metrics.header_height
+        header_bottom = top + self._header_height(file, width)
         baseline = (metrics.header_height - metrics.font_size) // 2
 
-        counts = f"+{file.additions}  \u2212{file.deletions}"
+        counts = self._counts(file)
         counts_width = self._fonts.bold.getlength(counts)
-        path_width = right - left - metrics.gutter_padding * 3 - counts_width
 
         draw.rectangle((left, top, right, header_bottom), fill=theme.surface)
-        draw.text(
-            (left + metrics.gutter_padding, top + baseline),
-            self._fit_path(file.filename, path_width),
-            font=self._fonts.bold,
-            fill=theme.text,
-        )
+        for index, piece in enumerate(
+            self._path_lines(file.filename, self._path_width(file, width))
+        ):
+            draw.text(
+                (left + metrics.gutter_padding, top + baseline + index * metrics.line_height),
+                piece,
+                font=self._fonts.bold,
+                fill=theme.text,
+            )
         draw.text(
             (right - metrics.gutter_padding - counts_width, top + baseline),
             counts,

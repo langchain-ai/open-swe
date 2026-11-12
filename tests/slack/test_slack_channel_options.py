@@ -11,7 +11,7 @@ from slack_sdk.errors import SlackApiError
 
 from openswe.jobs import queue
 from openswe.slack import channel_options, channels, dashboard_routes
-from openswe.slack.channels import SlackChannel
+from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:
@@ -171,6 +171,42 @@ async def test_cached_display_name_survives_metadata_expiry(
     _install(monkeypatch, _FakeClient([], []))
 
     assert await SlackChannel.name_for("C1") == "engineering"
+
+
+@pytest.mark.parametrize("reference", ["C12345678", "#reviews", "#stale-reviews"])
+@pytest.mark.parametrize("failure", ["rate_limited", "timeout", "not_found"])
+async def test_channel_resolution_distinguishes_transient_failures(
+    monkeypatch: pytest.MonkeyPatch, reference: str, failure: str
+) -> None:
+    known = SlackChannel.from_payload({"id": "C12345678", "name": "stale-reviews"})
+    assert known is not None
+    known.fetched_at = datetime.fromtimestamp(0, UTC)
+    monkeypatch.setattr(SlackChannel, "cached", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        SlackChannel,
+        "_row_named",
+        AsyncMock(return_value=known if reference == "#stale-reviews" else None),
+    )
+    error = (
+        _rate_limited("30")
+        if failure == "rate_limited"
+        else TimeoutError()
+        if failure == "timeout"
+        else SlackApiError(
+            "channel_not_found",
+            SimpleNamespace(status_code=200, data={"error": "channel_not_found"}, headers={}),
+        )
+    )
+    client = _FakeClient([], [error])
+    client.conversations_info = AsyncMock(side_effect=error)
+    _install(monkeypatch, client)
+
+    if failure == "not_found":
+        assert await SlackChannel.resolve(reference, raise_unavailable=True) is None
+    else:
+        with pytest.raises(ChannelLookupUnavailable) as raised:
+            await SlackChannel.resolve(reference, raise_unavailable=True)
+        assert raised.value.retry_after == (30 if failure == "rate_limited" else 60)
 
 
 @pytest.mark.usefixtures("registry_db")

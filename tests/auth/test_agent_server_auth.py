@@ -33,7 +33,8 @@ def _ctx(permissions: list[str], resource: str, action: str) -> Auth.types.AuthC
     )
 
 
-async def test_only_the_backend_key_or_a_dashboard_session_authenticates() -> None:
+async def test_only_the_backend_key_or_a_dashboard_session_authenticates(langsmith_users) -> None:
+    langsmith_users.add("ada")
     backend = await agent_server_auth.authenticate(_scope((b"x-api-key", BACKEND_KEY.encode())))
     assert backend["permissions"] == [agent_server_auth.BACKEND_PERMISSION]
 

@@ -481,7 +481,7 @@ WITH runs AS (
 ), metrics AS (
     SELECT p.person_id, d.github_login, d.email,
         COALESCE(NULLIF(d.display_name, ''), NULLIF(d.github_login, ''),
-            NULLIF(split_part(d.email, '@', 1), ''), 'Open SWE user') AS name,
+            NULLIF(split_part(d.email, '@', 1), ''), 'Robin user') AS name,
         ((:current_login <> '' AND lower(d.github_login) = :current_login)
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
@@ -528,7 +528,7 @@ WITH runs AS (
         -- Sorting and disclosure must agree, so derive each displayed label once here
         -- and let both the ordering and the emitted row read the same column.
         CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-            THEN name ELSE 'Open SWE user' END AS display_name,
+            THEN name ELSE 'Robin user' END AS display_name,
         -- Mirrors safeModelLabel in ui/src/lib/modelLabel.ts and the usage table's
         -- empty-label fallback.
         COALESCE(NULLIF(btrim(left(

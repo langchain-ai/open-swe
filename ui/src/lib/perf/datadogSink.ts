@@ -10,7 +10,7 @@ import {
   isDatadogRumInitialized,
   subscribeToDatadogInitialization,
 } from "@/lib/datadog"
-import { registerPerfSink } from "./trace"
+import { getPerfSpans, registerPerfSink, type PerfSink } from "./trace"
 
 export function installDatadogPerfSink(): void {
   let installed = false
@@ -24,7 +24,7 @@ export function installDatadogPerfSink(): void {
       window.openSweDesktop ? "desktop" : "web"
     )
     const addDurationVital = rum.addDurationVital
-    registerPerfSink((span) => {
+    const send: PerfSink = (span) => {
       if (span.duration === null) return
       const context = { ...span.attributes }
       for (const step of span.steps)
@@ -34,7 +34,11 @@ export function installDatadogPerfSink(): void {
         duration: span.duration,
         context,
       })
-    })
+    }
+    for (const span of getPerfSpans()) {
+      if (span.status === "ended") send(span)
+    }
+    registerPerfSink(send)
   }
   if (isDatadogRumInitialized()) attach()
   else subscribeToDatadogInitialization(attach)

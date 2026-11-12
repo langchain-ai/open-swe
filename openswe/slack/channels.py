@@ -148,7 +148,7 @@ class SlackChannel(Base):
     async def save_all(cls, *payloads: JsonObject) -> None:
         """Upsert what Slack just said about these channels."""
         rows = [row for row in (cls.from_payload(item) for item in payloads) if row is not None]
-        if not rows or not postgres.configured():
+        if not rows:
             return
         upsert = insert(cls).values(
             [
@@ -172,8 +172,6 @@ class SlackChannel(Base):
     @classmethod
     async def listed_channels(cls) -> list[Self]:
         """The directory: every listed channel, by name."""
-        if not postgres.configured():
-            return []
         async with postgres.session() as session:
             rows = await session.scalars(select(cls).where(cls.listed).order_by(cls.name, cls.id))
             return list(rows)
@@ -217,11 +215,8 @@ class SlackChannel(Base):
     async def observe(cls, event_type: str, channel_id: str) -> None:
         """Bring one channel's row up to date after a Slack channel event about it."""
         if event_type in UNLIST_EVENTS:
-            if postgres.configured():
-                async with postgres.session() as session:
-                    await session.execute(
-                        update(cls).where(cls.id == channel_id).values(listed=False)
-                    )
+            async with postgres.session() as session:
+                await session.execute(update(cls).where(cls.id == channel_id).values(listed=False))
         elif event_type in REFETCH_EVENTS:
             await cls.load(channel_id, use_cache=False)
 
@@ -273,15 +268,11 @@ class SlackChannel(Base):
 
     @classmethod
     async def _row(cls, channel_id: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.get(cls, channel_id)
 
     @classmethod
     async def _row_named(cls, name: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(select(cls).where(cls.name == name))
 
@@ -340,7 +331,7 @@ class SlackChannel(Base):
         return channel.context if channel is not None else SlackChannelContext(id=channel_id)
 
     @classmethod
-    async def _search(cls, name: str) -> Self | None:
+    async def _search(cls, name: str, *, raise_unavailable: bool = False) -> Self | None:
         """Page ``conversations.list`` for ``name``, saving every channel it walks past."""
         try:
             async with SlackClient.bot() as client:
@@ -359,10 +350,12 @@ class SlackChannel(Base):
             return None
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning("Slack channel list failed", extra={"slack_error": slack_error(exc)})
+            if raise_unavailable and (unavailable := ChannelLookupUnavailable.from_error(exc)):
+                raise unavailable from None
             return None
 
     @classmethod
-    async def resolve(cls, reference: str) -> Self | None:
+    async def resolve(cls, reference: str, *, raise_unavailable: bool = False) -> Self | None:
         """The channel for an id, a ``<#C…|name>`` mention, ``#name`` or ``name``."""
         value = reference.strip()
         if mention := _MENTION.fullmatch(value):
@@ -371,14 +364,18 @@ class SlackChannel(Base):
         if not value:
             return None
         if _ID_SHAPE.fullmatch(value):
-            return await cls.load(value)
+            return await cls.load(value, raise_unavailable=raise_unavailable)
         name = value.lower()
         if (known := await cls._row_named(name)) is not None:
             # A stale row may predate a rename, so confirm it before trusting the name.
-            current = known if known.fresh else await cls.load(known.id, use_cache=False)
+            current = (
+                known
+                if known.fresh
+                else await cls.load(known.id, use_cache=False, raise_unavailable=raise_unavailable)
+            )
             if current is not None and current.details.name.lower() == name:
                 return current
-        return await cls._search(name)
+        return await cls._search(name, raise_unavailable=raise_unavailable)
 
     async def join(self) -> bool:
         """Join this channel; a private one needs an invite instead."""

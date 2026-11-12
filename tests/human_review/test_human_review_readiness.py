@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,7 +15,7 @@ from openswe.users import User, UserIdentity
 
 
 @pytest.mark.parametrize("failure", [None, "github", "delivery"])
-async def test_draft_request_offers_author_control_without_requesting_review(
+async def test_draft_request_links_diff_without_requesting_review(
     failure: str | None,
 ) -> None:
     author = User(
@@ -36,16 +35,20 @@ async def test_draft_request_offers_author_control_without_requesting_review(
     )
     if failure == "github":
         pull.pull.side_effect = HTTPException(502, "GitHub unavailable")
-    claimed: set[str] = set()
+    legacy_claim = (
+        readiness.DELIVERY_SCOPE,
+        "https://github.com/lc/repo/pull/7:abc:U1",
+    )
+    claimed = {legacy_claim}
 
     async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
-        if key in claimed:
+        if (scope, key) in claimed:
             return False
-        claimed.add(key)
+        claimed.add((scope, key))
         return True
 
     async def release(scope: str, key: str) -> None:
-        claimed.discard(key)
+        claimed.discard((scope, key))
 
     with (
         patch.object(readiness.event_claims, "claim", AsyncMock(side_effect=claim)),
@@ -53,6 +56,11 @@ async def test_draft_request_offers_author_control_without_requesting_review(
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
         patch.object(standard, "review_blockers", AsyncMock(return_value=["it is a draft"])),
         patch.object(User, "for_login", AsyncMock(return_value=author)),
+        patch.object(
+            readiness,
+            "dashboard_review_url",
+            return_value="https://robin.example/agents/reviews/lc/repo/7",
+        ),
         patch.object(
             readiness,
             "send_dm_with_location",
@@ -85,7 +93,7 @@ async def test_draft_request_offers_author_control_without_requesting_review(
             assert "already sent or is being delivered" in repeated.error
             assert dm.await_count == 1
         elif failure == "delivery":
-            assert not claimed
+            assert claimed == {legacy_claim}
             dm.side_effect = None
             retry = await readiness.offer_readiness(
                 GitHubPrRef(
@@ -103,14 +111,12 @@ async def test_draft_request_offers_author_control_without_requesting_review(
         assert "Ready for review on GitHub" in result.error
         assert "Do not work around this refusal" in result.error
         return
-    assert "author-only Mark ready button" in result.error
+    assert "review-page link" in result.error
     assert dm.await_args is not None
     assert dm.await_args.args[0] == "U1"
     sent = dm.await_args.kwargs["blocks"]
-    value = sent[-1]["elements"][0]["value"]
-    card = readiness.ReadinessCard.model_validate_json(json.loads(value)["fingerprint"])
-    assert card.author == "ada" and card.head_sha == "abc" and card.thread_id == "origin"
-    assert len(value) <= 2000
+    assert all(block["type"] != "actions" for block in sent)
+    assert "https://robin.example/agents/reviews/lc/repo/7|Open review" in sent[-1]["text"]["text"]
 
 
 async def test_expired_card_cannot_mark_ready_after_a_replacement_is_sent() -> None:

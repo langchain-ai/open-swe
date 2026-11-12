@@ -38,7 +38,9 @@ export function ClosePullRequest({
         description="GitHub closes it without merging. A reason is posted as a comment."
         placeholder="Reason (optional)"
         submitLabel="Close pull request"
-        onSubmit={(reason) => close.mutateAsync(reason)}
+        onSubmit={(reason) =>
+          close.mutateAsync({ reason: reason || undefined })
+        }
       />
     </div>
   )

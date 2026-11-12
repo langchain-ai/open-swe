@@ -10,13 +10,18 @@ from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.middleware.record_run_usage import record_run_usage
 
 
-def _message(input_tokens: int, output_tokens: int) -> AIMessage:
+def _message(input_tokens: int, output_tokens: int, cache_read: int | None = None) -> AIMessage:
     return AIMessage(
         content="done",
         usage_metadata={
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
+            **(
+                {"input_token_details": {"cache_read": cache_read}}
+                if cache_read is not None
+                else {}
+            ),
         },
     )
 
@@ -25,7 +30,7 @@ def _message(input_tokens: int, output_tokens: int) -> AIMessage:
 async def test_records_whole_run_across_queued_human_messages() -> None:
     first = _message(100, 10)
     first.response_metadata["open_swe_run_id"] = "run-1"
-    second = _message(200, 20)
+    second = _message(200, 20, cache_read=150)
     second.response_metadata["open_swe_run_id"] = "run-1"
     state: AgentState = {
         "messages": [
@@ -62,7 +67,9 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
     usage = record.await_args.kwargs["usage"]
     assert usage.input_tokens == 300
     assert usage.output_tokens == 30
-    assert usage.total_tokens == 330
+    assert usage.total_tokens == 180
+    assert usage.cache_read_tokens == 150
+    assert usage.cache_creation_tokens is None
     schedule.assert_awaited_once_with({"thread_id": "thread-1", "invocation_id": "run-1"})
     mark_scheduled.assert_awaited_once_with(invocation_id="run-1")
 

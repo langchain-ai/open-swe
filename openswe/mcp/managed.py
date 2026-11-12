@@ -167,6 +167,29 @@ class _Listing:
     def tool_names(self) -> frozenset[str]:
         return frozenset(tool.name for tool in self.tools)
 
+    @classmethod
+    def partial(cls, result: ListToolsResult) -> _Listing:
+        """A partial-use gateway's listing, with only the tools the user can call now.
+
+        It names the unconnected services in _meta and lists their tools too; those are
+        left out because calling one asks the user to connect first.
+        """
+        entries = (result.meta or {}).get(_MISSING_CREDENTIALS_META)
+        missing, links = _credentials(entries)
+        unconnected = {
+            tool["name"]
+            for entry in (entries if isinstance(entries, list) else ())
+            if isinstance(entry, dict) and isinstance(entry.get("tools"), list)
+            for tool in entry["tools"]
+            if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+        }
+        tools = tuple(
+            ManagedTool(name=tool.name, description=tool.description)
+            for tool in result.tools
+            if tool.name not in unconnected
+        )
+        return cls(len(tools), missing, links, all_required=False, tools=tools)
+
 
 def managed_tools_configured() -> bool:
     return langsmith_oauth_configured()
@@ -188,7 +211,7 @@ def gateway_id(value: str) -> str:
 
 async def _headers(login: str) -> dict[str, str]:
     if not managed_tools_configured():
-        raise ManagedToolsError("Managed tools are not configured on this Open SWE instance")
+        raise ManagedToolsError("Managed tools are not configured on this Robin instance")
     token = await langsmith_access_token(login)
     if token is None:
         raise LangSmithNotConnected
@@ -525,22 +548,13 @@ async def _listing(login: str, gateway: str) -> _Listing:
     """Read the gateway's tools as ``login``, under either of LMT's connection policies.
 
     A gateway that requires every connection answers 428 until all are made. One that
-    allows partial use lists the connected services' tools and names the rest in _meta.
+    allows partial use names the unconnected services in _meta.
     """
     try:
         result = await _with_session(login, gateway, _list_tools)
     except GatewayCredentialsRequired as required:
         return _Listing(None, required.missing, required.links, all_required=True)
-    missing, links = _credentials((result.meta or {}).get(_MISSING_CREDENTIALS_META))
-    return _Listing(
-        len(result.tools),
-        missing,
-        links,
-        all_required=False,
-        tools=tuple(
-            ManagedTool(name=tool.name, description=tool.description) for tool in result.tools
-        ),
-    )
+    return _Listing.partial(result)
 
 
 async def gateway_inventory(login: str, gateway: str) -> GatewayInventory:

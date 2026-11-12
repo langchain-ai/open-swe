@@ -6,7 +6,7 @@ import type {
   OpenPullRequest,
   PullRequestActionName,
 } from "@/lib/api"
-import { githubActions } from "./githubActions"
+import { type GithubActionInput, githubActions } from "./githubActions"
 import { pullRequestKey } from "./status"
 
 /**
@@ -23,18 +23,21 @@ export function usePullRequestAction({
   pr: OpenPullRequest
   action: PullRequestActionName
   apply?: () => () => void
-  onDone?: () => void
+  /** `queued` is true when a merge was queued as auto-merge. */
+  onDone?: (queued: boolean) => void
   method?: MergeMethod
 }) {
   const { run, succeeded, failed } = githubActions[action]
   return useMutation({
-    mutationFn: (reason: string | void) => run(pr, method, reason || undefined),
+    mutationFn: (input: Omit<GithubActionInput, "method"> | void) =>
+      run(pr, { ...input, method }),
     meta: { errorTitle: failed(pullRequestKey(pr)) },
     onMutate: () => ({ undo: apply?.() }),
-    onError: (_error, _reason, context) => context?.undo?.(),
-    onSuccess: () => {
-      toast.success(succeeded(pullRequestKey(pr), pr))
-      onDone?.()
+    onError: (_error, _input, context) => context?.undo?.(),
+    onSuccess: (queued, _input, context) => {
+      if (queued) context?.undo?.()
+      toast.success(succeeded(pullRequestKey(pr), queued))
+      onDone?.(queued)
     },
     retry: false,
   })

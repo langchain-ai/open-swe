@@ -57,6 +57,9 @@ async def _keep_approval(
         "Kept expedited approval across a diff change",
         extra={"approval_id": str(approval.id)},
     )
+    await approval.log_event(
+        "expedited.approval_kept", reason=reason.strip(), diff_fingerprint=fingerprint
+    )
     return await HumanReviewRequest.get(approval.id)
 
 
@@ -66,13 +69,20 @@ async def merge_approved(
     pr = approval.pull_request
     try:
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
-            return await _merge_approved(
+            result = await _merge_approved(
                 approval,
                 github.repo(pr.owner, pr.repo).pull_request(pr.number),
                 keep_approval_reason,
             )
     except GitHubAppUnavailable:
-        return MergeResult("error", "Open SWE cannot reach this repository's GitHub App.")
+        result = MergeResult("error", "Robin cannot reach this repository's GitHub App.")
+    await approval.log_event(
+        "expedited.merge_attempted",
+        status=result.status,
+        message=result.message,
+        keep_approval_reason=keep_approval_reason,
+    )
+    return result
 
 
 async def _merge_approved(

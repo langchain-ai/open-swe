@@ -32,7 +32,7 @@ export function AgentNoteCard({
       className="w-full rounded-r-lg border-y border-r border-default bg-brand-muted text-xs"
       style={{ borderLeft: "3px solid var(--icon-brand)" }}
     >
-      <div className="flex items-center gap-space-2 px-space-3 pt-space-2">
+      <div className="flex items-start gap-space-2 px-space-3 pt-space-2">
         <AgentMark />
         <span className="shrink-0 font-medium text-primary">Note</span>
         {onShow ? (
@@ -40,12 +40,11 @@ export function AgentNoteCard({
             color="secondary"
             variant="plain"
             size="sm"
-            aria-label={location}
             type="button"
             onClick={onShow}
-            className="h-auto min-w-0 truncate border-0 px-0 font-mono text-secondary underline-offset-2 hover:underline"
+            className="h-auto min-w-0 flex-1 shrink justify-start overflow-visible! border-0 px-0 text-left font-mono whitespace-normal! text-secondary underline-offset-2 hover:underline"
           >
-            <span className="min-w-0 truncate">{location}</span>
+            <span className="min-w-0 break-all">{location}</span>
           </Button>
         ) : (
           <span className="min-w-0 flex-1 truncate text-secondary">
@@ -65,6 +64,7 @@ export function AgentNoteCard({
         )}
       </div>
       <div
+        data-reply-part={`Robin's note on ${location}`}
         className={
           closed
             ? "line-clamp-2 px-space-3 pt-space-1 pb-space-2 leading-[1.6] text-secondary"

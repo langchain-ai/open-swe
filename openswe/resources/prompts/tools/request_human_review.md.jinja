@@ -5,17 +5,17 @@ When auto-merge is enabled, the pull request merges on its own once every review
 
 Use it when someone asks for a human review, or when a pull request you opened is ready for one.
 It is refused while the pull request is a draft, has merge conflicts, or is failing a required check.
-Call this tool even when the pull request is a draft: it refuses to solicit reviews but sends the author a real author-only **Mark ready** button in Slack DM.
-Report that no review has been requested, give the PR's canonical URL, and ask the author to review the changes carefully themselves before clicking that button.
-Do not substitute a generic Slack response-option button.
-If delivery fails, report the specific error and the GitHub **Ready for review** fallback.
-Never undraft it yourself or solicit reviews until the author has clicked the readiness button.
+Call this tool even when the pull request is a draft: it refuses to solicit reviews but sends the author a link to the Review page in Slack DM.
+Report that no review has been requested, give the PR's canonical URL, and ask the author to inspect the diff and mark it ready on the Review page, then ask for human review again.
+Do not offer a Mark ready button in Slack: the author needs to see the diff first.
+If delivery fails, report the specific error and ask the author to inspect the diff and use GitHub's **Ready for review** control.
+Never undraft it yourself or solicit reviews until the author has marked it ready.
 For a tiny change that someone can approve straight from the diff, use `expedite_pr_approval` instead.
 
 An open expedited card already satisfies the review request and is not a blocker to resolve: tell the requester review is in progress rather than retrying.
 Do not call `expedite_pr_approval` with `action="cancel"` to make room for a standard review unless the requester explicitly asks.
 For other blockers except draft status, investigate and resolve them within the requested scope when safe, verify and push any fixes, then retry this tool.
-Do not merely report that the PR is blocked, whether by merge conflicts, failing checks, or another fixable prerequisite; draft status is never yours to change, and only the author's readiness button click may undraft the PR.
+Do not merely report that the PR is blocked, whether by merge conflicts, failing checks, or another fixable prerequisite; draft status is never yours to change, and only the author may undraft the PR.
 If you need access, authorization, or a behavioral decision, explain the specific blocker and offer to fix it or ask for the concrete action needed to proceed.
 Never bypass safeguards or force-push without explicit authorization.
 
@@ -30,16 +30,16 @@ Otherwise, after this tool succeeds, send a brief completion message in the conv
 Tool activity and review cards do not replace this confirmation, including in the dashboard.
 Do not repeat the review summary or link to the Slack card: Slack unfurls that link into a second copy of it.
 
-{% if mcp %}If nobody signs up within 2 hours (or the workspace’s configured timeout) Open SWE picks a reviewer itself; use `assign_human_reviewer` to name one sooner. Calling this again for a pull request with an open standard request returns the existing card; when the request came from the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% else %}If nobody signs up within 2 hours (or the workspace’s configured timeout) you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open standard request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% endif %} To take the request down instead, use `dismiss_human_review_request`.
+{% if mcp %}If nobody signs up within 2 hours (or the workspace’s configured timeout) Robin picks a reviewer itself; use `assign_human_reviewer` to name one sooner. Calling this again for a pull request with an open standard request returns the existing card; when the request came from the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% else %}If nobody signs up within 2 hours (or the workspace’s configured timeout) you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open standard request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% endif %} To take the request down instead, use `dismiss_human_review_request`.
 
 Repositories can configure supplementary reviews, such as design or security, under `supplementaryReviews` in `.open-swe/settings.json`; each has an `id`, a GitHub team, paths, and criteria.
-Open SWE assesses matching pull requests against those criteria on its own when review starts.
+Robin assesses matching pull requests against those criteria on its own when review starts.
 To ask for one yourself, pass `supplementary_review` (the policy `id`) with `supplementary_review_reason` explaining the concrete change that meets its criteria.
 Keep the reason under 240 characters: High/Medium/Low impact, the visible change, and what needs review.
 If that policy configures `areas`, also pass `supplementary_review_area` using a key from the policy's map in the repository's default-branch `.open-swe/settings.json`.
 Choose the main affected area from the actual diff and configured descriptions; use `unmapped` only when none applies.
 For an existing review request, omit `inline_summary` so the engineering card stays unchanged.
-Open SWE chooses the mapped owner, otherwise rotates a member of the configured team, and sends one Slack ping with available PR screenshots (DM for private or unreadable channels or failed delivery), without replacing engineering review.
+Robin chooses the mapped owner, otherwise rotates a member of the configured team, and sends one Slack ping with available PR screenshots (DM for private or unreadable channels or failed delivery), without replacing engineering review.
 Do not use `assign_human_reviewer` for supplementary reviewers.
 
 Pass `auto_merge=false` for review only: reviewer signup, assignment and reminders continue, but a person must merge the PR.

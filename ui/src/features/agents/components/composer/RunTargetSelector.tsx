@@ -1,3 +1,4 @@
+import { FuzzySearch } from "@/lib/fuzzySearch"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   CheckIcon,
@@ -154,7 +155,7 @@ export function LocalProjectSelector({
   const name = selected?.name ?? selectedPath?.split("/").filter(Boolean).at(-1)
   const needle = query.trim().toLowerCase()
   const matches = needle
-    ? projects.filter((project) => project.name.toLowerCase().includes(needle))
+    ? new FuzzySearch(needle).rank(projects, (project) => project.name)
     : projects
 
   const toggle = (next: boolean) => {
@@ -289,16 +290,19 @@ export function LocalWorkspaceSelector({
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex cursor-default items-center gap-space-1 text-secondary select-none">
+      <span className="flex min-w-0 cursor-default items-center gap-space-1 text-secondary select-none">
         <ComposerTriggerIcon icon={icon} />
-        {label}
+        <span className="truncate">{label}</span>
       </span>
     )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={COMPOSER_TRIGGER_CLASS_NAME}>
+      <DropdownMenuTrigger
+        className={cn(COMPOSER_TRIGGER_CLASS_NAME, "min-w-0")}
+        title={label}
+      >
         <ComposerTriggerIcon icon={icon} />
-        <span>{label}</span>
+        <span className="truncate">{label}</span>
         <ComposerControlChevron />
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -354,7 +358,7 @@ export function LocalBranchSelector({
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase()
     if (!value) return refs
-    return refs.filter((ref) => ref.name.toLowerCase().includes(value))
+    return new FuzzySearch(value).rank(refs, (ref) => ref.name)
   }, [query, refs])
 
   const toggle = (next: boolean) => {
@@ -372,7 +376,11 @@ export function LocalBranchSelector({
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger
         disabled={disabled}
-        className={cn(COMPOSER_TRIGGER_CLASS_NAME, "max-w-[260px] min-w-0")}
+        className={cn(
+          COMPOSER_TRIGGER_CLASS_NAME,
+          "max-w-[260px] min-w-0 shrink-[2]"
+        )}
+        title={selectedBranch ?? undefined}
       >
         <ComposerTriggerIcon icon={GitBranchIcon} />
         <span className="truncate">{selectedBranch ?? "No branch"}</span>

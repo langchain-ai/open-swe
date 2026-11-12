@@ -9,6 +9,9 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import agent_catalog
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
+
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
@@ -71,7 +74,6 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
                 "reasoning_effort": "high",
             },
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await agent_catalog(config, surface)
@@ -125,7 +127,6 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
                 "reasoning_effort": "high",
             },
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):
         await agent_catalog(config, surface)

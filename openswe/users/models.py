@@ -9,7 +9,7 @@ reference ``users.id`` instead of a provider-specific handle.
 """
 
 import logging
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
@@ -39,7 +39,9 @@ from openswe.users.authorization import (
     is_authorized_github_login,
 )
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
+from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
+from openswe.utils.search import FuzzySearch
 
 if TYPE_CHECKING:
     from openswe.dashboard.langsmith_login import LangSmithAccount
@@ -85,10 +87,27 @@ class User(Base):
         """This person's handle on ``provider``, for display; never an identity key."""
         return self._identity_field(provider, "login") or self.display_name or str(self.id)[:8]
 
+    def billing_trace_metadata(self) -> dict[str, str]:
+        """Trace-only attribution to this Robin user."""
+        metadata = {
+            "user_id": str(self.id),
+            "billing_bucket": "user",
+            "billed_robin_user_id": str(self.id),
+        }
+        if self.email:
+            metadata["billed_user_email"] = self.email
+        return metadata
+
     @property
     def github_login(self) -> str:
         """The GitHub handle, or ``""`` — unlike :meth:`login_for`, never a stand-in."""
         return self._identity_field("github", "login")
+
+    @property
+    def github_id(self) -> int | None:
+        """GitHub's numeric account id, which survives renames."""
+        external_id = self._identity_field("github", "external_id")
+        return int(external_id) if external_id.isdigit() else None
 
     @property
     def slack_user_id(self) -> str:
@@ -160,6 +179,17 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
+    async def for_ids(cls, user_ids: Collection[UUID]) -> dict[UUID, Self]:
+        """The people with these ids, identities loaded; ids with no row are left out."""
+        if not user_ids:
+            return {}
+        async with postgres.session() as session:
+            users = await session.scalars(
+                cls._with_identities(select(cls)).where(cls.id.in_(user_ids))
+            )
+            return {user.id: user for user in users}
+
+    @classmethod
     async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
         """The person a dashboard session belongs to.
 
@@ -167,8 +197,6 @@ class User(Base):
         identity, so a renamed login never falls through to whoever took the old
         handle; only a row whose GitHub identity moved away falls back to the login.
         """
-        if not postgres.configured():
-            return None
         if user_id is not None:
             user = await cls.get(user_id)
             if user is not None and any(i.provider == "github" for i in user.identities):
@@ -178,8 +206,6 @@ class User(Base):
     @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -298,6 +324,42 @@ class User(Base):
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
 
+    async def can_read_repository(self, repository: str) -> bool:
+        """Whether this person can read ``repository`` (``owner/repo``) on GitHub.
+
+        A yes is trusted as long as ``accessible_repo_full_names`` trusts its
+        listing, so access lost on GitHub shows within that window and callers
+        that check on every keystroke spend no rate limit; a no is never kept, so
+        access granted there shows at once. An expired sign-in raises.
+        """
+        from openswe.github.repos import ACCESS_FRESH_MS
+
+        if not self.github_login:
+            return False
+        key = f"github-repository-read:{self.id}:{repository.lower()}"
+        readable = await ttl_cache.cached(
+            key,
+            ACCESS_FRESH_MS / 1000,
+            lambda: self._reads_repository(repository),
+            serve_stale=False,
+        )
+        if not readable:
+            ttl_cache.invalidate(key)
+        return readable
+
+    async def _reads_repository(self, repository: str) -> bool:
+        from fastapi import HTTPException
+
+        from openswe.dashboard.repo_access import require_repo_access_for_user
+
+        try:
+            await require_repo_access_for_user(self.github_login, repository)
+        except HTTPException as exc:
+            if exc.status_code in {403, 404}:
+                return False
+            raise
+        return True
+
     async def default_repo(
         self, workspace: str | None = None, *, fallback_global: bool = True
     ) -> dict[str, str] | None:
@@ -353,6 +415,7 @@ class User(Base):
         changes = patch.model_dump(exclude_none=True)
         if not changes:
             return user.typed_preferences
+        await patch.validate_channel(user)
         incoming = bindparam("preferences_patch", changes, type_=JSONB)
         merged = (
             incoming.op("||")(cls.preferences)
@@ -372,7 +435,7 @@ class User(Base):
     async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:
         """Lowercased GitHub logins among ``logins`` that belong to a person."""
         wanted = {login.strip().lower() for login in logins if login and login.strip()}
-        if not wanted or not postgres.configured():
+        if not wanted:
             return frozenset()
         async with postgres.session() as session:
             rows = await session.scalars(
@@ -385,18 +448,19 @@ class User(Base):
 
     @classmethod
     async def page(cls, *, offset: int, limit: int, search: str = "") -> tuple[list[Self], int]:
-        """One page of matching people, oldest first, with the total count."""
-        query = select(cls)
+        """One page of people with sign-in identities, oldest first, with the total count."""
+        query = select(cls).where(cls.identities.any())
         if search := search.strip():
+            fuzzy = FuzzySearch(search)
             query = query.where(
                 or_(
-                    cls.display_name.icontains(search, autoescape=True),
+                    fuzzy.condition(cls.display_name),
                     cls.identities.any(
                         or_(
-                            UserIdentity.login.icontains(search, autoescape=True),
-                            UserIdentity.email.icontains(search, autoescape=True),
+                            fuzzy.condition(UserIdentity.login),
+                            fuzzy.condition(UserIdentity.email),
                             (UserIdentity.provider == "slack")
-                            & UserIdentity.external_id.icontains(search, autoescape=True),
+                            & fuzzy.condition(UserIdentity.external_id),
                         )
                     ),
                 )
@@ -414,8 +478,6 @@ class User(Base):
     @classmethod
     async def for_identity(cls, provider: Provider, external_id: str) -> Self | None:
         """The person owning that provider account, or ``None``."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -432,7 +494,7 @@ class User(Base):
     ) -> dict[str, Self]:
         """The people owning those provider accounts, keyed by account id; unknown ids are absent."""
         wanted = {external_id for external_id in external_ids if external_id}
-        if not wanted or not postgres.configured():
+        if not wanted:
             return {}
         async with postgres.session() as session:
             rows = await session.execute(
@@ -444,10 +506,49 @@ class User(Base):
             return {external_id: user for user, external_id in rows.tuples()}
 
     @classmethod
+    async def for_github_logins(cls, logins: Collection[str]) -> dict[str, Self]:
+        """The people behind GitHub ``logins``, keyed by the lowercased login asked for."""
+        wanted = {login.lower() for login in logins}
+        if not wanted:
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, func.lower(UserIdentity.login))
+                .join(cls.identities)
+                .where(
+                    UserIdentity.provider == "github",
+                    func.lower(UserIdentity.login).in_(wanted),
+                )
+                .order_by(UserIdentity.last_seen_at)
+            )
+            return {login: user for user, login in rows.tuples()}
+
+    @classmethod
+    async def for_handle(cls, handle: str) -> Self | None:
+        """The person someone named by GitHub login or email address, as when sharing."""
+        handle = handle.strip().removeprefix("@")
+        if not handle:
+            return None
+        if "@" in handle:
+            return await cls.for_email(handle)
+        return await cls.for_login("github", handle)
+
+    @classmethod
+    async def automation_creator(cls, record: Mapping[str, object]) -> Self | None:
+        """Who created an automation: by stable user id, or by login for rows saved before it."""
+        if user_id := record.get("created_by_user_id"):
+            try:
+                return await cls.get(UUID(str(user_id)))
+            except ValueError:
+                return None
+        login = record.get("created_by")
+        if not isinstance(login, str) or not login.strip():
+            return None
+        return await cls.for_login("github", login.strip())
+
+    @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
-        if not postgres.configured():
-            return None
         if login.startswith("user:"):
             user_id = cls.key_id(login)
             return await cls.get(user_id) if user_id is not None else None
@@ -518,7 +619,7 @@ class User(Base):
         email: str = "",
         team_id: str = "",
     ) -> Self:
-        """Attach another provider account to this person, taking it over if needed."""
+        """Attach a provider account without moving another person's Slack identity."""
         if provider == "langsmith" or (
             provider == "github" and any(i.provider == "langsmith" for i in self.identities)
         ):
@@ -533,7 +634,7 @@ class User(Base):
                 email=email,
                 team_id=team_id,
             )
-            await session.execute(
+            result = await session.execute(
                 upsert.on_conflict_do_update(
                     index_elements=[UserIdentity.provider, UserIdentity.external_id],
                     set_={
@@ -541,15 +642,27 @@ class User(Base):
                         "last_seen_at": func.clock_timestamp(),
                         **_known(login=login, email=email, team_id=team_id),
                     },
-                )
+                    where=UserIdentity.user_id == self.id if provider == "slack" else None,
+                ).returning(UserIdentity.user_id)
             )
+            if result.scalar_one_or_none() is None:
+                raise AccountConflict(
+                    "This Slack account is already linked to another Robin account"
+                )
             await session.flush()
             stored = await cls._load(session, self.id)
         if stored is None:
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
 
-    async def join_github(self, external_id: str, *, login: str, email: str) -> Self:
+    async def join_github(
+        self,
+        external_id: str,
+        *,
+        login: str,
+        email: str,
+        recovery_slack_id: str | None = None,
+    ) -> Self:
         """Join this LangSmith person and a GitHub account they proved, returning who holds both.
 
         A GitHub account someone already used keeps its person, so their threads and
@@ -563,11 +676,37 @@ class User(Base):
         cls = type(self)
         async with postgres.session() as session:
             owner = await session.scalar(
-                select(UserIdentity.user_id).where(
-                    UserIdentity.provider == "github", UserIdentity.external_id == external_id
-                )
+                select(UserIdentity.user_id)
+                .where(UserIdentity.provider == "github", UserIdentity.external_id == external_id)
+                .with_for_update()
             )
             target = owner or self.id
+            await session.execute(
+                select(cls.id)
+                .where(cls.id.in_({self.id, target}))
+                .order_by(cls.id)
+                .with_for_update()
+            )
+            if not await session.scalar(
+                select(UserIdentity.user_id).where(
+                    UserIdentity.user_id == self.id, UserIdentity.provider == "langsmith"
+                )
+            ):
+                raise AccountConflict("Your account changed — sign in again before linking GitHub")
+            if recovery_slack_id is not None:
+                slack_owner = await session.scalar(
+                    select(UserIdentity.user_id)
+                    .where(
+                        UserIdentity.provider == "slack",
+                        UserIdentity.external_id == recovery_slack_id,
+                    )
+                    .with_for_update()
+                )
+                if owner is None or slack_owner != owner:
+                    raise AccountConflict(
+                        "This is not the GitHub account connected to your Slack. "
+                        "Try again with the GitHub account you previously used with Robin."
+                    )
             if target != self.id:
                 if await session.scalar(
                     select(UserIdentity.user_id).where(
@@ -575,7 +714,8 @@ class User(Base):
                     )
                 ):
                     raise AccountConflict(
-                        "This GitHub account is already linked to another LangSmith account"
+                        "This GitHub account is already linked to another LangSmith account. "
+                        "Sign in with that LangSmith account to keep using your existing Robin account."
                     )
                 await session.execute(
                     update(UserIdentity)
@@ -685,7 +825,9 @@ class User(Base):
         if provider == "langsmith":
             if authorization is None or authorization.sub != external_id:
                 raise UnauthorizedUser("LangSmith sign in requires an authorized account")
-            authorization.require_allowed_org()
+            from openswe.dashboard.langsmith_login import LangSmithLogin
+
+            authorization.require_allowed_org(await LangSmithLogin().allowed_org())
         owner = await session.scalar(
             select(UserIdentity.user_id).where(
                 UserIdentity.provider == provider,
@@ -755,4 +897,4 @@ async def _authorize(provider: Provider, login: str) -> None:
             "Refused to create a user for an unauthorized GitHub login",
             extra={"github_login": login},
         )
-        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Open SWE")
+        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Robin")

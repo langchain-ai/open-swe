@@ -8,6 +8,7 @@ import {
   useScopedSettings,
   type SettingsScope,
 } from "@/features/settings/lib/settingsScope"
+import { ReviewAppsSettings, ReviewBrowserSettings } from "./ReviewAppsSettings"
 import { TierRow } from "./WorkspaceSettingsSections"
 
 /** Review guidelines and toggles at one tier: the instance, or one workspace's overrides. */
@@ -55,8 +56,8 @@ export function ReviewSettings({
         title="Review Guidelines"
         description={
           scoped
-            ? "Instructions injected into every review this workspace runs, across all of its repositories. Until this workspace sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
-            : "Instructions injected into every review, in every workspace that does not set its own. Repository-specific style prompts take precedence when they conflict."
+            ? "Instructions injected into every review this environment runs, across all of its repositories. Until this environment sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
+            : "Instructions injected into every review, in every environment that does not set its own. Repository-specific style prompts take precedence when they conflict."
         }
       >
         <div className="flex flex-col gap-space-2 p-space-4">
@@ -64,7 +65,7 @@ export function ReviewSettings({
             <p className="text-xs text-secondary">
               {guidelinesInherited
                 ? "Inherited from the instance."
-                : "Overridden for this workspace."}
+                : "Overridden for this environment."}
             </p>
           )}
           <Textarea
@@ -113,7 +114,7 @@ export function ReviewSettings({
             settings={settings}
             fields={["review_draft_prs"]}
             label="Review Draft PRs"
-            description="Whether Open SWE Review runs on draft PRs. Each user can override it in their Git settings."
+            description="Whether Robin Review runs on draft PRs. Each user can override it in their Git settings."
             control={toggle("review_draft_prs", "Review Draft PRs")}
           />
           <TierRow
@@ -133,9 +134,14 @@ export function ReviewSettings({
         </div>
       </SettingsSection>
 
+      <ReviewAppsSettings settings={settings} editable={editable} />
+      {!scoped && (
+        <ReviewBrowserSettings settings={settings} editable={editable} />
+      )}
+
       {!canEdit && (
         <p className="text-xs text-secondary">
-          These settings are read-only. Ask a workspace admin to change them.
+          These settings are read-only. Ask a Robin admin to change them.
         </p>
       )}
     </>

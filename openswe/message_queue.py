@@ -10,13 +10,14 @@ from datetime import datetime
 from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field
+from runtime_api.provenance import Provenance
 from sqlalchemy import BigInteger, Identity, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.input_messages import RunMessage, message_sender_id
+from openswe.input_messages import RunMessage
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject
 
@@ -118,13 +119,13 @@ class QueuedMessage(Base):
         message = self.run_message
         return (
             message is not None
-            and message_sender_id(message["content"], kind="system") == "system:slack-note"
+            and (provenance := Provenance.of(message)) is not None
+            and provenance.kind == "system"
+            and provenance.sender == "system:slack-note"
         )
 
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
-        from openswe.incidents.report import context_message
-
         message = self.run_message
         content = message["content"] if message is not None else self.content
         if isinstance(content, str):
@@ -136,7 +137,7 @@ class QueuedMessage(Base):
         sender = payload.sender
         return QueuedPreview(
             id=self.queue_id or f"queued-{self.seq}",
-            text=context_message(payload.preview_text()),
+            text=payload.preview_text(),
             sender=await sender.login() if sender else None,
             platform=sender.platform if sender else None,
             queued_at=self.queued_at,

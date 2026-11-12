@@ -13,6 +13,8 @@ from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeUserRecords
 
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 @pytest.fixture
 def requester(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -83,7 +85,11 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
     result = await save_user_settings(
-        {"auto_fix_ci": False, "auto_human_review_enabled": False, "default_workspace": "  NEW  "}
+        {
+            "auto_fix_ci": False,
+            "auto_human_review_enabled": False,
+            "default_workspace": "  NEW  ",
+        }
     )
     assert result == {
         "ok": True,
@@ -189,7 +195,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
-        {"pr_failure_reactions": None, "auto_fix_ci": False},
+        {"experimental_classify": None, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -235,7 +241,7 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        assert (await save_user_settings({"pr_failure_reactions": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"experimental_classify": True, "auto_fix_ci": False}))[
             "ok"
         ] is False
         save.assert_awaited_once()
@@ -244,13 +250,13 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
         User,
         "update_preferences",
         new_callable=AsyncMock,
-        return_value=UserPreferences(pr_failure_reactions=True),
+        return_value=UserPreferences(experimental_classify=True),
     ) as save:
-        assert (await save_user_settings({"pr_failure_reactions": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"experimental_classify": True, "auto_fix_ci": False}))[
             "updated"
-        ] == {"pr_failure_reactions": True, "auto_fix_ci": False}
+        ] == {"experimental_classify": True, "auto_fix_ci": False}
         assert save.await_args.args[0] == "Alice"
-        assert save.await_args.args[1].pr_failure_reactions is True
+        assert save.await_args.args[1].experimental_classify is True
     assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
 
 
@@ -308,16 +314,14 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 **ordinary,
                 "auto_human_review_enabled": True,
                 "concierge_mode": False,
-                "pr_failure_reactions": False,
-                "goal_mode": False,
+                "personal_kitchen_channel_id": "",
                 "experimental_classify": False,
-                "experimental_memory": False,
-                "experimental_conditional_approval": False,
             },
             "preferences": {
                 "default_workspace": "mine",
                 "default_visibility": "private",
                 "follow_up_behavior": "steer",
+                "auto_show_changes": True,
             },
             "instructions": "",
         }

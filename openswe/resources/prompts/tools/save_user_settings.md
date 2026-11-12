@@ -5,15 +5,17 @@ No login, email, thread ID, or on-behalf-of identity is accepted.
 Model selection uses workspace defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
+- `personal_kitchen_channel_id`: one internal Slack channel Open SWE has joined; requires a linked Slack account.
+  Pass the channel ID; an empty string clears it.
+  Only the requester’s untagged messages get kitchen handling, without changing workspace kitchen channels.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `workspace_default_repos`: a complete map of workspace slugs to `owner/repo` defaults.
   Read the current map first and preserve entries the user did not ask to change.
   Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
-- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
+- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Robin user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
-- `experimental_conditional_approval`: opt the requester’s authored PRs into conditional approval (default false); never enables it for other authors.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
@@ -22,13 +24,14 @@ Supported dashboard preferences:
 - `default_workspace`: workspace slug; null clears the default.
 - `follow_up_behavior`: `queue` or `steer`.
   What a message sent while a run is live does: wait for the run to end, or steer the running agent.
+- `auto_show_changes`: boolean (default true); whether a thread's Changes panel opens when a run that edited files finishes.
 
-`concierge_mode` (the user's Slack DM with Open SWE as one conversation) is read-only through agent tools.
+`concierge_mode` (the user's Slack DM with Robin as one conversation) is read-only through agent tools.
 Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
 
 Only save explicitly requested personal changes.
 If personal versus shared scope is unclear, ask first.
-Use `remember` for standing behavioral guidance and the existing personal skill tools for skills.
+Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills.
 This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences.
 Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
 

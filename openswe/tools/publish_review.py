@@ -12,14 +12,17 @@ from pydantic import JsonValue, TypeAdapter
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
-from openswe.github.pull_requests import PullRequest, PullRequestPayload
+from openswe.github.pull_requests import PullRequest
 from openswe.github.thread_token import (
     GitHubAuthError,
     invalidate_cached_github_token,
     resolve_thread_github_token,
 )
+from openswe.jobs import queue
+from openswe.review.approval_withdrawal import ApprovalWithdrawal
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -72,7 +75,6 @@ from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.review.shadow import ReviewShadow
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
-from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
 
@@ -107,9 +109,10 @@ async def publish_review(
 
     config = get_config()
     cfg = RunConfig.from_config(config)
+    apps_only = cfg.reviewer_event == "preview_ready"
     pr_number = cfg.pr_number
     head_sha = cfg.head_sha
-    is_re_review = bool(cfg.re_review)
+    is_re_review = cfg.posts_only_new_findings
 
     if not cfg.repo:
         return {"success": False, "error": "Missing repo info in run config"}
@@ -119,7 +122,7 @@ async def publish_review(
         return {"success": False, "error": "Missing head_sha in run config"}
 
     try:
-        if ranking_error := await _record_ranking(ranking, cfg):
+        if ranking_error := await _record_ranking(ranking, cfg, state):
             return ranking_error
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -139,6 +142,7 @@ async def publish_review(
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
+                base_sha=cfg.base_sha or "",
                 severity_threshold=severity_threshold,
             )
         except ReviewerThreadMissingError as exc:
@@ -155,12 +159,14 @@ async def publish_review(
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
+            base_sha=cfg.base_sha or "",
             severity_threshold=severity_threshold,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
             assessment=assessment,
+            apps_only=apps_only,
         )
         events = ReviewEvents.from_config(cfg)
         if events is not None:
@@ -192,19 +198,24 @@ def _has_sibling_tool_calls(state: dict[str, Any] | None) -> bool:
     return bool(messages) and len(getattr(messages[-1], "tool_calls", None) or []) > 1
 
 
-async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:
+async def _record_ranking(
+    ranking: list[str], cfg: RunConfig, state: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     """Store the reviewer's best-first order over the findings this publish would post.
 
     Returns a tool error instead when ``ranking`` is not exactly that set, once each.
     """
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
-    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
+    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.posts_only_new_findings else ""
     selection = PublishSelection(
         findings,
         destination=cfg.review_destination,
-        re_review=bool(cfg.re_review),
+        re_review=cfg.posts_only_new_findings,
         head_sha=head_sha,
+        earlier=_state_errors(state, "review_earlier_finding_ids")
+        if cfg.reviewer_event == "preview_ready"
+        else (),
     )
     expected = [finding["id"] for finding in selection.rankable]
     known = {finding["id"] for finding in findings}
@@ -260,6 +271,7 @@ async def _publish_review_eval_dry_run_async(
     *,
     head_sha: str,
     severity_threshold: Severity,
+    base_sha: str = "",
 ) -> dict[str, Any]:
     """Simulate publish_review for benchmark runs without posting to GitHub."""
     thread_id = get_thread_id_from_runtime()
@@ -286,6 +298,7 @@ async def _publish_review_eval_dry_run_async(
     await set_reviewer_thread_metadata(
         thread_id,
         last_reviewed_sha=head_sha,
+        last_reviewed_base_sha=base_sha,
         extra={REVIEWER_EVAL_PUBLICATION_KEY: publication},
     )
 
@@ -312,11 +325,20 @@ async def _publish_review_async(
     trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
     assessment: ReviewAssessment | None = None,
+    base_sha: str = "",
+    apps_only: bool = False,
 ) -> dict[str, Any]:
+    """Post the review. ``apps_only``, for a run on a newly deployed preview, posts only the
+    findings that run added, as a comment, and changes nothing else: the code review's
+    verdict, approvals, check and recorded commit stay its own."""
     thread_id = get_thread_id_from_runtime()
     dry_run = True
+    policy: object = None
     approval_errors = _state_errors(state, "review_approval_errors")
     config_errors = _state_errors(state, "review_config_errors")
+    if apps_only:
+        approval_errors = config_errors = []
+        assessment = None
     if config_errors:
         assessment = None
     if assessment is not None:
@@ -327,43 +349,34 @@ async def _publish_review_async(
         if not policy or mode == "off":
             assessment = None
         dry_run = mode != "approve"
-    if assessment is not None and assessment.decision == "would_approve_conditionally":
-        try:
-            async with GitHubClient.connect(token=token) as github:
-                payload = PullRequestPayload.model_validate(
-                    await github.repo(owner, repo).pull_request(pr_number).pull()
-                )
-            opted_in: bool | None = (
-                await User.preferences_for_login(payload.author)
-            ).experimental_conditional_approval
-        except Exception:
-            logger.warning(
-                "Could not confirm the author opted in to conditional approval",
-                extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
-                exc_info=True,
-            )
-            opted_in = None
-        if not opted_in:
-            assessment = assessment.model_copy(
-                update={
-                    "decision": "needs_human_review",
-                    "approval_condition": None,
-                    "auto_approved": None,
-                    "explanation": "Conditional approval is not enabled for this PR's author."
-                    if opted_in is False
-                    else "Could not confirm that this PR's author enabled conditional approval.",
-                }
-            )
+    if (
+        assessment is not None
+        and assessment.decision != "needs_human_review"
+        and (state or {}).get("review_changes_approval")
+    ):
+        assessment = assessment.model_copy(
+            update={
+                "decision": "needs_human_review",
+                "approval_condition": None,
+                "auto_approved": None,
+                "explanation": "This PR changes auto approval, which always needs a person to approve.",
+            }
+        )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
-    head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
-    if assessment is not None and assessment.head_sha != head_sha:
+    reviewed_head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    if assessment is not None and assessment.head_sha != reviewed_head_sha:
         return {
             "success": False,
             "error": "Assessment commit differs from the current review head. Review it again.",
         }
+    if reviewed_head_sha != head_sha:
+        metadata = await get_thread_metadata(thread_id)
+        live_base_sha = metadata.get("review_base_sha")
+        base_sha = live_base_sha if isinstance(live_base_sha, str) else ""
+    head_sha = reviewed_head_sha
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -386,6 +399,7 @@ async def _publish_review_async(
         re_review=is_re_review,
         head_sha=head_sha,
         severity_threshold=severity_threshold,
+        earlier=_state_errors(state, "review_earlier_finding_ids") if apps_only else (),
     )
     open_unpublished = selection.open
     in_diff_unpublished = selection.in_diff
@@ -409,6 +423,14 @@ async def _publish_review_async(
             continue
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
+
+    if apps_only and not inline_comments:
+        return {
+            "success": True,
+            "review_id": None,
+            "surfaced_count": 0,
+            "skipped_empty_re_review": True,
+        }
 
     # With nothing new to surface, skip the "no issues found" summary if Open
     # SWE has already reviewed this PR — the user already saw the previous
@@ -444,7 +466,9 @@ async def _publish_review_async(
         await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
             reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
         )
-        await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await set_reviewer_thread_metadata(
+            thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+        )
         await _record_reviewer_usage(
             thread_id=thread_id,
             owner=owner,
@@ -453,9 +477,7 @@ async def _publish_review_async(
             head_sha=head_sha,
             findings=await list_findings_async(thread_id),
         )
-        await _withdraw_open_swe_approvals(
-            owner=owner, repo=repo, pr_number=pr_number, token=token, keep_commit=head_sha
-        )
+        await ApprovalWithdrawal(owner=owner, repo=repo, number=pr_number).attempt(token=token)
         await _withdraw_open_swe_change_requests(
             owner=owner, repo=repo, pr_number=pr_number, token=token
         )
@@ -487,6 +509,14 @@ async def _publish_review_async(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
     )
+    # Withdraws an approval of a head that moved if this publish stops before its own withdrawal.
+    publication_guard = (
+        await ApprovalWithdrawal(owner=owner, repo=repo, number=pr_number).queue()
+        if approved
+        else None
+    )
+    # Robin can't approve a pull request it authored; its decision stands in for the approval.
+    self_approved = False
     request_changes = bool(config_errors)
     # GitHub forbids approving or requesting changes on your own pull request; comment instead.
     for _ in range(2):
@@ -518,6 +548,7 @@ async def _publish_review_async(
             and isinstance(review_response, dict)
             and review_response.get("_error_kind") == "self_review"
         ):
+            self_approved = approved
             approved = request_changes = False
         else:
             break
@@ -610,18 +641,33 @@ async def _publish_review_async(
     approval_id = (
         review_id if approved and not unresolvable_findings and isinstance(review_id, int) else None
     )
-    await _withdraw_open_swe_approvals(
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        keep_review_id=approval_id,
-        scope_to_review_id=review_id,
-    )
-    if not config_errors:
-        await _withdraw_open_swe_change_requests(
-            owner=owner, repo=repo, pr_number=pr_number, token=token
+    if not apps_only:
+        live_head = await ApprovalWithdrawal(
+            owner=owner,
+            repo=repo,
+            number=pr_number,
+            keep_head=approval_id is not None,
+            review_id=review_id if isinstance(review_id, int) else None,
+        ).attempt(token=token)
+        if publication_guard is not None:
+            try:
+                await queue.cancel(publication_guard.id)
+            except Exception:
+                logger.warning("Could not cancel the publication's approval guard", exc_info=True)
+        if approval_id is not None and live_head != head_sha:
+            # The head moved while this approval was posted, so it was withdrawn or will be.
+            approval_id = None
+            approved = False
+        kept = approval_id is not None or (
+            self_approved and not unresolvable_findings and isinstance(review_id, int)
         )
+        await PullRequestApproval.record_auto_approval(
+            owner, repo, pr_number, head_sha if kept else ""
+        )
+        if not config_errors:
+            await _withdraw_open_swe_change_requests(
+                owner=owner, repo=repo, pr_number=pr_number, token=token
+            )
 
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
@@ -641,6 +687,9 @@ async def _publish_review_async(
                 approved=approved,
                 dry_run=dry_run,
                 run_id=langgraph_run_id,
+                policy_sha256=PublishedAssessment.policy_digest(
+                    policy if isinstance(policy, str) else None
+                ),
             ).save()
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
         except Exception:
@@ -701,6 +750,17 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    if apps_only:
+        added: dict[str, Any] = {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "resolved_thread_count": resolved_thread_count,
+        }
+        if unresolvable_findings:
+            added["unresolvable_findings"] = unresolvable_findings
+        return added
+
     try:
         await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
             reviewer_thread_id=thread_id,
@@ -733,7 +793,9 @@ async def _publish_review_async(
             surfaced_count=len(inline_comments),
         )
 
-    await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await set_reviewer_thread_metadata(
+        thread_id, last_reviewed_sha=head_sha, last_reviewed_base_sha=base_sha
+    )
     await _record_reviewer_usage(
         thread_id=thread_id,
         owner=owner,
@@ -770,64 +832,17 @@ async def _publish_review_async(
     return result
 
 
-async def _withdraw_open_swe_approvals(
-    *,
-    owner: str,
-    repo: str,
-    pr_number: int,
-    token: str,
-    keep_review_id: int | None = None,
-    keep_commit: str | None = None,
-    scope_to_review_id: int | None = None,
-) -> None:
-    """Leave standing only this publish's own approval, if it posted one."""
-    if keep_review_id is not None:
-        reason = "Superseded by Open SWE's approval of the current head."
-    elif keep_commit is not None:
-        reason = "New commits were pushed after Open SWE approved this pull request."
-    else:
-        reason = "Open SWE's latest review of this pull request does not approve it."
-    try:
-        async with GitHubClient.connect(token=token) as github:
-            refused = await (
-                github.repo(owner, repo)
-                .pull_request(pr_number)
-                .withdraw_open_swe_approvals(
-                    reason=reason,
-                    keep_review_id=keep_review_id,
-                    keep_commit=keep_commit,
-                    scope_to_review_id=scope_to_review_id,
-                )
-            )
-    except httpx2.HTTPError, ValueError:
-        logger.warning(
-            "Could not list Open SWE approvals to withdraw",
-            extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
-        return
-    if refused:
-        logger.error(
-            "Open SWE approvals the latest review does not support are still standing",
-            extra={
-                "repository": f"{owner}/{repo}",
-                "pr_number": pr_number,
-                "github_review_ids": refused,
-            },
-        )
-
-
 async def _withdraw_open_swe_change_requests(
     *, owner: str, repo: str, pr_number: int, token: str
 ) -> None:
-    """Dismiss Open SWE's change requests once the configuration they flagged is valid."""
+    """Dismiss Robin's change requests once the configuration they flagged is valid."""
     try:
         async with GitHubClient.connect(token=token) as github:
             refused = await (
                 github.repo(owner, repo)
                 .pull_request(pr_number)
                 .withdraw_open_swe_approvals(
-                    reason="The Open SWE configuration in this pull request is valid now.",
+                    reason="The Robin configuration in this pull request is valid now.",
                     state="changes_requested",
                 )
             )
@@ -865,7 +880,7 @@ async def _open_swe_already_reviewed(
 ) -> bool:
     """Decide whether to suppress a duplicate empty "no issues found" summary.
 
-    Suppress only when we are *certain* a prior Open SWE review exists, so a
+    Suppress only when we are *certain* a prior Robin review exists, so a
     transient GitHub failure never causes a double-post:
 
     - ``is_re_review`` is a durable signal (the dispatching webhook set it from
@@ -970,7 +985,7 @@ def _comment_id_by_finding_id(
 ) -> dict[str, int]:
     """Map each surfaced finding id to its GitHub comment id via the marker.
 
-    The embedded Open SWE marker is the *only* source of truth. Every comment
+    The embedded Robin marker is the *only* source of truth. Every comment
     this reviewer posts carries a ``<!-- open-swe-review-comment {...} -->``
     marker keyed by finding id (see ``render_inline_comment_body``), so the
     match is exact. The old ``(path, line, body)`` fallback collided whenever
@@ -1140,10 +1155,10 @@ async def _maybe_post_slack_completion_reply(
         return
 
     if surfaced_count == 0:
-        headline = "*Open SWE Review*: No issues found."
+        headline = "*Robin Review*: No issues found."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
-        headline = f"*Open SWE Review* found {surfaced_count} potential {issue_word}."
+        headline = f"*Robin Review* found {surfaced_count} potential {issue_word}."
 
     review_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
     if isinstance(review_id, int):

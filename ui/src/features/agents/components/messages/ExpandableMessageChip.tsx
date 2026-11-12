@@ -11,19 +11,25 @@ export function ExpandableMessageChip({
   children,
   testId,
   accessibleLabel,
+  messageIds,
 }: {
   label: ReactNode
   actions?: ReactNode
   children: ReactNode
   testId?: string
   accessibleLabel?: string
+  messageIds?: string[]
 }) {
   const [open, setOpen] = useState(false)
   const contentId = useId()
 
   return (
     <div>
-      <div className="flex max-w-full items-center gap-space-1">
+      <div
+        className="flex max-w-full items-center gap-space-1"
+        data-message-id={open ? undefined : messageIds?.[0]}
+        data-message-ids={messageIds ? JSON.stringify(messageIds) : undefined}
+      >
         <Button
           color="secondary"
           variant="plain"
