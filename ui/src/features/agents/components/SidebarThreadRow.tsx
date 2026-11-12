@@ -22,6 +22,8 @@ import {
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { useZIndex } from "@langchain/macaw-components/utils/useZIndex"
+import zIndices from "@langchain/macaw-components/utils/zIndices"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
@@ -69,6 +71,9 @@ import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 
 const ICON_SIZE = 14
+
+const HOVER_TRIANGLE_EDGE_OFFSET = 1
+const HOVER_TRIANGLE_BASE_PADDING = 15
 
 type PrState = NonNullable<AgentThread["pr"]>["state"]
 
@@ -212,8 +217,8 @@ function sidebarRowProps({
       archived && "opacity-55",
       "text-primary",
       active
-        ? "bg-selected group-hover/row:bg-selected-hover"
-        : "group-hover/row:bg-surface-level-2-hover"
+        ? "bg-selected group-hover/row:bg-selected-hover group-has-data-[hover-preview=open]/row:bg-selected-hover"
+        : "group-hover/row:bg-surface-level-2-hover group-has-data-[hover-preview=open]/row:bg-surface-level-2-hover"
     ),
     style: { paddingLeft: (indent ? 16 : 8) + depth * TREE_STEP },
   }
@@ -378,6 +383,7 @@ export function SidebarThreadRow({
   onToggleArchived: () => void
 }) {
   const selection = useSidebarThreadSelection()
+  const actionsZIndex = useZIndex(zIndices.popover) + 1
   const selected = selection?.selected.has(item.id) ?? false
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
@@ -472,7 +478,7 @@ export function SidebarThreadRow({
 
       <span
         className={cn(
-          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 [@media(hover:none)]:pr-space-5",
+          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 group-has-data-[hover-preview=open]/row:invisible group-has-[[data-hover-preview=open]]/row:min-w-6 [@media(hover:none)]:pr-space-5",
           moreMenuOpen && "invisible min-w-6"
         )}
       >
@@ -560,43 +566,49 @@ export function SidebarThreadRow({
             <RowHoverCard
               trigger={link}
               card={<ThreadHoverCard item={item} live={live} />}
-            />
-            <DropdownMenu onOpenChange={setMoreMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  icon={DotsThreeIcon}
-                  label="Thread actions"
-                  size="xs"
-                  color="secondary"
-                  variant="plain"
-                  className={cn(
-                    "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
-                    moreMenuOpen && "opacity-100"
+            >
+              <DropdownMenu onOpenChange={setMoreMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    icon={DotsThreeIcon}
+                    label="Thread actions"
+                    style={
+                      {
+                        "--thread-actions-z-index": actionsZIndex,
+                      } as React.CSSProperties
+                    }
+                    size="xs"
+                    color="secondary"
+                    variant="plain"
+                    className={cn(
+                      "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                      moreMenuOpen && "opacity-100"
+                    )}
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="min-w-[10rem] border-default bg-elevated"
+                  onClickCapture={(event) => {
+                    menuNavigated.current = Boolean(
+                      (event.target as HTMLElement).closest("a[href]")
+                    )
+                  }}
+                  onCloseAutoFocus={(event) => {
+                    if (menuNavigated.current) event.preventDefault()
+                    menuNavigated.current = false
+                  }}
+                >
+                  {item.pr && (
+                    <>
+                      <PullRequestMenuItem pr={item.pr} live={live} />
+                      <DropdownMenuSeparator />
+                    </>
                   )}
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="min-w-[10rem] border-default bg-elevated"
-                onClickCapture={(event) => {
-                  menuNavigated.current = Boolean(
-                    (event.target as HTMLElement).closest("a[href]")
-                  )
-                }}
-                onCloseAutoFocus={(event) => {
-                  if (menuNavigated.current) event.preventDefault()
-                  menuNavigated.current = false
-                }}
-              >
-                {item.pr && (
-                  <>
-                    <PullRequestMenuItem pr={item.pr} live={live} />
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                {menuItems("dropdown")}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  {menuItems("dropdown")}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </RowHoverCard>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-[10rem] border-default bg-elevated">
@@ -757,14 +769,60 @@ export function SidebarThreadHoverProvider(props: {
 function RowHoverCard({
   trigger,
   card,
+  children,
 }: {
   trigger: React.ReactElement
   card: React.ReactNode
+  children?: React.ReactNode
 }) {
   const id = useId()
   const { activeCardId, onOpenChange } = useContext(RowHoverCardContext)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const safeAreaRef = useRef<SVGSVGElement>(null)
+  const triangleRef = useRef<SVGPolygonElement>(null)
 
   useEffect(() => () => onOpenChange(id, false), [id, onOpenChange])
+
+  useEffect(() => {
+    if (activeCardId !== id) return
+    const abort = new AbortController()
+    const dismiss = () => onOpenChange(id, false)
+    document.addEventListener("scroll", dismiss, {
+      capture: true,
+      signal: abort.signal,
+    })
+    window.addEventListener("resize", dismiss, { signal: abort.signal })
+    window.addEventListener("blur", dismiss, { signal: abort.signal })
+    return () => abort.abort()
+  }, [activeCardId, id, onOpenChange])
+
+  const onPointerLeave = (event: React.PointerEvent) => {
+    if (activeCardId !== id || event.pointerType === "touch") return
+
+    const cardNode = cardRef.current?.getBoundingClientRect()
+    const svgNode = safeAreaRef.current?.getBoundingClientRect()
+    if (!cardNode || !svgNode) return
+
+    const row = event.currentTarget.getBoundingClientRect()
+
+    let points: string
+    if (cardNode.left >= row.right || cardNode.right <= row.left) {
+      const offset =
+        cardNode.left >= row.right
+          ? HOVER_TRIANGLE_EDGE_OFFSET
+          : -HOVER_TRIANGLE_EDGE_OFFSET
+      const edge = (offset > 0 ? cardNode.left : cardNode.right) + offset
+      points = `${event.clientX - offset - svgNode.left},${event.clientY - svgNode.top} ${edge - svgNode.left},${cardNode.top - HOVER_TRIANGLE_BASE_PADDING - svgNode.top} ${edge - svgNode.left},${cardNode.bottom + HOVER_TRIANGLE_BASE_PADDING - svgNode.top}`
+    } else {
+      const offset =
+        cardNode.top >= row.bottom
+          ? HOVER_TRIANGLE_EDGE_OFFSET
+          : -HOVER_TRIANGLE_EDGE_OFFSET
+      const edge = (offset > 0 ? cardNode.top : cardNode.bottom) + offset
+      points = `${event.clientX - svgNode.left},${event.clientY - offset - svgNode.top} ${cardNode.left - HOVER_TRIANGLE_BASE_PADDING - svgNode.left},${edge - svgNode.top} ${cardNode.right + HOVER_TRIANGLE_BASE_PADDING - svgNode.left},${edge - svgNode.top}`
+    }
+    triangleRef.current?.setAttribute("points", points)
+  }
 
   return (
     <HoverCard
@@ -773,14 +831,35 @@ function RowHoverCard({
       closeDelay={100}
       onOpenChange={(open) => onOpenChange(id, open)}
     >
-      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+      <HoverCardTrigger
+        asChild
+        data-hover-preview={activeCardId === id ? "open" : "closed"}
+        onPointerLeave={onPointerLeave}
+      >
+        <div>
+          {trigger}
+          {children}
+        </div>
+      </HoverCardTrigger>
       <HoverCardContent
+        ref={cardRef}
         side="right"
         align="start"
         sideOffset={8}
         className="w-auto max-w-80 rounded-lg p-space-3"
       >
         {card}
+        <svg
+          ref={safeAreaRef}
+          aria-hidden="true"
+          data-hover-safe-area
+          className="text-brand pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        >
+          <polygon
+            ref={triangleRef}
+            className="pointer-events-auto fill-transparent"
+          />
+        </svg>
       </HoverCardContent>
     </HoverCard>
   )
