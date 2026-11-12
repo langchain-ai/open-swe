@@ -30,8 +30,8 @@ def _latest_task(messages: Sequence[object]) -> str:
     for message in reversed(messages):
         if not isinstance(message, HumanMessage) or (provenance := Provenance.of(message)) is None:
             continue
-        if provenance.human and (authored := input_message_text(message.content)):
-            return authored
+        if provenance.human:
+            return input_message_text(message.content) or ""
         if not event and provenance.kind == "system":
             event = input_message_text(message.content) or ""
     return event

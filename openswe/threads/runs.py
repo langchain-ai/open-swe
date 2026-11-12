@@ -197,12 +197,14 @@ class DashboardImageBody(BaseModel):
         return files
 
     @classmethod
-    async def stage_files(cls, thread_id: str, params: dict[str, Any]) -> list[DashboardImageBody]:
-        """Queue a command's files for the thread's sandbox and leave a note in their place."""
+    async def stage_files(
+        cls, thread_id: str, params: dict[str, Any]
+    ) -> tuple[list[DashboardImageBody], list[str]]:
+        """Queue a command's files for the thread's sandbox; return them and their sandbox paths."""
         content = _command_message_content(params)
         files = cls.files_in(content)
         if not files or not isinstance(content, list):
-            return []
+            return [], []
         message_id = _command_message_id(params)
         for position, file in enumerate(files):
             _decode_dashboard_image(file)
@@ -216,12 +218,10 @@ class DashboardImageBody(BaseModel):
             [SlackFileEntry(name=f.file_name or "", attachment_id=f.attachment_id) for f in files],
             directory=DASHBOARD_FILE_DIR,
         )
-        note = prompt("threads/dashboard-files", paths=[file.sandbox_path for file in staged])
         params["input"]["messages"][-1]["content"] = [
-            *(b for b in content if not (isinstance(b, dict) and b.get("type") == "file")),
-            {"type": "text", "text": note},
+            b for b in content if not (isinstance(b, dict) and b.get("type") == "file")
         ]
-        return files
+        return files, [file.sandbox_path for file in staged]
 
 
 class ThreadRenameBody(BaseModel):
@@ -940,6 +940,7 @@ async def _attributed_run_messages(
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
     replies: Sequence[PassageReply] = (),
+    attached_paths: Sequence[str] = (),
 ) -> tuple[list[RunMessage], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -987,7 +988,7 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        dashboard_input_context(sender_id, relayed_from, replies),
+        dashboard_input_context(sender_id, relayed_from, replies, attached_paths),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -1223,7 +1224,7 @@ async def _enrich_run_start_command(
 
         prior = await history if history is not None else _ThreadHistory()
         profile = await profile_read or {}
-        command_files = await DashboardImageBody.stage_files(thread_id, params)
+        command_files, attached_paths = await DashboardImageBody.stage_files(thread_id, params)
         content = _command_message_content(params)
     finally:
         reads = (profile_read,) if history is None else (history, profile_read)
@@ -1240,6 +1241,7 @@ async def _enrich_run_start_command(
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
         replies=replies,
+        attached_paths=attached_paths,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.

@@ -29,7 +29,7 @@ def test_native_image_blocks_reject_unsupported_sources(url: str) -> None:
     assert failure.value.status_code == 422
 
 
-async def test_file_blocks_are_queued_for_the_sandbox_and_replaced_by_a_note(
+async def test_file_blocks_are_queued_for_the_sandbox_and_removed_from_the_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     queued: list[SlackFileEntry] = []
@@ -44,14 +44,13 @@ async def test_file_blocks_are_queued_for_the_sandbox_and_replaced_by_a_note(
     pdf = {"type": "file", "base64": "aGk=", "mime_type": "application/pdf", "file_name": "a.pdf"}
     params = {"input": {"messages": [{"content": [pdf, {"type": "text", "text": "read it"}]}]}}
 
-    files = await runs.DashboardImageBody.stage_files("t1", params)
+    files, paths = await runs.DashboardImageBody.stage_files("t1", params)
 
     assert [f.attachment_id for f in files] == [e.attachment_id for e in queued]
-    content = params["input"]["messages"][0]["content"]
-    assert [block["type"] for block in content] == ["text", "text"]
-    assert "/workspace/.open-swe/attachments/a.pdf" in content[1]["text"]
+    assert params["input"]["messages"][0]["content"] == [{"type": "text", "text": "read it"}]
+    assert paths == ["/workspace/.open-swe/attachments/a.pdf"]
     pdf["mime_type"] = "text/html"
-    (opaque,) = await runs.DashboardImageBody.stage_files(
+    (opaque,), _ = await runs.DashboardImageBody.stage_files(
         "t1", {"input": {"messages": [{"content": [pdf]}]}}
     )
     assert opaque.mime_type == "application/octet-stream"
@@ -67,7 +66,7 @@ async def test_retried_run_start_stages_files_under_the_same_attachment_ids(
 
     monkeypatch.setattr(runs, "queue_slack_files", queue)
 
-    async def stage() -> list[runs.DashboardImageBody]:
+    async def stage() -> tuple[list[runs.DashboardImageBody], list[str]]:
         pdf = {
             "type": "file",
             "base64": "aGk=",
@@ -77,5 +76,5 @@ async def test_retried_run_start_stages_files_under_the_same_attachment_ids(
         params = {"input": {"messages": [{"id": "m1", "content": [pdf]}]}}
         return await runs.DashboardImageBody.stage_files("t1", params)
 
-    first, retry = await stage(), await stage()
+    (first, _), (retry, _) = await stage(), await stage()
     assert first[0].attachment_id == retry[0].attachment_id

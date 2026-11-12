@@ -59,8 +59,8 @@ class RouteClassifier:
                 continue
             content = message.content
             if (provenance := Provenance.of(message)) is not None:
-                if provenance.human and (authored := input_message_text(content)):
-                    return authored
+                if provenance.human:
+                    return input_message_text(content) or ""
                 if not event and provenance.kind == "system":
                     event = input_message_text(content) or ""
                 continue

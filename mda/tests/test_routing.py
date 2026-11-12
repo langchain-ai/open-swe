@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, convert_to_messages
-from rt.input_messages import RunMessage, human_input, system_input
+from rt.input_messages import InputMessageContext, RunMessage, human_input, system_input
 from rt.routing import Route, RouteClassifier
 
 
@@ -100,6 +100,21 @@ def test_a_persons_request_wins_over_a_later_event() -> None:
     ]
 
     assert RouteClassifier.latest_task(messages) == "Rename the flag"
+
+
+def test_an_attachment_only_turn_does_not_reuse_an_older_request() -> None:
+    web: InputMessageContext = {"sender_id": "user:u1", "surface": "web", "kind": "human"}
+    attachment: InputMessageContext = {
+        **web,
+        "data": {"attached_file": [{"sandbox_path": "/tmp/invoice.pdf"}]},
+    }
+    messages = [
+        _message(human_input("Build the settings page", web)),
+        AIMessage(content="Done"),
+        _message(human_input("", attachment)),
+    ]
+
+    assert RouteClassifier.latest_task(messages) == ""
 
 
 async def test_a_confident_choice_is_kept_for_the_thread() -> None:
