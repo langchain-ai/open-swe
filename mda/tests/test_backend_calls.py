@@ -2222,7 +2222,11 @@ async def _launch_worker(
             "metadata": {"assistant_id": "open-swe"},
         },
         # The launch middleware reads this context, though it declares no context type.
-        context={"graph": "agent", "__run_token": "coordinator-token"},  # ty: ignore[invalid-argument-type]
+        context={  # ty: ignore[invalid-argument-type]
+            "graph": "agent",
+            "__run_token": "coordinator-token",
+            "owner_ls_user_id": "original-owner",
+        },
     )
     # Open SWE's task messages report the worker; deepagents does not poll it too.
     assert not values.get("async_tasks")
@@ -2258,6 +2262,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
         "graph": "agent",
         "__worker_grant": "worker-grant",
         "__catalog": KINDS["agent"].applied(COORDINATOR_CATALOG).model_dump(mode="json"),
+        "owner_ls_user_id": "original-owner",
     }
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]

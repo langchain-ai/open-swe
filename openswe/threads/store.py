@@ -170,8 +170,11 @@ class ThreadStore:
     ) -> IndexedThread:
         """A titled thread of the backend's own on MDA, unless ``thread_id`` is one already,
         which keeps its metadata."""
+        from openswe.tasks.schemas import ThreadMetadata
+
         if (known := await self.get(thread_id)) is not None:
             return known
+        metadata = await ThreadMetadata.for_new_thread(metadata)
         thread = await index.create(
             thread_id,
             runtime="mda",

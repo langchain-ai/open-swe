@@ -704,7 +704,7 @@ async def _prepare_run(
     run = SlackTurnRun(
         input=cast(dict[str, JsonValue], prepared.input),
         context=cast(dict[str, JsonValue], rewritten["context"]),
-        metadata=channel_run_metadata(run_config["metadata"]),
+        metadata=channel_run_metadata(cast(dict[str, JsonValue], rewritten["metadata"])),
         webhook=COMPLETION_WEBHOOK_URL or None,
     )
     await channel_run_starting(thread_id)

@@ -164,6 +164,14 @@ def test_upsert_stamps_an_adopted_channel_stub_once(
     threads = _FakeThreadsClient(thread={"metadata": dict(stub)})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
     monkeypatch.setattr(webhook_common, "mirror_thread_metadata", AsyncMock())
+    original_owner = User()
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(
+            side_effect=lambda provider, login: original_owner if login == "alice" else User()
+        ),
+    )
 
     for login, requested in (("alice", "public"), ("bob", "private")):
         assert asyncio.run(
@@ -179,6 +187,9 @@ def test_upsert_stamps_an_adopted_channel_stub_once(
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == visibility
     assert metadata.get("owner_login") == ("alice" if visibility == "public" else None)
+    assert metadata.get("owner_user_id") == (
+        str(original_owner.id) if visibility == "public" else None
+    )
 
 
 @pytest.mark.asyncio

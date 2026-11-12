@@ -12,11 +12,11 @@ import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Literal, cast, get_args
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, field_validator
 from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun, GitHubTriggerEvent
 from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
@@ -1660,7 +1660,7 @@ async def _planned_channel_automation(
         "thread_id": uuid.UUID(thread_id),
         "input": run_input,
         "context": rewritten["context"],
-        "metadata": channel_run_metadata(planned["metadata"]),
+        "metadata": channel_run_metadata(cast(dict[str, JsonValue], rewritten["metadata"])),
         "webhook": COMPLETION_WEBHOOK_URL or None,
     }
 

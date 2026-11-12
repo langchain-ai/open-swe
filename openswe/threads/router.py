@@ -126,8 +126,11 @@ async def adopt_channel_run(
     with :func:`channel_run_starting` once the run is ready. ``metadata`` is what a
     new thread starts with until its metadata is written, such as its visibility.
     """
+    from openswe.tasks.schemas import ThreadMetadata
+
     thread = await index.get(thread_id)
     if thread is None:
+        metadata = await ThreadMetadata.for_new_thread(metadata or {})
         await index.create(
             thread_id,
             runtime="mda",
@@ -334,8 +337,11 @@ class ThreadRouter:
         *,
         if_exists: Literal["raise", "do_nothing"],
     ) -> IndexedThread:
+        from openswe.tasks.schemas import ThreadMetadata
+
         if if_exists == "do_nothing" and (known := await THREADS.get(thread_id)) is not None:
             return known
+        metadata = await ThreadMetadata.for_new_thread(metadata)
         thread = await index.create(
             thread_id,
             runtime="mda",

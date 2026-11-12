@@ -152,6 +152,7 @@ async def _adopt(thread_id: str, owner_login: str | None) -> None:
         "source": "slack",
     }
     if owner_login:
+        metadata["owner_type"] = "user"
         metadata["owner_login"] = owner_login
     await adopt_channel_run(thread_id, CHANNEL, metadata=metadata)
 

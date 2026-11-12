@@ -380,6 +380,7 @@ class RunContext(BaseModel):
     # A launched task worker's first run: traded for its own run token before anything else.
     worker_grant: str | None = Field(default=None, alias="__worker_grant")
     invocation_id: str | None = None
+    owner_ls_user_id: str | None = None
     # JSON, not Catalog: the gRPC runtime serializes only the context's top level.
     catalog: dict[str, JsonValue] | None = Field(default=None, alias="__catalog")
     _run: Run | None = PrivateAttr(default=None)

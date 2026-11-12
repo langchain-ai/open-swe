@@ -115,13 +115,21 @@ def test_a_channel_conversations_worker_belongs_to_its_channel(
         model=MODEL,
         effort="low",
     )
+    owner_id = uuid4()
     metadata = ThreadMetadata.model_validate(
-        {"owner_type": "user", "owner_login": OWNER, "sandbox_id": "shared", **coordinator}
+        {
+            "owner_type": "user",
+            "owner_login": OWNER,
+            "owner_user_id": str(owner_id),
+            "sandbox_id": "shared",
+            **coordinator,
+        }
     )
 
     worker = service._worker_metadata(current_task, delegation, metadata)
 
     assert worker.get("channel") == channel
+    assert worker["owner_user_id"] == str(owner_id)
 
 
 def task() -> store.Task:

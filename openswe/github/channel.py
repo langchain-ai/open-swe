@@ -430,7 +430,7 @@ async def _signed(
     await channel_run_starting(thread_id)
     return {
         "context": cast(dict[str, JsonValue], rewritten["context"]),
-        "metadata": channel_run_metadata(run_config["metadata"]),
+        "metadata": channel_run_metadata(cast(dict[str, JsonValue], rewritten["metadata"])),
         "webhook": COMPLETION_WEBHOOK_URL or None,
     }
 

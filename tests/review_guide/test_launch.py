@@ -7,8 +7,9 @@ from openswe.review_guide import launch
 
 
 @pytest.mark.parametrize("is_private", [False, True])
+@pytest.mark.parametrize("identity_unavailable", [False, True])
 async def test_fork_preserves_visibility_without_copying_source_credentials(
-    monkeypatch: pytest.MonkeyPatch, is_private: bool
+    monkeypatch: pytest.MonkeyPatch, is_private: bool, identity_unavailable: bool
 ) -> None:
     threads = SimpleNamespace(
         get=AsyncMock(
@@ -18,6 +19,15 @@ async def test_fork_preserves_visibility_without_copying_source_credentials(
         update=AsyncMock(),
     )
     client = SimpleNamespace(threads=threads)
+    owner = launch.User()
+    monkeypatch.setattr(
+        launch.User,
+        "for_login",
+        AsyncMock(
+            return_value=owner,
+            side_effect=RuntimeError("identity unavailable") if identity_unavailable else None,
+        ),
+    )
     monkeypatch.setattr(launch, "sandbox_host_thread_id", AsyncMock(return_value="source"))
 
     assert await launch._fork(client, "source", "requester", is_private=is_private) == "copy"
@@ -25,6 +35,7 @@ async def test_fork_preserves_visibility_without_copying_source_credentials(
     metadata = threads.update.call_args.kwargs["metadata"]
     assert metadata["visibility"] == ("private" if is_private else "public")
     assert metadata["owner_login"] == "requester"
+    assert metadata["owner_user_id"] == (None if identity_unavailable else str(owner.id))
     assert metadata["github_login"] is None
 
 

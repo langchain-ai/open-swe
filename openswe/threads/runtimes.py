@@ -462,6 +462,28 @@ class MdaRuntime:
             active += sorted(_runs.validate_python(response.json()), key=lambda run: run.created_at)
         return active
 
+    async def _owner_ls_user_id(self, thread_id: str) -> str | None:
+        from openswe.tasks.schemas import ThreadMetadata
+        from openswe.threads.store import THREADS
+
+        try:
+            thread = await THREADS.get(thread_id)
+            if thread is None or thread.metadata.get("owner_type") != "user":
+                return None
+            metadata = ThreadMetadata.model_validate(thread.metadata)
+            if metadata.owner_user_id is None:
+                return None
+            owner = await metadata.owner()
+            identities = [item for item in owner.identities if item.provider == "langsmith"]
+            return identities[0].external_id if len(identities) == 1 else None
+        except Exception:
+            logger.warning(
+                "Could not resolve original trace owner",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            return None
+
     async def run_payload(
         self,
         thread_id: str,
@@ -517,6 +539,8 @@ class MdaRuntime:
                 logger.warning("Could not resolve acting user for trace metadata", exc_info=True)
         if run_metadata.get("user_id") != run_metadata.get("billed_robin_user_id"):
             run_metadata.pop("user_id", None)
+        owner_ls_user_id = await self._owner_ls_user_id(thread_id)
+        run_metadata["owner_ls_user_id"] = owner_ls_user_id
         raw_config_metadata = config.get("metadata")
         if isinstance(raw_config_metadata, dict):
             config["metadata"] = {
@@ -526,6 +550,7 @@ class MdaRuntime:
                     if key not in BILLING_FIELDS and key != "billed_user_id"
                 },
                 **{key: run_metadata[key] for key in BILLING_FIELDS if key in run_metadata},
+                "owner_ls_user_id": owner_ls_user_id,
                 "created_by": None,
             }
         context = dict(
@@ -536,6 +561,7 @@ class MdaRuntime:
                 assistant_id=assistant_id,
             )
         )
+        context["owner_ls_user_id"] = owner_ls_user_id
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True

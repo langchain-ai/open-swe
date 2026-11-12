@@ -92,6 +92,7 @@ from rt.backend import (
     BackendCallError,
     OpenSweBackend,
     Run,
+    RunContext,
     RunLocal,
     harness_message,
     human_messages,
@@ -1012,7 +1013,13 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
 def _launch_runtime(runtime: ToolRuntime, grant: str, catalog: dict[str, JsonValue]) -> ToolRuntime:
     """The tool runtime the launch sees: a worker grant for context, in place of the run's."""
     return dataclasses.replace(
-        runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant, CATALOG_KEY: catalog}
+        runtime,
+        context={
+            "graph": "agent",
+            WORKER_GRANT_KEY: grant,
+            CATALOG_KEY: catalog,
+            "owner_ls_user_id": RunContext.model_validate(runtime.context or {}).owner_ls_user_id,
+        },
     )
 
 

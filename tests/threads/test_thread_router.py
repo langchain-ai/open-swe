@@ -263,6 +263,40 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert harness.reached_here == []
 
 
+@pytest.mark.parametrize("creation", ["router", "store", "channel"])
+@pytest.mark.parametrize("subject", ["ada", f"user:{USER_ID}"])
+async def test_new_threads_keep_the_original_owner_after_a_handle_changes_hands(
+    monkeypatch: pytest.MonkeyPatch, creation: str, subject: str
+) -> None:
+    harness = _Harness(monkeypatch)
+    from uuid import UUID
+
+    owner = User(id=UUID(USER_ID))
+    lookup = AsyncMock(return_value=owner)
+    monkeypatch.setattr(User, "for_login", lookup)
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
+    metadata: dict[str, JsonValue] = {"owner_type": "user", "owner_login": subject}
+    if creation == "router":
+        await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": metadata})
+    elif creation == "store":
+        await store.THREADS.create(THREAD, title="Original", metadata=metadata)
+    else:
+        await router.adopt_channel_run(THREAD, "slack", metadata=metadata)
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata["owner_user_id"] == USER_ID
+
+    lookup.return_value = User()
+    await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": metadata, "if_exists": "do_nothing"},
+    )
+    await router.adopt_channel_run(THREAD, "slack", metadata=metadata)
+    await store.THREADS.create(THREAD, title="Replacement", metadata=metadata)
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.metadata["owner_user_id"] == USER_ID
+
+
 async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -464,6 +498,7 @@ async def test_runs_include_the_current_slack_thread_link(
         "kind": "follow_up",
         "created_by": None,
         "billing_bucket": "system",
+        "owner_ls_user_id": None,
         **expected,
     }
     assert sent["config"] == {
@@ -471,6 +506,7 @@ async def test_runs_include_the_current_slack_thread_link(
             "invocation_id": "turn-1",
             "created_by": None,
             "billing_bucket": "system",
+            "owner_ls_user_id": None,
             **expected,
         }
     }

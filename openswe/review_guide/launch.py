@@ -41,6 +41,7 @@ from openswe.slack.dm import post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
+from openswe.tasks.schemas import ThreadMetadata
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
@@ -232,6 +233,9 @@ async def _fork(
         )
         host = await sandbox_host_thread_id(source_thread_id)
         copied = _ThreadCopy.model_validate(await client.threads.copy(source_thread_id))
+        ownership = await ThreadMetadata.for_new_thread(
+            {"owner_type": "user", "owner_login": login}
+        )
         await client.threads.update(
             thread_id=copied.thread_id,
             metadata={
@@ -239,6 +243,7 @@ async def _fork(
                 "visibility": "private" if is_private else "public",
                 "owner_type": "user",
                 "owner_login": login,
+                "owner_user_id": ownership.get("owner_user_id"),
                 "created_at_ms": int(time.time() * 1000),
                 **(
                     {

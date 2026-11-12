@@ -676,6 +676,11 @@ async def upsert_agent_thread_metadata(
         initiating_login = owner_login.strip() or sender_login.strip()
         if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
+            from openswe.tasks.schemas import ThreadMetadata
+
+            ownership = await ThreadMetadata.for_new_thread({**existing_meta, **metadata})
+            if ownership.get("owner_user_id"):
+                metadata["owner_user_id"] = ownership["owner_user_id"]
 
     try:
         if existing is None:
