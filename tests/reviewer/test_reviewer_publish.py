@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.review.approval_withdrawal import ApprovalWithdrawal
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import Finding, new_finding
 from openswe.review.publish import (
@@ -147,7 +148,9 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
         patch("openswe.tools.publish_review.replace_findings", AsyncMock()),
         patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
         patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
-        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()),
+        patch.object(ApprovalWithdrawal, "attempt", autospec=True, return_value="a" * 40),
+        patch.object(ApprovalWithdrawal, "queue", AsyncMock()),
+        patch("openswe.tools.publish_review.queue.cancel", AsyncMock()),
         patch("openswe.tools.publish_review._withdraw_open_swe_change_requests", AsyncMock()),
         patch(
             "openswe.tools.publish_review.resolve_review_head_sha",
@@ -258,9 +261,7 @@ async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_no
         ),
         patch("openswe.tools.publish_review._store_thread_ids_on_findings", AsyncMock()),
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as recorded,
-        patch(
-            "openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()
-        ) as withdrawn,
+        patch.object(ApprovalWithdrawal, "attempt", AsyncMock()) as withdrawn,
         patch(
             "openswe.tools.publish_review.PullRequestApproval.record_auto_approval", AsyncMock()
         ) as approval,
@@ -1203,16 +1204,18 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment,conditional_enabled",
+    "prepared_policy,mode,current_head,expected_event,has_assessment,conditional_enabled,live_head",
     [
-        (None, "approve", True, "COMMENT", False, None),
-        ("Docs only", "off", True, "COMMENT", False, None),
-        ("Docs only", "dry_run", True, "COMMENT", True, None),
-        ("Docs only", "approve", False, "COMMENT", True, None),
-        ("Docs only", "approve", True, "APPROVE", True, None),
-        ("Docs only", "approve", True, "COMMENT", True, False),
-        ("Docs only", "approve", True, "COMMENT", True, True),
-        ("Docs only", "approve", True, "COMMENT", True, "lookup-fails"),
+        (None, "approve", True, "COMMENT", False, None, "a" * 40),
+        ("Docs only", "off", True, "COMMENT", False, None, "a" * 40),
+        ("Docs only", "dry_run", True, "COMMENT", True, None, "a" * 40),
+        ("Docs only", "approve", False, "COMMENT", True, None, "a" * 40),
+        ("Docs only", "approve", True, "APPROVE", True, None, "a" * 40),
+        ("Docs only", "approve", True, "APPROVE", True, None, "b" * 40),
+        ("Docs only", "approve", True, "APPROVE", True, None, None),
+        ("Docs only", "approve", True, "COMMENT", True, False, "a" * 40),
+        ("Docs only", "approve", True, "COMMENT", True, True, "a" * 40),
+        ("Docs only", "approve", True, "COMMENT", True, "lookup-fails", "a" * 40),
     ],
     ids=[
         "no-policy",
@@ -1220,6 +1223,8 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         "dry-run",
         "head-moved",
         "approve",
+        "head-moved-while-approving",
+        "withdrawal-unconfirmed",
         "conditional-off",
         "conditional-on",
         "conditional-author-unknown",
@@ -1232,10 +1237,17 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     expected_event: str,
     has_assessment: bool,
     conditional_enabled: bool | Literal["lookup-fails"] | None,
+    live_head: str | None,
     registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
     from openswe.users import UserPreferences
+
+    withdrawals: list[ApprovalWithdrawal] = []
+
+    async def attempt(self: ApprovalWithdrawal, *, token: str | None = None) -> str | None:
+        withdrawals.append(self)
+        return live_head
 
     with (
         patch(
@@ -1274,7 +1286,10 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
         patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
         patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
-        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()) as withdraw,
+        patch.object(ApprovalWithdrawal, "attempt", attempt),
+        patch(
+            "openswe.tools.publish_review.PullRequestApproval.record_auto_approval", AsyncMock()
+        ) as recorded,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1301,13 +1316,14 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     assert result["success"] is True
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == expected_event
-    # Every earlier Open SWE approval goes; only an approval this publish posted may stand.
-    assert withdraw.await_args is not None
-    assert withdraw.await_args.kwargs["keep_review_id"] == (
-        77 if expected_event == "APPROVE" else None
-    )
+    # Only approvals of the live head survive, and only an approving publish keeps any.
+    [withdrawal] = withdrawals
+    assert withdrawal.keep_head is (expected_event == "APPROVE")
     # Scoped to this publish's own review so a sibling deployment's approval stands.
-    assert withdraw.await_args.kwargs["scope_to_review_id"] == 77
+    assert withdrawal.review_id == 77
+    # An approval is recorded only once its head is confirmed to still be the live one.
+    approval_stands = expected_event == "APPROVE" and live_head == "a" * 40
+    recorded.assert_awaited_once_with("o", "r", 7, "a" * 40 if approval_stands else "")
     body = post.await_args.kwargs["body"]
     assert ("Risk:" in body) is has_assessment
     assert ("(dry run)" in body) is (has_assessment and mode == "dry_run")
@@ -1315,7 +1331,7 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     assert (saved is not None) is has_assessment
     if saved is not None:
         assert saved.dry_run is (mode == "dry_run")
-        assert saved.approved is (expected_event == "APPROVE")
+        assert saved.approved is approval_stands
 
         if conditional_enabled is not None:
             author_preferences.assert_awaited_once_with("pr-author")

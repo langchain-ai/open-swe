@@ -21,6 +21,8 @@ from openswe.github.thread_token import (
     invalidate_cached_github_token,
     resolve_thread_github_token,
 )
+from openswe.jobs import queue
+from openswe.review.approval_withdrawal import ApprovalWithdrawal
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -490,9 +492,7 @@ async def _publish_review_async(
             head_sha=head_sha,
             findings=await list_findings_async(thread_id),
         )
-        await _withdraw_open_swe_approvals(
-            owner=owner, repo=repo, pr_number=pr_number, token=token, keep_commit=head_sha
-        )
+        await ApprovalWithdrawal(owner=owner, repo=repo, number=pr_number).attempt(token=token)
         await _withdraw_open_swe_change_requests(
             owner=owner, repo=repo, pr_number=pr_number, token=token
         )
@@ -523,6 +523,12 @@ async def _publish_review_async(
         and await approval_allowed_for_head(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
+    )
+    # Withdraws an approval of a head that moved if this publish stops before its own withdrawal.
+    publication_guard = (
+        await ApprovalWithdrawal(owner=owner, repo=repo, number=pr_number).queue()
+        if approved
+        else None
     )
     # Robin can't approve a pull request it authored; its decision stands in for the approval.
     self_approved = False
@@ -651,14 +657,22 @@ async def _publish_review_async(
         review_id if approved and not unresolvable_findings and isinstance(review_id, int) else None
     )
     if not apps_only:
-        await _withdraw_open_swe_approvals(
+        live_head = await ApprovalWithdrawal(
             owner=owner,
             repo=repo,
-            pr_number=pr_number,
-            token=token,
-            keep_review_id=approval_id,
-            scope_to_review_id=review_id,
-        )
+            number=pr_number,
+            keep_head=approval_id is not None,
+            review_id=review_id if isinstance(review_id, int) else None,
+        ).attempt(token=token)
+        if publication_guard is not None:
+            try:
+                await queue.cancel(publication_guard.id)
+            except Exception:
+                logger.warning("Could not cancel the publication's approval guard", exc_info=True)
+        if approval_id is not None and live_head != head_sha:
+            # The head moved while this approval was posted, so it was withdrawn or will be.
+            approval_id = None
+            approved = False
         kept = approval_id is not None or (
             self_approved and not unresolvable_findings and isinstance(review_id, int)
         )
@@ -831,53 +845,6 @@ async def _publish_review_async(
             "call update_finding to fix or resolve them."
         )
     return result
-
-
-async def _withdraw_open_swe_approvals(
-    *,
-    owner: str,
-    repo: str,
-    pr_number: int,
-    token: str,
-    keep_review_id: int | None = None,
-    keep_commit: str | None = None,
-    scope_to_review_id: int | None = None,
-) -> None:
-    """Leave standing only this publish's own approval, if it posted one."""
-    if keep_review_id is not None:
-        reason = "Superseded by Robin's approval of the current head."
-    elif keep_commit is not None:
-        reason = "New commits were pushed after Robin approved this pull request."
-    else:
-        reason = "Robin's latest review of this pull request does not approve it."
-    try:
-        async with GitHubClient.connect(token=token) as github:
-            refused = await (
-                github.repo(owner, repo)
-                .pull_request(pr_number)
-                .withdraw_open_swe_approvals(
-                    reason=reason,
-                    keep_review_id=keep_review_id,
-                    keep_commit=keep_commit,
-                    scope_to_review_id=scope_to_review_id,
-                )
-            )
-    except httpx2.HTTPError, ValueError:
-        logger.warning(
-            "Could not list Open SWE approvals to withdraw",
-            extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
-        return
-    if refused:
-        logger.error(
-            "Open SWE approvals the latest review does not support are still standing",
-            extra={
-                "repository": f"{owner}/{repo}",
-                "pr_number": pr_number,
-                "github_review_ids": refused,
-            },
-        )
 
 
 async def _withdraw_open_swe_change_requests(

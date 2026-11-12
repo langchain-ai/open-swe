@@ -57,6 +57,7 @@ from openswe.plugins.records import (
     ATTACHMENT_SWEEP_SCHEDULE,
     AttachmentObjects,
 )
+from openswe.review.approval_withdrawal import ApprovalWithdrawal
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -103,6 +104,7 @@ WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
+WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
 
 
 def _text(job: Job, key: str) -> str | None:

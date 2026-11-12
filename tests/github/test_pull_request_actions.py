@@ -33,28 +33,27 @@ def github(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("keep_review_id", "keep_commit", "scope_to_review_id", "dismissed"),
+    ("keep_head", "review_id", "dismissed"),
     [
-        (None, "new", None, {1, 5, 6}),
-        (3, None, None, {1, 5, 6, 7}),
-        (None, None, None, {1, 3, 5, 6, 7}),
-        (None, None, 4, {1, 3, 7}),
-        (None, None, 999, set()),
+        (True, None, {1, 5, 6}),
+        (False, None, {1, 3, 5, 6, 7}),
+        (False, 4, {1, 3}),
+        (True, 4, {1}),
+        (False, 999, set()),
     ],
     ids=[
         "head-moved",
-        "approved-again",
         "not-approved",
-        "scoped-to-own-login",
+        "scoped-to-own-login-and-earlier-reviews",
+        "head-moved-before-own-review",
         "own-review-missing",
     ],
 )
-async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
-    keep_review_id: int | None,
-    keep_commit: str | None,
-    scope_to_review_id: int | None,
-    dismissed: set[int],
+async def test_withdrawal_spares_only_the_live_head_and_reports_refusals(
+    keep_head: bool, review_id: int | None, dismissed: set[int]
 ) -> None:
+    from openswe.review.approval_withdrawal import ApprovalWithdrawal
+
     def review(review_id: int, login: str, state: str, commit: str) -> dict[str, object]:
         return {
             "id": review_id,
@@ -76,25 +75,26 @@ async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
 
     def github(request: httpx2.Request) -> httpx2.Response:
         if request.method == "GET":
-            return httpx2.Response(200, json=reviews)
+            if request.url.path.endswith("/reviews"):
+                return httpx2.Response(200, json=reviews)
+            return httpx2.Response(200, json={"head": {"sha": "new"}})
         review_id = int(request.url.path.split("/")[-2])
         dismissals.append(review_id)
-        # A review GitHub no longer has is as good as dismissed; a refusal must be reported.
+        # A submitted review can't be deleted, so a 404 is a refusal like a 403.
         return httpx2.Response({5: 404, 6: 403}.get(review_id, 200), json={})
 
+    withdrawal = ApprovalWithdrawal(
+        owner="acme", repo="app", number=9, keep_head=keep_head, review_id=review_id
+    )
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
         pull = GitHubClient(http).repo("acme", "app").pull_request(9)
-        refused = await pull.withdraw_open_swe_approvals(
-            reason="stale",
-            keep_review_id=keep_review_id,
-            keep_commit=keep_commit,
-            scope_to_review_id=scope_to_review_id,
-        )
+        if {5, 6} <= dismissed:
+            with pytest.raises(RuntimeError, match=r"\[5, 6\]"):
+                await withdrawal.run(pull)
+        else:
+            assert await withdrawal.run(pull) == "new"
 
     assert set(dismissals) == dismissed
-    # Scoping to a login excludes review 6 (a different login) before it is ever
-    # attempted, and an unknown scope review attempts nothing at all.
-    assert refused == ([6] if scope_to_review_id is None else [])
 
 
 @pytest.mark.parametrize("status,merged", [(200, True), (200, False), (409, False), (403, False)])
