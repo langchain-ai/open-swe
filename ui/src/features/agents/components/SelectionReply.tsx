@@ -2,6 +2,8 @@ import { Input } from "@langchain/macaw-components/Input"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Button } from "@langchain/macaw-components/Button"
 import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowBendUpLeft"
+import { CopySimpleIcon } from "@phosphor-icons/react/dist/ssr/CopySimple"
+import { toast } from "sonner"
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react"
 import type { RefObject } from "react"
 
@@ -19,7 +21,7 @@ import type {
   PassageSource,
 } from "@/features/agents/utils/passageReply"
 
-const BUTTON = { width: 76, height: 30 }
+const TOOLBAR = { width: 160, height: 30 }
 const POPOVER = { width: 320, height: 96 }
 const GAP = 6
 /** Keeps the passage marked once focus moves to the reply field and the selection goes. */
@@ -31,6 +33,7 @@ const CONTEXT_ANCESTORS = 6
 /** A passage the reader selected, and how to turn a comment on it into a reply. */
 export interface Passage {
   range: Range
+  text: string
   preview: string
   reply: (comment: string) => PassageReply
 }
@@ -117,6 +120,7 @@ export function textPassage(
     const around = textAround(range, container)
     return {
       range: range.cloneRange(),
+      text: selection.toString(),
       preview,
       reply: (comment) => ({ source, ...around, comment }),
     }
@@ -191,6 +195,7 @@ export function codePassage(
       const around = passageAround(contents, start, end)
       return {
         range: range.cloneRange(),
+        text: selection.toString(),
         preview,
         reply: (comment) => ({
           source: "file",
@@ -335,30 +340,54 @@ export function SelectionReply({
   }, [editing])
 
   if (!offer) return null
-  const position = placement(offer, editing ? POPOVER : BUTTON)
+  const position = placement(offer, editing ? POPOVER : TOOLBAR)
   if (!position) return null
 
   if (!editing)
     return (
-      <Button
-        color="secondary"
-        variant="plain"
-        size="sm"
-        aria-label="Reply"
-        type="button"
+      <div
         data-selection-reply
-        // Keep the selection: focus moving to the button would clear it.
+        // Keep the selection: focus moving to a button would clear it.
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => {
-          markPassage(offer.passage.range)
-          setEditing(true)
-        }}
-        style={{ left: position.left, top: position.top, width: BUTTON.width }}
-        className="fixed z-selection-action-bar h-[30px] justify-center gap-space-1 rounded-lg border border-subtle bg-elevated font-sans font-medium text-primary shadow-md hover:bg-elevated-hover"
+        style={{ left: position.left, top: position.top, width: TOOLBAR.width }}
+        className="fixed z-selection-action-bar flex h-[30px] items-center rounded-lg border border-subtle bg-elevated font-sans shadow-md"
       >
-        <ArrowBendUpLeftIcon className="size-3.5" weight="regular" />
-        Reply
-      </Button>
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label="Reply"
+          type="button"
+          leftDecorator={ArrowBendUpLeftIcon}
+          onClick={() => {
+            markPassage(offer.passage.range)
+            setEditing(true)
+          }}
+          className="h-full flex-1 gap-space-1 text-primary hover:bg-elevated-hover"
+        >
+          Reply
+        </Button>
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label="Copy selected text"
+          type="button"
+          leftDecorator={CopySimpleIcon}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(offer.passage.text)
+              toast.success("Selected text copied")
+            } catch (error) {
+              console.warn("Could not copy to the clipboard", { error })
+              toast.error("Couldn't copy to the clipboard")
+            }
+          }}
+          className="h-full flex-1 gap-space-1 text-primary hover:bg-elevated-hover"
+        >
+          Copy
+        </Button>
+      </div>
     )
 
   const submit = () => {
