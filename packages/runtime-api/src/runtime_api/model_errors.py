@@ -56,18 +56,14 @@ def code_for_error_type(error_type: str | None) -> str | None:
 
 
 def classify_exception(exc: BaseException) -> str | None:
-    """Failure code for a live exception, using status and provider error body.
-
-    Provider-agnostic on purpose: a gateway can surface an overload as anything
-    from a 529 to a bare ``APIError`` carrying ``overloaded_error`` in its body.
-    """
+    """Failure code for a live exception, using status and provider error body."""
     status = getattr(exc, "status_code", None)
     body = getattr(exc, "body", None)
     provider_code = ""
     if isinstance(body, dict):
         inner = body.get("error")
-        if isinstance(inner, dict):
-            provider_code = str(inner.get("type") or inner.get("code") or "")
+        error = inner if isinstance(inner, dict) else body
+        provider_code = str(error.get("type") or error.get("code") or "")
     haystack = f"{provider_code} {exc}".lower()
 
     if status == 429 or "rate_limit" in haystack:
@@ -78,7 +74,7 @@ def classify_exception(exc: BaseException) -> str | None:
         return "context_too_long"
     if "model_not_available" in haystack or "model_not_found" in haystack:
         return "model_unavailable"
-    if isinstance(status, int) and status >= 500:
+    if provider_code == "server_error" or (isinstance(status, int) and status >= 500):
         return "provider_unavailable"
     return code_for_error_type(type(exc).__name__)
 

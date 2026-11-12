@@ -46,7 +46,7 @@ from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
-from runtime_api.model_errors import is_model_failure_reply
+from runtime_api.model_errors import classify_exception, is_model_failure_reply
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
 _OPENAI = ChatOpenAI(
@@ -392,6 +392,16 @@ def _fallback_call(
         _status_error(503),
         _status_error(529),
         httpx2.RemoteProtocolError("peer closed connection (incomplete chunked read)"),
+        openai.APIError(
+            "Sorry, something went wrong.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body={"type": "server_error", "message": "Sorry, something went wrong."},
+        ),
+        openai.APIError(
+            "Sorry, something went wrong.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
+        ),
         # A streamed overload carries no status, only its message.
         openai.APIError(
             "Our servers are currently overloaded. Please try again later.",
@@ -403,10 +413,15 @@ def _fallback_call(
 async def test_a_transient_failure_goes_to_the_fallback(error: BaseException) -> None:
     attempts = _Attempts(error)
 
-    response = await _fallback_call(attempts)
+    response = await call_with_fallback(
+        ModelRequest(model=_OPENAI, messages=[]),
+        attempts,
+        lambda: _ANTHROPIC,
+        backoff_schedule=(0.0,),
+    )
 
     assert response.result[0].content == "answered"
-    assert attempts.models == [_ANTHROPIC, _OPENAI]
+    assert attempts.models == [_OPENAI, _ANTHROPIC]
 
 
 async def test_attempts_alternate_between_the_model_and_its_fallback() -> None:
@@ -436,7 +451,29 @@ async def test_attempts_wait_out_the_backoff_with_jitter(monkeypatch: pytest.Mon
     sleep.assert_awaited_once_with(10.0)
 
 
-@pytest.mark.parametrize("error", [ValueError("not transient"), _status_error(400)])
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("not transient"),
+        _status_error(400),
+        *[
+            openai.APIError(
+                message,
+                request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+                body=body,
+            )
+            for message, body in [
+                ("provider error", {"type": "invalid_request_error"}),
+                ("provider error", {"error": {"type": "invalid_request_error"}}),
+                ("Invalid request: unsupported parameter", None),
+                ("provider error", {"code": "context_length_exceeded"}),
+                ("prompt is too long", None),
+                ("provider error", {"error": {"code": "model_not_found"}}),
+                ("provider error", {"code": "model_not_available"}),
+            ]
+        ],
+    ],
+)
 async def test_an_error_another_attempt_would_repeat_raises_at_once(error: BaseException) -> None:
     attempts = _Attempts(error)
 
@@ -802,3 +839,28 @@ async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handler.await_count == 1
+
+
+class TestStreamedErrorClassification:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "body, expected",
+        [
+            ({"type": "server_error"}, "provider_unavailable"),
+            ({"code": "server_error"}, "provider_unavailable"),
+            ({"type": "overloaded_error"}, "provider_overloaded"),
+            ({"code": "context_length_exceeded"}, "context_too_long"),
+            ({"error": {"type": "overloaded_error"}}, "provider_overloaded"),
+        ],
+    )
+    async def test_provider_body_classifies_a_generic_error(
+        body: dict[str, object], expected: str
+    ) -> None:
+        class StreamedError(RuntimeError):
+            def __init__(self, body: dict[str, object]) -> None:
+                super().__init__("provider error")
+                self.body = body
+
+        error = StreamedError(body)
+
+        assert classify_exception(error) == expected

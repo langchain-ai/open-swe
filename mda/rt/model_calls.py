@@ -184,8 +184,11 @@ def is_transient(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in RETRYABLE_STATUS_CODES:
             return True
-    if type(exc) is openai.APIError:
-        return classify_exception(exc) == "provider_overloaded"
+    if type(exc) is openai.APIError and getattr(exc, "status_code", None) is None:
+        if classify_exception(exc) in {"context_too_long", "model_unavailable"}:
+            return False
+        detail = f"{exc} {exc.body}".lower()
+        return "invalid_request" not in detail and "invalid request" not in detail
     return False
 
 
