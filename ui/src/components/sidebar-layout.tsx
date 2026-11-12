@@ -385,13 +385,16 @@ function ResizeHandle({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      className={cn(
-        "absolute top-0 right-0 z-resize-handle h-full w-1 cursor-col-resize touch-none select-none",
-        "after:absolute after:inset-y-0 after:right-0 after:border-r after:border-transparent after:transition-colors",
-        "hover:after:border-default",
-        dragging && "after:border-default"
-      )}
-    />
+      className="group absolute top-0 -right-1.5 z-resize-handle h-full w-3 cursor-col-resize touch-none select-none"
+    >
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-y-0 right-1/2 border-r border-transparent transition-colors",
+          "group-hover:border-default",
+          dragging && "border-default"
+        )}
+      />
+    </div>
   )
 }
 
