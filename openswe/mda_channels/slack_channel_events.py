@@ -50,8 +50,7 @@ async def slack_channel_event(
             "team_id": event.get("teamId", ""),
             "api_app_id": ENV.SLACK_APP_ID.optional() or "",
             "event_id": event["deliveryId"],
-        },
-        background_tasks,
+        }
     )
     return None
 

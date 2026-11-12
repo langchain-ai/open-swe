@@ -1222,7 +1222,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-owner" not in str(catalog)
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread"]
-    # MDA runs the graph's cap on model calls, such as an incident policy's.
+    # MDA runs the graph's cap on model calls.
     assert catalog["model_call_limit"] == 20
     # Code mode calls the file and shell tools too, through MDA's own with their checks,
     # but never one the graph excludes.

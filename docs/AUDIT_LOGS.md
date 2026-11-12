@@ -16,7 +16,7 @@ Neither mechanism retains arguments, payloads, or returned values, with one exce
 | --- | --- | --- |
 | Settings and identity | Profile/preferences, user/repository instructions, review enablement/styles, API-key creation/revocation, Slack bot allowlist, LangSmith disconnection | OAuth handoffs/callbacks, logout (no authenticated actor dependency), onboarding dismissal |
 | MCP | Connection changes, managed connection, explicit secret-header reveal | Discovery and CLI invocation of arbitrary external tools |
-| Administration | Workspace creation/configuration/deletion/refresh, automation CRUD/trigger, incident settings/commands, organization skills | Listing/status reads, inbound service webhooks |
+| Administration | Workspace creation/configuration/deletion/refresh, automation CRUD/trigger, incident settings, organization skills | Listing/status reads, inbound service webhooks |
 | Threads | Uploads, lifecycle/run actions, sharing, pinning, commands, terminal access, artifact edits/comments, workflow-push decisions, explicit feedback | History, event streams, batched PR-check reads |
 | Reviews and GitHub | PR actions, review requests/assignment, comments and pending-review edits, submission/discard, labels, re-review/scout, review-style edits | Summary queries, viewed telemetry, chat history/streams |
 | Bridges | Open and close | Heartbeats, claims and request replies (transport/liveness traffic) |

@@ -1501,19 +1501,17 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     assert export_failed == (failure == "export")
 
 
-async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval_call(
+async def test_an_operation_code_mode_calls_is_reported_under_its_eval_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Code mode calls tools past the tool-call chain, so the tool reports itself."""
     from rt.backend import reporting, subagent_of
-    from runtime_api.operations import EvidenceReply
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
     backend = _run_backend()
     answers = {
         "/agent-api/operation": OperationResult(content="found it"),
-        "/agent-api/record_evidence": EvidenceReply(content="found it\n\nIncident evidence: ev-1"),
     }
 
     async def post(path: str, body: dict[str, object], **kwargs: object) -> object:
@@ -1525,9 +1523,8 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     monkeypatch.setattr(backend.outbox, "started", started)
     monkeypatch.setattr(backend.outbox, "finished", finished)
     search = operation_tool(
-        ToolSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
+        ToolSpec(name="search_threads", description="Search", parameters={"type": "object"}),
         backend,
-        cites_evidence=True,
     )
     runtime = ToolRuntime(
         state={"messages": []},
@@ -1545,9 +1542,9 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     await backend.outbox.drain()
 
     assert isinstance(result, ToolMessage)
-    assert result.content == "found it\n\nIncident evidence: ev-1"
+    assert result.content == "found it"
     [[report]] = [call.args for call in started.call_args_list]
-    assert report.name == "search_incidents"
+    assert report.name == "search_threads"
     assert report.namespace == ["eval-1"]
     [[_body, recorded]] = [call.args for call in finished.call_args_list]
     assert recorded.content == result.content

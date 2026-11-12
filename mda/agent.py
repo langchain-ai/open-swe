@@ -58,7 +58,6 @@ from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
     DescribedToolsMiddleware,
-    IncidentEvidenceMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
 )
@@ -240,7 +239,6 @@ def _parts(graph: Graph) -> _Parts:
     reports: list[AgentMiddleware] = [
         ReportRepliesMiddleware(backend),
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
-        IncidentEvidenceMiddleware(backend),
     ]
     subagent = _SUBAGENTS[graph]
     subagents: list[SubAgent] = [

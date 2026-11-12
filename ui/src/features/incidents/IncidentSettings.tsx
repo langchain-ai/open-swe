@@ -45,9 +45,6 @@ function PolicyForm({
     initial.excluded_channel_ids
   )
   const [model, setModel] = useState(initial.model ?? "")
-  const [maxModelCalls, setMaxModelCalls] = useState(
-    String(initial.max_model_calls)
-  )
   const [validation, setValidation] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: incidentsApi.saveSettings,
@@ -69,7 +66,6 @@ function PolicyForm({
       channel_prefix: channelPrefix.trim(),
       excluded_channel_ids: excludedChannelIds,
       model: model.trim() || null,
-      max_model_calls: Number(maxModelCalls),
     }
     if (!/^[a-z0-9_-]+$/.test(policy.channel_prefix)) {
       setValidation(
@@ -84,7 +80,7 @@ function PolicyForm({
     <form onSubmit={onSubmit} className="space-y-space-4">
       <SettingsSection
         title="Incidents"
-        description="Investigate matching Slack channels and maintain incident summaries with Robin."
+        description="Robin joins new Slack channels that match the prefix and starts investigating."
       >
         <SlackConnectionStatus settings={settings} />
         <SettingsRow
@@ -126,22 +122,10 @@ function PolicyForm({
         </SettingsPanel>
         <details>
           <summary className="cursor-pointer px-space-4 py-space-3 text-xs font-medium">
-            Model and analysis limits
+            Model
           </summary>
           <SettingsPanel>
             <div className="grid gap-x-space-5 gap-y-space-5 sm:grid-cols-2">
-              <Input
-                size="md"
-                type="number"
-                id="policy-max_model_calls"
-                label="Model calls per turn"
-                value={maxModelCalls}
-                onChange={setMaxModelCalls}
-                min={1}
-                max={20}
-                step={1}
-                required
-              />
               <Input
                 size="md"
                 id="policy-model"

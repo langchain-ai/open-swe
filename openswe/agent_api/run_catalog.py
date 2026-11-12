@@ -37,7 +37,6 @@ from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings, RemoteRu
 from openswe.agent_api.tool_sets import ToolSet
 from openswe.config import ENV
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
-from openswe.incidents.runtime import INCIDENT_SOURCE
 from openswe.prompts import common_prompt, prompt
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import EXCLUDED_TOOLS, ModelChoice, ToolSurface
@@ -226,7 +225,6 @@ class RunCatalog:
                 artifacts_root=surface.artifacts_root,
                 checks=list(surface.file_checks),
             ),
-            incident_evidence=surface.loop.incident,
             browser=surface.browser,
             worker_webhook=COMPLETION_WEBHOOK_URL if surface.delegates else None,
             skill_sources=list(surface.skill_sources),
@@ -288,7 +286,7 @@ class RunCatalog:
             effort=cfg.resolved_agent_effort,
             agent=None if turn is None else AgentTurnSettings.model_validate(turn),
             slack_thread=_json_object.validate_python(slack_thread)
-            if cfg.source == INCIDENT_SOURCE and isinstance(slack_thread, Mapping)
+            if cfg.source == "incidents_agent" and isinstance(slack_thread, Mapping)
             else None,
             disabled_tools=sorted(self.surface.disabled()),
         )

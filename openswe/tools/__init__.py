@@ -40,7 +40,6 @@ _TOOL_MODULES = {
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
     "switch_to_performance_model": ".switch_to_performance_model",
-    "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
     "reorder_thread_pins": ".threads",
     "reorder_sidebar_threads": ".threads",
@@ -130,7 +129,6 @@ __all__ = [
     "list_threads",
     "manage_baby_sit",
     "switch_to_performance_model",
-    "manage_incident",
     "manage_thread",
     "reorder_thread_pins",
     "reorder_sidebar_threads",
@@ -195,7 +193,6 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from openswe.incidents.tools import manage_incident
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html
     from openswe.slack.tools.channels import (

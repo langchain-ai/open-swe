@@ -126,8 +126,6 @@ class QueuedMessage(Base):
 
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
-        from openswe.incidents.report import context_message
-
         message = self.run_message
         content = message["content"] if message is not None else self.content
         if isinstance(content, str):
@@ -139,7 +137,7 @@ class QueuedMessage(Base):
         sender = payload.sender
         return QueuedPreview(
             id=self.queue_id or f"queued-{self.seq}",
-            text=context_message(payload.preview_text()),
+            text=payload.preview_text(),
             sender=await sender.login() if sender else None,
             platform=sender.platform if sender else None,
             queued_at=self.queued_at,

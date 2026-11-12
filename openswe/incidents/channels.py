@@ -1,365 +1,225 @@
-"""Slack events for enrolled incident channels: enrollment, context, controls, and questions."""
+"""Join new incident channels and start an investigation in each."""
 
 import logging
-import re
-from typing import Any
+from datetime import datetime
+from typing import Any, Final
 
-from fastapi import BackgroundTasks, HTTPException
-from langgraph_sdk import get_client
+from fastapi import HTTPException
+from pydantic import JsonValue
 
 from openswe.config import ENV
-from openswe.incidents import service, turns
-from openswe.incidents.models import Incident, IncidentPolicy
-from openswe.incidents.presentation import report_message
-from openswe.input_messages import PersonIdentity
+from openswe.dashboard.options import normalize_model_choice
+from openswe.dispatch import create_durable_run
+from openswe.incidents import service
+from openswe.incidents.models import IncidentPolicy
+from openswe.input_messages import SystemIdentity, system_input, system_introduction
+from openswe.jobs import queue
+from openswe.jobs.queue import Job
+from openswe.prompts import prompt
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import (
-    fetch_slack_thread_messages,
-    get_slack_user_info,
-    post_slack_thread_reply_with_ts,
-    slack_message_bot_id,
-)
-from openswe.slack.events import claim_slack_event
-from openswe.slack.http import SlackClient, SlackRequestError
+from openswe.slack.client import fetch_slack_thread_messages, parse_slack_ts
+from openswe.slack.http import SlackClient
 from openswe.slack.records import resolve_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
-from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_incident_url
-from openswe.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
+from openswe.threads.runtimes import RUNTIMES
+from openswe.threads.store import THREADS
+from openswe.webhooks.common import upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
 
-CONTROL_WORDS = frozenset({"pause", "resume", "complete", "reopen"})
-HISTORY_LIMIT = 100
-_HANDLED_EVENTS = frozenset(
-    {
-        "channel_created",
-        "channel_rename",
-        "channel_archive",
-        "message",
-        "app_mention",
-    }
-)
-_MEMBERSHIP_SUBTYPES = frozenset({"channel_join", "channel_leave", "group_join", "group_leave"})
-_MENTION = re.compile(r"<@[A-Z0-9]{1,20}>")
+INCIDENT_SOURCE = "incidents_agent"
+JOIN_JOB: Final = "incident_channel_join"
+INVESTIGATE_JOB: Final = "incident_channel_investigate"
+# A new channel's alert or description usually lands just after it is created.
+KICKOFF_DELAY_SECONDS = 60
+_ENROLLING_EVENTS = frozenset({"channel_created", "channel_rename"})
+_INCIDENTS_SYSTEM: SystemIdentity = {
+    "id": "system:incidents",
+    "display_name": "Incidents",
+    "platform": "open-swe",
+}
+_KICKOFF_NOTICE = "Robin joined to investigate. Findings will appear in this thread."
 
 
-def parse_mention(text: str, *, bot_user: str = "") -> tuple[str, str]:
-    """Return a bare control word or the question surrounding the bot's mention."""
-    match = re.search(re.escape(f"<@{bot_user}>"), text) if bot_user else _MENTION.search(text)
-    if not match:
-        return "", ""
-    rest = (text[: match.start()] + text[match.end() :]).strip()
-    if rest.lower() in CONTROL_WORDS:
-        return rest.lower(), ""
-    return ("ask", rest[:8000]) if rest else ("", "")
+class IncidentChannel:
+    """A Slack channel named like an incident, which Robin joins once to investigate.
 
-
-def _own_message(message: dict[str, Any], policy: IncidentPolicy) -> bool:
-    bot_user = ENV.SLACK_BOT_USER_ID.get()
-    profile = message.get("bot_profile")
-    app_id = str(
-        message.get("app_id") or (profile.get("app_id") if isinstance(profile, dict) else "") or ""
-    )
-    return bool(bot_user and message.get("user") == bot_user) or bool(
-        policy.slack_app_id and app_id == policy.slack_app_id
-    )
-
-
-async def slack_person(user_id: str) -> PersonIdentity:
-    """Identity for any human in the channel. Turning an incident off needs nothing more."""
-    user = await get_slack_user_info(user_id)
-    profile = (user or {}).get("profile")
-    person: PersonIdentity = {"id": f"slack:{user_id}"}
-    name = (
-        (profile.get("display_name") or profile.get("real_name"))
-        if isinstance(profile, dict)
-        else ""
-    ) or (user or {}).get("real_name")
-    if isinstance(name, str) and name:
-        person["display_name"] = name
-    email = profile.get("email") if isinstance(profile, dict) else None
-    if isinstance(email, str) and email:
-        person["email"] = email
-    return person
-
-
-async def linked_slack_user(user_id: str) -> PersonIdentity | None:
-    """The identity of a Slack user who connected an Open SWE account, else None.
-
-    A question unlocks the agent's tools, so it needs the same connected account as
-    mentioning Open SWE anywhere else.
+    Joining and investigating are jobs keyed by the channel, so overlapping creation
+    and rename events queue one kickoff, and a failed step retries.
     """
-    login = await User.login_for_slack(user_id)
-    if not login:
-        return None
-    person = await slack_person(user_id)
-    person["github_login"] = login
-    return person
 
+    def __init__(self, channel_id: str, name: str) -> None:
+        self.channel_id = channel_id
+        self.name = name
 
-async def control_by_slack_user(record: Incident, action: str, user_id: str) -> Incident:
-    return await apply_control(record, action, dict(await slack_person(user_id)))
+    @classmethod
+    def from_event(cls, payload: dict[str, Any], policy: IncidentPolicy) -> IncidentChannel | None:
+        """The channel a creation or rename event names, if the policy wants Robin there."""
+        event = payload.get("event") or {}
+        channel = event.get("channel")
+        if str(event.get("type") or "") not in _ENROLLING_EVENTS or not isinstance(channel, dict):
+            return None
+        channel_id = str(channel.get("id") or "")
+        name = str(channel.get("name") or "")
+        if (
+            not policy.enabled
+            or not channel_id
+            or not name.startswith(policy.channel_prefix)
+            or channel_id in policy.excluded_channel_ids
+        ):
+            return None
+        return cls(channel_id, name)
 
+    @classmethod
+    def of(cls, job: Job) -> IncidentChannel:
+        return cls(str(job.payload["channel_id"]), str(job.payload["name"]))
 
-async def prompt_to_connect(channel_id: str, thread_ts: str, user_id: str) -> None:
-    await post_account_link_prompt(channel_id, thread_ts, user_id, None, reason="unlinked")
+    @property
+    def payload(self) -> dict[str, JsonValue]:
+        return {"channel_id": self.channel_id, "name": self.name}
 
-
-def _introduction(record: Incident) -> str:
-    text = "Incidents is following this channel. Findings will appear here"
-    link = dashboard_incident_url(record.id)
-    if link:
-        text += f"; the full incident is at <{link}|Open incident>"
-    return (
-        text
-        + ". Mention me with a question, or ask me to pause, resume, or complete this incident. "
-        "Anyone here can turn it off: mention me with `pause` to stop automatic analysis or "
-        "`complete` to close the incident. The Incidents page in the dashboard has the same "
-        "controls."
-    )
-
-
-async def post_notice(
-    record: Incident,
-    text: str,
-    *,
-    blocks: list[dict[str, Any]] | None = None,
-    reply_thread_ts: str = "",
-) -> str | None:
-    if record.is_archived:
-        return None
-    try:
-        ts = await post_slack_thread_reply_with_ts(
-            record.channel_id,
-            reply_thread_ts or turns.SESSION_TS,
-            text,
-            blocks=blocks,
-            unfurl_links=False,
-            unfurl_media=False,
+    async def queue_join(self) -> None:
+        """Queue joining the channel, unless a join of it is already queued."""
+        await queue.schedule(
+            JOIN_JOB, self.payload, key=f"{JOIN_JOB}:{self.channel_id}", replace=False
         )
-    except SlackRequestError as exc:
-        ts = None
-        logger.warning(
-            "Incident notice not delivered",
-            extra={"incident_id": record.id, "slack_error": exc.code},
-        )
-    return ts
 
+    @classmethod
+    async def join(cls, job: Job) -> None:
+        """Join the channel, post the kickoff notice, and queue the investigation under it.
 
-async def enroll_channel(
-    channel_id: str, channel_name: str, policy: IncidentPolicy, *, manual: bool = False
-) -> Incident | None:
-    """Join a channel and bind it to a new system-owned agent thread.
-
-    Automatic enrollment requires the channel prefix; a manual start by a responder does not.
-    """
-    incident_id = service.incident_id(policy.workspace_id, channel_id)
-    if await service.INCIDENTS.get(incident_id):
-        return None
-    record = Incident(
-        id=incident_id,
-        workspace_id=policy.workspace_id,
-        channel_id=channel_id,
-        channel_name=channel_name,
-        title=channel_name,
-    )
-    try:
+        Every attempt checks the channel is still eligible, but only the first skips one
+        Robin is already in: a retry follows its own join, which failed before the
+        investigation was queued, and reuses the notice that join posted.
+        """
+        channel = cls.of(job)
+        policy = await service.get_policy()
+        if not policy.enabled or channel.channel_id in policy.excluded_channel_ids:
+            return
+        info = await SlackChannel.fetch(channel.channel_id, use_cache=False)
+        if not info:
+            raise RuntimeError("Slack did not describe the incident channel")
+        if not service.channel_allowed(info, policy):
+            logger.info("Skipping ineligible incident channel", extra=channel.log_extra)
+            return
+        first = job.attempts == 0 and job.lapsed_lease is None
+        if first and info.get("is_member") is True:
+            return
         async with SlackClient.bot() as slack:
-            await slack.conversations_join(channel=channel_id)
-        info = await SlackChannel.fetch(channel_id, use_cache=False)
-        if not info or not service.channel_allowed(info, policy, require_prefix=not manual):
-            record.status, record.reason = "needs_attention", "setup_failed"
-            service.note(record, "error", "Channel is not an eligible public internal channel.")
-            await service.save(record)
-            return record
-        record.channel_name = str(info.get("name") or channel_name)
-        record.title = record.channel_name
-        client = get_client()
-        record.thread_id = await resolve_slack_thread_id(channel_id, turns.SESSION_TS)
-        persisted = await upsert_agent_thread_metadata(
-            record.thread_id,
-            source="incidents_agent",
-            title=record.channel_name,
-            source_context=SourceContext(
-                slack_thread=SlackThreadRef(channel_id=channel_id, thread_ts=turns.SESSION_TS)
-            ),
+            await slack.conversations_join(channel=channel.channel_id)
+            thread_ts = "" if first else await channel.posted_notice(job.created_at)
+            if not thread_ts:
+                posted = await slack.chat_postMessage(
+                    channel=channel.channel_id,
+                    text=_KICKOFF_NOTICE,
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
+                thread_ts = str(posted.get("ts") or "")
+        if not thread_ts:
+            raise RuntimeError("Slack did not return the kickoff message timestamp")
+        await queue.schedule(
+            INVESTIGATE_JOB,
+            {**channel.payload, "thread_ts": thread_ts},
+            key=f"{INVESTIGATE_JOB}:{channel.channel_id}",
+            replace=False,
+        )
+
+    async def posted_notice(self, since: datetime) -> str:
+        """The timestamp of the kickoff notice Robin posted here since ``since``, or ""."""
+        bot_user = ENV.SLACK_BOT_USER_ID.get()
+        for message in reversed(
+            await fetch_slack_thread_messages(self.channel_id, "0", complete=True)
+        ):
+            ts = str(message.get("ts") or "")
+            if (
+                message.get("text") == _KICKOFF_NOTICE
+                and message.get("user") == bot_user
+                and parse_slack_ts(ts) >= since.timestamp()
+            ):
+                return ts
+        return ""
+
+    @classmethod
+    async def investigate(cls, job: Job) -> None:
+        """Start the investigation run in the kickoff notice's thread, once.
+
+        A retry, or a job reclaimed from a worker that stopped, first checks the thread
+        for a run, so a run the server started before an error reached us is not
+        started again.
+        """
+        channel = cls.of(job)
+        thread_ts = str(job.payload["thread_ts"])
+        policy = await service.get_policy()
+        thread_id = await resolve_slack_thread_id(channel.channel_id, thread_ts)
+        slack_thread = SlackThreadRef(channel_id=channel.channel_id, thread_ts=thread_ts)
+        if not await upsert_agent_thread_metadata(
+            thread_id,
+            source=INCIDENT_SOURCE,
+            title=f"#{channel.name}",
+            source_context=SourceContext(slack_thread=slack_thread),
             visibility="public",
             owner_type="system",
-        )
-        if not persisted:
+        ):
             raise RuntimeError("could not persist incident thread metadata")
-        await client.threads.update(
-            thread_id=record.thread_id, metadata={"incident_id": incident_id}
+        if (job.attempts or job.lapsed_lease is not None) and (
+            thread := await THREADS.get(thread_id)
+        ) is not None:
+            if await RUNTIMES.runs_on(thread.runtime).latest_run(thread_id) is not None:
+                return
+        configurable: dict[str, Any] = {
+            "thread_id": thread_id,
+            "source": INCIDENT_SOURCE,
+            "slack_thread": {"channel_id": channel.channel_id, "thread_ts": thread_ts},
+        }
+        if policy.model:
+            model, effort = normalize_model_choice(policy.model, None)
+            configurable["agent_model_id"] = model
+            configurable["agent_effort"] = effort
+        await create_durable_run(
+            thread_id,
+            "agent",
+            input={
+                "messages": [
+                    system_introduction(_INCIDENTS_SYSTEM),
+                    system_input(
+                        prompt("incidents/kickoff", channel_name=channel.name),
+                        {
+                            "sender_id": _INCIDENTS_SYSTEM["id"],
+                            "channel_id": f"slack:{channel.channel_id}",
+                            "surface": "slack",
+                            "kind": "system",
+                        },
+                    ),
+                ]
+            },
+            source=INCIDENT_SOURCE,
+            thread_title=None,
+            config={"configurable": configurable},
+            metadata={"source": INCIDENT_SOURCE},
+            multitask_strategy="enqueue",
+            after_seconds=KICKOFF_DELAY_SECONDS,
         )
-        record.anchor_ts = await post_notice(record, _introduction(record))
-        service.note(record, "enrolled", f"Following #{record.channel_name}.")
-        await service.save(record)
-        history = await fetch_slack_thread_messages(channel_id, turns.SESSION_TS)
-        queued = 0
-        for message in history[-HISTORY_LIMIT:]:
-            if _is_context(message, policy):
-                queued += int(await turns.queue_context(record, message))
-        # A brand-new channel has nothing to analyze yet; the first alert starts the first turn.
-        if queued:
-            await turns.schedule_automatic_turn(record, policy)
-    except Exception:
-        logger.exception("Incident enrollment failed", extra={"incident_id": incident_id})
-        record.status, record.reason = "needs_attention", "setup_failed"
-        service.note(record, "error", "Channel setup failed. Check Slack grants and configuration.")
-        await service.save(record)
-    return record
+
+    @property
+    def log_extra(self) -> dict[str, object]:
+        return {"incident_channel": {"channel_id": self.channel_id, "name": self.name}}
 
 
-def _is_context(message: dict[str, Any], policy: IncidentPolicy) -> bool:
-    subtype = str(message.get("subtype") or "")
-    return (
-        subtype not in _MEMBERSHIP_SUBTYPES
-        and subtype != "message_deleted"
-        and not _own_message(message, policy)
-        and bool(turns.message_text(message))
-    )
+async def handle_slack_event(payload: dict[str, Any]) -> dict[str, str] | None:
+    """Queue joining a newly created or renamed incident channel; None lets the regular path continue.
 
-
-async def apply_control(
-    record: Incident,
-    action: str,
-    actor: dict[str, Any],
-    *,
-    keep_run_id: str = "",
-    require_notification: bool = False,
-) -> Incident:
-    """Pause, resume, complete, or reopen an incident and tell the channel.
-
-    `keep_run_id` names the run applying the control (the manage_incident tool), which
-    must survive the cancellation of the others.
+    A redelivered or overlapping event queues nothing more: the join is keyed by the
+    channel, and a join that already ran finds Robin in the channel.
     """
     policy = await service.get_policy()
-    blocks: list[dict[str, Any]] | None = None
-    if action in {"pause", "complete"}:
-        await turns.cancel_active_runs(record.thread_id, keep_run_id=keep_run_id)
-        record.status = "completed" if action == "complete" else "paused"
-        record.reason = str(actor.get("reason") or f"responder_{action}")
-        # Remember which run closed this, so that same run cannot reopen it moments later.
-        record.completed_run_id = keep_run_id if action == "complete" else ""
-        text = (
-            "Incident complete."
-            if action == "complete"
-            else "Incident paused. Mention me with `resume` to continue."
-        )
-        if action == "complete":
-            latest = await service.REPORTS.get(record.id)
-            if latest is not None:
-                text, blocks = report_message(
-                    latest.report,
-                    "Incident complete. " + latest.report.summary,
-                    dashboard_incident_url(record.id),
-                    reason="completion",
-                )
-    elif action in {"resume", "reopen"}:
-        record.status, record.reason, record.completed_run_id = "watching", "", ""
-        text = "Incident watching resumed."
-    else:
-        raise ValueError(f"unknown incident control {action!r}")
-    service.note(record, "control", text.split("\n", 1)[0])
-    await service.save(record, by=service.actor_login(actor))
-    posted = await post_notice(record, text, blocks=blocks)
-    if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
-        await turns.schedule_automatic_turn(record, policy)
-    if require_notification and not posted:
-        raise RuntimeError("Incident state changed but its channel notification was not delivered")
-    return record
-
-
-async def handle_slack_event(
-    payload: dict[str, Any], background_tasks: BackgroundTasks
-) -> dict[str, str] | None:
-    """Handle a Slack event for an enrolled channel; None lets the regular path continue."""
-    event = payload.get("event") or {}
-    kind = str(event.get("type") or "")
-    if kind not in _HANDLED_EVENTS:
-        return None
-    channel = event.get("channel")
-    channel_id = channel.get("id", "") if isinstance(channel, dict) else channel
-    if not isinstance(channel_id, str) or not channel_id:
-        return None
-    policy = await service.get_policy()
-    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
-    enrollment = (
-        kind in {"channel_created", "channel_rename"}
-        and policy.enabled
-        and isinstance(channel, dict)
-        and str(channel.get("name", "")).startswith(policy.channel_prefix)
-        and channel_id not in policy.excluded_channel_ids
-    )
-    if record is None and not enrollment:
+    channel = IncidentChannel.from_event(payload, policy)
+    if channel is None:
         return None
     if (
         payload.get("team_id") != policy.workspace_id
         or payload.get("api_app_id") != policy.slack_app_id
     ):
-        raise HTTPException(401, "Slack workspace or app does not match Incidents policy")
-    event_id = str(payload.get("event_id") or "")
-    event_ts = str(event.get("event_ts") or event.get("ts") or "")
-    if not await claim_slack_event(event_id, channel_id, event_ts):
-        return {"status": "duplicate"}
-    if record is None:
-        assert isinstance(channel, dict)
-        background_tasks.add_task(enroll_channel, channel_id, str(channel.get("name")), policy)
-        return {"status": "accepted"}
-    if kind in {"channel_created", "channel_rename"}:
-        return {"status": "ignored"}
-    if record.channel_id in policy.excluded_channel_ids:
-        return {"status": "ignored"}
-    if kind == "channel_archive":
-        record.is_archived = True
-        if record.status != "completed":
-            background_tasks.add_task(
-                apply_control,
-                record,
-                "complete",
-                {"id": "system:slack", "reason": "channel_archived"},
-            )
-        else:
-            await service.save(record)
-        return {"status": "accepted"}
-    if not policy.enabled:
-        return {"status": "ignored"}
-    message = event.get("message") if event.get("subtype") == "message_changed" else event
-    if not isinstance(message, dict):
-        return {"status": "ignored"}
-    text = str(message.get("text") or "")
-    bot_user = ENV.SLACK_BOT_USER_ID.get()
-    user = message.get("user")
-    mentioned = kind == "app_mention" or bool(bot_user and f"<@{bot_user}>" in text)
-    if mentioned and isinstance(user, str) and user and not slack_message_bot_id(message):
-        action, question = parse_mention(text, bot_user=bot_user or "")
-        if action in CONTROL_WORDS:
-            background_tasks.add_task(control_by_slack_user, record, action, user)
-            return {"status": "accepted"}
-        if action == "ask":
-            ts = str(message.get("ts") or "")
-            thread_ts = str(message.get("thread_ts") or "")
-            actor = await linked_slack_user(user)
-            if actor is None:
-                # A question unlocks the agent's tools, so it needs a connected account.
-                background_tasks.add_task(
-                    prompt_to_connect, record.channel_id, thread_ts or ts, user
-                )
-                return {"status": "accepted"}
-            background_tasks.add_task(
-                turns.dispatch_turn,
-                record,
-                policy,
-                request=question,
-                requester=actor,
-                reply_thread_ts=thread_ts if thread_ts and thread_ts != ts else "",
-            )
-            return {"status": "accepted"}
-        return {"status": "ignored"}
-    if record.status == "completed" or not _is_context(message, policy):
-        return {"status": "ignored"}
-    await turns.queue_context(record, message)
-    if record.status in {"watching", "needs_attention"}:
-        background_tasks.add_task(turns.schedule_automatic_turn, record, policy)
+        raise HTTPException(401, "Slack workspace or app does not match the incident policy")
+    await channel.queue_join()
     return {"status": "accepted"}

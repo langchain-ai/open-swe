@@ -220,9 +220,7 @@ class McpServer:
             content=_content(content), artifact=artifact, tool_call_id=tool_call_id, name=name
         )
 
-    def tool(
-        self, definition: Tool, backend: OpenSweBackend, *, cites_evidence: bool
-    ) -> StructuredTool:
+    def tool(self, definition: Tool, backend: OpenSweBackend) -> StructuredTool:
         """``definition`` as the model sees it: the backend's name and description for it."""
         name = self.spec.tools[definition.name]
 
@@ -233,7 +231,6 @@ class McpServer:
                 arguments,
                 runtime,
                 partial(self.call, definition, arguments, held=HeldSessions.of(backend)),
-                cites_evidence=cites_evidence,
             )
 
         description = definition.description or definition.name
@@ -257,7 +254,6 @@ class McpTools:
         backend: OpenSweBackend,
         *,
         taken: Collection[str],
-        cites_evidence: bool,
     ) -> McpTools:
         """The tools of ``servers`` the run can reach now, leaving out names in ``taken``.
 
@@ -284,7 +280,7 @@ class McpTools:
         names = set(taken)
         for (server, _credential), definitions in zip(reachable, listed, strict=True):
             for definition in definitions:
-                tool = server.tool(definition, backend, cites_evidence=cites_evidence)
+                tool = server.tool(definition, backend)
                 if tool.name in names:
                     logger.warning(
                         "Leaving out an MCP tool whose name the run already has",

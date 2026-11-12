@@ -14,7 +14,6 @@ const pages = new Set([
   "integrations",
   "admin",
   "assistant",
-  "incidents",
   "cloud-agents",
   "feature-flags",
 ])

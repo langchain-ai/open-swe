@@ -306,9 +306,6 @@ class LoopRules(BaseModel):
     # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model
     # call: a task worker's, the token of its coordinator's sandbox.
     refresh_github_proxy: bool = False
-    # Whether the run investigates an incident: before each model call the backend checks the
-    # incident still wants it and gives the call its instructions (``incident_context``).
-    incident: bool = False
     # Whether the run was asked only to offload the conversation: it summarizes it and ends.
     offload_conversation: bool = False
     # What the run's end does besides recording it.
@@ -362,8 +359,6 @@ class Catalog(BaseModel):
     # The thread's sandbox; None runs the file and shell tools through the files API alone.
     sandbox: SandboxSpec | None = None
     files: FilesSpec = FilesSpec()
-    # Whether each tool result is recorded as incident evidence, which the result then cites.
-    incident_evidence: bool = False
     # A review's browser; None gives a review none. The coding agent always has its own.
     browser: BrowserSpec | None = None
     # Where the Agent Server reports a launched worker's run ending; None launches none.

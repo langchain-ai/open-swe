@@ -396,7 +396,7 @@ class SlackEventsDelivery:
 
         from openswe.incidents import channels as incidents
 
-        incident_response = await incidents.handle_slack_event(payload, background_tasks)
+        incident_response = await incidents.handle_slack_event(payload)
         if incident_response is not None:
             return cast(WebhookResponse | DuplicateIncidentResponse, incident_response)
 

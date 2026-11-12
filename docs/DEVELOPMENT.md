@@ -197,10 +197,9 @@ The App's **Advanced** tab lists every delivery and its response, and ngrok's in
 With only the seeded `default` workspace, Slack and GitHub runs land there by default.
 Create additional workspaces from the **Workspaces** page to exercise routing locally: the same order applies as in a deployment (thread, `/workspace:<slug>` on the opening message — `workspace:<slug>` and `env:<slug>` still work, owning repository, bound Slack channel, user default, then `default`); see [How a run picks its workspace](INSTALLATION.md#7-verify-it-works) in the installation guide.
 
-**Incidents.**
-Follow [Incidents setup](INSTALLATION.md#incidents) to enroll Slack channels.
-Set `SLACK_APP_ID`; anyone in a channel can pause or complete its incident, and asking the agent requires a connected Robin account.
-Incident turns run on the main `agent` graph and are dispatched straight from the Slack webhook, so `make dev` or `make dev-ui` is all that is needed.
+**Incident channels.**
+Follow [incident channel setup](INSTALLATION.md#incidents) and set `SLACK_APP_ID`.
+The kickoff run is dispatched straight from the Slack webhook on the main `agent` graph, so `make dev` or `make dev-ui` is all that is needed.
 
 Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
 

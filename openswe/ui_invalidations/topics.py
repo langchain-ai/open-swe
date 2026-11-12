@@ -21,7 +21,6 @@ from openswe.ui_invalidations import outbox
 
 if TYPE_CHECKING:
     from openswe.github.repo_names import RepoFullName
-    from openswe.incidents.models import IncidentId
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +99,8 @@ class Topic(BaseTopic):
     REVIEW_STYLES: ClassVar[KeyedTopic[RepoFullName]]
     """Any repository's review style, including its analysis status."""
 
-    INCIDENTS: ClassVar[KeyedTopic[IncidentId]]
-    """Any incident's listing entry. Keyed: that incident's detail and documents,
-    including whether a run is investigating it."""
-
     INCIDENT_SETTINGS: ClassVar[Topic]
-    """The incident policy, which decides which incidents anyone can see."""
+    """The incident channel policy."""
 
     REQUIRED_CHECKS: ClassVar[KeyedTopic[str]]
 
@@ -213,22 +208,6 @@ class KeyedTopic[K: str](BaseTopic):
         return (keys & {""}) | await self._authorize_keys(session, records)
 
 
-async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[str]:
-    # The incident service invalidates through this module.
-    from openswe.dashboard.deps import session_is_admin
-    from openswe.incidents import service
-    from openswe.incidents.models import IncidentId
-
-    if session.get("provider", "github") != "github":
-        return set()
-    admin = session_is_admin(session)
-    ordered = sorted(incident_ids)
-    visible = await asyncio.gather(
-        *(service.visible(IncidentId(key), include_setup=admin) for key in ordered)
-    )
-    return {key for key, ok in zip(ordered, visible, strict=True) if ok}
-
-
 async def _readable_required_checks(session: Session, keys: set[str]) -> set[str]:
     from openswe.github.repos import accessible_repo_full_names
 
@@ -305,7 +284,6 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
 
 Topic.WORKSPACES = Topic("workspaces")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
-Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)

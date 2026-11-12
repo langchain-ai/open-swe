@@ -35,15 +35,12 @@ from runtime_api.endpoint import LONG_CALL_SECONDS, call
 from runtime_api.loop import ToolCallReport
 from runtime_api.operations import (
     OPERATION,
-    RECORD_EVIDENCE,
     OperationResult,
     RunOperation,
-    ToolEvidence,
 )
 
 from rt.backend import (
     TOOL_CALL_SLACK_SECONDS,
-    BackendCallError,
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
@@ -166,26 +163,6 @@ def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessag
     return Command(update={"messages": [message], STATE_KEY: answer.state})
 
 
-async def cited(
-    backend: OpenSweBackend, name: str, arguments: Mapping[str, object], result: ToolMessage
-) -> ToolMessage:
-    """``result``, recorded as incident evidence, citing the id it was recorded under."""
-    evidence = ToolEvidence(
-        run_id=run_id(),
-        tool=name,
-        arguments=_json_object.validate_python(arguments),
-        content=_json_content.validate_python(result.content),
-        status=result.status,
-        artifact=_json.validate_python(result.artifact) if result.artifact is not None else None,
-    )
-    try:
-        reply = await call(backend, RECORD_EVIDENCE, evidence)
-    except BackendCallError:
-        logger.warning("Could not record a tool result as incident evidence", exc_info=True)
-        return result
-    return result.model_copy(update={"content": _content(reply.content)})
-
-
 async def _credentials(spec: ToolSpec) -> dict[str, str]:
     """What the run reads of each connection ``spec`` names, by slug.
 
@@ -284,14 +261,11 @@ async def called(
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     make: Callable[[str], Awaitable[ToolMessage | Command]],
-    *,
-    cites_evidence: bool = False,
 ) -> ToolMessage | Command:
     """Make one call of tool ``name`` with ``arguments``: ``make``, given the call's id.
 
     Code mode calls tools directly, past the agent's tool-call chain that reports each
-    call and cites it as incident evidence, so a call it makes does both itself, under
-    the code mode call that ran it.
+    call, so a call it makes reports itself, under the code mode call that ran it.
     """
     outer = reported_call()
     if outer is None or outer == runtime.tool_call_id:
@@ -308,8 +282,6 @@ async def called(
         backend.outbox.finished(report, failure)
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
-    if cites_evidence:
-        message = await cited(backend, name, arguments, message)
     backend.outbox.finished(report, message)
     if isinstance(result, ToolMessage):
         return message
@@ -337,8 +309,6 @@ async def run_operation(
     spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
-    *,
-    cites_evidence: bool = False,
 ) -> ToolMessage | Command:
     """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
     reads of the connections it names."""
@@ -351,14 +321,12 @@ async def run_operation(
     else:
         run = _run_locally if runs_locally(spec, backend.run, runtime) else _operate
         make = partial(run, backend, spec, arguments, runtime, credentials=credentials)
-    return await called(backend, spec.name, arguments, runtime, make, cites_evidence=cites_evidence)
+    return await called(backend, spec.name, arguments, runtime, make)
 
 
-def operation_tool(
-    spec: ToolSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
-) -> StructuredTool:
+def operation_tool(spec: ToolSpec, backend: OpenSweBackend) -> StructuredTool:
     async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
-        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
+        return await run_operation(backend, spec, arguments, runtime)
 
     return StructuredTool.from_function(
         coroutine=operate,
@@ -391,8 +359,7 @@ def backend_tool(
             raise UnresolvedToolError(
                 f"{name} is not one of this run's tools; find the tool you want with search_tools"
             )
-        cites_evidence = backend.run.catalog.incident_evidence
-        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
+        return await run_operation(backend, spec, arguments, runtime)
 
     return StructuredTool.from_function(
         coroutine=operate,

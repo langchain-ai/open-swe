@@ -64,6 +64,20 @@ class MCPTools(list[BaseTool]):
     def catalog_note(self) -> str:
         return catalog_note(self.failures)
 
+    def without(self, tool_name: str) -> MCPTools:
+        """These tools less every one named ``tool_name`` on its server, wherever it runs."""
+        kept = MCPTools(
+            (t for t in self if (t.metadata or {}).get("mcp_tool_name") != tool_name),
+            (
+                server.model_copy(
+                    update={"tools": {k: v for k, v in server.tools.items() if k != tool_name}}
+                )
+                for server in self.runtime_servers
+            ),
+        )
+        kept.failures = list(self.failures)
+        return kept
+
 
 def catalog_note(failures: Sequence[str]) -> str:
     """What the system prompt says of managed tool discovery that ``failures`` broke."""

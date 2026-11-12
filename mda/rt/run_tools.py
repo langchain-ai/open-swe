@@ -79,10 +79,7 @@ class RunTools:
         self.catalog = catalog
         self._backend = backend
         self._files = files
-        self._operations = [
-            operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
-            for spec in catalog.operations
-        ]
+        self._operations = [operation_tool(spec, backend) for spec in catalog.operations]
         # None until the run connects to the MCP servers its catalog names.
         self._mcp: McpTools | None = None if catalog.mcp_servers else McpTools()
         self._connecting = asyncio.Lock()
@@ -166,7 +163,6 @@ class RunTools:
                 self.catalog.mcp_servers,
                 self._backend,
                 taken=self.by_name.keys(),
-                cites_evidence=self.catalog.incident_evidence,
             )
             self._offer(self._mcp)
 

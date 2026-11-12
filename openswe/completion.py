@@ -343,10 +343,6 @@ async def _handle_successful_run(
                 exc_info=True,
                 extra={"run_completion": {"thread_id": thread_id}},
             )
-    if metadata.get("source") == "incidents_agent":
-        from openswe.incidents import turns
-
-        return await turns.handle_run_completion(thread_id, run_id, "success")
     if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND}:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await refresh_slack_background_status(thread_id)
@@ -529,10 +525,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
-    if metadata.get("source") == "incidents_agent":
-        from openswe.incidents import turns
-
-        return await turns.handle_run_completion(thread_id, run_id, str(status))
     await refresh_slack_background_status(thread_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped

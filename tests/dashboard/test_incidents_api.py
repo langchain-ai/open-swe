@@ -1,4 +1,4 @@
-"""Incidents's dashboard authorization and generic-thread isolation."""
+"""Incident settings authorization and generic-thread isolation of incident threads."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -38,11 +38,8 @@ def _login(client: TestClient, *, login: str = "sre", email: str = "sre@example.
 @pytest.fixture
 def service(monkeypatch):
     service = SimpleNamespace(
-        list_incidents=AsyncMock(return_value={"items": [], "next_cursor": None}),
-        get_incident=AsyncMock(return_value={"incident": {"id": "i1"}, "report": None}),
         get_settings=AsyncMock(return_value={"policy": {"enabled": False}}),
         update_settings=AsyncMock(return_value={"command_id": "settings1", "status": "accepted"}),
-        submit_command=AsyncMock(return_value={"command_id": "command1", "status": "accepted"}),
     )
     monkeypatch.setattr(incidents, "service", service, raising=False)
     return service
@@ -51,11 +48,8 @@ def service(monkeypatch):
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
-        ("GET", "/records", None),
-        ("GET", "/records/i1", None),
         ("GET", "/settings", None),
         ("PATCH", "/settings", {"expected_version": 0, "policy": {}}),
-        ("POST", "/records/i1/commands", {"request_id": "r1", "action": "pause"}),
     ],
 )
 def test_all_incidents_routes_require_a_session(client, method, path, body) -> None:
@@ -87,14 +81,13 @@ def test_non_admins_cannot_change_settings(client, method) -> None:
     ("path", "body"),
     [
         ("/settings", {"expected_version": 0, "policy": {}}),
-        ("/records/i1/commands", {"request_id": "r1", "action": "pause"}),
     ],
 )
 def test_incidents_mutations_keep_parent_router_csrf(client, path, body) -> None:
     _login(client, login="admin")
 
     response = client.request(
-        "PATCH" if path == "/settings" else "POST",
+        "PATCH",
         f"/dashboard/api/incidents{path}",
         json=body,
         headers={"Origin": "https://other.example"},
@@ -102,31 +95,6 @@ def test_incidents_mutations_keep_parent_router_csrf(client, path, body) -> None
 
     assert response.status_code == 403
     assert response.json() == {"detail": "CSRF check failed"}
-
-
-def test_question_acceptance_uses_only_server_session_identity(client, service) -> None:
-    _login(client)
-
-    response = client.post(
-        "/dashboard/api/incidents/records/i1/commands",
-        json={"request_id": "r1", "action": "ask", "text": "What changed?"},
-        headers={"Origin": "http://testserver"},
-    )
-
-    assert response.status_code == 202
-    assert response.json() == {"command_id": "command1", "status": "accepted"}
-    service.submit_command.assert_awaited_once_with(
-        "i1",
-        action="ask",
-        text="What changed?",
-        request_id="r1",
-        actor={
-            "id": "github:sre",
-            "platform": "github",
-            "github_login": "sre",
-            "email": "sre@example.com",
-        },
-    )
 
 
 @pytest.mark.parametrize("source", ["incidents_agent"])

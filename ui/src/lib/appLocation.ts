@@ -10,7 +10,6 @@ export const SECTION_ROOTS = [
   "/agents/automations",
   "/agents/bots",
   "/agents/reviews",
-  "/incidents",
 ] as const
 
 /** A built-in section, or one installed plugin's page. */
@@ -30,7 +29,7 @@ function pathnameOf(href: string): string | undefined {
 
 function isAppLocation(value: string): boolean {
   const pathname = pathnameOf(value)
-  return [FALLBACK_LOCATION, "/assistant", "/incidents"].some((root) =>
+  return [FALLBACK_LOCATION, "/assistant"].some((root) =>
     isUnder(root, pathname)
   )
 }

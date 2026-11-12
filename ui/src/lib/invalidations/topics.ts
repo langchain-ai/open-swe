@@ -16,7 +16,6 @@ type KeyedTopic =
   | "required-checks"
   | "notifications"
   | "review-styles"
-  | "incidents"
   | "pull-requests"
   | "pull-request-checks"
   | "thread-queues"

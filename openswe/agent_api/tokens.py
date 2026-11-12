@@ -98,7 +98,7 @@ class RunSettings(BaseModel):
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
-    # Where an incident run answers: its incident's Slack thread, not the run's own.
+    # Where an incident channel's kickoff run answers.
     slack_thread: dict[str, JsonValue] | None = None
     # Tools the run's catalog offers the model but never grants (``Catalog.disabled``).
     disabled_tools: list[str] = []

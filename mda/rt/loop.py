@@ -29,7 +29,6 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     ToolMessage,
-    messages_from_dict,
     messages_to_dict,
 )
 from langgraph.config import get_stream_writer
@@ -48,7 +47,6 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
-    INCIDENT_CONTEXT,
     REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
     RUN_ENDED,
@@ -61,7 +59,6 @@ from runtime_api.loop import (
     Prepared,
     RefreshGitHubProxy,
     ReplyOnBehalf,
-    Routed,
     RunEnded,
     ScoutPlanEnd,
 )
@@ -74,7 +71,6 @@ from rt.backend import (
     OpenSweBackend,
     RunLocal,
     harness_message,
-    human_messages,
     run_call,
 )
 from rt.routing import Route, RouteClassifier
@@ -104,8 +100,6 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 _ROLE: Final = "task-role:"
 # Starts the id of the message holding what the backend worked out for this run.
 _RUN_CONTEXT: Final = "run-context:"
-# Starts the id of the message holding an incident run's instructions for its next call.
-_INCIDENT: Final = "incident-context:"
 
 
 def content_text(content: object) -> str:
@@ -382,32 +376,6 @@ class RunLoop:
                     source="task_context",
                 )
             )
-        if self.rules.incident:
-            # In a message, not the system prompt: they change from call to call, and a
-            # changed system prompt misses the provider's cache for the whole conversation.
-            incident = await call(
-                self._backend,
-                INCIDENT_CONTEXT,
-                Routed(run_id=run_id(), humans=human_messages(messages)),
-            )
-            if incident.instructions and incident.instructions != latest_with_id(
-                visible, _INCIDENT
-            ):
-                added.append(
-                    harness_message(
-                        incident.instructions,
-                        message_id=f"{_INCIDENT}{uuid.uuid4()}",
-                        source="incident_context",
-                        provenance=Provenance(kind="context", sender="run:incident"),
-                    )
-                )
-            limit = self._backend.run.catalog.model_call_limit
-            if (
-                self.rules.reply is not None
-                and limit is not None
-                and state.get("run_model_call_count", 0) == max(0, limit - 3)
-            ):
-                added.extend(messages_from_dict(self._nudge(self.rules.reply, state)))
         route = await self._route(held, [*visible, *added])
         if route is not None:
             update.update(self._kept(route))
@@ -726,7 +694,7 @@ class RunLoop:
         return PhaseResult(update={**update, "reply_nudges": 0})
 
     async def _reply_on_behalf(self, state: Mapping[str, object], text: str) -> None:
-        if not text and not self.rules.incident:
+        if not text:
             logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
             return
         reply = run_call(ReplyOnBehalf, run_id(), state, text=text)
@@ -768,13 +736,7 @@ class RunLoop:
         current = run_id()
         outbox = self._backend.outbox
         if messages and _LIMIT_MARKER in content_text(messages[-1].content):
-            answered = (
-                self.rules.incident
-                and self.rules.reply is not None
-                and self._replied(self.rules.reply, _Turn(messages, self._guards))
-            )
-            if not answered:
-                outbox.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
+            outbox.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
         for work in self.rules.at_end:
             if work == "settle_review_check":
                 outbox.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))

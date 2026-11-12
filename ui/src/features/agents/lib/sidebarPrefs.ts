@@ -38,7 +38,6 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
     "/agents/automations",
     "/agents/bots",
     "/agents/reviews",
-    "/incidents",
   ],
   organize: "none",
 }

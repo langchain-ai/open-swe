@@ -5,7 +5,7 @@ MDA plays every kind with its one graph. Each kind names, for the backend: the c
 it resolves from the backend's data as a run starts, what readies each turn and what
 its start records, the recorders that hear of its replies and tool calls, the guards on
 its shell commands, and how it reaches its tools by name, the thread's files, its
-skills, its incident and its GitHub credentials.
+skills and its GitHub credentials.
 """
 
 from collections.abc import Sequence
@@ -18,7 +18,6 @@ from langchain_core.tools import BaseTool
 from runtime_api.loop import RunSender, RunStarted
 
 from openswe.agent_api.tokens import RunSettings
-from openswe.incidents.runtime import IncidentSession
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.skill_store.run_skills import RunSkillStores
 
@@ -86,8 +85,4 @@ class RunKind:
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         """The tool behind the operation ``name``."""
-        return None
-
-    async def incident(self, config: RunnableConfig) -> IncidentSession | None:  # noqa: ARG002
-        """The incident the run investigates; None for a run that investigates none."""
         return None

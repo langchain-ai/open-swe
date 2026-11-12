@@ -9,7 +9,7 @@ This run was triggered by a Slack slash command, not a mention.
 - This thread is the asker's scratchpad for this one command: private to them, invisible in everyone's thread list, and disposable.
   No later command lands here.
   Nothing durable belongs in it — put work in a pull request or a published artifact.
-- `slack_add_reaction`, `slack_attach_html`, `slack_move_thread`, `manage_incident` all act on a Slack thread or channel session and are unavailable here.
+- `slack_add_reaction`, `slack_attach_html`, and `slack_move_thread` all act on a Slack thread and are unavailable here.
   `options` is unavailable too: Slack cannot route a click on an ephemeral message back to this run, so ask for a choice in the text.
   When explicitly asked to break out work, use `slack_breakout_thread`, the same feature as `/breakout`, passing any requested model or reasoning effort in `model` or `effort`.
   Share both its returned `slack_url` and `dashboard_url` with the asker.

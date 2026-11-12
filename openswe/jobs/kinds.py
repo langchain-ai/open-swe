@@ -41,6 +41,9 @@ from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLI
 from openswe.human_review.settling import SETTLE_JOB as HUMAN_REVIEW_SETTLE
 from openswe.human_review.settling import SettleTarget
 from openswe.human_review.standard import run_deadline, settle_pull_request, settle_repository
+from openswe.incidents.channels import INVESTIGATE_JOB as INCIDENT_INVESTIGATE
+from openswe.incidents.channels import JOIN_JOB as INCIDENT_JOIN
+from openswe.incidents.channels import IncidentChannel
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
@@ -103,6 +106,8 @@ WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
+WORKER.register(INCIDENT_JOIN)(IncidentChannel.join)
+WORKER.register(INCIDENT_INVESTIGATE)(IncidentChannel.investigate)
 
 
 def _text(job: Job, key: str) -> str | None:

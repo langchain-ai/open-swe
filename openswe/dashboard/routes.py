@@ -21,7 +21,6 @@ from openswe.dashboard.workspace_settings import router as workspace_settings_ro
 from openswe.github.dashboard_routes import router as repos_router
 from openswe.github.pull_request_dashboard_routes import router as pull_requests_router
 from openswe.human_review.routes import router as human_review_router
-from openswe.incidents.document_routes import router as incident_documents_router
 from openswe.incidents.routes import router as incidents_router
 from openswe.mcp.routes import router as mcp_router
 from openswe.merge_queue.routes import router as merge_queue_router
@@ -49,7 +48,6 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 router.include_router(incidents_router)
-router.include_router(incident_documents_router, prefix="/incidents/documents")
 router.include_router(auth_router)
 router.include_router(client_errors_router)
 router.include_router(desktop_environments_router)

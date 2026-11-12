@@ -3,8 +3,7 @@
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: a model's
-settings, the incident a run investigates, a fresh
-GitHub proxy token, a reply posted on the model's behalf, and what the end of the run
+settings, a fresh GitHub proxy token, a reply posted on the model's behalf, and what the end of the run
 records. The runtime classifies each turn's route itself, and the catalog says which
 task the thread belongs to.
 The transcript and usage hear of the run's start, each reply and tool call, and the
@@ -199,7 +198,7 @@ class ModelFailed(Report):
 
 
 class Routed(RunRequest):
-    """A run's request with its human messages, for ``INCIDENT_CONTEXT`` (and the deprecated ``ROUTE_MODEL``)."""
+    """A run's request with its human messages, for the deprecated ``ROUTE_MODEL``."""
 
     # The run's human messages, the latest of which the route is for.
     humans: list[dict[str, JsonValue]] = []
@@ -275,13 +274,6 @@ class ChosenModel(RunRequest):
     effort: str | None = None
 
 
-class IncidentContext(BaseModel):
-    """The incident a run investigates, as each model call tells the model."""
-
-    # Added to the call's system prompt.
-    instructions: str
-
-
 class ReplyOnBehalf(RunCall):
     """The model's final answer, posted for it after it ignored the reply tool."""
 
@@ -317,11 +309,6 @@ TASK_CONTEXT = Endpoint(
 )
 MODEL_CHOICE = Endpoint(
     "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
-# Checks the incident still wants the run and records the evidence its messages carry,
-# each once: safe to send again.
-INCIDENT_CONTEXT = Endpoint(
-    "incident_context", Routed, IncidentContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 # Mints a token and sets it on the sandbox, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(

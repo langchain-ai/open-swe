@@ -9,14 +9,14 @@ them; the backend answers the typed API both sides import (``runtime_api``):
   What the turn's start records (its transcript turn, the thread's model and usage) is
   the ``run_started`` report, off the run's path
 - the inbox and skills, and the named calls MDA's middleware makes around a model call
-  (``model_choice``, ``incident_context``, ``refresh_github_proxy``,
+  (``model_choice``, ``refresh_github_proxy``,
   ``reply_on_behalf``), to move its Slack conversation (``slack_move``, ``slack_moved``),
   and at the run's end (``run_ended``, or ``model_failed`` when a model call fails it,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``)
 - the reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key
-- the work of the run's tools (``operation``, ``check_shell``, ``record_evidence``, the
-  ``files`` calls), and the sandbox MDA keeps
+- the work of the run's tools (``operation``, ``check_shell``, the ``files``
+  calls), and the sandbox MDA keeps
 
 None of the run's tool calls is a tool call here: no tools node, no tool-call
 middleware. A call made from inside a subagent names the namespace of its ``task``
@@ -59,7 +59,6 @@ from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
     INBOX,
     INBOX_RECEIVED,
-    INCIDENT_CONTEXT,
     MODEL_CHOICE,
     MODEL_FAILED,
     MODEL_RESULT,
@@ -84,7 +83,6 @@ from runtime_api.loop import (
     InboxItems,
     InboxRead,
     InboxReceipt,
-    IncidentContext,
     ModelFailed,
     ModelResult,
     Prepare,
@@ -107,14 +105,11 @@ from runtime_api.models import chosen_model
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
-    RECORD_EVIDENCE,
-    EvidenceReply,
     OperationResult,
     RunOperation,
     RunRequest,
     ShellCheck,
     ShellVerdict,
-    ToolEvidence,
 )
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxy, SandboxProxyRequest
@@ -171,8 +166,6 @@ from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.analytics.segment_activity import SegmentActivity
 from openswe.config import ENV
 from openswe.github.proxy import proxy_token_set_since
-from openswe.incidents.runtime import IncidentSession
-from openswe.input_messages import run_context
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.plugin_chat import PluginChatTools
@@ -719,12 +712,6 @@ class TokenRun:
         state = call_state(request, self.kind.restore)
 
         async def post() -> None:
-            if self.run.settings.source == "incidents_agent":
-                from openswe.incidents.runtime import load_incident_session
-
-                session = await load_incident_session(self._config(), run_id=request.run_id)
-                await session.deliver_incomplete()
-                return
             result = await send_slack_reply(request.text, "final", state=state)
             logger.warning(
                 "Posted the model's final message on its behalf after it ignored the reply tool",
@@ -770,13 +757,7 @@ class TokenRun:
         return Done()
 
     async def step_limit_reached(self, request: RunRequest) -> Done:
-        if self.run.settings.source == "incidents_agent":
-            from openswe.incidents.runtime import load_incident_session
-
-            session = await load_incident_session(self._config(), run_id=request.run_id)
-            await session.deliver_incomplete()
-        else:
-            await self.in_run("step_limit_reached", notify_step_limit)
+        await self.in_run("step_limit_reached", notify_step_limit)
         return Done()
 
     async def settle_review_check(self, _request: RunRequest) -> Done:
@@ -789,54 +770,6 @@ class TokenRun:
 
         await self.in_run("finish_scout_plan", finish)
         return Done()
-
-    async def _incident(self) -> IncidentSession:
-        incident = await self.kind.incident(self.config)
-        if incident is None:
-            raise RefusedCallError("This run investigates no incident")
-        return incident
-
-    async def incident_context(self, request: Routed) -> IncidentContext:
-        """The incident the run investigates, as the next model call tells the model."""
-        humans = [m.text for m in messages_from_dict(request.humans)]
-
-        async def read() -> IncidentContext:
-            incident = await self._incident()
-            instructions = await incident.context(humans)
-            return IncidentContext(
-                instructions=run_context("incident", instructions) if instructions.strip() else ""
-            )
-
-        return await in_graph_context(
-            {**self.config, "run_name": "incident_context"}, lambda _runtime: read()
-        )
-
-    async def record_evidence(self, request: ToolEvidence) -> EvidenceReply:
-        """An incident run's tool result, recorded as evidence the result then cites."""
-        content = request.content
-        result = ToolMessage(
-            content=content
-            if isinstance(content, str)
-            else [block for block in content if isinstance(block, str | dict)],
-            artifact=request.artifact,
-            status=request.status,
-            tool_call_id="evidence",
-            name=request.tool,
-        )
-
-        async def record() -> EvidenceReply:
-            incident = await self._incident()
-            observed = await incident.observe(
-                result, {"name": request.tool, "args": request.arguments}
-            )
-            cited = observed.content
-            return EvidenceReply(
-                content=cited if isinstance(cited, str) else _json_list.validate_python(cited)
-            )
-
-        return await in_graph_context(
-            {**self.config, "run_name": "record_evidence"}, lambda _runtime: record()
-        )
 
     async def browser(self, request: BrowserReport) -> Done:
         await ThreadBrowser(browser=request.browser, opened=request.opened).report(
@@ -945,7 +878,6 @@ CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
 CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
-CALLS.serve(INCIDENT_CONTEXT, TokenRun.incident_context)
 CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
@@ -960,7 +892,6 @@ CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)
 CALLS.serve(REPORTS, TokenRun.reports)
 CALLS.serve(OPERATION, TokenRun.operation)
 CALLS.serve(CHECK_SHELL, TokenRun.check_shell)
-CALLS.serve(RECORD_EVIDENCE, TokenRun.record_evidence)
 CALLS.serve(SANDBOX_REPLACED, TokenRun.sandbox_replaced)
 CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
 CALLS.serve(file_api.LS, file_calls.files_ls)

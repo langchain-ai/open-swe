@@ -82,21 +82,3 @@ class ShellVerdict(BaseModel):
 
 
 CHECK_SHELL = Endpoint("check_shell", ShellCheck, ShellVerdict)
-
-
-class ToolEvidence(RunRequest):
-    """A tool result of an incident run, recorded as evidence the report can cite."""
-
-    tool: str
-    arguments: dict[str, JsonValue] = {}
-    content: str | list[JsonValue]
-    status: Literal["success", "error"] = "success"
-    artifact: JsonValue = None
-
-
-class EvidenceReply(BaseModel):
-    # The result's content, citing the evidence it was recorded as.
-    content: str | list[JsonValue]
-
-
-RECORD_EVIDENCE = Endpoint("record_evidence", ToolEvidence, EvidenceReply)

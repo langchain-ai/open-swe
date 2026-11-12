@@ -198,7 +198,6 @@ from openswe.tools import (
     list_workspaces,
     listen_events,
     manage_baby_sit,
-    manage_incident,
     manage_thread,
     merge_expedited_pr,
     monitor,
@@ -319,7 +318,6 @@ DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
 # on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {
-        "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
@@ -546,50 +544,51 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
         return None
 
 
-INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+# An incident channel's kickoff run acts for no one and reads untrusted channel
+# messages, so it only researches and replies in its own thread.
+INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
-        "manage_incident",
-        "slack_add_reaction",
-        "slack_attach_html",
-        "slack_reply",
         "task",
+        "start_thread",
         "background_execute",
         "background_task",
         "monitor",
-        "expose_port",
         "http_request",
-        "expedite_pr_approval",
-        "merge_expedited_pr",
+        "expose_port",
+        "listen_events",
+        "open_pull_request",
+        "link_pull_request",
+        "request_pr_review",
         "request_human_review",
         "assign_human_reviewer",
         "auto_assign_human_reviewer",
         "dismiss_human_review_request",
         "get_human_review_status",
-        "manage_baby_sit",
-        "listen_events",
+        "expedite_pr_approval",
+        "merge_expedited_pr",
         "request_rollout_check",
+        "manage_baby_sit",
         "manage_thread",
         "reorder_thread_pins",
         "reorder_sidebar_threads",
-        "start_thread",
-        "link_pull_request",
-        "open_pull_request",
-        "recreate_sandbox",
-        "request_pr_review",
-        "save_user_skill",
-        "delete_user_skill",
-        "slack_move_thread",
+        "slack_add_reaction",
+        "slack_attach_html",
         "slack_post_message",
+        "slack_move_thread",
         "slack_breakout_thread",
-        "publish_workspace",
-        "snapshotctl",
-        "configure_repository",
-        "configure_workspace",
-        "delete_workspace",
+        "slack_start_review_channel",
         "create_automation",
         "update_automation",
         "trigger_automation",
         "delete_automation",
+        "configure_repository",
+        "configure_workspace",
+        "delete_workspace",
+        "publish_workspace",
+        "snapshotctl",
+        "save_user_skill",
+        "delete_user_skill",
+        "recreate_sandbox",
     }
 )
 
@@ -614,14 +613,12 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "note_on_diff",
         "add_review_comment",
         "get_thread",
-        "manage_incident",
         "list_threads",
         "listen_events",
         "request_rollout_check",
         "manage_thread",
         "reorder_thread_pins",
         "reorder_sidebar_threads",
-        "read_incident",
         "read_only_sql",
         "execute_database_sql",
         "read_user_settings",
@@ -635,8 +632,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "unshare_project",
         "move_thread_to_project",
         "save_user_instructions",
-        "record_incident_report",
-        "search_incidents",
         "start_thread",
         "task",
     }
@@ -725,7 +720,6 @@ AGENT_TOOLS: Final = (
     request_rollout_check,
     listen_events,
     list_event_types,
-    manage_incident,
     slack_add_reaction,
     slack_attach_html,
     slack_list_channel_members,
@@ -979,8 +973,6 @@ _NOT_FROM_CODE = frozenset({"task"}) | frozenset(
     {
         "slack_reply",
         "slack_no_reply_needed",
-        "record_incident_report",
-        "manage_incident",
         "cli_result",
         "connect_managed_tools",
         "switch_to_performance_model",
@@ -1754,13 +1746,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     if thread_id is None:
         raise ValueError("An agent run needs a thread")
 
-    from openswe.incidents.runtime import IncidentSession, load_incident_session
-
-    incident_session: IncidentSession | None = None
-    if cfg.source == "incidents_agent":
-        incident_session = await load_incident_session(config, run_id=None)
-        cfg.slack_thread = incident_session.slack_thread
-        configurable["slack_thread"] = cfg.slack_thread.dump()
     credential_scope = asyncio.ensure_future(_credential_scope(config))
     # MCP loading needs only who the run acts for and where, and it is the slowest
     # lookup here, so it overlaps every lookup below.
@@ -2009,16 +1994,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     cli_result_required = bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
     managed_gateway, mcp_tools = await mcp_tools_task
-    if incident_session is not None:
-        # incident.io refuses publishing from this MCP client (surface_cannot_publish).
-        mcp_tools = [
-            tool
-            for tool in mcp_tools
-            if (tool.metadata or {}).get("mcp_tool_name") != "status_page_update"
-        ]
+    if cfg.source == "incidents_agent":
+        # Status-page updates publish to customers; a kickoff run only researches.
+        mcp_tools = mcp_tools.without("status_page_update")
 
     slack_tools = [
-        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_list_channel_members,
@@ -2059,14 +2039,12 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         static_tools = [
             tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
         ]
-    incident_automatic = incident_session is not None and incident_session.explicit_request is None
-    if incident_session is not None:
-        static_tools.extend(incident_session.tools)
-    if incident_automatic:
+    incident_kickoff = cfg.source == "incidents_agent"
+    if incident_kickoff:
         static_tools = [
             tool
             for tool in static_tools
-            if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+            if _registered_tool_name(tool) not in INCIDENT_KICKOFF_EXCLUDED_TOOLS
         ]
     if settings.get("implementation_walkthrough_enabled") is True:
         static_tools = [
@@ -2080,8 +2058,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     excluded_tools = (
         _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
-        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
-        if incident_automatic
+        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_KICKOFF_EXCLUDED_TOOLS
+        if incident_kickoff
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
     # A client's tool replaces any server tool of the same name, so the endpoint's
@@ -2094,8 +2072,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     main_tools = [
         tool for tool in static_tools if _registered_tool_name(tool) not in client_tool_names
     ]
-    # Nothing is owed on a run the model cannot answer through: an automatic
-    # incident sweep, for one, has the reply tool taken away on purpose.
+    # Nothing is owed on a run the model cannot answer through.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
     dynamic_tool_middleware = _integration_middleware(
         mcp_tools,
@@ -2111,7 +2088,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         and not routed_arm
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
-        and incident_session is None
         and not cfg.background_task_completion
         and not cfg.continued_from_thread_id
         else None
@@ -2172,24 +2148,14 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
-    initial_surface = (
-        SLACK_REPLY_SURFACE
-        if incident_session is not None
-        else _initial_reply_surface(cfg)
-        if reply_tool_offered
-        else WEB_REPLY_SURFACE
-    )
+    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
     page_tools = PageTools.of_run(cfg)
     surface.base_tools = [
         *main_tools,
         *(client_tools.tools if client_tools else []),
         *(page_tools.tools if page_tools else []),
     ]
-    surface.model_call_limit = (
-        incident_session.policy.max_model_calls
-        if incident_session is not None and incident_session.explicit_request is None
-        else MODEL_CALL_RECURSION_LIMIT
-    )
+    surface.model_call_limit = MODEL_CALL_RECURSION_LIMIT
     surface.delegates = task_coordination is not None and task_coordination.can_delegate
     reply_tool = _registered_tool_name(slack_reply)
     no_reply_tool = _registered_tool_name(slack_no_reply_needed)
@@ -2231,11 +2197,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             if part
         ),
         refresh_github_proxy=True,
-        incident=incident_session is not None,
         offload_conversation=cfg.offload_conversation,
     )
-    if incident_session is not None:
-        surface.loop.reply = incident_session.reply_rules()
     surface.inbox = InboxSpec(
         events=True,
         surface=initial_surface,
@@ -2299,7 +2262,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     surface.excluded = (
         _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
-        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
-        if incident_automatic
+        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_KICKOFF_EXCLUDED_TOOLS
+        if incident_kickoff
         else DEEP_AGENT_EXCLUDED_TOOLS
     )

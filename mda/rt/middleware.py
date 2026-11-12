@@ -111,7 +111,7 @@ from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles, RunArtifacts
 from rt.sandbox_setup import sandbox_setup
-from rt.tools import STATE_KEY, cited, run_id, tool_report
+from rt.tools import STATE_KEY, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -801,44 +801,6 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         if request.tool_call["name"] in self._served:
             return await handler(request)
         return await reported(self._backend, request, handler)
-
-
-class IncidentEvidenceMiddleware(AgentMiddleware):
-    """Record each tool result of an incident run as evidence, which the result then cites.
-
-    The report the run writes cites what it found by evidence id, so each result
-    carries the id the backend recorded it under.
-    """
-
-    trace_policy = MIDDLEWARE_TRACE_POLICY
-
-    def __init__(self, backend: OpenSweBackend) -> None:
-        self._backend = backend
-
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
-        result = await handler(request)
-        if not self._backend.run.catalog.incident_evidence:
-            return result
-        if isinstance(result, ToolMessage):
-            return await self._cited(request, result)
-        if isinstance(result, Command) and isinstance(result.update, dict):
-            messages = result.update.get("messages")
-            if isinstance(messages, list):
-                cited = [
-                    await self._cited(request, m) if isinstance(m, ToolMessage) else m
-                    for m in messages
-                ]
-                return dataclasses.replace(result, update={**result.update, "messages": cited})
-        return result
-
-    async def _cited(self, request: ToolCallRequest, result: ToolMessage) -> ToolMessage:
-        return await cited(
-            self._backend, request.tool_call["name"], request.tool_call["args"], result
-        )
 
 
 class _Launched(BaseModel):

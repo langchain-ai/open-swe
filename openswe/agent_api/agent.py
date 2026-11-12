@@ -13,12 +13,6 @@ from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RunSettings
 from openswe.github.thread_token import get_github_token
 from openswe.github.token import resolve_github_token
-from openswe.incidents.runtime import (
-    INCIDENT_SOURCE,
-    INCIDENT_TOOL_NAMES,
-    IncidentSession,
-    load_incident_session,
-)
 from openswe.middleware.ask_requester_guard import AskRequesterGuardMiddleware
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import record_run_usage
@@ -117,16 +111,7 @@ class AgentKind(RunKind):
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
         cfg = RunConfig.from_config(config)
-        if name in INCIDENT_TOOL_NAMES:
-            incident = await self.incident(config)
-            return None if incident is None else next(t for t in incident.tools if t.name == name)
         if (page := PageTools.of_run(cfg)) is not None and (tool := page.tool(name)) is not None:
             return tool
         static = agent_tools_by_name().get(name)
         return static if static is not None else (await integration_tools(config)).get(name)
-
-    async def incident(self, config: RunnableConfig) -> IncidentSession | None:
-        cfg = RunConfig.from_config(config)
-        if cfg.source != INCIDENT_SOURCE:
-            return None
-        return await load_incident_session(config, run_id=cfg.run_id)

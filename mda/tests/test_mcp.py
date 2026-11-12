@@ -67,12 +67,12 @@ async def test_a_run_for_no_one_goes_without_a_personal_server_and_a_person_is_a
     )
     no_person = CredentialStoreError("user-owned connections require a person principal")
     monkeypatch.setattr(mcp, "connections", _Connections(no_person))
-    loaded = await McpTools.load([server], OpenSweBackend(), taken=(), cites_evidence=False)
+    loaded = await McpTools.load([server], OpenSweBackend(), taken=())
     assert loaded.tools == []
 
     monkeypatch.setattr(mcp, "connections", _Connections(GraphInterrupt()))
     with pytest.raises(GraphInterrupt):
-        await McpTools.load([server], OpenSweBackend(), taken=(), cites_evidence=False)
+        await McpTools.load([server], OpenSweBackend(), taken=())
 
 
 async def test_a_server_never_gets_a_credential_open_swe_or_a_channel_reads_for_itself(
@@ -89,7 +89,7 @@ async def test_a_server_never_gets_a_credential_open_swe_or_a_channel_reads_for_
     # Agent Auth would answer with the GitHub App's installation token.
     agent_auth = _Connections(AssertionError("read the token"))
     monkeypatch.setattr(mcp, "connections", agent_auth)
-    loaded = await McpTools.load([server], OpenSweBackend(), taken=(), cites_evidence=False)
+    loaded = await McpTools.load([server], OpenSweBackend(), taken=())
     assert (loaded.tools, agent_auth.read) == ([], [])
 
 
@@ -184,7 +184,7 @@ async def test_a_server_tool_gets_the_arguments_langchain_names_for_itself(
         return ToolMessage(content="ok", tool_call_id=tool_call_id)
 
     monkeypatch.setattr(server, "call", call)
-    tool = server.tool(definition, OpenSweBackend(), cites_evidence=False)
+    tool = server.tool(definition, OpenSweBackend())
     runtime = ToolRuntime(
         state={"messages": []},
         context=None,
