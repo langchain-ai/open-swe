@@ -95,7 +95,7 @@ async def test_operational_alert_failure_does_not_break_the_run(
 @pytest.mark.parametrize(
     ("image_age", "expected_age"),
     [
-        (timedelta(hours=6, minutes=17), "6h 17m"),
+        (timedelta(hours=9, minutes=9), "9h 9m"),
         (timedelta(days=2, hours=3, minutes=4), "2d 3h 4m"),
         (None, "unknown (capture timestamp missing or invalid)"),
     ],
@@ -113,7 +113,10 @@ async def test_stale_workspace_alerts_skip_fresh_images(
         snapshot_id="snapshot-1",
     )
     await StaleWorkspaceReporter.report("thread-1", workspace)
+    workspace.last_captured_at = (datetime.now(UTC) - timedelta(hours=7, minutes=59)).isoformat()
+    await StaleWorkspaceReporter.report("thread-1", workspace)
     assert not slack_api.calls
+    assert not [r for r in caplog.records if r.name == "openswe.slack.alerts"]
     workspace.last_captured_at = (
         (datetime.now(UTC) - image_age).isoformat() if image_age is not None else None
     )

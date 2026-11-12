@@ -12,7 +12,7 @@ from openswe.workspaces.store import Workspace
 class StaleWorkspaceReporter:
     @staticmethod
     async def report(thread_id: str, workspace: Workspace) -> None:
-        if not is_snapshot_stale(workspace, interval_seconds=2 * 60 * 60):
+        if not is_snapshot_stale(workspace, interval_seconds=8 * 60 * 60):
             return
         captured = parse_iso(workspace.last_captured_at)
         image_age = "unknown (capture timestamp missing or invalid)"
