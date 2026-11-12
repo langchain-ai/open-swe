@@ -151,7 +151,7 @@ async def _reviewed(approval: HumanReviewRequest, github: _GitHub) -> HumanRevie
 
 
 async def test_merge_submits_a_missing_review_and_merges_pinned_to_the_head(
-    github: _GitHub, open_approval: OpenApproval
+    github: _GitHub, open_approval: OpenApproval, github_app: AsyncMock
 ) -> None:
     approval = await _approved(open_approval, "U_GRACE")
 
@@ -163,6 +163,12 @@ async def test_merge_submits_a_missing_review_and_merges_pinned_to_the_head(
     assert stored.state == "merged"
     assert github.reviews == [("grace", "abc123")]
     assert github.merges == [{"sha": "abc123", "merge_method": "squash"}]
+    github_app.assert_awaited_with(
+        installation_id=42,
+        repositories=["repo"],
+        permissions={"contents": "write", "pull_requests": "write", "workflows": "write"},
+        raise_errors=True,
+    )
     grace = next(vote for vote in stored.participants if vote.github_login == "grace")
     assert (grace.github_review_id, grace.github_review_sha) == (101, "abc123")
     assert github.dismissed == []

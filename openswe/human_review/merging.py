@@ -13,7 +13,7 @@ from openswe.human_review.requests import HumanReviewRequest
 
 logger = logging.getLogger(__name__)
 
-_MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write"}
+_MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write", "workflows": "write"}
 
 MergeStatus = Literal[
     "merged",
