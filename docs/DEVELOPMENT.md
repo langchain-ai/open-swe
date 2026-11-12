@@ -152,10 +152,11 @@ It reloads on code changes only: after editing `.env`, restart it.
 Have the backend front the Vite dev server instead of serving a build:
 
 ```bash
-make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to it, in one terminal
+make dev-ui   # Vite on :3000, the backend on :2024, and MDA on :2025, in one terminal
 ```
 
-`make dev-ui` runs `make web` and `make dev` side by side, the backend with `DASHBOARD_DEV_SERVER_URL=http://localhost:3000`; Ctrl-C stops both.
+`make dev-ui` runs `make web`, `make dev`, and `make dev-mda` side by side, the backend with `DASHBOARD_DEV_SERVER_URL=http://localhost:3000`; Ctrl-C stops all three.
+Do not also start `make dev-mda` in another terminal; the individual targets remain available for running services separately.
 Open `http://localhost:2024` as usual: the page, its modules, and hot module replacement come from Vite, while `/dashboard/api/*` and the LangGraph routes stay with the backend.
 Nothing else changes, because the browser never leaves port 2024.
 The HMR WebSocket connects straight to Vite's port; the UI's Vite config points the client there.
@@ -367,7 +368,7 @@ Ask users to attach that file to a report.
 | `make dev` | `langgraph dev` on port 2024: graphs, webhooks, dashboard API, and the bundled dashboard when a build exists |
 | `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Robin thread runs on |
 | `make mda-cli` | Build the `mda` CLI from the vendored SDK (`make dev-mda` does it first) |
-| `make dev-ui` | `make web` and `make dev` together, the backend fronting Vite so the UI hot-reloads on port 2024 |
+| `make dev-ui` | Vite, the backend, and MDA together; the UI hot-reloads on port 2024 |
 | `make web` | The Vite dev server alone on port 3000 |
 | `make build-dashboard` | Installs the dashboard's dependencies and builds it into `ui/.output/public` |
 | `make tunnel NGROK_DOMAIN=…` | `ngrok http 2024` on your static domain, exposing only `/webhooks/*` |

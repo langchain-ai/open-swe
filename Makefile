@@ -45,11 +45,11 @@ postgres:
 migration:
 	uv run python scripts/new_migration.py "$(m)"
 
-# UI development in one terminal: Vite (`make web`) and the backend fronting it, so
-# http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
-# run side by side under -j2; Ctrl-C stops both. Command-line variables reach both recipes.
+# UI development in one terminal: Vite, the backend fronting it, and MDA.
+# http://localhost:2024 hot-reloads without a build or any cross-origin setup.
+# Ctrl-C stops all three. Command-line variables reach every recipe.
 dev-ui:
-	$(MAKE) --no-print-directory -j2 web dev DASHBOARD_DEV_SERVER_URL=http://localhost:3000 TURBO_UI=stream
+	$(MAKE) --no-print-directory -j3 web dev dev-mda DASHBOARD_DEV_SERVER_URL=http://localhost:3000 TURBO_UI=stream
 
 web:
 	pnpm run dev
@@ -162,7 +162,7 @@ help:
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
 	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where every agent run goes'
 	@echo 'mda-cli                      - build the mda CLI from the vendored SDK (needs cargo)'
-	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
+	@echo 'dev-ui                       - Vite, LangGraph, and MDA in one terminal (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'
 	@echo 'web                          - run the dashboard web server'
