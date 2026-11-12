@@ -83,8 +83,8 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     browser,
     baseURL,
   }) => {
-    // 834px is wider than the 767px mobile breakpoint, so the sidebar renders
-    // inline while Chromium still emits touch events for the long press.
+    // At tablet width the sidebar starts collapsed but opens inline, while
+    // Chromium still emits touch events for the long press.
     const context = await browser.newContext({
       baseURL,
       viewport: { width: 834, height: 1112 },
@@ -102,6 +102,10 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     const threadA = await createThreadWithSandbox(page);
     const threadB = await createThreadWithSandbox(page);
     await expect(page).toHaveURL(new RegExp(`/agents/${threadB}$`));
+
+    await page
+      .getByRole("button", { name: "Expand sidebar", exact: true })
+      .tap();
 
     const rowA = page.locator(`a[href$="/agents/${threadA}"]`).first();
     await expect(rowA).toBeVisible();

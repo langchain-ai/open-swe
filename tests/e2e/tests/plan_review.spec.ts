@@ -91,6 +91,10 @@ test.describe("HTML artifacts", () => {
         .contentFrame()
         .getByText("Add greet() helper"),
     ).toBeVisible({ timeout: 30_000 });
+    // Keep the artifact pane narrow enough to exercise its stacked header.
+    await loggedOut
+      .getByRole("button", { name: "Expand sidebar", exact: true })
+      .click();
     const summaryBox = await loggedOut
       .getByTestId("plan-summary")
       .boundingBox();

@@ -245,6 +245,7 @@ it("keeps a project thread out of No project even when the unscoped page is cach
     </QueryClientProvider>
   )
 
+  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
   expect(screen.getByRole("button", { name: "Example project" })).toBeTruthy()
   expect(screen.getByRole("button", { name: "No project" })).toBeTruthy()
   expect(screen.getByRole("link", { name: /Unfiled chat/ })).toBeTruthy()
