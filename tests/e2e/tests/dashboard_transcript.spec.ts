@@ -5,6 +5,7 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
+  readyComposerEditor,
   threadIdFromUrl,
   threadState,
   typeIntoComposer,
@@ -272,7 +273,7 @@ test.describe("transcript rendering", () => {
     ).toHaveCount(1);
   });
 
-  test("replies to selected transcript text in the next message", async ({
+  test("sends a selected-text reply without submitting the composer draft", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -280,6 +281,10 @@ test.describe("transcript rendering", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
+
+    const editor = await readyComposerEditor(page);
+    await editor.click();
+    await editor.pressSequentially("Keep this draft");
 
     const passage = page
       .getByText("Opening a pull request.", { exact: true })
@@ -298,18 +303,19 @@ test.describe("transcript rendering", () => {
     await field.press("Enter");
     await expect(
       page.getByRole("list", { name: "Replies in your next message" }),
-    ).toContainText("Which branch?");
+    ).toHaveCount(0);
+    await expect(editor).toHaveText("Keep this draft");
 
-    await typeIntoComposer(page, "Thanks!");
     // The agent gets the selection with a line of context on each side.
     await waitForStateToContain(
       page,
       threadId,
-      "Thanks!\\n<reply>\\nsource: conversation\\nbefore:",
+      "<reply>\\nsource: conversation\\nbefore:",
     );
     const state = await threadState(page, threadId);
     expect(state).toContain("selection: Opening a pull request.\\nafter:\\n");
     expect(state).toContain("comment: Which branch?\\n</reply>");
+    expect(state).not.toContain("Keep this draft");
     const sent = page
       .getByTestId("user-message")
       .filter({ hasText: "Which branch?" });
