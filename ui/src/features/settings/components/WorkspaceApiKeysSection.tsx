@@ -68,7 +68,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
   return (
     <SettingsSection
       title="API Keys"
-      description="Workspace-scoped keys for the CLI and automation. Keys can start system threads, not personal threads. Only admins can manage them."
+      description="Environment-scoped keys for the CLI and automation. Keys can start system threads, not personal threads. Only admins can manage them."
     >
       <div className="space-y-space-4 px-space-4 py-space-3">
         {keys.isPending ? (

@@ -75,7 +75,7 @@ export function BotThreadsList({
         <p className="mt-space-1 text-xs text-secondary">
           Threads started by Slack bots on the allowlist. They are read-only
           here: reply in the Slack thread to steer one.
-          {!isAdmin && " Workspace admins manage which bots are allowed."}
+          {!isAdmin && " Robin admins manage which bots are allowed."}
         </p>
 
         {!bot &&

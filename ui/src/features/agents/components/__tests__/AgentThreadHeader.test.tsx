@@ -74,7 +74,7 @@ describe("AgentThreadHeader", () => {
       }
     )
     fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: "Workspace" })
+      await screen.findByRole("menuitemradio", { name: "Shared" })
     )
     fireEvent.click(screen.getByRole("checkbox"))
     fireEvent.click(screen.getByRole("button", { name: "Share entire thread" }))

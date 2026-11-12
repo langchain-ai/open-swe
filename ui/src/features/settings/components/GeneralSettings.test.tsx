@@ -132,19 +132,19 @@ it("keeps preference labels when closed and saves workspace values, not labels",
       .slice(0, 4)
       .map((element) => element.textContent)
   ).toEqual(
-    ["System", "Private · only me", "Workspace default", "Queue"].map((label) =>
-      expect.stringContaining(label)
+    ["System", "Private · only me", "Environment default", "Queue"].map(
+      (label) => expect.stringContaining(label)
     )
   )
   expect(save).not.toHaveBeenCalled()
 
   fireEvent.click(workspace)
   expect(
-    await screen.findByRole("option", { name: "Workspace default" })
+    await screen.findByRole("option", { name: "Environment default" })
   ).toBeTruthy()
   fireEvent.keyDown(workspace, { key: "Escape" })
   await waitFor(() => expect(screen.queryByRole("option")).toBeNull())
-  expect(workspace.textContent).toContain("Workspace default")
+  expect(workspace.textContent).toContain("Environment default")
   expect(save).not.toHaveBeenCalled()
 
   fireEvent.click(workspace)
@@ -165,7 +165,7 @@ it("keeps preference labels when closed and saves workspace values, not labels",
 
   fireEvent.click(workspace)
   const workspaceDefault = await screen.findByRole("option", {
-    name: "Workspace default",
+    name: "Environment default",
   })
   fireEvent.pointerDown(workspaceDefault)
   fireEvent.click(workspaceDefault)
@@ -175,7 +175,7 @@ it("keeps preference labels when closed and saves workspace values, not labels",
     )
   )
   await waitFor(() =>
-    expect(workspace.textContent).toContain("Workspace default")
+    expect(workspace.textContent).toContain("Environment default")
   )
 })
 

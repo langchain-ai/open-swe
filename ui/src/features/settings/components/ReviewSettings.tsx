@@ -56,8 +56,8 @@ export function ReviewSettings({
         title="Review Guidelines"
         description={
           scoped
-            ? "Instructions injected into every review this workspace runs, across all of its repositories. Until this workspace sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
-            : "Instructions injected into every review, in every workspace that does not set its own. Repository-specific style prompts take precedence when they conflict."
+            ? "Instructions injected into every review this environment runs, across all of its repositories. Until this environment sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
+            : "Instructions injected into every review, in every environment that does not set its own. Repository-specific style prompts take precedence when they conflict."
         }
       >
         <div className="flex flex-col gap-space-2 p-space-4">
@@ -65,7 +65,7 @@ export function ReviewSettings({
             <p className="text-xs text-secondary">
               {guidelinesInherited
                 ? "Inherited from the instance."
-                : "Overridden for this workspace."}
+                : "Overridden for this environment."}
             </p>
           )}
           <Textarea
@@ -141,7 +141,7 @@ export function ReviewSettings({
 
       {!canEdit && (
         <p className="text-xs text-secondary">
-          These settings are read-only. Ask a workspace admin to change them.
+          These settings are read-only. Ask a Robin admin to change them.
         </p>
       )}
     </>

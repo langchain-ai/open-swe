@@ -32,17 +32,17 @@ export function ShareThreadDialog({
       }}
     >
       <DialogContent
-        title="Expose this entire thread to the workspace?"
+        title="Expose this entire thread to all Robin users?"
         titleIcon={WarningRegularIcon}
         titleIconIntent="error"
         showClose={false}
         className="w-[min(32rem,calc(100vw-2rem))] border border-error"
       >
         <DialogDescription className="text-sm text-primary">
-          Everyone with workspace access will be able to read everything already
-          in this thread and anything added later: messages, private tool
-          results, attachments, plans, and sandbox files. This may include
-          secrets or sensitive personal information.
+          Everyone with access to this Robin instance will be able to read
+          everything already in this thread and anything added later: messages,
+          private tool results, attachments, plans, and sandbox files. This may
+          include secrets or sensitive personal information.
         </DialogDescription>
         <p className="text-sm font-semibold text-primary">
           This cannot be undone. Continuing privately creates a new copy; it
@@ -61,7 +61,7 @@ export function ShareThreadDialog({
           checked={acknowledged}
           onCheckedChange={(checked) => setAcknowledged(checked === true)}
           disabled={busy}
-          label="I understand that everything in this thread becomes visible to the workspace."
+          label="I understand that everything in this thread becomes visible to everyone with access to this Robin instance."
           containerClassName="items-start"
         />
         <div className="flex justify-end gap-space-2">

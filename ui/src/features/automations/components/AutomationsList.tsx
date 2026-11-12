@@ -75,7 +75,7 @@ export function AutomationsList({
         <p className="mt-space-1 text-xs text-secondary">
           Run Robin on a schedule or on GitHub, Slack, and Linear events. Each
           run starts a fresh agent thread.{" "}
-          {!canManage && "Workspace admins manage automation setup."}
+          {!canManage && "Robin admins manage automation setup."}
         </p>
         {canManage && (
           <Banner intent="neutral" className="mt-space-3">

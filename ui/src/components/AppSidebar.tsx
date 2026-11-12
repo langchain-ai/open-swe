@@ -85,7 +85,7 @@ const NAV: Array<NavGroup> = [
     ],
   },
   {
-    heading: "Workspace",
+    heading: "Robin",
     items: [
       {
         to: "/review",
@@ -99,7 +99,7 @@ const NAV: Array<NavGroup> = [
         label: "Repository Instructions",
         icon: FileTextIcon,
       },
-      { to: "/workspaces", label: "Workspaces", icon: CubeRegularIcon },
+      { to: "/workspaces", label: "Environments", icon: CubeRegularIcon },
       { to: "/usage", label: "Usage", icon: ChartBarIcon },
     ],
   },

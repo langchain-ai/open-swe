@@ -22,7 +22,7 @@ const OPTIONS: Record<
   { label: string; Icon: IconComponent }
 > = {
   private: { label: "Private", Icon: LockIcon },
-  public: { label: "Workspace", Icon: GlobeRegularIcon },
+  public: { label: "Shared", Icon: GlobeRegularIcon },
 }
 const ORDER: ThreadVisibility[] = ["private", "public"]
 

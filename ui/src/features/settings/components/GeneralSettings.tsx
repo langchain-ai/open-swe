@@ -40,7 +40,7 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 
 const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "private", label: "Private · only me" },
-  { value: "public", label: "Workspace" },
+  { value: "public", label: "Shared" },
 ]
 
 const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
@@ -98,7 +98,7 @@ export function GeneralSettings() {
   })
   const workspaceOptions = useWorkspaceOptions()
   const workspaceItems = [
-    { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
+    { value: NO_DEFAULT_WORKSPACE, label: "Environment default" },
     ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
       value: workspace.slug,
       label: workspace.name,
@@ -156,7 +156,7 @@ export function GeneralSettings() {
       >
         <SettingsRow
           label="Default visibility"
-          description="Private threads can use your personal connections and only you can prompt them. Workspace threads are open to everyone. Visibility can't change later."
+          description="Private threads can use your personal connections and only you can prompt them. Shared threads are open to everyone with access to this Robin instance. Visibility can't change later."
           control={
             <Select
               aria-label="Default visibility"
@@ -171,11 +171,11 @@ export function GeneralSettings() {
           }
         />
         <SettingsRow
-          label="Default workspace"
-          description="Preselected in the composer when the chosen repository doesn't belong to another workspace."
+          label="Default environment"
+          description="Preselected in the composer when the chosen repository doesn't belong to another environment."
           control={
             <Select
-              aria-label="Default workspace"
+              aria-label="Default environment"
               options={workspaceItems}
               value={
                 preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE
@@ -226,7 +226,7 @@ export function GeneralSettings() {
           label="Personal kitchen channel"
           description={
             session.data?.slack_user_id
-              ? "Open SWE responds to your messages in this channel without an @mention. Only your messages get kitchen handling; workspace kitchen channels stay unchanged. Choose an internal channel Open SWE has joined. Clear to turn off."
+              ? "Open SWE responds to your messages in this channel without an @mention. Only your messages get kitchen handling; environment kitchen channels stay unchanged. Choose an internal channel Open SWE has joined. Clear to turn off."
               : "Link Slack in Connections to choose a channel where Open SWE responds to your messages without an @mention."
           }
           control={

@@ -195,7 +195,7 @@ export function WorkspaceEditor({
     <div className="space-y-space-3 border-t border-default px-space-4 py-space-3 text-primary">
       <Input
         label="Name"
-        aria-label="Workspace name"
+        aria-label="Environment name"
         size="md"
         value={draft.name}
         onChange={(name) => onChange({ ...draft, name })}
@@ -203,12 +203,12 @@ export function WorkspaceEditor({
       <div className="text-sm">
         <span className="inline-flex items-center gap-space-2">
           Bound repositories
-          <HelpTooltip label="About workspace repositories">
-            Threads in any workspace can use any repository the GitHub App can
+          <HelpTooltip label="About environment repositories">
+            Threads in any environment can use any repository the GitHub App can
             access. Binding a repository routes its GitHub issues, pull
-            requests, Linear tickets, and automations to this workspace and
-            preloads it into this workspace&apos;s sandbox image. A repository
-            is bound to one workspace.
+            requests, Linear tickets, and automations to this environment and
+            preloads it into this environment&apos;s sandbox image. A repository
+            is bound to one environment.
           </HelpTooltip>
         </span>
         <div
@@ -296,7 +296,7 @@ export function WorkspaceEditor({
               repos={draft.repos}
               value={draft.setupScript}
               onChange={(setupScript) => onChange({ ...draft, setupScript })}
-              description="Edit the shell script, then create the workspace to save it and start building the image."
+              description="Edit the shell script, then create the environment to save it and start building the image."
             />
           </div>
           <div className="text-sm">
@@ -310,7 +310,7 @@ export function WorkspaceEditor({
               repos={draft.repos}
               value={draft.updateScript}
               onChange={(updateScript) => onChange({ ...draft, updateScript })}
-              description="Edit the shell script, then create the workspace to save it."
+              description="Edit the shell script, then create the environment to save it."
             />
           </div>
         </>

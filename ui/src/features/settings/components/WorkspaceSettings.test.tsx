@@ -301,11 +301,11 @@ describe("WorkspaceSettingsPanel", () => {
     expect(remove).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Delete OSS" }))
-    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
     await waitFor(() =>
       expect(reportError).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: "Couldn't delete workspace",
+          title: "Couldn't delete environment",
           error: expect.objectContaining({
             message: "Could not delete the workspace",
           }),
@@ -322,7 +322,7 @@ describe("WorkspaceSettingsPanel", () => {
           finish = resolve
         })
     )
-    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete environment" }))
     expect(
       (await screen.findByRole("button", { name: "Deleting…" })).hasAttribute(
         "disabled"
@@ -341,7 +341,7 @@ describe("WorkspaceSettingsPanel", () => {
   it("does not offer deletion without admin access", async () => {
     mockApis()
     renderPage(false)
-    await screen.findByLabelText("Workspace name")
+    await screen.findByLabelText("Environment name")
     expect(await screen.findByRole("link", { name: "#oss-help" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
@@ -353,7 +353,7 @@ describe("WorkspaceSettingsPanel", () => {
       .mockResolvedValue({ ...RECORD, name: "OSS support" })
     renderPage()
 
-    const name = await screen.findByLabelText("Workspace name")
+    const name = await screen.findByLabelText("Environment name")
     expect((name as HTMLInputElement).value).toBe("OSS")
     expect(
       ((await screen.findByLabelText("Instructions")) as HTMLTextAreaElement)
@@ -385,7 +385,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
     await waitFor(() =>
       expect(
-        (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+        (screen.getByLabelText("Environment name") as HTMLInputElement).value
       ).toBe("OSS support")
     )
     expect(screen.queryByRole("status")).toBeNull()
@@ -533,7 +533,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
     renderPage()
 
-    fireEvent.change(await screen.findByLabelText("Workspace name"), {
+    fireEvent.change(await screen.findByLabelText("Environment name"), {
       target: { value: "Renamed" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -742,7 +742,7 @@ describe("WorkspaceSettingsPanel", () => {
     ).toBe("make setup && make build")
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-    fireEvent.change(screen.getByLabelText("Workspace name"), {
+    fireEvent.change(screen.getByLabelText("Environment name"), {
       target: { value: "Unsaved workspace name" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
@@ -764,7 +764,7 @@ describe("WorkspaceSettingsPanel", () => {
     )
 
     expect(
-      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+      (screen.getByLabelText("Environment name") as HTMLInputElement).value
     ).toBe("Unsaved workspace name")
     expect(
       (

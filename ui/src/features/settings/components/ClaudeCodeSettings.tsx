@@ -319,8 +319,8 @@ export function ClaudeCodeAboutSection() {
             <Code>gh pr create</Code> is linked to the thread.
           </Fact>
           <Fact term="Who sees it">
-            Only you and workspace admins. Threads are read-only here: continue
-            them in Claude Code.
+            Only you and Robin admins. Threads are read-only here: continue them
+            in Claude Code.
           </Fact>
           <Fact term="Your sessions">
             Claude Code waits for each hook, so they give up fast: 2 seconds for

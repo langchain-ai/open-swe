@@ -71,7 +71,7 @@ test("the new-thread page does not shift while it loads", async ({
     page.getByRole("heading", { name: "What should we work on?" }),
   ).toBeVisible();
   await expect(page.getByTestId("sidebar-threads-skeleton")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Environment" })).toBeVisible();
   await page.waitForTimeout(1000);
 
   // Under the throttled CPU Chrome paints the server's markup before it has

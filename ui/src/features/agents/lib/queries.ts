@@ -1568,7 +1568,7 @@ export function useShareThreadWithWorkspace() {
   return useMutation({
     mutationFn: (threadId: string) =>
       agentsApi.shareThreadWithWorkspace(threadId),
-    meta: { errorTitle: "Couldn't share thread with workspace" },
+    meta: { errorTitle: "Couldn't share thread with environment" },
     onSuccess: (thread) => {
       storeAgentThread(queryClient, thread)
       invalidateAgentThreadLists(queryClient)

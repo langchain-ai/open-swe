@@ -114,7 +114,7 @@ export function RunningAgentsSection() {
   return (
     <SettingsSection
       title="Running Agents"
-      description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
+      description="Instance-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
     >
       <div className="flex flex-col gap-space-3 p-space-4">
         <div className="flex items-center justify-between">

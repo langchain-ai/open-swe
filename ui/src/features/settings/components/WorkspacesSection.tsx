@@ -240,7 +240,7 @@ export function WorkspacesSection({
     } catch (e) {
       void qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setCreateError(
-        e instanceof Error ? e.message : "Could not create the workspace"
+        e instanceof Error ? e.message : "Could not create the environment"
       )
     }
     setCreating(false)
@@ -248,11 +248,11 @@ export function WorkspacesSection({
 
   return (
     <SettingsSection
-      title="Workspaces"
+      title="Environments"
       description={
         isAdmin
-          ? "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Open a workspace to change its name, repositories, Slack channels, instructions, scripts, model defaults, review settings, and MCP connections. To publish a new sandbox image, start a new agent thread, open the + menu, enable admin mode, and ask Robin to capture it."
-          : "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Robin to make the change."
+          ? "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Open an environment to change its name, repositories, Slack channels, instructions, scripts, model defaults, review settings, and MCP connections. To publish a new sandbox image, start a new agent thread, open the + menu, enable admin mode, and ask Robin to capture it."
+          : "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a Robin admin to start an admin thread and ask Robin to make the change."
       }
     >
       {workspaces.isLoading ? (
@@ -261,11 +261,11 @@ export function WorkspacesSection({
         </div>
       ) : workspaces.isError ? (
         <div className="px-space-4 py-space-3">
-          <Banner intent="error" title="Could not load workspaces." />
+          <Banner intent="error" title="Could not load environments." />
         </div>
       ) : !options || options.workspaces.length === 0 ? (
         <p className="px-space-4 py-space-3 text-xs text-secondary">
-          No workspaces are configured.
+          No environments are configured.
         </p>
       ) : (
         options.workspaces.map((workspace) => (
@@ -285,7 +285,7 @@ export function WorkspacesSection({
             <WorkspaceEditor
               draft={createDraft}
               onChange={setCreateDraft}
-              promptHint="Instructions appended to every run in this workspace"
+              promptHint="Instructions appended to every run in this environment"
               workspaceSlug={null}
               workspaces={options?.workspaces ?? []}
               channelLabel={channelLabel}
@@ -318,7 +318,7 @@ export function WorkspacesSection({
                   disabled={creating || !createDraft.name.trim()}
                   onClick={() => void create()}
                 >
-                  {creating ? "Creating…" : "Create workspace"}
+                  {creating ? "Creating…" : "Create environment"}
                 </Button>
               </div>
             </div>
@@ -326,7 +326,7 @@ export function WorkspacesSection({
         ) : (
           <div className="px-space-4 py-space-3">
             <Button size="xs" color="primary" onClick={() => setAdding(true)}>
-              Add workspace
+              Add environment
             </Button>
           </div>
         ))}

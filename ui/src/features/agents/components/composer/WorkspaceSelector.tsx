@@ -41,7 +41,7 @@ export function WorkspaceSelector({
   onChange,
   disabled = false,
   showWithOneWorkspace = false,
-  placeholder = "No workspace",
+  placeholder = "No environment",
   side = "bottom",
 }: WorkspaceSelectorProps) {
   if (workspaces.length < (showWithOneWorkspace ? 1 : 2)) return null
@@ -53,7 +53,7 @@ export function WorkspaceSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label="Workspace"
+        aria-label="Environment"
         disabled={disabled}
         className={cn(COMPOSER_TRIGGER_CLASS_NAME, "max-w-[220px] min-w-0")}
       >
@@ -68,7 +68,7 @@ export function WorkspaceSelector({
         sideOffset={7}
       >
         <DropdownMenuGroup>
-          <ComposerMenuLabel>Workspace</ComposerMenuLabel>
+          <ComposerMenuLabel>Environment</ComposerMenuLabel>
           {workspaces.map((workspace) => (
             <ComposerMenuOption
               key={workspace.slug}

@@ -79,7 +79,7 @@ export function RepositoryPicker({
     <OwnershipPicker
       triggerLabel="Choose repositories"
       title="Bound Repositories"
-      description="Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace."
+      description="Events on these repositories run in this environment, and its image preloads them. A repository is bound to one environment."
       noun="repository"
       pluralNoun="repositories"
       items={items}
@@ -164,7 +164,7 @@ export function SlackChannelPicker({
     <OwnershipPicker
       triggerLabel="Choose channels"
       title="Slack channels"
-      description="Mentions in these channels start runs in this workspace. A channel belongs to one workspace."
+      description="Mentions in these channels start runs in this environment. A channel belongs to one environment."
       noun="channel"
       pluralNoun="channels"
       items={items}

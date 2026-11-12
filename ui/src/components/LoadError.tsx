@@ -28,7 +28,7 @@ export function LoadError({
     <div role="alert" className="flex min-w-0 flex-1 overflow-y-auto p-space-5">
       <ErrorState
         title={title}
-        message="Try again. If this keeps happening, share the page URL and the details below with your workspace admin."
+        message="Try again. If this keeps happening, share the page URL and the details below with your Robin admin."
         contentClassName="mx-auto max-w-lg pt-space-8"
         action={
           <div className="flex w-full flex-col items-center gap-space-4">

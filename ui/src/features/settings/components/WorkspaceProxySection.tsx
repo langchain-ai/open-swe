@@ -339,7 +339,7 @@ export function WorkspaceProxySection({
                             label={
                               <FieldLabel
                                 label="Header name"
-                                description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Robin workspace settings reject authentication headers such as Authorization and X-Api-Key."
+                                description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Robin environment settings reject authentication headers such as Authorization and X-Api-Key."
                               />
                             }
                             value={
@@ -354,7 +354,7 @@ export function WorkspaceProxySection({
                             label={
                               <FieldLabel
                                 label="Header value"
-                                description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Robin workspace settings."
+                                description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Robin environment settings."
                               />
                             }
                             value={
@@ -367,7 +367,7 @@ export function WorkspaceProxySection({
                           <div className="space-y-space-1">
                             <FieldLabel
                               label="Type"
-                              description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Robin still persists this workspace configuration: opaque is not a way to store secrets here."
+                              description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Robin still persists this environment configuration: opaque is not a way to store secrets here."
                             />
                             <Select
                               aria-label="Type"
@@ -433,7 +433,7 @@ export function WorkspaceProxySection({
                           label={
                             <FieldLabel
                               label="Variable name"
-                              description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Robin workspace settings."
+                              description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Robin environment settings."
                             />
                           }
                           value={name}
@@ -553,7 +553,7 @@ export function WorkspaceProxySection({
           label="Governed Tag Value IDs"
           size="sm"
           placeholder="Comma-separated LangSmith tag value UUIDs"
-          hintText="Assign existing governed tags from the LangSmith workspace used by this deployment. These are not Robin workspace IDs. LangSmith checks ownership and assignment permissions at sandbox creation."
+          hintText="Assign existing governed tags from the LangSmith workspace used by this deployment. These are not Robin environment IDs. LangSmith checks ownership and assignment permissions at sandbox creation."
           value={tags}
           onChange={setTags}
           disabled={!canEdit || save.isPending}
@@ -570,8 +570,8 @@ export function WorkspaceProxySection({
         <p className="text-xs text-secondary">
           Cloud trust and least-privilege permissions must be configured in AWS,
           GCP, or Azure first. Identity settings and tags belong to this
-          workspace even when its image is inherited. Never enter cloud keys or
-          secrets.
+          environment even when its image is inherited. Never enter cloud keys
+          or secrets.
         </p>
         <p id="workspace-proxy-help" className="text-xs text-secondary">
           Use rules with name, match_hosts, headers (name, type, value), and

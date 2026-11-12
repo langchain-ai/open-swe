@@ -1095,7 +1095,7 @@ export function AgentThreadView({
                               : hasConversation
                                 ? "Work with Robin"
                                 : "Send the first message"
-                            : "Only workspace admins can send messages in this thread"
+                            : "Only Robin admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact

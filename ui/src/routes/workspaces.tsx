@@ -10,7 +10,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
-  head: () => ({ meta: [{ title: pageTitle("Workspaces") }] }),
+  head: () => ({ meta: [{ title: pageTitle("Environments") }] }),
 })
 
 function WorkspacesPage() {
@@ -28,8 +28,8 @@ function WorkspacesPage() {
   return (
     <AppShell
       user={session.data}
-      title="Workspaces"
-      description="Which repositories and Slack channels each workspace owns, the sandbox image its runs boot from, and how its nightly rebuild went."
+      title="Environments"
+      description="Which repositories and Slack channels each environment owns, the sandbox image its runs boot from, and how its nightly rebuild went."
     >
       <WorkspacesSection
         isAdmin={session.data.is_admin}

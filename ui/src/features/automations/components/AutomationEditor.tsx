@@ -396,7 +396,7 @@ export function AutomationEditor({
       <div className="mx-auto w-full max-w-3xl px-space-5 pt-space-2 pb-space-9">
         {!canManage && (
           <Banner intent="neutral" className="mb-space-4">
-            This workspace automation is read-only. Ask a workspace admin to
+            This environment automation is read-only. Ask a Robin admin to
             change it.
           </Banner>
         )}
@@ -428,14 +428,14 @@ export function AutomationEditor({
             selectedSlug={workspace}
             onChange={(slug) => setWorkspaceOverride(slug)}
             disabled={!canManage}
-            placeholder="Choose workspace"
+            placeholder="Choose environment"
             showWithOneWorkspace
           />
         </div>
         {savedWorkspaceMissing && (
           <p role="alert" className="mt-space-2 text-xs text-error-secondary">
-            Workspace {schedule?.workspace} no longer exists, so runs are
-            refused. Pick another workspace and save.
+            Environment {schedule?.workspace} no longer exists, so runs are
+            refused. Pick another environment and save.
           </p>
         )}
 
@@ -703,7 +703,7 @@ export function AutomationEditor({
                 id="automation-admin-thread-description"
                 className="mt-0.5 pl-space-5 text-xs text-tertiary"
               >
-                Allow this automation to use workspace admin capabilities.
+                Allow this automation to use Robin admin capabilities.
               </p>
             </div>
           )}

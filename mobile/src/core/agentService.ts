@@ -29,7 +29,7 @@ export type AgentVisibility = "private" | "workspace"
 
 export const VISIBILITY_TITLES: Record<AgentVisibility, string> = {
   private: "Private",
-  workspace: "Workspace",
+  workspace: "Shared",
 }
 
 /** Everything the app reads and changes about the signed-in person's agents. */

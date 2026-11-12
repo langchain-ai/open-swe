@@ -27,7 +27,7 @@ function AdminDefaultsPage() {
     <SettingsPage
       adminOnly
       title="Defaults"
-      description="Settings every workspace inherits. Open a workspace to override one there."
+      description="Settings every environment inherits. Open an environment to override one there."
     >
       <ModelDefaultsSection
         scope={INSTANCE_SCOPE}

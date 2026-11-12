@@ -354,9 +354,9 @@ export function OwnershipPicker({
                 Nothing matches.
               </p>
             )}
-            {renderGroup("In this workspace", inThis)}
+            {renderGroup("In this environment", inThis)}
             {renderGroup("Available", available)}
-            {renderGroup("Owned by another workspace", owned)}
+            {renderGroup("Owned by another environment", owned)}
           </div>
           {manual && (
             <form

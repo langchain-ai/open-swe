@@ -610,7 +610,7 @@ export function AgentsSidebar({
           { value: "none", label: "None" },
           { value: "date", label: "Date" },
           { value: "repo", label: "Project" },
-          { value: "workspace", label: "Workspace" },
+          { value: "workspace", label: "Environment" },
         ]}
       />
       <DropdownMenuSeparator />
@@ -898,7 +898,7 @@ export function AgentsSidebar({
             {repoMode && !skeleton && (
               <section className="mb-space-3">
                 <SidebarSectionHeader
-                  label={workspaceMode ? "Workspaces" : "Projects"}
+                  label={workspaceMode ? "Environments" : "Projects"}
                   collapsed={!workspaceMode && sectionCollapsed("repos")}
                   onToggleCollapsed={
                     workspaceMode

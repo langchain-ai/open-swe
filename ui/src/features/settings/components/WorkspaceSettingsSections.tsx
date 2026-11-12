@@ -137,8 +137,8 @@ export function DefaultRepoSection({
       title="Default Repository"
       description={
         scoped
-          ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
-          : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
+          ? "Where a run in this environment lands when nothing names a repository. Any repository the GitHub App can access will do."
+          : "Where a run lands when nothing names a repository and the environment sets no default of its own."
       }
     >
       <div className="divide-y divide-default">
@@ -234,8 +234,8 @@ export function ModelDefaultsSection({
       title="Model Defaults"
       description={
         scoped
-          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
-          : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
+          ? "Models for runs in this environment. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
+          : "Models for runs in every environment that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
       <div className="divide-y divide-default">

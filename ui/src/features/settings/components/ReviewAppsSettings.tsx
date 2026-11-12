@@ -232,7 +232,7 @@ export function ReviewBrowserSettings({
   return (
     <SettingsSection
       title="Review browser"
-      description="Reviews that work for apps, such as Design QA, open the pull request's preview in this browser. Every workspace's reviews sign in only to these domains, and only on LangSmith sites, with the one tool named here."
+      description="Reviews that work for apps, such as Design QA, open the pull request's preview in this browser. Every environment's reviews sign in only to these domains, and only on LangSmith sites, with the one tool named here."
     >
       <div className="flex flex-col gap-space-3 p-space-4">
         <Input
@@ -250,7 +250,7 @@ export function ReviewBrowserSettings({
           aria-label="Session tool"
           size="md"
           placeholder="connection/tool"
-          hintText="An instance or workspace MCP connection's tool that returns a browser session. Leave it empty to browse signed out."
+          hintText="An instance or environment MCP connection's tool that returns a browser session. Leave it empty to browse signed out."
           value={toolDraft}
           onChange={setToolDraft}
           disabled={!editable}
