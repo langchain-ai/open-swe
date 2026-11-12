@@ -307,7 +307,7 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
         content = (
             [ToolUseBlock(type="tool_use", id="tool-1", name="_ThreadTitle", input={})]
             if "tools" in payload
-            else [TextBlock(type="text", text=' "Repair   thread titles." ')]
+            else [TextBlock(type="text", text=' "Repair   thread title generation failures." ')]
         )
         response = Message(
             id="message-1",
@@ -329,6 +329,6 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
         model=model,
         client=SimpleNamespace(threads=threads),
     )
-    assert threads.metadata["title"] == "Repair thread titles"
+    assert threads.metadata["title"] == "Repair thread title generation"
     assert threads.metadata["title_seed"] is None
-    mirror.assert_awaited_once_with("thread-123", {"title": "Repair thread titles"})
+    mirror.assert_awaited_once_with("thread-123", {"title": "Repair thread title generation"})

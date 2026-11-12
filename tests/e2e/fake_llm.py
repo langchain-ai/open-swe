@@ -341,7 +341,7 @@ LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 # Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
 # empty reply so background titling never renames threads mid-spec.
-_THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
+_THREAD_TITLE_PROMPT_PREFIX = "Generate a terse title that will help the user recognize"
 
 # Gives every reply of the run a thought, as a reasoning model's would carry.
 THOUGHT_MARKER = "E2E_THOUGHT"

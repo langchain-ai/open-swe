@@ -32,7 +32,7 @@ _inflight_thread_ids: set[str] = set()
 
 
 class _ThreadTitle(BaseModel):
-    title: str = Field(description="Concise, outcome-focused thread title, 3-8 words")
+    title: str = Field(description="Terse, task-focused thread title, 3-4 words")
 
 
 _TITLE_SYSTEM_PROMPT = prompt("thread-title")
@@ -71,7 +71,7 @@ def _breakout_title_input(request: str, conversation: str) -> str:
 
 def _normalize_title(title: str) -> str:
     normalized = " ".join(title.strip().strip("`\"'").split())
-    normalized = " ".join(normalized.split()[:8]).rstrip(".")
+    normalized = " ".join(normalized.split()[:4]).rstrip(".")
     if len(normalized) <= MAX_THREAD_TITLE_CHARS:
         return normalized
     return normalized[:MAX_THREAD_TITLE_CHARS].rsplit(" ", 1)[0].rstrip()
