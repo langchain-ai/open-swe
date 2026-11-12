@@ -58,7 +58,7 @@ from openswe.review.reviews import (
     get_review_file_contents,
     get_review_summaries,
     list_reviews,
-    proxy_pr_image,
+    proxy_pr_media,
     trigger_re_review,
     trigger_review_scout,
 )
@@ -336,16 +336,18 @@ async def api_get_review_file_contents(
     )
 
 
+# Serves videos too; the path keeps its name for dashboard pages already open.
 @router.get("/reviews/{owner}/{repo}/{pr_number}/image")
 async def api_get_review_image(
     owner: str,
     repo: str,
     pr_number: int,
     url: str,
+    request: Request,
     session: dict[str, Any] = SESSION_DEP,
-) -> Response:
+) -> StreamingResponse:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await proxy_pr_image(owner, repo, pr_number, url)
+    return await proxy_pr_media(owner, repo, pr_number, url, request.headers.get("Range"))
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")

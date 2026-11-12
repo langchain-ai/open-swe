@@ -198,7 +198,7 @@ function Description({
       update.mutate(draft)
   }
   const { owner, repo, number } = pr
-  const proxyImage = useCallback(
+  const proxyMedia = useCallback(
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),
     [owner, repo, number]
   )
@@ -304,7 +304,7 @@ function Description({
         {body.trim() ? (
           <Markdown
             content={linkGithubRefs(body, pr, pullRequests)}
-            transformImageUrl={proxyImage}
+            transformMediaUrl={proxyMedia}
             enlargeImages
           />
         ) : (

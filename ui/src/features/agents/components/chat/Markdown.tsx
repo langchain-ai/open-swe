@@ -3,7 +3,15 @@ import {
   InfoRegularIcon,
   WarningRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Component, createElement, memo, useMemo, useState } from "react"
+import {
+  Component,
+  createContext,
+  createElement,
+  memo,
+  use,
+  useMemo,
+  useState,
+} from "react"
 import { ChatCenteredTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCenteredText"
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
 import { WarningOctagonIcon } from "@phosphor-icons/react/dist/ssr/WarningOctagon"
@@ -37,11 +45,11 @@ interface MarkdownProps {
   /** When true, keep Streamdown in streaming mode for the duration of the run. */
   isLive?: boolean
   /**
-   * Rewrite image `src` URLs before rendering (e.g. route private GitHub
-   * attachments through an authenticated proxy). Return the URL unchanged to
-   * leave it as-is.
+   * Rewrite image and attachment video `src` URLs before rendering (e.g. route
+   * private GitHub attachments through an authenticated proxy). Return the URL
+   * unchanged to leave it as-is.
    */
-  transformImageUrl?: (src: string) => string
+  transformMediaUrl?: (src: string) => string
   /** The workspace file the content was read from; its relative links open with `onOpenFile`. */
   workspacePath?: string
   /** Where the workspace file's relative images load from. */
@@ -132,7 +140,13 @@ function fencedCode(node: HastElement | undefined) {
   }
 }
 
+/** The `transformMediaUrl` a GitHub attachment video plays through. */
+const MediaUrlTransform = createContext<((src: string) => string) | undefined>(
+  undefined
+)
+
 function GithubAttachment({ href }: { href: string }) {
+  const transformMediaUrl = use(MediaUrlTransform)
   const [failed, setFailed] = useState(false)
   if (failed)
     return (
@@ -142,7 +156,7 @@ function GithubAttachment({ href }: { href: string }) {
     )
   return (
     <video
-      src={href}
+      src={transformMediaUrl ? transformMediaUrl(href) : href}
       controls
       playsInline
       preload="metadata"
@@ -335,7 +349,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 export const Markdown = memo(function Markdown({
   content,
   isLive = false,
-  transformImageUrl,
+  transformMediaUrl,
   workspacePath,
   imageBase,
   onOpenFile,
@@ -392,7 +406,7 @@ export const Markdown = memo(function Markdown({
     [enlargeImages, workspacePath, onOpenFile]
   )
   const urlTransform = useMemo(() => {
-    if (!transformImageUrl && workspacePath === undefined) return undefined
+    if (!transformMediaUrl && workspacePath === undefined) return undefined
     return (
       url: string,
       key: string,
@@ -404,10 +418,10 @@ export const Markdown = memo(function Markdown({
           ? new URL(url.slice(DOCUMENT_FOLDER.length), imageBase).href
           : ""
       }
-      if (key === "src" && transformImageUrl) return transformImageUrl(url)
+      if (key === "src" && transformMediaUrl) return transformMediaUrl(url)
       return defaultUrlTransform(url, key, node)
     }
-  }, [transformImageUrl, workspacePath, imageBase])
+  }, [transformMediaUrl, workspacePath, imageBase])
 
   return (
     <div
@@ -417,32 +431,34 @@ export const Markdown = memo(function Markdown({
       )}
     >
       <MarkdownErrorBoundary content={content}>
-        <Streamdown
-          mode={isLive ? "streaming" : "static"}
-          parseIncompleteMarkdown={isLive}
-          isAnimating={isLive}
-          shikiTheme={SHIKI_THEME}
-          className="streamdown-agent max-w-full min-w-0 space-y-0"
-          components={components}
-          remarkPlugins={
-            workspacePath !== undefined
-              ? [
-                  ...REMARK_PLUGINS,
-                  [
-                    remarkResolveRelativeUrls,
-                    {
-                      images: `${DOCUMENT_FOLDER}document`,
-                      links: `${WORKSPACE_LINK}${workspacePath}`,
-                    },
-                  ],
-                ]
-              : REMARK_PLUGINS
-          }
-          allowedTags={ALLOWED_TAGS}
-          urlTransform={urlTransform}
-        >
-          {content}
-        </Streamdown>
+        <MediaUrlTransform value={transformMediaUrl}>
+          <Streamdown
+            mode={isLive ? "streaming" : "static"}
+            parseIncompleteMarkdown={isLive}
+            isAnimating={isLive}
+            shikiTheme={SHIKI_THEME}
+            className="streamdown-agent max-w-full min-w-0 space-y-0"
+            components={components}
+            remarkPlugins={
+              workspacePath !== undefined
+                ? [
+                    ...REMARK_PLUGINS,
+                    [
+                      remarkResolveRelativeUrls,
+                      {
+                        images: `${DOCUMENT_FOLDER}document`,
+                        links: `${WORKSPACE_LINK}${workspacePath}`,
+                      },
+                    ],
+                  ]
+                : REMARK_PLUGINS
+            }
+            allowedTags={ALLOWED_TAGS}
+            urlTransform={urlTransform}
+          >
+            {content}
+          </Streamdown>
+        </MediaUrlTransform>
       </MarkdownErrorBoundary>
       <Dialog
         open={image !== null}
