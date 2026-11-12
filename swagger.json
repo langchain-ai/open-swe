@@ -14655,6 +14655,22 @@
           },
           {
             "in": "query",
+            "name": "slack_recovery",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Slack Recovery"
+            }
+          },
+          {
+            "in": "query",
             "name": "desktop_handoff",
             "required": false,
             "schema": {

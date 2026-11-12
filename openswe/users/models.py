@@ -655,7 +655,14 @@ class User(Base):
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
 
-    async def join_github(self, external_id: str, *, login: str, email: str) -> Self:
+    async def join_github(
+        self,
+        external_id: str,
+        *,
+        login: str,
+        email: str,
+        recovery_slack_id: str | None = None,
+    ) -> Self:
         """Join this LangSmith person and a GitHub account they proved, returning who holds both.
 
         A GitHub account someone already used keeps its person, so their threads and
@@ -669,11 +676,37 @@ class User(Base):
         cls = type(self)
         async with postgres.session() as session:
             owner = await session.scalar(
-                select(UserIdentity.user_id).where(
-                    UserIdentity.provider == "github", UserIdentity.external_id == external_id
-                )
+                select(UserIdentity.user_id)
+                .where(UserIdentity.provider == "github", UserIdentity.external_id == external_id)
+                .with_for_update()
             )
             target = owner or self.id
+            await session.execute(
+                select(cls.id)
+                .where(cls.id.in_({self.id, target}))
+                .order_by(cls.id)
+                .with_for_update()
+            )
+            if not await session.scalar(
+                select(UserIdentity.user_id).where(
+                    UserIdentity.user_id == self.id, UserIdentity.provider == "langsmith"
+                )
+            ):
+                raise AccountConflict("Your account changed — sign in again before linking GitHub")
+            if recovery_slack_id is not None:
+                slack_owner = await session.scalar(
+                    select(UserIdentity.user_id)
+                    .where(
+                        UserIdentity.provider == "slack",
+                        UserIdentity.external_id == recovery_slack_id,
+                    )
+                    .with_for_update()
+                )
+                if owner is None or slack_owner != owner:
+                    raise AccountConflict(
+                        "This is not the GitHub account connected to your Slack. "
+                        "Try again with the GitHub account you previously used with Robin."
+                    )
             if target != self.id:
                 if await session.scalar(
                     select(UserIdentity.user_id).where(
@@ -681,7 +714,8 @@ class User(Base):
                     )
                 ):
                     raise AccountConflict(
-                        "This GitHub account is already linked to another LangSmith account"
+                        "This GitHub account is already linked to another LangSmith account. "
+                        "Sign in with that LangSmith account to keep using your existing Robin account."
                     )
                 await session.execute(
                     update(UserIdentity)

@@ -203,6 +203,23 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
     }),
     "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
+  const recoveryLogin = new URL(
+    connectLoginUrl(
+      "https://backend.example",
+      "github",
+      {
+        challenge: "abc",
+        port: 51234,
+      },
+      "opaque+token&with=reserved?characters",
+    ),
+  );
+  assert.equal(
+    recoveryLogin.searchParams.get("slack_recovery"),
+    "opaque+token&with=reserved?characters",
+  );
+  assert.equal(recoveryLogin.searchParams.get("desktop_handoff"), "abc");
+  assert.equal(recoveryLogin.pathname, "/dashboard/api/github/login");
   assert.equal(
     connectExchangeUrl("https://backend.example", "github"),
     "https://backend.example/dashboard/api/github/desktop/exchange",

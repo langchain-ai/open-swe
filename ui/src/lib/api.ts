@@ -2303,21 +2303,29 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
+export type SlackRecovery = { recoveryToken: string; error?: string }
+export type ConnectResult = boolean | SlackRecovery
+
 export function connectService(
   provider: "slack" | "github",
-  redirectTo?: string
+  redirectTo?: string,
+  recoveryToken?: string
 ) {
   const action = productAnalytics.beginAction("integration_connect")
-  const pending = window.openSweDesktop?.connectService(provider)
+  const pending = window.openSweDesktop?.connectService(
+    provider,
+    recoveryToken ? { recoveryToken } : undefined
+  )
   if (!pending) {
     const target =
       redirectTo ??
       (provider === "slack"
         ? `${window.location.pathname}${window.location.search}${window.location.hash}`
         : "")
-    const query = target
-      ? `?${new URLSearchParams({ redirect_to: target })}`
-      : ""
+    const params = new URLSearchParams()
+    if (target) params.set("redirect_to", target)
+    if (recoveryToken) params.set("slack_recovery", recoveryToken)
+    const query = params.size ? `?${params}` : ""
     window.location.assign(
       `${API_BASE}/dashboard/api/${provider}/login${query}`
     )

@@ -231,8 +231,17 @@ def linking(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def fake_upsert(login: str, email: str, data: dict[str, Any]) -> None:
         collected["tokens"] = {"login": login, "email": email, "data": data}
 
-    async def fake_join(self: User, external_id: str, *, login: str, email: str) -> User:
+    async def fake_join(
+        self: User,
+        external_id: str,
+        *,
+        login: str,
+        email: str,
+        recovery_slack_id: str | None = None,
+    ) -> User:
         collected["join"] = {"user": self, "external_id": external_id, "login": login}
+        if recovery_slack_id:
+            collected["recovery_slack_id"] = recovery_slack_id
         return joined
 
     async def fake_user(self: DashboardPrincipal) -> User:
@@ -274,13 +283,19 @@ def _langsmith_client(person: User, *, through: str | None = None) -> TestClient
     return client
 
 
-def test_linking_github_turns_the_langsmith_session_into_its_github_login(
-    linking: dict[str, Any],
+@pytest.mark.parametrize("recovery", [False, True])
+async def test_linking_github_turns_the_langsmith_session_into_its_github_login(
+    linking: dict[str, Any], recovery: bool
 ) -> None:
+    from openswe.slack.recovery import SlackRecovery
+
+    proof = await SlackRecovery(linking["person"].id, "U-legacy").issue() if recovery else None
     target = "/agents?from=slack"
     with _langsmith_client(linking["person"]) as client:
         start = client.get(
-            "/dashboard/api/github/login", params={"redirect_to": target}, follow_redirects=False
+            "/dashboard/api/github/login",
+            params={"redirect_to": target, **({"slack_recovery": proof} if proof else {})},
+            follow_redirects=False,
         )
         authorize = parse_qs(urlparse(start.headers["location"]).query)
         assert authorize["redirect_uri"] == [
@@ -293,7 +308,11 @@ def test_linking_github_turns_the_langsmith_session_into_its_github_login(
         )
 
         assert callback.status_code == 302
-        assert callback.headers["location"] == f"https://dashboard.example{target}"
+        assert callback.headers["location"] == (
+            "https://dashboard.example/my-settings/connections"
+            if recovery
+            else f"https://dashboard.example{target}"
+        )
         session = decode_session(callback.cookies[COOKIE_NAME])
         assert (session["sub"], session["provider"]) == ("alice", "langsmith")
         assert session["user_id"] == str(linking["joined"].id)
@@ -348,11 +367,42 @@ def test_linking_github_rejects_a_callback_without_its_state_cookie(
     assert "join" not in linking
 
 
-def test_desktop_github_link_hands_back_only_encrypted_tokens(linking: dict[str, Any]) -> None:
+@pytest.mark.parametrize("desktop", [False, True])
+def test_expired_slack_recovery_does_not_start_github_link(
+    linking: dict[str, Any], desktop: bool
+) -> None:
+    with _langsmith_client(linking["person"]) as client:
+        response = client.get(
+            "/dashboard/api/github/login",
+            params={
+                "slack_recovery": "invalid-proof",
+                **({"desktop_handoff": _CHALLENGE, "desktop_port": 51234} if desktop else {}),
+            },
+            follow_redirects=False,
+        )
+    assert response.status_code == (400 if desktop else 302)
+    if not desktop:
+        location = urlparse(response.headers["location"])
+        assert location.path == "/my-settings/connections"
+        assert "connect Slack again" in parse_qs(location.query)["recovery_error"][0]
+    assert "join" not in linking
+
+
+@pytest.mark.parametrize("recovery", [False, True])
+async def test_desktop_github_link_hands_back_only_encrypted_tokens(
+    linking: dict[str, Any], recovery: bool
+) -> None:
+    from openswe.slack.recovery import SlackRecovery
+
+    proof = await SlackRecovery(linking["person"].id, "U-legacy").issue() if recovery else None
     with _langsmith_client(linking["person"]) as app_client:
         start = app_client.get(
             "/dashboard/api/github/login",
-            params={"desktop_handoff": _CHALLENGE, "desktop_port": 51234},
+            params={
+                "desktop_handoff": _CHALLENGE,
+                "desktop_port": 51234,
+                **({"slack_recovery": proof} if proof else {}),
+            },
             follow_redirects=False,
         )
         state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
@@ -380,6 +430,9 @@ def test_desktop_github_link_hands_back_only_encrypted_tokens(linking: dict[str,
     assert exchange.status_code == 200
     assert linking["join"]["login"] == "alice"
     assert linking["tokens"]["data"] == _TOKENS
+    assert decode_session(exchange.json()["session"])["user_id"] == str(linking["joined"].id)
+    if recovery:
+        assert linking["recovery_slack_id"] == "U-legacy"
 
 
 @pytest.mark.parametrize(

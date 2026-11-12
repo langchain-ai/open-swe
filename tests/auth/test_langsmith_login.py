@@ -318,6 +318,53 @@ async def test_linking_github_returns_a_langsmith_person_to_their_github_account
         await other.join_github("1", login="alice", email="Same@Example.com")
 
 
+@pytest.mark.parametrize("account", ["correct", "wrong", "occupied"])
+async def test_slack_recovery_requires_the_github_owner_before_moving_identities(
+    langsmith_client, account: str
+) -> None:
+    server, client = langsmith_client
+    legacy = await User.sign_in("github", "1", login="alice", email="same@example.com")
+    await legacy.link("slack", "U-legacy", email="same@example.com")
+    await USER_PREFERENCES.put("alice", {"follow_up_behavior": "queue"})
+    if account == "occupied":
+        previous = await User.sign_in(
+            "langsmith",
+            "previous-login",
+            authorization=LangSmithAccount(sub="previous-login", ls_org_id=server.organization),
+        )
+        await previous.join_github("1", login="alice", email="same@example.com")
+    callback = await server.desktop_login(client)
+    exchanged = await server.exchange(client, callback)
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    current = await User.for_identity("langsmith", server.subject)
+    assert current is not None
+    if account == "correct":
+        joined = await current.join_github(
+            "1", login="alice", email="same@example.com", recovery_slack_id="U-legacy"
+        )
+        assert joined.id == legacy.id
+        assert await User.for_identity("slack", "U-legacy") == joined
+        assert await User.for_identity("langsmith", server.subject) == joined
+        credential = await load_credential("langsmith_login", "alice")
+        assert credential is not None
+        assert decrypt_token(credential.encrypted_access_token) == "access"
+        me = await client.get("/dashboard/api/me")
+        assert me.status_code == 200 and me.json()["follow_up_behavior"] == "queue"
+    else:
+        with pytest.raises(AccountConflict):
+            await current.join_github(
+                "wrong" if account == "wrong" else "1",
+                login="wrong" if account == "wrong" else "alice",
+                email="same@example.com",
+                recovery_slack_id="U-legacy",
+            )
+        assert await User.for_identity("slack", "U-legacy") == await User.get(legacy.id)
+        assert await User.for_identity("github", "1") == await User.get(legacy.id)
+        assert await User.for_identity("github", "wrong") is None
+        assert await User.for_identity("langsmith", server.subject) == current
+        assert await load_credential("langsmith_login", f"user:{current.id}") is not None
+
+
 async def test_login_without_desktop_proof_and_cross_purpose_codes_are_rejected(
     langsmith_client,
 ) -> None:

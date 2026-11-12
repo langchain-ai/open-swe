@@ -349,6 +349,7 @@ def issue_state(
     redirect_uri: str | None = None,
     connect_slack: bool = False,
     linking_user_id: str | None = None,
+    slack_recovery: str | None = None,
 ) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
@@ -367,6 +368,8 @@ def issue_state(
         payload["connect_slack"] = True
     if linking_user_id is not None:
         payload["linking_user_id"] = linking_user_id
+    if slack_recovery is not None:
+        payload["slack_recovery"] = slack_recovery
     if handoff_challenge and handoff_port:
         payload["handoff_challenge"] = handoff_challenge
         payload["handoff_port"] = handoff_port

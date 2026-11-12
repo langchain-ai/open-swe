@@ -58,6 +58,7 @@ from openswe.dashboard.profiles import (
 )
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
+from openswe.slack.recovery import SlackRecovery
 from openswe.users import User
 from openswe.users.authorization import allowed_orgs
 from openswe.utils.build_info import build_info
@@ -88,6 +89,7 @@ async def auth_login(request: Request, redirect_to: str | None = None) -> Redire
 @router.get("/github/login")
 async def github_link_login(
     redirect_to: str | None = None,
+    slack_recovery: str | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = SESSION_DEP,
@@ -96,12 +98,25 @@ async def github_link_login(
     client_id = ENV.GITHUB_APP_CLIENT_ID.get()
     if not client_id:
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
+    if slack_recovery:
+        user = await DashboardPrincipal.from_session(_session).user()
+        if user is None:
+            raise HTTPException(401, "Robin account not found — sign in again")
+        try:
+            await SlackRecovery.read(slack_recovery, user.id)
+        except HTTPException as exc:
+            if exc.status_code != 400 or desktop_handoff:
+                raise
+            return RedirectResponse(
+                await SlackRecovery.redirect(slack_recovery, str(exc.detail)), status_code=302
+            )
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=sanitize_redirect_to(redirect_to) or frontend_base_url(),
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,
+        slack_recovery=slack_recovery,
     )
     query = urlencode(
         {
@@ -122,9 +137,13 @@ async def github_link_desktop_exchange(
     """Finish a desktop GitHub link with the app's own session."""
     claims = redeem_connect_handoff(provider="github", code=body.code, verifier=body.verifier)
     principal = DashboardPrincipal.from_session(session)
-    user = await GitHubLink.from_handoff(claims).join(principal)
-    set_session_cookie(response, GitHubLink.session(principal, user, session.get("email")))
-    return {"connected": True}
+    recovery = claims.get("slack_recovery")
+    user = await GitHubLink.from_handoff(claims).join(
+        principal, slack_recovery=recovery if isinstance(recovery, str) else None
+    )
+    token = GitHubLink.session(principal, user, session.get("email"))
+    set_session_cookie(response, token)
+    return {"connected": True, "session": token, "expires_in": SESSION_TTL_SECONDS}
 
 
 @router.get("/auth/dev-login")
@@ -187,11 +206,15 @@ async def auth_callback(request: Request, state: str, code: str | None = None) -
         raise HTTPException(400, "oauth state mismatch — please retry")
 
     link = await GitHubLink.from_code(code)
+    recovery = state_payload.get("slack_recovery")
+    slack_recovery = recovery if isinstance(recovery, str) else None
     if handoff is not None:
         # The app finishes the link under the session it holds.
         challenge, port = handoff
         handoff_code = issue_connect_handoff(
-            provider="github", challenge=challenge, claims=link.handoff_claims()
+            provider="github",
+            challenge=challenge,
+            claims={**link.handoff_claims(), "slack_recovery": slack_recovery},
         )
         response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         clear_state_cookie(response)
@@ -199,8 +222,22 @@ async def auth_callback(request: Request, state: str, code: str | None = None) -
 
     session = await require_session(request)
     principal = DashboardPrincipal.from_session(session)
-    user = await link.join(principal)
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
+    try:
+        user = await link.join(principal, slack_recovery=slack_recovery)
+    except HTTPException as exc:
+        if not slack_recovery or exc.status_code not in {400, 409}:
+            raise
+        error = exc.detail["message"] if isinstance(exc.detail, dict) else str(exc.detail)
+        response = RedirectResponse(
+            await SlackRecovery.redirect(slack_recovery, error), status_code=302
+        )
+        clear_state_cookie(response)
+        return response
+    redirect_to = (
+        f"{frontend_base_url()}/my-settings/connections"
+        if slack_recovery
+        else sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
+    )
     response = RedirectResponse(redirect_to, status_code=302)
     set_session_cookie(response, GitHubLink.session(principal, user, session.get("email")))
     clear_state_cookie(response)

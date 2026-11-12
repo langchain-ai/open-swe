@@ -209,7 +209,11 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack" | "github") => Promise<boolean>
+      connectService: (
+        provider: "slack" | "github",
+        options?: { recoveryToken: string }
+      ) => Promise<boolean | { recoveryToken: string; error?: string }>
+      cancelConnectService?: (provider: "slack" | "github") => Promise<void>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string

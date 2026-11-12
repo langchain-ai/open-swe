@@ -36,6 +36,8 @@ from openswe.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from openswe.slack.recovery import SlackRecovery
+from openswe.users import AccountConflict
 
 logger = logging.getLogger(__name__)
 
@@ -135,12 +137,21 @@ async def slack_callback(
     if user is None or state_payload.get("linking_user_id") != str(user.id):
         raise HTTPException(400, "Robin account changed — please restart Slack sign-in")
     identity = await _verified_slack_identity(code)
-    await _link_slack_identity(
-        session,
-        slack_user_id=identity.user_id,
-        email=identity.email or "",
-        team_id=identity.team_id,
-    )
+    try:
+        await _link_slack_identity(
+            session,
+            slack_user_id=identity.user_id,
+            email=identity.email or "",
+            team_id=identity.team_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 409 or not isinstance(exc.detail, dict):
+            raise
+        response = RedirectResponse(
+            await SlackRecovery.redirect(exc.detail["recovery_token"]), status_code=302
+        )
+        _clear_slack_state_cookie(response)
+        return response
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -166,7 +177,17 @@ async def _link_slack_identity(
     user = await principal.user()
     if user is None:
         raise HTTPException(401, "Robin account not found — sign in with LangSmith again")
-    await user.link("slack", slack_user_id, email=email, team_id=team_id)
+    try:
+        await user.link("slack", slack_user_id, email=email, team_id=team_id)
+    except AccountConflict as exc:
+        raise HTTPException(
+            409,
+            {
+                "code": "slack_account_conflict",
+                "message": "Your Slack is connected to an older Robin account.",
+                "recovery_token": await SlackRecovery(user.id, slack_user_id).issue(),
+            },
+        ) from exc
 
 
 @router.post("/slack/desktop/exchange")
