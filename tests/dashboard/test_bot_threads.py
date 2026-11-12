@@ -128,6 +128,34 @@ async def test_only_admin_decides_bot_thread_workflow_push(
         resume.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("route", "selection", "expected"),
+    [
+        ("fast", None, "auto"),
+        ("balanced", "explicit", "auto"),
+        ("performance", None, "auto"),
+        ("default", "explicit", "explicit"),
+        (None, "explicit", "explicit"),
+        (None, "auto", "auto"),
+        (None, None, None),
+    ],
+)
+async def test_summary_reports_effective_model_selection(
+    bot_thread, monkeypatch, route, selection, expected
+):
+    monkeypatch.setattr(summary, "get_langsmith_trace_url", AsyncMock(return_value=None))
+    thread = bot_thread[0]
+    thread["metadata"].update(
+        model="openai:gpt-6.1-sol",
+        effort="high",
+        model_route=route,
+        model_selection=selection,
+    )
+    result = await summary._thread_summary(thread)
+    assert result["modelSelection"] == expected
+    assert result["model"] == "openai:gpt-6.1-sol"
+
+
 async def test_summary_names_the_starting_bot(bot_thread, monkeypatch):
     monkeypatch.setattr(summary, "get_langsmith_trace_url", AsyncMock(return_value=None))
     result = await summary._thread_summary(bot_thread[0])

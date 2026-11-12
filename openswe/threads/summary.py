@@ -620,9 +620,13 @@ async def _thread_summary(
         "model": model,
         "effort": effort,
         "modelSelection": (
-            metadata.get("model_selection")
-            if metadata.get("model_selection") in {"auto", "explicit"}
-            else None
+            "auto"
+            if metadata.get("model_route") in {"fast", "balanced", "performance"}
+            else (
+                metadata.get("model_selection")
+                if metadata.get("model_selection") in {"auto", "explicit"}
+                else None
+            )
         ),
         "adminThread": metadata.get("admin_thread") is True,
         "concierge": bool(
