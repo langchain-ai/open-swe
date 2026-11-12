@@ -34,13 +34,7 @@ def test_convert_mentions_preserves_slack_mentions_and_unrelated_parentheses(
 
 @pytest.mark.parametrize(
     "variable",
-    [
-        "SLACK_BOT_TOKEN",
-        "SLACK_SIGNING_SECRET",
-        "SLACK_APP_ID",
-        "SLACK_BOT_USER_ID",
-        "SLACK_BOT_USERNAME",
-    ],
+    ["SLACK_BOT_TOKEN", "SLACK_APP_ID", "SLACK_BOT_USER_ID", "SLACK_BOT_USERNAME"],
 )
 @pytest.mark.parametrize("value", [None, "   "])
 async def test_app_refuses_to_start_with_missing_slack_configuration(
@@ -51,13 +45,8 @@ async def test_app_refuses_to_start_with_missing_slack_configuration(
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("MDA_RUNTIME_URL", "http://127.0.0.1:2025")
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-runtime-secret")
-    for name in (
-        "SLACK_BOT_TOKEN",
-        "SLACK_SIGNING_SECRET",
-        "SLACK_APP_ID",
-        "SLACK_BOT_USER_ID",
-        "SLACK_BOT_USERNAME",
-    ):
+    monkeypatch.delenv("MDA_DEPLOYMENT_ID", raising=False)
+    for name in ("SLACK_BOT_TOKEN", "SLACK_APP_ID", "SLACK_BOT_USER_ID", "SLACK_BOT_USERNAME"):
         monkeypatch.setenv(name, "test-value")
     if value is None:
         monkeypatch.delenv(variable)
@@ -67,6 +56,22 @@ async def test_app_refuses_to_start_with_missing_slack_configuration(
     with pytest.raises(http.SlackConfigurationError, match=f"{variable} is required"):
         async with lifespan(app):
             pytest.fail("A deployment without Slack started")
+
+
+def test_startup_needs_no_signing_secret_and_no_bot_token_agent_auth_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("SLACK_APP_ID", "SLACK_BOT_USER_ID", "SLACK_BOT_USERNAME"):
+        monkeypatch.setenv(name, "test-value")
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("MDA_DEPLOYMENT_ID", "11111111-1111-4111-8111-111111111111")
+
+    http.validate_slack_startup_config()
+
+    monkeypatch.delenv("MDA_DEPLOYMENT_ID")
+    with pytest.raises(http.SlackConfigurationError, match="SLACK_BOT_TOKEN is required"):
+        http.validate_slack_startup_config()
 
 
 async def test_message_lookup_does_not_hide_missing_slack_configuration(

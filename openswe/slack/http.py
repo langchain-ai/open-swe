@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from time import monotonic
-from typing import Any, Self
+from typing import Any, Final, Self
 
 import aiohttp
 from fastapi import HTTPException
@@ -24,6 +24,8 @@ from openswe import event_claims
 from openswe.config import ENV, EnvVar
 from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_connector
+
+logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api/"
 SLACK_REQUEST_ERRORS = (SlackApiError, aiohttp.ClientError, TimeoutError, ValueError)
@@ -46,15 +48,68 @@ def required_slack_value(variable: EnvVar) -> str:
         ) from exc
 
 
+class SlackBotToken:
+    """The bot token every Slack Web API call is made with.
+
+    MDA's Slack channel owns the Slack app: ``mda deploy`` hands its bot token to Trigger
+    Server, which keeps it in Agent Auth as the MDA deployment's own secret. With
+    ``MDA_DEPLOYMENT_ID`` the backend reads it from there, so an app that is reinstalled
+    or rotated gets its new token in one place. Without it, as in local development, the
+    token is ``SLACK_BOT_TOKEN``.
+    """
+
+    #: The reserved connection Trigger Server keeps the token under.
+    CONNECTION: Final = "mda/slack-bot-token"
+    _CACHE_KEY: Final = "slack-bot-token"
+    #: How long a rotated token takes to reach a replica.
+    _TTL_SECONDS: Final = 60.0
+
+    @classmethod
+    async def read(cls) -> str:
+        """The token, or :class:`SlackConfigurationError` when the deployment has none."""
+        deployment_id = ENV.MDA_DEPLOYMENT_ID.optional()
+        if not deployment_id:
+            return required_slack_value(ENV.SLACK_BOT_TOKEN)
+        try:
+            return await ttl_cache.cached(
+                cls._CACHE_KEY, cls._TTL_SECONDS, lambda: cls._from_agent_auth(deployment_id)
+            )
+        except Exception as exc:
+            # Until SLACK_BOT_TOKEN is taken off a deployment, it covers an Agent Auth
+            # the backend cannot read yet. The token may be the one a reinstall revoked.
+            fallback = ENV.SLACK_BOT_TOKEN.optional()
+            if not fallback:
+                raise
+            logger.warning(
+                "Could not read the Slack bot token from Agent Auth; using SLACK_BOT_TOKEN",
+                extra={"error_type": type(exc).__name__, "error": str(exc)},
+            )
+            ttl_cache.set_cached(cls._CACHE_KEY, fallback, cls._TTL_SECONDS)
+            return fallback
+
+    @classmethod
+    async def _from_agent_auth(cls, deployment_id: str) -> str:
+        from openswe.threads.runtimes import RUNTIMES
+
+        token = await RUNTIMES.mda_runtime.deployment_secret(deployment_id, cls.CONNECTION)
+        if not token:
+            raise SlackConfigurationError(
+                f"Agent Auth holds no {cls.CONNECTION} the backend can read for the "
+                "deployment MDA_DEPLOYMENT_ID names: run `mda deploy` to register its Slack app"
+            )
+        return token
+
+
 def validate_slack_startup_config() -> None:
-    """Refuse to start without the Slack app every deployment needs."""
-    for variable in (
-        ENV.SLACK_BOT_TOKEN,
-        ENV.SLACK_SIGNING_SECRET,
-        ENV.SLACK_APP_ID,
-        ENV.SLACK_BOT_USER_ID,
-        ENV.SLACK_BOT_USERNAME,
-    ):
+    """Refuse to start without the Slack app every deployment needs.
+
+    The signing secret is not part of it: only a Slack app whose URLs point at this
+    backend needs one, and without it those routes reject every request.
+    """
+    required = [ENV.SLACK_APP_ID, ENV.SLACK_BOT_USER_ID, ENV.SLACK_BOT_USERNAME]
+    if not ENV.MDA_DEPLOYMENT_ID.is_set():
+        required.insert(0, ENV.SLACK_BOT_TOKEN)
+    for variable in required:
         required_slack_value(variable)
 
 
@@ -186,7 +241,7 @@ class _ChannelInfoRequests:
             self.failures[key] = (monotonic() + 2, failure)
             while len(self.failures) > 256:
                 self.failures.popitem(last=False)
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Slack channel lookup failed",
                 extra={
                     "slack_method": "conversations.info",
@@ -235,7 +290,7 @@ class SlackClient(AsyncWebClient):
     @classmethod
     @asynccontextmanager
     async def bot(cls) -> AsyncIterator[Self]:
-        token = required_slack_value(ENV.SLACK_BOT_TOKEN)
+        token = await SlackBotToken.read()
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
             response_class=_SlackResponse,

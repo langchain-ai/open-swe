@@ -12,6 +12,7 @@ Each backend setting is off until set, and unset keeps that credential on the ba
 | `open-swe-github-<env>` | user | `open_pull_request`, for the requester's own PR | `MDA_GITHUB_USER_CONNECTION=open-swe-github-<env>` |
 | `open-swe-mcp-<server>` | agent or user | An MCP server whose Robin record names the connection | `connection` on the server's record |
 | `mda/linear-token` | agent | Also Linear's MCP server (`https://mcp.linear.app`), an instance or workspace server whose record names it; the Linear channel's `mda deploy` keeps it | `connection` on the server's record |
+| `mda/slack-bot-token` | agent | The backend's own Slack calls, with the Slack app's bot token; the Slack channel's `mda deploy` keeps it | `MDA_DEPLOYMENT_ID`, this deployment's id |
 
 ## 0. Prepare the shell
 

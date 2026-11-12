@@ -160,6 +160,7 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
+| `MDA_DEPLOYMENT_ID` | This deployment's id (`host.project_id` of its `/info`): the backend reads the Slack app's bot token from Agent Auth, where this deployment's Slack channel keeps it (`mda/slack-bot-token`), so a reinstalled app's token is set in one place, `mda deploy`'s. Unset: the backend's own `SLACK_BOT_TOKEN` |
 | `MDA_LANGSMITH_PROJECT` | This deployment's LangSmith project (its `LANGSMITH_PROJECT`, the deployment name), where its runs are traced; the backend's trace links, costs, feedback and reviewer evals read runs there. Unset: the backend's `LANGSMITH_PROJECT` |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |

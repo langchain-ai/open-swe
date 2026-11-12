@@ -1,6 +1,7 @@
 """Utilities for building multimodal content blocks."""
 
 import base64
+import functools
 import logging
 import mimetypes
 import re
@@ -14,8 +15,7 @@ from langchain_core.messages.content import (
     create_text_block,
 )
 
-from openswe.config import ENV
-from openswe.slack.http import required_slack_value
+from openswe.slack.http import SlackBotToken
 from openswe.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -62,12 +62,14 @@ def _image_provider(image_url: str) -> str | None:
     return None
 
 
-def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str, str] | None:
+def _image_auth_headers_for_url(
+    original_url: str, current_url: str, *, slack_token: str | None
+) -> dict[str, str] | None:
     provider = _image_provider(original_url)
     if provider is None or _image_provider(current_url) != provider:
         return None
-    if provider == "slack":
-        return {"Authorization": f"Bearer {required_slack_value(ENV.SLACK_BOT_TOKEN)}"}
+    if provider == "slack" and slack_token:
+        return {"Authorization": f"Bearer {slack_token}"}
     return None
 
 
@@ -78,11 +80,12 @@ async def fetch_image_block(
     """Fetch image bytes and build a model content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
+        slack_token = await SlackBotToken.read() if _image_provider(image_url) == "slack" else None
         response = await request_with_safe_redirects(
             client,
             "GET",
             image_url,
-            headers_for_url=_image_auth_headers_for_url,
+            headers_for_url=functools.partial(_image_auth_headers_for_url, slack_token=slack_token),
         )
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()

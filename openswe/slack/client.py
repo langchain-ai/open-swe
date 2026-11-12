@@ -24,9 +24,9 @@ from openswe import event_claims
 from openswe.config import ENV
 from openswe.slack.http import (
     SLACK_REQUEST_ERRORS,
+    SlackBotToken,
     SlackClient,
     SlackRequestError,
-    required_slack_value,
     slack_error,
     slack_error_details,
     slack_retry_after,
@@ -1180,7 +1180,7 @@ async def download_slack_file(url: str) -> bytes:
     The token is only ever sent to Slack-owned hosts; redirects keep the SSRF
     host validation. Raises :class:`SlackFileDownloadError` on failure.
     """
-    token = required_slack_value(ENV.SLACK_BOT_TOKEN)
+    token = await SlackBotToken.read()
 
     def auth_headers(original_url: str, current_url: str) -> dict[str, str] | None:
         def slack_host(target: str) -> bool:

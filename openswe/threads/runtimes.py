@@ -370,23 +370,12 @@ class MdaRuntime:
         workspace; this resolves the same identity, with the key the backend calls MDA
         with. The SDK caches each answer.
         """
-        api_key = mda_runtime_api_key()
-        workspace = ENV.MDA_WORKSPACE_ID.optional() or await resolve_tenant_id()
         extra = {"user_id": user_id}
-        if not api_key or not workspace:
-            logger.warning("No LangSmith key or workspace to resolve a principal", extra=extra)
-            return None
         try:
-            agent_auth = AgentAuth(
-                AgentAuthContext(
-                    base_url=resolve_agent_auth_base_url(
-                        {PLATFORM_API_URL_ENV: ENV.LANGSMITH_ENDPOINT.get()}
-                    ),
-                    principal_id="",
-                    api_key=api_key,
-                    workspace_id=workspace,
-                )
-            )
+            agent_auth = await self._agent_auth()
+            if agent_auth is None or not (workspace := agent_auth.context.workspace_id):
+                logger.warning("No LangSmith key or workspace to resolve a principal", extra=extra)
+                return None
             return await asyncio.to_thread(
                 agent_auth.resolve_principal,
                 {"provider": TRUSTED_BACKEND_PROVIDER, "issuer": workspace, "subject": user_id},
@@ -394,6 +383,40 @@ class MdaRuntime:
         except Exception:  # noqa: BLE001
             logger.warning("Could not resolve a user's principal", extra=extra, exc_info=True)
             return None
+
+    async def deployment_secret(self, deployment_id: str, slug: str) -> str | None:
+        """The secret the deployment holds for itself in Agent Auth as connection ``slug``:
+        one its channel's ``mda deploy`` keeps there, such as the Slack app's bot token.
+
+        ``None`` when the deployment holds none, or the backend has no key or workspace
+        to ask with; raises ``CredentialStoreError`` when Agent Auth does not answer.
+        """
+        agent_auth = await self._agent_auth(deployment_id=deployment_id)
+        if agent_auth is None:
+            return None
+        credential_id = await asyncio.to_thread(agent_auth.find_workspace_credential_id, slug)
+        if credential_id is None:
+            return None
+        return await asyncio.to_thread(agent_auth.read_secret, credential_id)
+
+    async def _agent_auth(self, *, deployment_id: str | None = None) -> AgentAuth | None:
+        """Agent Auth in the deployment's workspace, asked with the key the backend calls
+        MDA with; ``None`` without either. ``deployment_id`` to read what it owns."""
+        api_key = mda_runtime_api_key()
+        workspace = ENV.MDA_WORKSPACE_ID.optional() or await resolve_tenant_id()
+        if not api_key or not workspace:
+            return None
+        return AgentAuth(
+            AgentAuthContext(
+                base_url=resolve_agent_auth_base_url(
+                    {PLATFORM_API_URL_ENV: ENV.LANGSMITH_ENDPOINT.get()}
+                ),
+                principal_id="",
+                agent_id=deployment_id,
+                api_key=api_key,
+                workspace_id=workspace,
+            )
+        )
 
     async def ensure_remote_thread(self, thread_id: str) -> None:
         if thread_id in self._mda_threads:
