@@ -57,10 +57,11 @@ class LangSmithOrgDiscovery:
     def __init__(self) -> None:
         self.identity: tuple[str, str] | None = None
         self.org_id = ""
+        self.workspace_id = ""
         self.expires_at = 0.0
         self.lock = asyncio.Lock()
 
-    async def resolve(self) -> str:
+    async def resolve(self) -> tuple[str, str]:
         key = ENV.LANGSMITH_API_KEY.get()
         if not key:
             raise HTTPException(503, "LangSmith login is not configured")
@@ -70,24 +71,26 @@ class LangSmithOrgDiscovery:
         identity = (endpoint, key)
         async with self.lock:
             if self.identity == identity and monotonic() < self.expires_at:
-                if not self.org_id:
+                if not self.org_id or not self.workspace_id:
                     raise HTTPException(
                         503, "LangSmith organization discovery is temporarily unavailable"
                     )
-                return self.org_id
+                return self.org_id, self.workspace_id
             try:
-                org_id = await self.discover(endpoint, key)
+                org_id, workspace_id = await self.discover(endpoint, key)
             except HTTPException:
                 self.identity = identity
                 self.org_id = ""
+                self.workspace_id = ""
                 self.expires_at = monotonic() + 3
                 raise
             self.identity = identity
             self.org_id = org_id
+            self.workspace_id = workspace_id
             self.expires_at = monotonic() + LANGSMITH_AUTHORIZATION_TTL.total_seconds()
-            return org_id
+            return org_id, workspace_id
 
-    async def discover(self, endpoint: str, key: str) -> str:
+    async def discover(self, endpoint: str, key: str) -> tuple[str, str]:
         try:
             async with httpx2.AsyncClient(
                 timeout=httpx2.Timeout(3.0, connect=1.0), transport=pooled_transport()
@@ -106,7 +109,10 @@ class LangSmithOrgDiscovery:
         org_id = data.get("organization_id") if isinstance(data, dict) else None
         if not isinstance(org_id, str) or not org_id.strip():
             raise HTTPException(503, "Invalid LangSmith deployment organization response")
-        return org_id
+        workspace_id = data.get("tenant_id") if isinstance(data, dict) else None
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise HTTPException(503, "Invalid LangSmith deployment workspace response")
+        return org_id, workspace_id
 
 
 LANGSMITH_ORG_DISCOVERY = LangSmithOrgDiscovery()
@@ -123,9 +129,10 @@ class LangSmithLogin:
         self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
         self.client_secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.get()
         self.org_id = ""
+        self.workspace_id = ""
 
     async def allowed_org(self) -> str:
-        self.org_id = await LANGSMITH_ORG_DISCOVERY.resolve()
+        self.org_id, self.workspace_id = await LANGSMITH_ORG_DISCOVERY.resolve()
         return self.org_id
 
     async def require_configured(self) -> None:
@@ -219,6 +226,8 @@ class LangSmithLogin:
             "code_challenge_method": "S256",
             "scope": "openid profile email offline_access",
             "resource": self.issuer,
+            "organization_id": self.org_id,
+            "workspace_id": self.workspace_id,
         }
         return endpoints["authorization_endpoint"] + "?" + urlencode(params)
 

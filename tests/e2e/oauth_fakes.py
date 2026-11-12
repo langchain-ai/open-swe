@@ -104,7 +104,7 @@ class OAuthProviders:
     async def public_auth(self, request: Request) -> dict[str, str]:
         if request.headers.get("x-api-key") != "e2e-deployment-key":
             raise HTTPException(401)
-        return {"organization_id": "e2e-org"}
+        return {"organization_id": "e2e-org", "tenant_id": "e2e-workspace"}
 
     async def organizations(self, request: Request) -> list[dict[str, str]]:
         await self.userinfo(request)

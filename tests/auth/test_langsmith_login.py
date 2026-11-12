@@ -34,6 +34,7 @@ class LangSmithServer:
     subject: str = "5bb3fb19-f328-4815-8fe8-0483b41312c2"
     organization: str = ALLOWED_ORG
     deployment_org: str = ALLOWED_ORG
+    deployment_workspace: str = "deployment-workspace"
     discoveries: int = 0
     discovery_unavailable: bool = False
     clock: float = 0.0
@@ -60,7 +61,13 @@ class LangSmithServer:
                 return httpx2.Response(503, json={"detail": "unavailable"})
             assert request.headers["x-api-key"] == "deployment-key"
             assert "authorization" not in request.headers
-            return httpx2.Response(200, json={"organization_id": self.deployment_org})
+            return httpx2.Response(
+                200,
+                json={
+                    "organization_id": self.deployment_org,
+                    "tenant_id": self.deployment_workspace,
+                },
+            )
         if request.url.path == "/.well-known/openid-configuration":
             return httpx2.Response(
                 200,
@@ -125,6 +132,8 @@ class LangSmithServer:
         query = parse_qs(urlparse(start.headers["location"]).query)
         assert query["scope"] == ["openid profile email offline_access"]
         assert query["resource"] == [ISSUER]
+        assert query["organization_id"] == [self.deployment_org]
+        assert query["workspace_id"] == [self.deployment_workspace]
         assert query["redirect_uri"] == [CALLBACK]
         callback = await client.get(
             "/dashboard/api/langsmith/callback",
@@ -439,6 +448,9 @@ async def test_login_requires_an_org_source_and_org_changes_invalidate_cached_ac
         (200, {}),
         (200, {"organization_id": " "}),
         (200, {"organization_id": 123}),
+        (200, {"organization_id": ALLOWED_ORG}),
+        (200, {"organization_id": ALLOWED_ORG, "tenant_id": " "}),
+        (200, {"organization_id": ALLOWED_ORG, "tenant_id": 123}),
         (200, []),
     ],
 )
