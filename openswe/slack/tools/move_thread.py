@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from openswe.source_context import SlackThreadRef
 from openswe.threads.store import THREADS
 from openswe.threads.summary import thread_is_private
 from openswe.utils.dashboard_links import dashboard_thread_url
+
+logger = logging.getLogger(__name__)
 
 _MESSAGE_MAX_CHARS = 2800
 _CHANNEL_ID_RE = re.compile(r"^[CGD][A-Z0-9]+$")
@@ -75,6 +78,11 @@ async def check_move(message: str, destination: str | None = None) -> CheckedMov
     try:
         thread = await THREADS.get(thread_id)
     except Exception:
+        logger.warning(
+            "Could not load the thread to verify its credential scope",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
         thread = None
     if thread is None:
         return {"success": False, "error": "Cannot verify thread credential scope"}
