@@ -2,6 +2,7 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   LaptopRegularIcon,
+  XIcon,
 } from "@langchain/macaw-components/icons"
 import {
   ContextMenu,
@@ -52,15 +53,14 @@ import type {
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { parsePullRequestReference } from "@/features/reviews/search"
-import { RenameThreadDialog } from "@/features/agents/components/RenameThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import { DropdownMenuItem } from "@/components/MenuItem"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markReviewViewed,
   useDeleteAgentThread,
+  useRenameAgentThread,
   useSetAgentThreadViewed,
 } from "@/features/agents/lib/queries"
 import {
@@ -133,6 +133,55 @@ function openContextMenuFromKeyboard(
 
 function SidebarRowTitle({ title }: { title: string }) {
   return <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+}
+
+function SidebarRowTitleInput({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  value: string
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  return (
+    // A native field lets inline editing retain the navigation row's styling.
+    <input
+      data-thread-rename="input"
+      aria-label="Thread title"
+      placeholder="Thread title"
+      className="min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-sm text-inherit shadow-none ring-0 outline-none placeholder:text-placeholder focus:ring-0 focus:outline-none"
+      value={value}
+      maxLength={80}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onBlur={(event) => {
+        // Prevent saving if the blur was caused by focusing to cancel button.
+        if (
+          event.relatedTarget instanceof HTMLElement &&
+          event.relatedTarget.dataset.threadRename === "cancel"
+        ) {
+          return
+        }
+
+        onSave()
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.nativeEvent.isComposing) return
+        if (event.key === "Enter") {
+          event.preventDefault()
+          onSave()
+        } else if (event.key === "Escape") {
+          event.preventDefault()
+          onCancel()
+        }
+      }}
+    />
+  )
 }
 
 const TREE_STEP = 20
@@ -225,10 +274,12 @@ function PullRequestMenuItem({
 
 function DisclosureCaret({
   expanded,
+  visible,
   label,
   onToggle,
 }: {
   expanded: boolean
+  visible: boolean
   label: string
   onToggle: () => void
 }) {
@@ -236,12 +287,15 @@ function DisclosureCaret({
   const toggle = (event: React.SyntheticEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    if (!visible) return
     onToggle()
   }
   return (
     <span
       role="button"
-      tabIndex={0}
+      data-thread-rename="caret"
+      tabIndex={visible ? 0 : -1}
+      aria-hidden={!visible}
       aria-expanded={expanded}
       aria-label={label}
       title={label}
@@ -249,9 +303,21 @@ function DisclosureCaret({
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") toggle(event)
       }}
-      className="-mx-space-1 flex size-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
+      className={cn(
+        "-mx-space-2 flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden",
+        "text-tertiary hover:text-primary",
+        "transition-all duration-normal motion-reduce:transition-none",
+        !visible
+          ? "pointer-events-none mr-0 w-0 opacity-0"
+          : !expanded &&
+              cn(
+                "mr-0 w-0 opacity-0",
+                "group-hover/row:-mr-space-2 group-hover/row:w-7 group-hover/row:opacity-100",
+                "[@media(hover:none)]:-mr-space-2 [@media(hover:none)]:w-7 [@media(hover:none)]:opacity-100"
+              )
+      )}
     >
-      <Caret size={10} weight="fill" />
+      <Caret size={16} className="shrink-0 translate-x-px" />
     </span>
   )
 }
@@ -330,11 +396,22 @@ export function SidebarThreadRow({
   const setViewed = useSetAgentThreadViewed()
   const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [renameOpen, setRenameOpen] = useState(false)
+  const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  const renameThread = useRenameAgentThread()
+  const editingTitle = useRef(false)
+
+  useEffect(() => {
+    if (
+      !editingTitle.current &&
+      titleDraft !== null &&
+      (item.title === titleDraft.trim() || renameThread.isError)
+    ) {
+      setTitleDraft(null)
+    }
+  }, [item.title, titleDraft, renameThread.isError])
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const menuNavigated = useRef(false)
-  const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
   const activeSubagentId =
     useSearch({
       from: "/agents/$threadId",
@@ -350,14 +427,16 @@ export function SidebarThreadRow({
   const activeWorkerId = workers.find(
     (worker) => worker.id === activeThreadId
   )?.id
-  const [workersExpanded, setWorkersExpanded] = useState(
-    Boolean(activeWorkerId)
-  )
-  const [previousWorkerId, setPreviousWorkerId] = useState(activeWorkerId)
-  if (previousWorkerId !== activeWorkerId) {
-    setPreviousWorkerId(activeWorkerId)
-    if (activeWorkerId) setWorkersExpanded(true)
+  const openedThreadId = isActive ? item.id : activeWorkerId
+  const [children, setChildren] = useState({
+    openedThreadId,
+    collapsed: false,
+  })
+  if (children.openedThreadId !== openedThreadId) {
+    setChildren({ openedThreadId, collapsed: false })
   }
+  const subagentsCollapsed = !openedThreadId || children.collapsed
+
   const hasSubagents = subagents.length > 0
   const activeSubagent =
     isActive &&
@@ -365,10 +444,9 @@ export function SidebarThreadRow({
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
       ? activeSubagentId
       : null
-  const subagentsCollapsed = !prefs.expandedSubagentKeys.includes(item.key)
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
-    (Boolean(activeWorkerId) && !workersExpanded)
+    (Boolean(activeWorkerId) && subagentsCollapsed)
   const unread = !item.viewed
   const isDeleting =
     deleteThread.isPending && deleteThread.variables === item.id
@@ -392,6 +470,22 @@ export function SidebarThreadRow({
     onNavigate?.()
   }
 
+  const saveTitle = () => {
+    if (!editingTitle.current || titleDraft === null) return
+    editingTitle.current = false
+    const title = titleDraft.trim()
+    if (title && title !== item.title) {
+      renameThread.mutate({ threadId: item.id, title })
+    } else {
+      setTitleDraft(null)
+    }
+  }
+
+  const cancelTitle = () => {
+    editingTitle.current = false
+    setTitleDraft(null)
+  }
+
   const rowContent = (
     <>
       {selected && (
@@ -399,26 +493,36 @@ export function SidebarThreadRow({
           ✓
         </span>
       )}
-      {hasSubagents && (
+      {(hasSubagents || workers.length > 0) && (
         <DisclosureCaret
+          visible={Boolean(openedThreadId)}
           expanded={!subagentsCollapsed}
-          label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-          onToggle={() => toggleSubagentsCollapsed(item.key)}
+          label={
+            subagentsCollapsed ? "Show child threads" : "Hide child threads"
+          }
+          onToggle={() =>
+            setChildren((previous) => ({
+              ...previous,
+              collapsed: !previous.collapsed,
+            }))
+          }
         />
       )}
-      {workers.length > 0 && (
-        <DisclosureCaret
-          expanded={workersExpanded}
-          label={workersExpanded ? "Hide task workers" : "Show task workers"}
-          onToggle={() => setWorkersExpanded((expanded) => !expanded)}
+      {titleDraft !== null ? (
+        <SidebarRowTitleInput
+          value={titleDraft}
+          onChange={setTitleDraft}
+          onSave={saveTitle}
+          onCancel={cancelTitle}
         />
+      ) : (
+        <SidebarRowTitle title={item.title} />
       )}
-      <SidebarRowTitle title={item.title} />
 
       <span
         className={cn(
-          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 group-has-data-[hover-preview=open]/row:invisible group-has-[[data-hover-preview=open]]/row:min-w-6 [@media(hover:none)]:pr-space-5",
-          moreMenuOpen && "invisible min-w-6"
+          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 group-has-data-[hover-preview=open]/row:invisible group-has-data-[hover-preview=open]/row:min-w-6 [@media(hover:none)]:pr-space-5",
+          (moreMenuOpen || titleDraft !== null) && "invisible min-w-6"
         )}
       >
         {item.status === "running" || item.waitingForDelegatedWork ? (
@@ -443,35 +547,38 @@ export function SidebarThreadRow({
   })
 
   const review = item.reviewPage
-  const link = review ? (
-    <Link
-      {...reviewPageRoute(review)}
-      onClick={(event) => {
-        handleNavigate(event)
-        if (!event.defaultPrevented) noteReviewOpenedFromSidebar(review)
-      }}
-      onKeyDown={openContextMenuFromKeyboard}
-      {...rowProps}
-      data-selectable-thread={item.id}
-      data-thread-title={item.title}
-      aria-label={selected ? `${item.title}, selected` : item.title}
-    >
-      {rowContent}
-    </Link>
-  ) : (
-    <Link
-      to="/agents/$threadId"
-      params={{ threadId: item.id }}
-      onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      {...rowProps}
-      data-selectable-thread={item.id}
-      data-thread-title={item.title}
-      aria-label={selected ? `${item.title}, selected` : item.title}
-    >
-      {rowContent}
-    </Link>
-  )
+  const link =
+    titleDraft !== null ? (
+      <div {...rowProps}>{rowContent}</div>
+    ) : review ? (
+      <Link
+        {...reviewPageRoute(review)}
+        onClick={(event) => {
+          handleNavigate(event)
+          if (!event.defaultPrevented) noteReviewOpenedFromSidebar(review)
+        }}
+        onKeyDown={openContextMenuFromKeyboard}
+        {...rowProps}
+        data-selectable-thread={item.id}
+        data-thread-title={item.title}
+        aria-label={selected ? `${item.title}, selected` : item.title}
+      >
+        {rowContent}
+      </Link>
+    ) : (
+      <Link
+        to="/agents/$threadId"
+        params={{ threadId: item.id }}
+        onClick={handleNavigate}
+        onKeyDown={openContextMenuFromKeyboard}
+        {...rowProps}
+        data-selectable-thread={item.id}
+        data-thread-title={item.title}
+        aria-label={selected ? `${item.title}, selected` : item.title}
+      >
+        {rowContent}
+      </Link>
+    )
 
   const menuItems = (menu: "context" | "dropdown") => (
     <ThreadMenuItems
@@ -480,7 +587,10 @@ export function SidebarThreadRow({
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
-      onRename={() => setRenameOpen(true)}
+      onRename={() => {
+        editingTitle.current = true
+        requestAnimationFrame(() => setTitleDraft(item.title))
+      }}
       onTogglePin={onTogglePin}
       onToggleViewed={() =>
         setViewed.mutate({ threadId: item.id, viewed: !item.viewed })
@@ -499,60 +609,104 @@ export function SidebarThreadRow({
               "group/row relative mb-0.5 select-none [-webkit-touch-callout:none]",
               isDeleting && "opacity-50"
             )}
+            onDoubleClick={(event) => {
+              if (
+                !(event.target instanceof Element) ||
+                event.target.closest("[data-thread-rename]") ||
+                renameThread.isPending
+              ) {
+                return
+              }
+
+              event.preventDefault()
+              editingTitle.current = true
+              setTitleDraft(item.title)
+            }}
           >
             <RowHoverCard
               trigger={link}
               card={<ThreadHoverCard item={item} live={live} />}
             >
-              <DropdownMenu onOpenChange={setMoreMenuOpen}>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    icon={DotsThreeIcon}
-                    label="Thread actions"
-                    style={
-                      {
-                        "--thread-actions-z-index": actionsZIndex,
-                      } as React.CSSProperties
+              {titleDraft !== null ? (
+                <IconButton
+                  data-thread-rename="cancel"
+                  icon={XIcon}
+                  label="Cancel rename"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  className="absolute top-1/2 right-1 -translate-y-1/2 text-tertiary hover:text-primary"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={cancelTitle}
+                  onBlur={cancelTitle}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault()
+                      cancelTitle()
                     }
-                    size="xs"
-                    color="secondary"
-                    variant="plain"
-                    className={cn(
-                      "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
-                      moreMenuOpen && "opacity-100"
+                  }}
+                />
+              ) : (
+                <DropdownMenu onOpenChange={setMoreMenuOpen}>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton
+                      data-thread-rename="actions"
+                      icon={DotsThreeIcon}
+                      label="Thread actions"
+                      style={
+                        {
+                          "--thread-actions-z-index": actionsZIndex,
+                        } as React.CSSProperties
+                      }
+                      size="xs"
+                      color="secondary"
+                      variant="plain"
+                      className={cn(
+                        "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                        moreMenuOpen && "opacity-100"
+                      )}
+                    />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="min-w-40 border-default bg-elevated"
+                    onClickCapture={(event) => {
+                      menuNavigated.current = Boolean(
+                        (event.target as HTMLElement).closest("a[href]")
+                      )
+                    }}
+                    onCloseAutoFocus={(event) => {
+                      if (menuNavigated.current || editingTitle.current) {
+                        event.preventDefault()
+                      }
+                      menuNavigated.current = false
+                    }}
+                  >
+                    {item.pr && (
+                      <>
+                        <PullRequestMenuItem pr={item.pr} live={live} />
+                        <DropdownMenuSeparator />
+                      </>
                     )}
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="min-w-[10rem] border-default bg-elevated"
-                  onClickCapture={(event) => {
-                    menuNavigated.current = Boolean(
-                      (event.target as HTMLElement).closest("a[href]")
-                    )
-                  }}
-                  onCloseAutoFocus={(event) => {
-                    if (menuNavigated.current) event.preventDefault()
-                    menuNavigated.current = false
-                  }}
-                >
-                  {item.pr && (
-                    <>
-                      <PullRequestMenuItem pr={item.pr} live={live} />
-                      <DropdownMenuSeparator />
-                    </>
-                  )}
-                  {menuItems("dropdown")}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {menuItems("dropdown")}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </RowHoverCard>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-[10rem] border-default bg-elevated">
+        <ContextMenuContent
+          className="min-w-40 border-default bg-elevated"
+          onCloseAutoFocus={(event) => {
+            if (editingTitle.current) {
+              event.preventDefault()
+            }
+          }}
+        >
           {menuItems("context")}
         </ContextMenuContent>
       </ContextMenu>
-      {hasSubagents && !subagentsCollapsed && (
+      {openedThreadId && hasSubagents && !subagentsCollapsed && (
         <SidebarTree
           label={`Subagents of ${item.title}`}
           indent={indent}
@@ -571,7 +725,7 @@ export function SidebarThreadRow({
           ))}
         </SidebarTree>
       )}
-      {workers.length > 0 && workersExpanded && (
+      {openedThreadId && workers.length > 0 && !subagentsCollapsed && (
         <SidebarTree
           label={`Task workers of ${item.title}`}
           indent={indent}
@@ -588,12 +742,6 @@ export function SidebarThreadRow({
             />
           ))}
         </SidebarTree>
-      )}
-      {renameOpen && (
-        <RenameThreadDialog
-          thread={thread}
-          onClose={() => setRenameOpen(false)}
-        />
       )}
       <DeleteThreadDialog
         open={deleteOpen}
@@ -923,16 +1071,18 @@ function SidebarTaskWorkerRow({
   indent: boolean
   onNavigate?: () => void
 }) {
-  const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
+  const [children, setChildren] = useState({ isActive, collapsed: false })
+  if (children.isActive !== isActive) {
+    setChildren({ isActive, collapsed: false })
+  }
+
+  const subagentsCollapsed = !isActive || children.collapsed
   const subagents = (worker.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
   )
   const activeSubagent =
     isActive &&
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
-  const subagentsCollapsed = !prefs.expandedSubagentKeys.includes(
-    `cloud:${worker.id}`
-  )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
   const status = worker.pendingWorkflowApproval
     ? "Awaiting approval"
@@ -953,7 +1103,7 @@ function SidebarTaskWorkerRow({
         search={{}}
         aria-current={rowIsActive ? "page" : undefined}
         title={`${worker.title} — ${status}`}
-        onClick={() => onNavigate?.()}
+        onClick={onNavigate}
         {...sidebarRowProps({
           active: rowIsActive,
           archived: worker.resolved === true,
@@ -963,13 +1113,19 @@ function SidebarTaskWorkerRow({
       >
         {subagents.length > 0 && (
           <DisclosureCaret
+            visible={isActive}
             expanded={!subagentsCollapsed}
             label={
               subagentsCollapsed
                 ? "Show worker subagents"
                 : "Hide worker subagents"
             }
-            onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
+            onToggle={() =>
+              setChildren((previous) => ({
+                ...previous,
+                collapsed: !previous.collapsed,
+              }))
+            }
           />
         )}
         <SidebarRowTitle title={worker.title} />
@@ -983,7 +1139,7 @@ function SidebarTaskWorkerRow({
           {status}
         </span>
       </Link>
-      {subagents.length > 0 && !subagentsCollapsed && (
+      {isActive && subagents.length > 0 && !subagentsCollapsed && (
         <SidebarTree
           label={`Subagents of ${worker.title}`}
           indent={indent}

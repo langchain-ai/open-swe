@@ -258,11 +258,11 @@ it("renames an unopened thread from its context menu and discards cancelled draf
     viewed: true,
   } as unknown as AgentThread
   const client = new QueryClient()
-  render(
+  const Row = ({ title }: { title: string }) => (
     <QueryClientProvider client={client}>
       <TooltipProvider>
         <SidebarThreadRow
-          item={cloudSidebarThread(thread)}
+          item={cloudSidebarThread({ ...thread, title })}
           isActive={false}
           pinned={false}
           archived={false}
@@ -272,6 +272,7 @@ it("renames an unopened thread from its context menu and discards cancelled draf
       </TooltipProvider>
     </QueryClientProvider>
   )
+  const { rerender } = render(<Row title={thread.title} />)
   const row = screen.getByRole("link", { name: /Thread/ })
   expect(screen.queryByRole("button", { name: "Pin thread" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Archive thread" })).toBeNull()
@@ -283,7 +284,7 @@ it("renames an unopened thread from its context menu and discards cancelled draf
   expect(stub.noop).toHaveBeenCalledTimes(2)
   fireEvent.contextMenu(row)
   fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
-  const input = (await screen.findByRole("textbox", {
+  let input = (await screen.findByRole("textbox", {
     name: "Thread title",
   })) as HTMLInputElement
   expect(document.activeElement).toBe(input)
@@ -292,23 +293,90 @@ it("renames an unopened thread from its context menu and discards cancelled draf
   fireEvent.change(input, { target: { value: "Discard this" } })
   fireEvent.keyDown(input, { key: "Escape" })
   expect(stub.rename.mutate).not.toHaveBeenCalled()
-  fireEvent.contextMenu(row)
+  fireEvent.contextMenu(screen.getByRole("link", { name: /Thread/ }))
   fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
-  const reopened = (await screen.findByRole("textbox", {
+  input = (await screen.findByRole("textbox", {
     name: "Thread title",
   })) as HTMLInputElement
-  expect(reopened.value).toBe(thread.title)
-  fireEvent.change(reopened, { target: { value: "   " } })
-  expect(
-    (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled
-  ).toBe(true)
-  fireEvent.change(reopened, { target: { value: "  New title  " } })
-  fireEvent.submit(reopened.closest("form")!)
-  expect(stub.rename.mutate).toHaveBeenCalledExactlyOnceWith({
+  expect(input.value).toBe(thread.title)
+  fireEvent.change(input, { target: { value: "  New title  " } })
+  fireEvent.keyDown(input, { key: "Enter" })
+  expect(stub.rename.mutate).toHaveBeenCalledOnce()
+  expect(stub.rename.mutate.mock.lastCall?.[0]).toEqual({
     threadId: thread.id,
     title: "New title",
   })
   expect(screen.queryByRole("dialog")).toBeNull()
+  expect(screen.getByRole("textbox", { name: "Thread title" })).toBe(input)
+  rerender(<Row title="New title" />)
+  expect(screen.queryByRole("textbox", { name: "Thread title" })).toBeNull()
+  expect(screen.getByText("New title")).toBeTruthy()
+
+  stub.rename.mutate.mockClear()
+  const startInlineRename = () => {
+    fireEvent.doubleClick(screen.getByRole("link"))
+    return screen.getByRole("textbox", {
+      name: "Thread title",
+    }) as HTMLInputElement
+  }
+  input = startInlineRename()
+  expect(document.activeElement).toBe(input)
+  expect(input.selectionStart).toBe(0)
+  expect(input.selectionEnd).toBe("New title".length)
+  fireEvent.change(input, { target: { value: "  Inline title  " } })
+  fireEvent.keyDown(input, { key: "Enter" })
+  fireEvent.blur(input)
+  expect(stub.rename.mutate).toHaveBeenCalledOnce()
+  expect(stub.rename.mutate.mock.lastCall?.[0]).toEqual({
+    threadId: thread.id,
+    title: "Inline title",
+  })
+  rerender(<Row title="Inline title" />)
+
+  stub.rename.mutate.mockClear()
+  fireEvent.blur(startInlineRename())
+  input = startInlineRename()
+  fireEvent.change(input, { target: { value: "   " } })
+  fireEvent.blur(input)
+  expect(stub.rename.mutate).not.toHaveBeenCalled()
+
+  input = startInlineRename()
+  fireEvent.change(input, { target: { value: "Discard via X" } })
+  expect(screen.queryByRole("button", { name: "Thread actions" })).toBeNull()
+  expect(
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Cancel rename" }))
+  ).toBe(false)
+  fireEvent.click(screen.getByRole("button", { name: "Cancel rename" }))
+  fireEvent.blur(input)
+  expect(screen.queryByRole("textbox", { name: "Thread title" })).toBeNull()
+
+  input = startInlineRename()
+  fireEvent.change(input, {
+    target: { value: "Discard after tabbing past Cancel" },
+  })
+  const cancel = screen.getByRole("button", { name: "Cancel rename" })
+  fireEvent.blur(input, { relatedTarget: cancel })
+  expect(screen.getByRole("textbox", { name: "Thread title" })).toBe(input)
+  fireEvent.focus(cancel)
+  fireEvent.blur(cancel)
+  expect(screen.queryByRole("textbox", { name: "Thread title" })).toBeNull()
+  expect(stub.rename.mutate).not.toHaveBeenCalled()
+
+  input = startInlineRename()
+  fireEvent.change(input, { target: { value: "Discard via Escape" } })
+  fireEvent.keyDown(input, { key: "Escape" })
+  fireEvent.blur(input)
+  expect(screen.queryByRole("textbox", { name: "Thread title" })).toBeNull()
+  expect(stub.rename.mutate).not.toHaveBeenCalled()
+
+  input = startInlineRename()
+  fireEvent.change(input, { target: { value: "Saved on blur" } })
+  fireEvent.blur(input)
+  expect(stub.rename.mutate).toHaveBeenCalledOnce()
+  expect(stub.rename.mutate.mock.lastCall?.[0]).toEqual({
+    threadId: thread.id,
+    title: "Saved on blur",
+  })
 })
 
 it("opens asynchronous workers as real conversations and expands the selected worker separately from synchronous subagents", () => {
@@ -348,13 +416,13 @@ it("opens asynchronous workers as real conversations and expands the selected wo
     ],
   } as AgentThread
   const client = new QueryClient()
-  render(
+  const row = (activeThreadId: string) => (
     <QueryClientProvider client={client}>
       <TooltipProvider>
         <SidebarThreadRow
           item={cloudSidebarThread(parent)}
-          isActive={false}
-          activeThreadId="worker"
+          isActive={activeThreadId === "parent"}
+          activeThreadId={activeThreadId}
           pinned={false}
           archived={false}
           onTogglePin={stub.noop}
@@ -363,13 +431,37 @@ it("opens asynchronous workers as real conversations and expands the selected wo
       </TooltipProvider>
     </QueryClientProvider>
   )
+  const { rerender } = render(row("other"))
+  expect(screen.queryByRole("link", { name: /Inspect code/ })).toBeNull()
+  expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
+  expect(
+    screen.queryByRole("button", { name: "Show child threads" })
+  ).toBeNull()
+  rerender(row("parent"))
+  expect(screen.getByRole("link", { name: /Inspect code/ })).toBeTruthy()
+  expect(screen.getByRole("link", { name: /Implement change/ })).toBeTruthy()
+  expect(
+    screen.getByRole("button", { name: "Hide child threads" })
+  ).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Hide child threads" }))
+  expect(screen.queryByRole("link", { name: /Inspect code/ })).toBeNull()
+  rerender(row("other"))
+  expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
+  rerender(row("parent"))
+  expect(screen.getByRole("link", { name: /Inspect code/ })).toBeTruthy()
+  expect(
+    screen.getAllByRole("button", { name: "Hide child threads" })
+  ).toHaveLength(1)
+  expect(screen.getByRole("link", { name: /Implement change/ })).toBeTruthy()
+  rerender(row("worker"))
+  expect(screen.getByRole("link", { name: /Inspect code/ })).toBeTruthy()
   const workerLink = screen.getByRole("link", { name: /Implement change/ })
+  expect(screen.getByRole("link", { name: /Worker inspection/ })).toBeTruthy()
   expect(workerLink.getAttribute("href")).toBe("/agents/worker")
   expect(workerLink.getAttribute("aria-current")).toBe("page")
-  fireEvent.click(screen.getByRole("button", { name: "Hide task workers" }))
-  expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Show task workers" }))
-  expect(screen.getByRole("link", { name: /Implement change/ })).toBeTruthy()
+  expect(
+    screen.getByRole("button", { name: "Hide child threads" })
+  ).toBeTruthy()
   const workerSyncToggle = screen.queryByRole("button", {
     name: "Show worker subagents",
   })
@@ -377,8 +469,18 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   expect(
     screen.getByRole("link", { name: /Worker inspection/ }).getAttribute("href")
   ).toBe("/agents/worker?subagent=worker-sync")
-  const syncToggle = screen.queryByRole("button", { name: "Show subagents" })
-  if (syncToggle) fireEvent.click(syncToggle)
+  expect(
+    screen.queryByRole("button", { name: "Show child threads" })
+  ).toBeNull()
+  rerender(row("parent"))
+  expect(
+    screen.queryByRole("button", { name: "Show worker subagents" })
+  ).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Hide child threads" }))
+  expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
+  expect(screen.queryByRole("link", { name: /Inspect code/ })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Show child threads" }))
+  expect(screen.getByRole("link", { name: /Implement change/ })).toBeTruthy()
   expect(
     screen.getByRole("link", { name: /Inspect code/ }).getAttribute("href")
   ).toBe("/agents/parent?subagent=sync-tool")
