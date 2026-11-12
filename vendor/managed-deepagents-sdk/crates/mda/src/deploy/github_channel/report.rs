@@ -9,6 +9,10 @@ use crate::langsmith::github_channel::{GitHubChannelStatus, GitHubInstallation};
 
 /// Repositories listed by name before the summary switches to a count.
 const LISTED_REPOSITORIES: usize = 5;
+/// Accounts named one by one before a list of installations or installation
+/// requests becomes one line with a count, so an App installed in many
+/// accounts doesn't fill the deploy output.
+const LISTED_ACCOUNTS: usize = 3;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Report {
@@ -43,16 +47,29 @@ pub(crate) fn build(channel: &GitHubChannel, status: &GitHubChannelStatus) -> Re
         report.warnings.push(changes);
     }
 
-    for request in &status.installation_requests {
-        let requester = request
-            .requester
-            .as_ref()
-            .map(|requester| format!(" requested by {}", requester.login))
-            .unwrap_or_default();
+    if status.installation_requests.len() > LISTED_ACCOUNTS {
+        let accounts: Vec<String> = status
+            .installation_requests
+            .iter()
+            .map(|request| request.account.login.clone())
+            .collect();
         report.warnings.push(format!(
-            "Waiting for an owner of {} to approve the installation{requester}.",
-            request.account.login
+            "{} installation requests are waiting for an owner's approval: {}.",
+            accounts.len(),
+            first_and_count(&accounts, false)
         ));
+    } else {
+        for request in &status.installation_requests {
+            let requester = request
+                .requester
+                .as_ref()
+                .map(|requester| format!(" requested by {}", requester.login))
+                .unwrap_or_default();
+            report.warnings.push(format!(
+                "Waiting for an owner of {} to approve the installation{requester}.",
+                request.account.login
+            ));
+        }
     }
 
     if status.installations.is_empty() {
@@ -65,6 +82,8 @@ pub(crate) fn build(channel: &GitHubChannel, status: &GitHubChannelStatus) -> Re
     }
 
     let mut installed_on = Vec::new();
+    // Installations still on older App permissions: (account, pending, settings).
+    let mut unaccepted: Vec<(String, String, String)> = Vec::new();
     for installation in &status.installations {
         let settings = installation_settings_url(installation);
         if installation.suspended_at.is_some() {
@@ -83,23 +102,64 @@ pub(crate) fn build(channel: &GitHubChannel, status: &GitHubChannelStatus) -> Re
         }
         let pending = missing(&parse_levels(&app.permissions), &installation.permissions);
         if !pending.is_empty() {
-            report.warnings.push(format!(
-                "An owner of {} must accept the App's updated permissions ({}) at {settings}",
-                installation.account.login,
-                pending.join(", ")
+            unaccepted.push((
+                installation.account.login.clone(),
+                pending.join(", "),
+                settings,
             ));
         }
         installed_on.push(installation_scope(installation));
+    }
+    if unaccepted.len() > LISTED_ACCOUNTS {
+        let accounts: Vec<String> = unaccepted.iter().map(|(login, ..)| login.clone()).collect();
+        let (_, _, first_settings) = &unaccepted[0];
+        // Past a cut-off list, the count is only a lower bound.
+        let count = if status.installations_truncated {
+            format!("At least {}", unaccepted.len())
+        } else {
+            unaccepted.len().to_string()
+        };
+        report.warnings.push(format!(
+            "{count} installations have not accepted the App's updated permissions: {}. Each owner accepts them in the installation's settings, such as {first_settings}",
+            first_and_count(&accounts, status.installations_truncated)
+        ));
+    } else {
+        for (login, pending, settings) in &unaccepted {
+            report.warnings.push(format!(
+                "An owner of {login} must accept the App's updated permissions ({pending}) at {settings}"
+            ));
+        }
     }
     if !installed_on.is_empty() {
         report.ready = Some(format!(
             "GitHub channel ready · App {} ({}) · installed on {}",
             app.slug,
             app.owner.login,
-            installed_on.join("; ")
+            first_and_count_by(
+                &installed_on,
+                "; ",
+                " accounts",
+                status.installations_truncated
+            )
         ));
     }
     report
+}
+
+/// The first [`LISTED_ACCOUNTS`] of `items`, then how many more:
+/// `a, b, c and 46 more`, or `… and at least 46 more` when the list itself was cut off.
+fn first_and_count(items: &[String], truncated: bool) -> String {
+    first_and_count_by(items, ", ", "", truncated)
+}
+
+fn first_and_count_by(items: &[String], separator: &str, noun: &str, truncated: bool) -> String {
+    let listed = items[..items.len().min(LISTED_ACCOUNTS)].join(separator);
+    match (items.len().saturating_sub(LISTED_ACCOUNTS), truncated) {
+        (0, false) => listed,
+        (0, true) => format!("{listed} and more{noun}"),
+        (more, false) => format!("{listed} and {more} more{noun}"),
+        (more, true) => format!("{listed} and at least {more} more{noun}"),
+    }
 }
 
 /// One list of what the App owner must add on GitHub and what they can
@@ -285,11 +345,20 @@ pub(super) fn token_summary(
             app_permissions_url(&app.owner.login, app.owner.is_organization(), &app.slug)
         ));
     }
-    steps.push(format!(
-        "An owner of {} accepts them at {}",
-        installation.account.login,
-        installation_settings_url(installation)
-    ));
+    // An installation past Agent Auth's report comes without its account's
+    // type, so its settings URL is unknown: name the installation instead.
+    if installation.account.kind.is_empty() && installation.settings_url.is_none() {
+        steps.push(format!(
+            "An owner of {} accepts them in that installation's settings on GitHub",
+            installation.account.login
+        ));
+    } else {
+        steps.push(format!(
+            "An owner of {} accepts them at {}",
+            installation.account.login,
+            installation_settings_url(installation)
+        ));
+    }
     steps.push("Run `mda deploy` again.".to_string());
     lines.push(String::new());
     lines.extend(
@@ -722,6 +791,85 @@ mod tests {
                 .join("\n")]
         );
         assert!(report.ready.is_some());
+    }
+
+    /// `count` user installations of the App, each on older App permissions.
+    fn installed_in(count: usize) -> serde_json::Value {
+        let mut value = healthy();
+        value["app"]["permissions"] =
+            json!({ "issues": "write", "metadata": "read", "checks": "read" });
+        value["installations"] = (0..count)
+            .map(|i| {
+                json!({
+                    "id": 100 + i, "account": { "login": format!("user{i}"), "type": "User" },
+                    "repository_selection": "all",
+                    "permissions": { "issues": "write", "metadata": "read" }
+                })
+            })
+            .collect();
+        value
+    }
+
+    #[test]
+    fn many_installations_are_summed_up_not_listed() {
+        let mut value = installed_in(5);
+        value["installations_truncated"] = json!(true);
+        value["installation_requests"] = (0..4)
+            .map(|i| json!({ "account": { "login": format!("org{i}"), "type": "Organization" } }))
+            .collect();
+        let report = build(&channel(), &status(value));
+
+        assert_eq!(
+            report.ready.as_deref(),
+            Some(
+                "GitHub channel ready · App acme-triage (acme) · installed on all repositories of user0; all repositories of user1; all repositories of user2 and at least 2 more accounts"
+            )
+        );
+        assert!(
+            report.warnings.contains(
+                &"4 installation requests are waiting for an owner's approval: org0, org1, org2 and 1 more."
+                    .to_string()
+            ),
+            "{:?}",
+            report.warnings
+        );
+        assert!(
+            report.warnings.contains(
+                &"At least 5 installations have not accepted the App's updated permissions: user0, user1, user2 and at least 2 more. Each owner accepts them in the installation's settings, such as https://github.com/settings/installations/100"
+                    .to_string()
+            ),
+            "{:?}",
+            report.warnings
+        );
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("An owner of") || w.starts_with("Waiting for an owner")),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn a_few_installations_are_still_listed_one_by_one() {
+        let report = build(&channel(), &status(installed_in(3)));
+        assert_eq!(
+            report.ready.as_deref(),
+            Some(
+                "GitHub channel ready · App acme-triage (acme) · installed on all repositories of user0; all repositories of user1; all repositories of user2"
+            )
+        );
+        assert_eq!(
+            report
+                .warnings
+                .iter()
+                .filter(|w| w.starts_with("An owner of user"))
+                .count(),
+            3,
+            "{:?}",
+            report.warnings
+        );
     }
 
     #[test]

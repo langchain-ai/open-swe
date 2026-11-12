@@ -272,6 +272,14 @@ pub(crate) trait SetupEnv: SetupUi {
     /// Mint the agent's token with `scopes`. Agent Auth drops the current
     /// token, so a session has to renew it.
     fn update_token_scopes(&mut self, provider_id: &str, scopes: &[String]) -> Result<()>;
+    /// Issue the agent's token on `installation_id` with the provider's
+    /// scopes, the same exchange Agent Auth's refresh runs, to learn whether
+    /// it still can.
+    fn issue_token(
+        &mut self,
+        connection: &AppConnection,
+        installation_id: u64,
+    ) -> Result<OAuthAuthorizationSession>;
     /// The App as GitHub reports it now.
     fn sync(&mut self) -> GitHubSyncOutcome;
     /// Where this deployment receives the App's events.
@@ -594,6 +602,25 @@ fn webhook_elsewhere(slug: &str, current: &str, expected: &str) -> String {
 /// How Agent Auth reports that GitHub refused the permissions a token asks for.
 const PERMISSIONS_REJECTED: &str = "GitHub rejected the requested permissions";
 
+/// The workspace permission Agent Auth checks before it changes an OAuth
+/// provider, such as the scopes of the agent's GitHub token.
+const INTEGRATIONS_MANAGE: &str = "workspaces:integrations:manage";
+
+/// Agent Auth refused to change the token's scopes: name the permission the
+/// key deploy runs with is missing, so whoever reads the log knows what to
+/// grant, instead of only "not authorized".
+fn explain_forbidden_scopes(error: anyhow::Error) -> anyhow::Error {
+    let forbidden = error
+        .downcast_ref::<ApiError>()
+        .is_some_and(|api| api.status == reqwest::StatusCode::FORBIDDEN);
+    if !forbidden {
+        return error;
+    }
+    error.context(format!(
+        "the LangSmith API key deploy runs with needs the workspace permission {INTEGRATIONS_MANAGE} (Integrations: manage) to change the agent's GitHub token"
+    ))
+}
+
 /// GitHub refused the agent's first token because the installation lacks a
 /// permission the channel needs; the channel config is the other way out.
 fn explain_refused_token(error: anyhow::Error) -> anyhow::Error {
@@ -874,19 +901,28 @@ fn sync_token_scopes(
         let described = pinned
             .as_ref()
             .map_or(active[0], |(installation, _)| installation);
-        return env.info(&report::token_summary(
+        env.info(&report::token_summary(
             channel, status, described, &scopes, false,
-        ));
+        ))?;
+        // Only a pinned or single installation is the one the token is on.
+        return match (&pinned, active.as_slice()) {
+            (Some((installation, _)), _) => {
+                check_token(env, channel, status, connection, installation)
+            }
+            (None, [installation]) => check_token(env, channel, status, connection, installation),
+            _ => Ok(()),
+        };
     }
     if let Some((installation, false)) = &pinned {
         // Past the report, what the installation grants beyond the current
         // token is unknown, and a failed widening would lose a token that
         // works: only a narrowing goes ahead.
         if !narrowing {
-            return env.info(&format!(
+            env.info(&format!(
                 "GitHub App installation {} ({INSTALLATION_ID_ENV}) is not among the first 100 installations Agent Auth reports, so deploy cannot see what it grants and the agent's GitHub token keeps its current permissions.",
                 installation.id
-            ));
+            ))?;
+            return check_token(env, channel, status, connection, installation);
         }
     }
     let installation = match (&pinned, active.as_slice()) {
@@ -909,13 +945,14 @@ fn sync_token_scopes(
     let mut target = scopes.clone();
     if !report::grants(&channel.permissions, &installation.permissions) {
         if !narrowing {
-            return env.info(&report::token_summary(
+            env.info(&report::token_summary(
                 channel,
                 status,
                 installation,
                 &connection.scopes,
                 false,
-            ));
+            ))?;
+            return check_token(env, channel, status, connection, installation);
         }
         // Narrow now to what the installation grants; the rest follows once
         // it grants them.
@@ -947,6 +984,108 @@ fn sync_token_scopes(
             "Could not update the agent's GitHub token ({error:#}), and the agent has no GitHub token until it is renewed. Run `mda deploy` again to set it up."
         )),
     }
+}
+
+/// Check that Agent Auth can still issue the agent's token on `installation`
+/// when deploy left its scopes alone, and repair it when it cannot.
+///
+/// Issuing goes through the same exchange as Agent Auth's own refresh, so a
+/// token that can no longer be refreshed fails here too, instead of only when
+/// the agent next needs it. The repair is what a person would do by hand:
+/// reset the provider's scopes to what the installation grants, then issue
+/// again. Neither step touches the App or its installations. Only a definite
+/// answer that the token cannot be issued leads to the reset, which can
+/// narrow it to what the installation grants; when the check gets no such
+/// answer, the token stays as it is.
+fn check_token(
+    env: &mut dyn SetupEnv,
+    channel: &GitHubChannel,
+    status: &GitHubChannelStatus,
+    connection: &AppConnection,
+    installation: &GitHubInstallation,
+) -> Result<()> {
+    let problem = match token_check(env.issue_token(connection, installation.id)) {
+        TokenCheck::Issued => return Ok(()),
+        TokenCheck::Broken(problem) => problem,
+        // Agent Auth also answers this way for a GitHub hiccup, so only a
+        // second refusal counts as a token it cannot issue.
+        TokenCheck::Refused(_) => match token_check(env.issue_token(connection, installation.id)) {
+            TokenCheck::Issued => return Ok(()),
+            TokenCheck::Broken(problem) | TokenCheck::Refused(problem) => problem,
+            TokenCheck::Unknown(problem) => return keep_unchecked_token(env, &problem),
+        },
+        TokenCheck::Unknown(problem) => return keep_unchecked_token(env, &problem),
+    };
+    let granted = report::granted_scopes(&channel.permissions, &installation.permissions);
+    let target = if granted.is_empty() {
+        connection.scopes.clone()
+    } else {
+        granted
+    };
+    match renew_token(env, connection, &target, installation.id) {
+        Ok(()) => env.warning(&format!(
+            "Agent Auth could not issue the agent's GitHub token ({problem}), so deploy reset it on installation {}.\n{}",
+            installation.id,
+            report::token_summary(channel, status, installation, &target, true)
+        )),
+        Err(RenewalFailure { error, .. }) => env.warning(&format!(
+            "Agent Auth cannot issue the agent's GitHub token ({problem}), so the agent has no working GitHub token, and resetting it failed ({error:#}). Fix that, then run `mda deploy` again."
+        )),
+    }
+}
+
+/// Agent Auth's answer when it cannot issue a token because of GitHub, which
+/// also covers GitHub's own outages and network errors.
+const PROVIDER_REQUEST_FAILED: &str = "OAuth provider request failed";
+
+/// What issuing the agent's token says about it.
+#[derive(Debug, PartialEq, Eq)]
+enum TokenCheck {
+    Issued,
+    /// Agent Auth says for certain that it cannot issue the token: its session
+    /// failed with an error code, or GitHub refused the permissions it holds.
+    Broken(String),
+    /// Agent Auth's provider request failed, which a GitHub hiccup causes too.
+    Refused(String),
+    /// The check itself did not get an answer (network, timeout, rate limit,
+    /// another server error), or a reset would not help.
+    Unknown(String),
+}
+
+fn token_check(outcome: Result<OAuthAuthorizationSession>) -> TokenCheck {
+    match outcome {
+        Ok(session) if session.status == "completed" => TokenCheck::Issued,
+        Ok(session) => match session.error_code {
+            Some(code) => TokenCheck::Broken(code),
+            None => TokenCheck::Unknown(format!("the session ended {}", session.status)),
+        },
+        Err(error) => {
+            let problem = format!("{error:#}");
+            match error.downcast_ref::<ApiError>() {
+                Some(api)
+                    if api.status == reqwest::StatusCode::BAD_GATEWAY
+                        && api.detail.contains(PERMISSIONS_REJECTED) =>
+                {
+                    TokenCheck::Broken(problem)
+                }
+                Some(api)
+                    if api.status == reqwest::StatusCode::BAD_GATEWAY
+                        && api.detail.contains(PROVIDER_REQUEST_FAILED) =>
+                {
+                    TokenCheck::Refused(problem)
+                }
+                _ => TokenCheck::Unknown(problem),
+            }
+        }
+    }
+}
+
+/// A token check that got no definite answer leaves the token alone: a reset
+/// during an outage could drop a token that works.
+fn keep_unchecked_token(env: &mut dyn SetupEnv, problem: &str) -> Result<()> {
+    env.warning(&format!(
+        "Could not check the agent's GitHub token ({problem}), so deploy leaves it as it is. Run `mda deploy` again to check it."
+    ))
 }
 
 /// The installation `MDA_GITHUB_APP_INSTALLATION_ID` pins, with what it
@@ -1809,6 +1948,17 @@ impl SetupEnv for LiveSetup<'_> {
     fn update_token_scopes(&mut self, provider_id: &str, scopes: &[String]) -> Result<()> {
         self.agent_auth
             .update_github_app_scopes(provider_id, scopes)
+            .map_err(explain_forbidden_scopes)
+    }
+
+    fn issue_token(
+        &mut self,
+        connection: &AppConnection,
+        installation_id: u64,
+    ) -> Result<OAuthAuthorizationSession> {
+        let start = GitHubAppSessionStart::Installation(installation_id.to_string());
+        self.agent_auth
+            .start_github_app_session(&connection.app, self.deployment_id, &start)
     }
 
     fn sync(&mut self) -> GitHubSyncOutcome {
