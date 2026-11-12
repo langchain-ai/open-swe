@@ -1896,6 +1896,66 @@ async def test_the_skills_open_swe_ships_are_served_from_this_deployment(
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
+async def test_memory_files_stay_in_mda_without_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code_mode: bool
+) -> None:
+    from deepagents.backends import FilesystemBackend
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from langchain.agents.middleware.types import ModelRequest
+    from managed_deepagents import ManagedToolRuntime
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(
+        catalog=Catalog(files=FilesSpec(backend_paths=["/memories/"], checks=["agents_md"]))
+    )
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    filesystem = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    tools = {tool.name: tool for tool in FilesystemMiddleware(backend=filesystem).tools}
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    model_request = MagicMock(spec=ModelRequest)
+    model_request.tools = list(tools.values())
+    await files.awrap_model_call(model_request, AsyncMock())
+    runtime = ManagedToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+        backend=filesystem,
+    )
+    for name, args in (
+        (
+            "write_file",
+            {"file_path": "/memories/user/projects/AGENTS.md", "content": "Remember 731"},
+        ),
+        (
+            "write_file",
+            {"file_path": "/memories/user/projects/notes.md", "content": "Project notes"},
+        ),
+        ("read_file", {"file_path": "/memories/user/projects/notes.md"}),
+    ):
+        if code_mode:
+            [code_tool] = files.code_tools([name])
+            result = await code_tool.ainvoke({**args, "runtime": runtime})
+        else:
+            request = ToolCallRequest(
+                tool_call={"name": name, "args": args, "id": "call-1", "type": "tool_call"},
+                tool=tools[name],
+                state={"messages": []},
+                runtime=runtime,
+            )
+            result = await files.awrap_tool_call(request, files._run_own)
+        assert isinstance(result, ToolMessage) and result.status != "error"
+    assert "Project notes" in result.text
+    assert "Instructions from: /memories/user/projects/AGENTS.md\nRemember 731" in result.text
+    assert (tmp_path / "memories/user/projects/AGENTS.md").read_text() == "Remember 731"
+
+
+@pytest.mark.parametrize("code_mode", [False, True])
 async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     monkeypatch: pytest.MonkeyPatch, code_mode: bool
 ) -> None:

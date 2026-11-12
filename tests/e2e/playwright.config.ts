@@ -14,6 +14,7 @@ const harnessURL = `http://127.0.0.1:${PORT}`;
 const serverEnv = {
   ...process.env,
   E2E_BUSY_HOLD_SECONDS: "8",
+  MDA_AGENT_AUTH_PRINCIPAL_ID: "e2e-local-caller",
   E2E_EXIT_WHEN_ORPHANED: "1",
   DROPPED_EVENTS: "",
 };

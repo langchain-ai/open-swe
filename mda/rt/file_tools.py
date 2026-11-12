@@ -220,8 +220,10 @@ class FileToolsMiddleware(AgentMiddleware):
         if request.tool is not None:
             request = request.override(tool=self._skill_tool(request, request.tool))
         spec = self._spec
-        if _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
-            run: Handler = self._run_skill
+        if _under(("/memories/",), call_["name"], call_["args"]):
+            run: Handler = handler
+        elif _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
+            run = self._run_skill
         elif _under(spec.backend_paths, call_["name"], call_["args"]):
             run = self._run_remote
         elif not self._in_sandbox:
@@ -347,13 +349,23 @@ class FileToolsMiddleware(AgentMiddleware):
 
     async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
         """A code mode call, run by the tool the model's own call of it runs."""
-        tools = self._sandbox_tools if self._in_sandbox else self._remote
+        call_ = request.tool_call
+        tools = (
+            self._sandbox_tools
+            if self._in_sandbox or _under(("/memories/",), call_["name"], call_["args"])
+            else self._remote
+        )
         return await _invoked(self._skill_tool(request, tools[request.tool_call["name"]]), request)
 
     async def _checked(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler`` in the graph's own order: image reads, then tool errors, then AGENTS.md."""
         checks = self._spec.checks
-        agents_md = self._agents_md_in_sandbox if self._in_sandbox else self._agents_md_remote
+        call_ = request.tool_call
+        agents_md = (
+            self._agents_md_in_sandbox
+            if self._in_sandbox or _under(("/memories/",), call_["name"], call_["args"])
+            else self._agents_md_remote
+        )
         checked = handler
         for check in (
             agents_md if "agents_md" in checks else None,

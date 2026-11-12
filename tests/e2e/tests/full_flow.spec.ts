@@ -88,6 +88,58 @@ test.describe("Open SWE full flow", () => {
     await expect(reply.locator('a[href*="/pull/"]')).toBeVisible();
   });
 
+  test("user memory recalls a number in a fresh DM thread", async ({
+    page,
+    request,
+  }) => {
+    const number = crypto.getRandomValues(new Uint32Array(1))[0].toString();
+    const savedResponse = await request.post("/mock/slack/send", {
+      data: {
+        text: `Remember this number: E2E_MEMORY_SAVE ${number}`,
+        mention_bot: false,
+        channel_type: "im",
+        channel: "D_MEMORY_ALICE",
+      },
+    });
+    expect(savedResponse.ok()).toBeTruthy();
+    const saved = await savedResponse.json();
+    expect(saved.webhook.status).toBe("accepted");
+    await expect(
+      page
+        .locator(".msg.bot")
+        .filter({ hasText: "Your number is saved." })
+        .first(),
+    ).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect
+      .poll(async () => {
+        const response = await request.get(`/threads/${saved.thread_id}`);
+        return (await response.json()).status;
+      })
+      .not.toBe("busy");
+
+    const response = await request.post("/mock/slack/send", {
+      data: {
+        text: "What number did I ask you to remember? E2E_MEMORY_RECALL",
+        mention_bot: false,
+        channel_type: "im",
+        channel: "D_MEMORY_ALICE",
+      },
+    });
+    expect(response.ok()).toBeTruthy();
+    const recalled = await response.json();
+    expect(recalled.webhook.status).toBe("accepted");
+    expect(recalled.thread_id).not.toBe(saved.thread_id);
+    const replies = page.locator(
+      `.msg.bot[data-thread-ts="${recalled.thread_ts}"]`,
+    );
+    await expect(replies.first()).toContainText(
+      `Your remembered number is ${number}.`,
+      { timeout: 60_000 },
+    );
+  });
+
   test("Slack breakout request starts a new top-level Open SWE thread", async ({
     page,
   }) => {

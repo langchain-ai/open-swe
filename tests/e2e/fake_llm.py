@@ -43,6 +43,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from runtime_api.provenance import Provenance
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
@@ -1938,6 +1939,87 @@ class FakeScriptedChatModel(BaseChatModel):
             and "display_description" in spec["function"].get("parameters", {}).get("required", [])
         ]
         return self
+
+    async def _memory_reply(self, messages: list[BaseMessage], context: ScriptContext) -> AIMessage:
+        if any(
+            isinstance(message, ToolMessage) and message.tool_call_id == "call-memory-reply"
+            for message in messages
+        ):
+            return AIMessage(content="")
+        if "E2E_MEMORY_SAVE" in context.last_text:
+            saved = next(
+                (
+                    message
+                    for message in reversed(messages)
+                    if isinstance(message, ToolMessage)
+                    and message.tool_call_id == "call-memory-save"
+                ),
+                None,
+            )
+            if saved is None:
+                number = re.search(r"E2E_MEMORY_SAVE (\d+)", context.last_text)
+                assert number is not None
+                return AIMessage(
+                    content="Saving your number in user memory.",
+                    tool_calls=[
+                        {
+                            "name": "write_file",
+                            "args": {
+                                "file_path": "/memories/user/AGENTS.md",
+                                "content": f"Remembered number: {number.group(1)}\n",
+                            },
+                            "id": "call-memory-save",
+                        }
+                    ],
+                )
+            assert saved.status != "error", saved.content
+            answer = "Your number is saved."
+        else:
+            assert not any(
+                "E2E_MEMORY_SAVE" in _text(message.content)
+                for message in messages
+                if isinstance(message, HumanMessage)
+                and (provenance := Provenance.of(message)) is not None
+                and provenance.kind == "human"
+            ), "Recall must not receive the original conversation"
+            prompt = "\n".join(
+                _text(message.content) for message in messages if isinstance(message, SystemMessage)
+            )
+            number = re.search(r"Remembered number: (\d+)", prompt)
+            answer = (
+                f"Your remembered number is {number.group(1)}."
+                if number
+                else "No remembered number found."
+            )
+        return AIMessage(
+            content="Replying about user memory.",
+            tool_calls=[
+                {
+                    "name": "slack_reply",
+                    "args": {"message": answer, "response_type": "final"},
+                    "id": "call-memory-reply",
+                }
+            ],
+        )
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: object = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        humans = _script_humans(messages)
+        context = ScriptContext(
+            first_text=_text(humans[0].content) if humans else "",
+            last_text=_text(humans[-1].content) if humans else "",
+            human_count=len(humans),
+            pending_text=_latest_turn_text(messages),
+        )
+        if "E2E_MEMORY_SAVE" in context.last_text or "E2E_MEMORY_RECALL" in context.last_text:
+            reply = await self._memory_reply(messages, context)
+            return ChatResult(generations=[ChatGeneration(message=reply)])
+        return await super()._agenerate(messages, stop=stop, **kwargs)
 
     def _generate(
         self,

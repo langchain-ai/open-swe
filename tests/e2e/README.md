@@ -37,6 +37,10 @@ All agent code runs for real.
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render, so what Playwright asserts on is exactly what the real agent produced.
 
+The browser suite sets `MDA_AGENT_AUTH_PRINCIPAL_ID` to a synthetic local caller, using MDA's local-dev memory support.
+The memory case writes a random number through the real file tool and recalls it from the model's hot-memory context in a different thread.
+It does not verify deployed identity resolution, Slack DM authorization, or isolation between users: local-dev runs share that synthetic caller.
+
 ## Files
 
 - `e2e_env.py` — env + constants set before any `agent.*` import (sandbox root, fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).

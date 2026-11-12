@@ -64,6 +64,9 @@ Every call is authenticated with the run token.
   Commands get the backend's five-minute default timeout and a client-side deadline past it.
   The transcript hears of every call alongside it (`tool_started`, `tool_result`); each reply waits for the reports made before it.
   Code mode's calls skip the checks.
+- **User memory:** `memory.py` enables MDA's caller-scoped durable memory at `/memories/user/`, with `AGENTS.md` loaded into the prompt.
+  MDA's default policy requires a trusted person and permits managed Slack one-to-one DMs and verified Studio users; shared-channel and service-principal runs do not mount user memory.
+  Storage and isolation are managed by MDA, not the sandbox or Robin's backend; shared agent memory remains disabled.
 - **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
   `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
 - **System prompt:** each call's system prompt goes in the order of how many runs share each part, for the provider's prompt cache (`rt/run_prompt.py`): the graph's instructions with what code mode and the browser add, the run's prompt (`ModelCall.system_prompt`), the run's skills, then what only the thread's prompt says (`ModelCall.thread_prompt`).
