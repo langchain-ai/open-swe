@@ -446,12 +446,26 @@ export function SidebarThreadRow({
           ✓
         </span>
       )}
+      {hasSubagents && (
+        <DisclosureCaret
+          expanded={!subagentsCollapsed}
+          label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+          onToggle={() => toggleSubagentsCollapsed(item.key)}
+        />
+      )}
+      {workers.length > 0 && (
+        <DisclosureCaret
+          expanded={workersExpanded}
+          label={workersExpanded ? "Hide task workers" : "Show task workers"}
+          onToggle={() => setWorkersExpanded((expanded) => !expanded)}
+        />
+      )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
 
       <span
         className={cn(
-          "flex w-5 shrink-0 items-center justify-center group-hover/row:invisible group-has-[:focus-visible]/row:invisible [@media(hover:none)]:invisible",
-          moreMenuOpen && "invisible"
+          "flex shrink-0 items-center justify-end gap-space-2 group-hover/row:invisible group-hover/row:min-w-6 [@media(hover:none)]:pr-space-5",
+          moreMenuOpen && "invisible min-w-6"
         )}
       >
         {item.status === "running" || item.waitingForDelegatedWork ? (
@@ -464,22 +478,6 @@ export function SidebarThreadRow({
             aria-label="Unread thread"
           />
         ) : null}
-      </span>
-      <span className="flex min-w-4 shrink-0 items-center justify-end gap-space-2">
-        {hasSubagents && (
-          <DisclosureCaret
-            expanded={!subagentsCollapsed}
-            label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
-            onToggle={() => toggleSubagentsCollapsed(item.key)}
-          />
-        )}
-        {workers.length > 0 && (
-          <DisclosureCaret
-            expanded={workersExpanded}
-            label={workersExpanded ? "Hide task workers" : "Show task workers"}
-            onToggle={() => setWorkersExpanded((expanded) => !expanded)}
-          />
-        )}
       </span>
     </>
   )
@@ -564,8 +562,7 @@ export function SidebarThreadRow({
                   color="secondary"
                   variant="plain"
                   className={cn(
-                    "absolute top-1/2 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
-                    hasSubagents && workers.length > 0 ? "right-10" : "right-8",
+                    "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-primary focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
                     moreMenuOpen && "opacity-100"
                   )}
                 />
@@ -913,6 +910,17 @@ function SidebarTaskWorkerRow({
           depth: 1,
         })}
       >
+        {subagents.length > 0 && (
+          <DisclosureCaret
+            expanded={!subagentsCollapsed}
+            label={
+              subagentsCollapsed
+                ? "Show worker subagents"
+                : "Hide worker subagents"
+            }
+            onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
+          />
+        )}
         <SidebarRowTitle marquee={marquee} title={worker.title} />
         <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
@@ -922,19 +930,6 @@ function SidebarTaskWorkerRow({
             <ErrorIndicator label="Worker failed" />
           )}
           {status}
-        </span>
-        <span className="flex w-4 shrink-0 items-center justify-end">
-          {subagents.length > 0 && (
-            <DisclosureCaret
-              expanded={!subagentsCollapsed}
-              label={
-                subagentsCollapsed
-                  ? "Show worker subagents"
-                  : "Hide worker subagents"
-              }
-              onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
-            />
-          )}
         </span>
       </Link>
       {subagents.length > 0 && !subagentsCollapsed && (
