@@ -165,7 +165,6 @@ The HMR WebSocket connects straight to Vite's port; the UI's Vite config points 
 |---|---|
 | `/` | Dashboard |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
-| `POST /webhooks/slack/commands` | The `/robin` slash command (`/oswe` remains an alias) |
 | `POST /mda/channel-api/{endpoint}` | The MDA deployment's channels asking for what needs Robin's data (`runtime_api.linear`, `runtime_api.github`) |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |

@@ -338,23 +338,7 @@ The app posts events to your deployment's URL, so it needs the same public URL a
         "bot_user": {
             "display_name": "Robin",
             "always_online": true
-        },
-        "slash_commands": [
-            {
-                "command": "/robin",
-                "url": "https://<your-url>/webhooks/slack/commands",
-                "description": "Ask Robin",
-                "usage_hint": "[your request or question]",
-                "should_escape": false
-            },
-            {
-                "command": "/oswe",
-                "url": "https://<your-url>/webhooks/slack/commands",
-                "description": "Ask Robin (legacy alias)",
-                "usage_hint": "[your request or question]",
-                "should_escape": false
-            }
-        ]
+        }
     },
     "oauth_config": {
         "redirect_urls": [
@@ -434,10 +418,6 @@ SLACK_BOT_USERNAME=""     # the bot's handle, e.g. robin (use its actual configu
 Set `SLACK_ALERTS_CHANNEL_ID` to the channel ID for operational alerts and invite the bot to that channel.
 If unset, alerts stay in server logs and are not sent to Slack.
 Slack delivery is limited to one operational alert per minute per channel across replicas.
-
-`/robin <request or question>` (legacy alias `/oswe`) answers or carries out a request without starting a Slack thread: replies are ephemeral, visible only to whoever asked, and the immediate acknowledgement links to the thread in the web dashboard.
-Each person's commands in a channel share one private scratch thread, kept out of everyone's thread list; continuing it on the web makes it an ordinary thread.
-Substantial work belongs in a thread of its own, which Robin starts in the channel.
 
 Both Slack URLs must point at the Robin deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`.
 Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository.

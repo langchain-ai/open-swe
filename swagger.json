@@ -29108,23 +29108,6 @@
         "summary": "Slack Webhook"
       }
     },
-    "/webhooks/slack/commands": {
-      "post": {
-        "description": "Answer `/robin` and legacy `/oswe` questions without a Slack thread.",
-        "operationId": "slack_command_webhooks_slack_commands_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Slack Command"
-      }
-    },
     "/webhooks/slack/interactivity": {
       "post": {
         "description": "Handle Slack Block Kit interactions.",

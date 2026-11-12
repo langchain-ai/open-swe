@@ -5,12 +5,10 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid7
 
-import jwt
 from fastapi import BackgroundTasks
 from pydantic import BaseModel, ValidationError
 
 from openswe import event_claims
-from openswe.config import ENV
 from openswe.prompts import prompt
 from openswe.slack.blocks import actions, block_payload, button, section
 from openswe.slack.client import (
@@ -46,7 +44,7 @@ class SlackRetry(BaseModel):
     message_ts: str = ""
     reply_thread_ts: str = ""
     nonce: str
-    # Epoch seconds; 0 for a token's.
+    # Epoch seconds.
     expires_at: float = 0
 
     def blocks(self, text: str) -> list[JsonObject] | None:
@@ -71,9 +69,6 @@ class SlackRetry(BaseModel):
     @classmethod
     def from_value(cls, value: JsonObject) -> SlackRetry | None:
         """The retry a button's ``value`` names, or ``None`` when it is invalid or expired."""
-        token = value.get("response")
-        if isinstance(token, str) and token:
-            return cls.parse(token)
         try:
             retry = cls.model_validate({k: v for k, v in value.items() if k != "type"})
         except ValidationError:
@@ -82,20 +77,6 @@ class SlackRetry(BaseModel):
         if retry.expires_at and retry.expires_at < datetime.now(UTC).timestamp():
             return None
         return retry
-
-    @classmethod
-    def parse(cls, token: str) -> SlackRetry | None:
-        """The retry an older, token button names."""
-        secret = ENV.SLACK_SIGNING_SECRET.get()
-        if not secret:
-            return None
-        try:
-            return cls.model_validate(
-                jwt.decode(token, secret, algorithms=["HS256"], audience=BUTTON_TYPE)
-            )
-        except jwt.InvalidTokenError, ValidationError:
-            logger.warning("Invalid or expired Slack retry button", exc_info=True)
-            return None
 
     async def queue(
         self,

@@ -37,8 +37,6 @@ const BASE_BOT_EVENTS = [
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
 
-export const ASK_COMMAND = "/robin"
-
 export interface SlackManifestConfig {
   backendUrl?: string | null
 }
@@ -68,13 +66,6 @@ export function slackAppManifest(config: SlackManifestConfig = {}) {
         description: "Ask Robin to explain this message",
       },
     ],
-    slash_commands: [ASK_COMMAND, "/oswe"].map((command) => ({
-      command,
-      url: `${backendUrl}/webhooks/slack/commands`,
-      description: "Ask Robin",
-      usage_hint: "[your request or question]",
-      should_escape: false,
-    })),
   }
 
   return {

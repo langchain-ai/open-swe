@@ -32,21 +32,13 @@ describe("slackAppManifest", () => {
     expect(new Set(events).size).toBe(events.length)
   })
 
-  it("registers the ask slash command", () => {
+  it("registers no slash command", () => {
     const manifest = slackAppManifest({
       backendUrl: "https://openswe.example.com",
     })
 
-    expect(manifest.features.slash_commands).toEqual([
-      expect.objectContaining({
-        command: "/robin",
-        url: "https://openswe.example.com/webhooks/slack/commands",
-      }),
-      expect.objectContaining({
-        command: "/oswe",
-        url: "https://openswe.example.com/webhooks/slack/commands",
-      }),
-    ])
+    expect(manifest.features).not.toHaveProperty("slash_commands")
+    // The "Explain This" message shortcut needs it.
     expect(manifest.oauth_config.scopes.bot).toEqual(
       expect.arrayContaining(["commands"])
     )
