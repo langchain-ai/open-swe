@@ -142,7 +142,7 @@ Recreation discards the old sandbox's filesystem, so preserve work first; removi
 **LangSmith Access** in the same section lists LangSmith permissions (for example `projects:read, datasets:read`) that code in new sandboxes may use against the LangSmith API.
 Robin saves them as an explicit `access_delegation` grant; the sandbox proxy injects a short-lived credential, so no key enters the sandbox.
 The delegator is Robin's own sandbox-creating LangSmith key, not the person running the thread, so every thread in the workspace gets the same access, capped by what that key holds.
-`INHERIT` grants and tenant administration (`workspaces:manage*`, `organization:manage*`, `organization:pats:*`) are refused.
+Tenant administration (`workspaces:manage*`, `organization:manage*`, `organization:pats:*`) is refused.
 Like cloud identity, the grant is fixed when a sandbox is created.
 
 ### Access
