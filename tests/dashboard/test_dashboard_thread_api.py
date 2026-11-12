@@ -997,6 +997,48 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     assert injected == ({unlinked_hash} if history_available else {linked_hash, unlinked_hash})
 
 
+async def test_review_chat_context_is_deduplicated_without_transcript_messages(monkeypatch) -> None:
+    monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": "user:octocat"}))
+    url = "https://github.com/octo/repo/pull/1"
+    messages, injected = await thread_runs._attributed_run_messages(
+        "octocat",
+        metadata={"pr_url": url},
+        history=thread_runs._ThreadHistory(read=True),
+        content="Explain this change",
+        email=None,
+        review_chat_pr_url=url,
+    )
+
+    assert len(messages) == 2
+    context, human = messages
+    assert '<dynamic-context kind="system" id="system:pull-request-thread">' in context["content"]
+    assert url in context["content"]
+    assert "The user is chatting from the review page" in context["content"]
+    assert 'kind="human"' in human["content"]
+
+    repeated, _ = await thread_runs._attributed_run_messages(
+        "octocat",
+        metadata={"pr_url": url},
+        history=thread_runs._ThreadHistory(read=True, context_hashes=frozenset(injected)),
+        content="And this one?",
+        email=None,
+        review_chat_pr_url=url,
+    )
+    assert len(repeated) == 1
+    assert 'kind="human"' in repeated[0]["content"]
+
+    changed, _ = await thread_runs._attributed_run_messages(
+        "octocat",
+        metadata={"pr_url": url},
+        history=thread_runs._ThreadHistory(read=True, context_hashes=frozenset(injected)),
+        content="Explain the other PR",
+        email=None,
+        review_chat_pr_url="https://github.com/octo/repo/pull/2",
+    )
+    assert len(changed) == 2
+    assert "https://github.com/octo/repo/pull/2" in changed[0]["content"]
+
+
 async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) -> None:
     """A retried dispatch must join the turn its first request recorded."""
 
