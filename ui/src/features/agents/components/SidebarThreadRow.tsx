@@ -32,7 +32,15 @@ import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
 import type {
@@ -717,7 +725,35 @@ function SidebarSubagentRow({
   )
 }
 
-/** Rich preview beside a row; it is a hover card so its links stay clickable. */
+const RowHoverCardContext = createContext<{
+  activeCardId: string | null
+  onOpenChange: (id: string, open: boolean) => void
+}>({
+  activeCardId: null,
+  onOpenChange: (_id: string, _open: boolean) => {},
+})
+
+export function SidebarThreadHoverProvider(props: {
+  children: React.ReactNode
+}) {
+  const [value, onChange] = useState<string | null>(null)
+  const hoverContext = useMemo(
+    () => ({
+      activeCardId: value,
+      onOpenChange: (id: string, open: boolean) =>
+        onChange((current) => (open ? id : current === id ? null : current)),
+    }),
+    [value]
+  )
+
+  return (
+    <RowHoverCardContext value={hoverContext}>
+      {props.children}
+    </RowHoverCardContext>
+  )
+}
+
+/** Rich preview beside a row; only one sidebar preview is open at a time. */
 function RowHoverCard({
   trigger,
   card,
@@ -725,8 +761,18 @@ function RowHoverCard({
   trigger: React.ReactElement
   card: React.ReactNode
 }) {
+  const id = useId()
+  const { activeCardId, onOpenChange } = useContext(RowHoverCardContext)
+
+  useEffect(() => () => onOpenChange(id, false), [id, onOpenChange])
+
   return (
-    <HoverCard openDelay={500} closeDelay={100}>
+    <HoverCard
+      open={activeCardId === id}
+      openDelay={activeCardId === null ? 500 : 0}
+      closeDelay={100}
+      onOpenChange={(open) => onOpenChange(id, open)}
+    >
       <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
       <HoverCardContent
         side="right"

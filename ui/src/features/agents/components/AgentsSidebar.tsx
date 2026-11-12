@@ -51,7 +51,10 @@ import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SortableThreadList } from "@/features/agents/components/SortableThreadList"
-import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarThreadHoverProvider,
+  SidebarThreadRow,
+} from "@/features/agents/components/SidebarThreadRow"
 import { SidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import {
   SidebarSectionAction,
@@ -1526,16 +1529,18 @@ export function AgentsShell({
   return (
     <SidebarLayoutProvider value={layout}>
       <TooltipProvider delayDuration={500} skipDelayDuration={100}>
-        <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
-          <AgentsSidebar
-            user={user}
-            activeThreadId={activeThreadId}
-            layout={layout}
-          />
-          <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
-            {children}
-          </main>
-        </div>
+        <SidebarThreadHoverProvider>
+          <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
+            <AgentsSidebar
+              user={user}
+              activeThreadId={activeThreadId}
+              layout={layout}
+            />
+            <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
+              {children}
+            </main>
+          </div>
+        </SidebarThreadHoverProvider>
       </TooltipProvider>
     </SidebarLayoutProvider>
   )
