@@ -74,6 +74,14 @@ class _Threads:
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.threads.get(thread_id)
 
+    async def state(self, thread_id: str) -> dict[str, JsonValue]:
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            request = httpx.Request("GET", f"http://runtime.test/threads/{thread_id}/state")
+            response = httpx.Response(404, request=request)
+            raise httpx.HTTPStatusError("Not Found", request=request, response=response)
+        return {"values": thread["values"], "next": []}
+
     async def indexed(self, thread_id: str) -> index.IndexedThread | None:
         if not self.reachable:
             raise httpx.ConnectError("Agent Server unreachable")
@@ -591,6 +599,38 @@ async def test_a_channel_thread_takes_runs_stops_and_answers_as_its_conversation
     assert harness.acted_as == [AS_THE_CONVERSATION]
     assert harness.read == [("GET", f"/threads/{THREAD}")]
     assert THREAD not in harness.runtimes.mda_runtime._mda_threads
+
+
+async def test_a_thread_mda_lost_is_made_there_again_when_its_state_is_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request(
+        "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
+    )
+    harness.runtimes.mda.threads.clear()
+
+    state = await store.THREADS.state(THREAD)
+
+    assert state is not None and state["values"] == {}
+    metadata = harness.runtimes.mda.threads[THREAD]["metadata"]
+    assert isinstance(metadata, dict) and metadata["owner_login"] == "ada"
+
+
+@pytest.mark.parametrize("owner", ["channel", "local"])
+async def test_a_thread_the_backend_does_not_keep_on_mda_is_not_made_there_when_read(
+    monkeypatch: pytest.MonkeyPatch, owner: str
+) -> None:
+    harness = _Harness(monkeypatch)
+    if owner == "channel":
+        await _channel_thread(harness)
+    else:
+        await index.create(THREAD, runtime="local")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await store.THREADS.state(THREAD)
+
+    assert THREAD not in harness.runtimes.mda.threads
 
 
 # The threads MDA's Slack channel's handlers choose: their owner there.

@@ -231,10 +231,23 @@ class ThreadStore:
 
     async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
         """The state of a thread already read from the index, as its runtime keeps it."""
-        if thread.runtime == "mda" and channel_of(thread.metadata) is None:
-            # The channel created its threads there; the backend's own may need it.
-            await RUNTIMES.mda_runtime.ensure_remote_thread(thread.thread_id)
-        return await RUNTIMES.runs_on(thread.runtime).state(thread.thread_id)
+        runtime = RUNTIMES.runs_on(thread.runtime)
+        try:
+            return await runtime.state(thread.thread_id)
+        except httpx.HTTPStatusError as error:
+            # Indexed with no copy on MDA: creating it there failed, or MDA swept it. A
+            # channel makes its own threads there, so the backend makes only its own again.
+            if (
+                error.response.status_code != httpx.codes.NOT_FOUND
+                or thread.runtime != "mda"
+                or channel_of(thread.metadata) is not None
+            ):
+                raise
+            logger.warning(
+                "Making an indexed thread MDA has no copy of", extra={"thread_id": thread.thread_id}
+            )
+        await runtime.create(thread.thread_id, for_mda(thread.metadata))
+        return await runtime.state(thread.thread_id)
 
     async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
         """The thread with its latest run's id and status in its metadata, as its runtime reports them.
