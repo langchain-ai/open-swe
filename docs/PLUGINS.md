@@ -102,7 +102,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `version` | Free text, at most 32 characters. It is shown to people, not compared. |
 | `description` | Optional, at most 280 characters. |
 | `sidebar.label` | At most 24 characters. |
-| `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`. |
+| `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`, `images`. |
 | `permissions` | What the plugin may ask for; see below. |
 | `collections` | Optional rules for storage collections, by name: `{ "captures": { "write": "app" } }`; see [Who writes a collection](#who-writes-a-collection). |
 | `review` | Optional work pull request reviews do for the app: `{ "instructions": "…", "writes": ["captures"], "browser": true }`; see [Review steps](#review-steps). |

@@ -15,6 +15,9 @@ it("keeps source-page links on their origin and rejects credential or executable
   expect(pageLink("http://localhost:3000/", "/projects")).toBe(
     "http://localhost:3000/projects"
   )
+  expect(
+    pageLink("https://preview.example.com/o/org-id", "/o/org-id/projects/42")
+  ).toBe("https://preview.example.com/o/org-id/projects/42")
   expect(pageLink("http://preview.example.com", "/projects")).toBeUndefined()
   expect(pageLink("javascript:alert(1)", "/projects")).toBeUndefined()
   expect(

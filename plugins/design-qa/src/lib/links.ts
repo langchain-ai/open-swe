@@ -6,7 +6,7 @@ export function pageLink(base: string, path: string): string | undefined {
     if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
       return
     const origin = new URL(base)
-    const url = new URL(`${base.replace(/\/$/, "")}${path}`)
+    const url = new URL(path, origin)
     const local =
       origin.protocol === "http:" &&
       ["127.0.0.1", "localhost"].includes(origin.hostname)

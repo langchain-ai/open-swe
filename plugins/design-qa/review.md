@@ -4,7 +4,9 @@ Capture only when the diff changes what people see in a web frontend and a previ
 A link while the preview is still building or deploying doesn't count: it can still serve an earlier commit, or nothing.
 Otherwise do nothing for Design QA, and don't mention it.
 
-1. Find the preview, and its base: the site built from the default branch that shares the preview's data.
+1. Find the latest successful preview deployment for the reviewed head commit, using current deployment records or the latest updated deployment-bot comment, not an older comment or a guessed URL.
+   Open its link and verify it loads before capturing.
+   Find its base: the site built from the default branch that shares the preview's data.
    The workspace's review guidelines name the base when there is one; without a base, don't capture.
 1. If the pages need a sign-in, sign the browser in to the base's host and to the preview's host.
 1. Pick the pages and interaction states the diff changes, at most ten.
@@ -44,6 +46,9 @@ Otherwise do nothing for Design QA, and don't mention it.
 
 with `files` such as `{"settings-before.png": "/workspace/design-qa/settings-before.png", "settings-after.png": "/workspace/design-qa/settings-after.png"}`.
 
+- Save `base_url` and `head_url` as the verified site origins.
+  Save each scenario's `path` as the actual browser pathname, query and fragment, including any organization prefix, not a route inferred from source code.
+  For modal-only states, save the working parent route and put the interaction in `actions`.
 - `auth_mode` is `"dummy"` when you signed in, `"none"` otherwise.
 - Each `*_url` is a name in `files`, of letters, digits, `.`, `_` and `-`.
   Give each scenario a distinct `id` of the same characters.

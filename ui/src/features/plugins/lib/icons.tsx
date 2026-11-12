@@ -5,6 +5,7 @@ import { CalendarIcon } from "@phosphor-icons/react/dist/ssr/Calendar"
 import { ChartBarIcon } from "@phosphor-icons/react/dist/ssr/ChartBar"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
+import { ImagesIcon } from "@phosphor-icons/react/dist/ssr/Images"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
 import { NotebookIcon } from "@phosphor-icons/react/dist/ssr/Notebook"
@@ -23,6 +24,7 @@ export const PLUGIN_ICONS: Record<SidebarIcon, IconComponent> = {
   "chat-circle": ChatCircleIcon,
   calendar: CalendarIcon,
   lightbulb: LightbulbIcon,
+  images: ImagesIcon,
 }
 
 export function pluginIcon(icon: string): IconComponent {

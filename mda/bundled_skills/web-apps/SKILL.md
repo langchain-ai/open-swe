@@ -27,7 +27,7 @@ Embed it in the HTML as a JSON script:
 
 - `name`: lowercase letters, digits and dashes.
   Publishing under the same name makes a new version of the same app.
-- `sidebar.icon`: one of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`.
+- `sidebar.icon`: one of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`, `images`.
 - `permissions`: ask for the fewest.
   `storage` (JSON documents, private or per repository), `realtime` (live rooms with presence), `github:read`, `github:write` (branches, commits, pull requests), `agent` (a chat dock with tools the app provides).
 

@@ -34,6 +34,7 @@ export type SidebarIcon =
   | "chat-circle"
   | "calendar"
   | "lightbulb"
+  | "images"
 
 export interface PluginManifest {
   name: string

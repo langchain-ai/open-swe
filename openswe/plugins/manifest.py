@@ -62,6 +62,7 @@ SidebarIcon = Literal[
     "chat-circle",
     "calendar",
     "lightbulb",
+    "images",
 ]
 
 

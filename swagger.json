@@ -8829,7 +8829,8 @@
               "chart-bar",
               "chat-circle",
               "calendar",
-              "lightbulb"
+              "lightbulb",
+              "images"
             ],
             "title": "Icon",
             "type": "string"
