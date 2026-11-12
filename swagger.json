@@ -10111,28 +10111,6 @@
         "title": "SlackUserOption",
         "type": "object"
       },
-      "SlashCommandResponse": {
-        "properties": {
-          "response_type": {
-            "enum": [
-              "ephemeral",
-              "in_channel"
-            ],
-            "title": "Response Type",
-            "type": "string"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "response_type",
-          "text"
-        ],
-        "title": "SlashCommandResponse",
-        "type": "object"
-      },
       "SubmittedReview": {
         "properties": {
           "html_url": {
@@ -30545,25 +30523,6 @@
           }
         },
         "summary": "Slack Webhook"
-      }
-    },
-    "/webhooks/slack/code-channel-commands": {
-      "post": {
-        "description": "Handle runtime slash commands registered for a Slack code channel.",
-        "operationId": "slack_code_channel_command_webhooks_slack_code_channel_commands_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SlashCommandResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Slack Code Channel Command"
       }
     },
     "/webhooks/slack/commands": {

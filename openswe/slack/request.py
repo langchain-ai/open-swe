@@ -52,7 +52,6 @@ class SlackRequest(BaseModel):
     treat_all_messages_as_mentions: bool = False
     kitchen_channel: bool = False
     message_update: bool = False
-    code_channel: bool = False
     concierge_mode: bool = False
     web_only: bool = False
     explicit_request: bool = False

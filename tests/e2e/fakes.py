@@ -29,10 +29,8 @@ from e2e_env import (
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
 VIEWS: list[dict[str, Any]] = []
-CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
 _slack_epoch = int(time.time())
-_code_channel_seq = [0]
 
 
 def next_slack_ts() -> str:
@@ -131,32 +129,6 @@ def update_slack_message(
                 message["blocks"] = blocks
             return message
     return None
-
-
-def create_code_channel(payload: dict[str, Any]) -> dict[str, Any]:
-    _code_channel_seq[0] += 1
-    channel_id = f"C_CODE_{_code_channel_seq[0]}"
-    channel = {
-        "id": channel_id,
-        "name": str(payload.get("name") or "Robin task"),
-        "session_id": str(payload.get("session_id") or ""),
-        "origin_channel_id": str(payload.get("origin_channel_id") or ""),
-        "origin_message_ts": str(payload.get("origin_message_ts") or ""),
-        "status": "active",
-        "context_bar_items": [],
-        "commands": [],
-        "views": [],
-        "archived": False,
-    }
-    CODE_CHANNELS[channel_id] = channel
-    return channel
-
-
-def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None:
-    channel = CODE_CHANNELS.get(channel_id)
-    if channel is not None:
-        channel.update(values)
-    return channel
 
 
 # --- GitHub ----------------------------------------------------------------
@@ -1036,7 +1008,6 @@ def reset() -> None:
     SLACK_MESSAGES.clear()
     EPHEMERALS.clear()
     VIEWS.clear()
-    CODE_CHANNELS.clear()
     PULLS.clear()
     REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()

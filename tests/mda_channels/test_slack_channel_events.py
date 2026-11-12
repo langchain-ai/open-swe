@@ -62,21 +62,19 @@ async def test_only_mda_may_hand_one_over() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "channel", "directory", "guide"),
+    ("kind", "channel", "directory"),
     [
-        ("channel_created", {"id": "C9", "name": "inc-1"}, True, False),
-        ("channel_archive", "C9", True, True),
-        ("group_rename", {"id": "C9", "name": "secret"}, True, False),
+        ("channel_created", {"id": "C9", "name": "inc-1"}, True),
+        ("channel_archive", "C9", True),
+        ("group_rename", {"id": "C9", "name": "secret"}, True),
     ],
 )
 async def test_a_channel_change_keeps_the_backends_records(
-    monkeypatch: pytest.MonkeyPatch, kind: str, channel: JsonValue, directory: bool, guide: bool
+    monkeypatch: pytest.MonkeyPatch, kind: str, channel: JsonValue, directory: bool
 ) -> None:
     observe = AsyncMock()
-    close_guide = AsyncMock()
     incident = AsyncMock(return_value=None)
     monkeypatch.setattr(slack_channel_events.SlackChannel, "observe", observe)
-    monkeypatch.setattr(slack_channel_events, "close_guide_for_channel", close_guide)
     monkeypatch.setattr(slack_channel_events.incidents, "handle_slack_event", incident)
 
     response = await _post(_call(kind, channel))
@@ -84,7 +82,6 @@ async def test_a_channel_change_keeps_the_backends_records(
     assert response.status_code == 200
     assert response.json() is None, "it starts no run"
     assert observe.await_count == int(directory)
-    assert close_guide.await_count == int(guide)
     # Incidents sees Slack's envelope, with the workspace MDA verified and this app.
     envelope = incident.await_args.args[0]
     assert envelope["event"] == {"type": kind, "channel": channel}

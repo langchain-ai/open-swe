@@ -19,15 +19,16 @@ import html
 import logging
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict
 from runtime_api.provenance import Provenance
+from sqlalchemy import text
 
+from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.input_messages import input_message_text
-from openswe.review_guide.buttons import LABELS as BUTTON_LABELS
-from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -78,16 +79,46 @@ class SteeringHistory(BaseModel):
         turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
         if not turns:
             return None
-        # The author's feedback while being walked through what the agent did steers the PR
-        # too. A guide forked from the builder repeats the builder's turns under the same ids.
+        async with postgres.session() as session:
+            guide_threads = list(
+                await session.scalars(
+                    text(
+                        "SELECT thread_id FROM review_guide_session "
+                        "WHERE pull_request_id = :pull_request_id AND mode = 'author' "
+                        "ORDER BY created_at"
+                    ),
+                    {"pull_request_id": pull_request.id},
+                )
+            )
         seen = {turn.message_id for turn in turns if turn.message_id}
-        for thread_id in await ReviewGuideSession.author_threads(pull_request.id):
+        for thread_id in guide_threads:
             for turn in await cls._human_turns(thread_id):
-                if turn.text in BUTTON_LABELS or (turn.message_id and turn.message_id in seen):
+                if turn.text in {
+                    "Next",
+                    "Looks good",
+                    "Approve on GitHub",
+                    "Mark ready for review",
+                    "Continue",
+                } or (turn.message_id and turn.message_id in seen):
                     continue
-                seen.add(turn.message_id)
+                if turn.message_id:
+                    seen.add(turn.message_id)
                 turns.append(turn)
-        follow_ups = turns[1:]
+        async with postgres.session() as session:
+            recorded = await session.execute(
+                text(
+                    "SELECT thread_id, message_id, created_at FROM thread_message "
+                    "WHERE thread_id = ANY(:thread_ids) AND role = 'human'"
+                ),
+                {"thread_ids": [*thread_ids, *guide_threads]},
+            )
+            timestamps = {(row.thread_id, row.message_id): row.created_at for row in recorded}
+        follow_ups = sorted(
+            turns[1:],
+            key=lambda turn: timestamps.get(
+                (turn.thread_id, turn.message_id), datetime.min.replace(tzinfo=UTC)
+            ),
+        )
         return cls(
             request=turns[0],
             follow_ups=follow_ups[-MAX_FOLLOW_UPS:],

@@ -14,7 +14,6 @@ _TOOL_MODULES = {
     "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
-    "code_channel_set_view": ".code_channel_set_view",
     "connect_managed_tools": ".connect_managed_tools",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
@@ -41,7 +40,6 @@ _TOOL_MODULES = {
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
     "switch_to_performance_model": ".switch_to_performance_model",
-    "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
     "reorder_thread_pins": ".threads",
@@ -92,7 +90,6 @@ _TOOL_MODULES = {
     "slack_reply": "openswe.slack.tools.reply",
     "slack_search": "openswe.slack.tools.search",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
-    "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
@@ -107,7 +104,6 @@ __all__ = [
     "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
-    "code_channel_set_view",
     "connect_managed_tools",
     "create_automation",
     "create_sandbox_file_download_url",
@@ -134,7 +130,6 @@ __all__ = [
     "list_threads",
     "manage_baby_sit",
     "switch_to_performance_model",
-    "manage_code_channel",
     "manage_incident",
     "manage_thread",
     "reorder_thread_pins",
@@ -191,7 +186,6 @@ __all__ = [
     "slack_reply",
     "slack_search",
     "slack_breakout_thread",
-    "slack_start_review_channel",
     "submit_thread_feedback",
     "suggest_task",
     "trigger_automation",
@@ -209,7 +203,6 @@ if TYPE_CHECKING:
         slack_list_channels,
         slack_post_message,
     )
-    from openswe.slack.tools.manage_code_channel import manage_code_channel
     from openswe.slack.tools.move_thread import slack_move_thread
     from openswe.slack.tools.no_reply_needed import slack_no_reply_needed
     from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
@@ -218,7 +211,6 @@ if TYPE_CHECKING:
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.search import slack_search
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
-    from openswe.slack.tools.start_review_channel import slack_start_review_channel
     from openswe.tools.add_finding import add_finding
     from openswe.tools.apps import preview_app, publish_app
     from openswe.tools.automations import (
@@ -231,7 +223,6 @@ if TYPE_CHECKING:
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
     from openswe.tools.classify import classify
-    from openswe.tools.code_channel_set_view import code_channel_set_view
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.discover_managed_tools import discover_managed_tools

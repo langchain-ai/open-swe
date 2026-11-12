@@ -565,8 +565,6 @@ def test_messages_not_for_the_agent_start_nothing(
     [
         # A mention in a conversation the backend holds.
         (_event(), SlackMessageFacts(conversation="backend")),
-        # A code channel's one session stays with the backend.
-        (_event(), SlackMessageFacts(code_channel=True, conversation="mda")),
         # A breakout naming a known channel and no instruction, outside MDA's conversations.
         (_event("<@UBOT> /breakout <#C2|ops>"), SlackMessageFacts(conversation="new")),
         # A web breakout with nothing to ask, in a new conversation.
@@ -577,7 +575,7 @@ def test_messages_not_for_the_agent_start_nothing(
             SlackMessageFacts(conversation="new"),
         ),
     ],
-    ids=["backend-mention", "code-channel", "breakout-to-channel", "empty-web", "broadcast"],
+    ids=["backend-mention", "breakout-to-channel", "empty-web", "broadcast"],
 )
 @pytest.mark.usefixtures("slack_reads")
 def test_messages_the_backend_answers_go_back_to_it(

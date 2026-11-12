@@ -1,6 +1,6 @@
 # Incidents architecture
 
-Incidents runs each enrolled Slack channel as one ordinary system-owned Robin thread, driven by the same webhook path that serves code channels.
+Incidents runs each enrolled Slack channel as one ordinary system-owned Robin thread, driven by the Slack webhook path.
 There is no incident-specific worker, queue, or scheduler.
 
 ## Flow
@@ -29,7 +29,7 @@ Nothing waits on another process.
 
 ## Identity and mapping
 
-An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, the session timestamp code channels use.
+An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, a whole-channel session timestamp.
 Thread metadata carries `source: incidents_agent`, `owner_type: system`, `visibility: public`, `incident_id`, and the Slack location.
 Runs on the thread carry `configurable.source = "incidents_agent"` and no personal identity; `openswe.incidents.runtime.load_incident_session` re-verifies the saved binding before assembling the agent and refuses forged sources.
 Background-task completions and scheduled wakeups return to the thread as normal turns.

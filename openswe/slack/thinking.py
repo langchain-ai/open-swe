@@ -20,7 +20,6 @@ from openswe.slack.client import (
     start_slack_stream,
     stop_slack_stream,
 )
-from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.records import lookup_slack_thread_id, store_slack_run_mapping
 from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
@@ -393,7 +392,7 @@ async def show_slack_thinking_status(
             if location is None:
                 continue
             last_known = location
-            if not is_code_channel_session(last_known[1]) and (
+            if last_known[1] != "0" and (
                 await _task_has_active_runs(thread_id)
                 or await RoutedWork(thread_id).delegated_active()
             ):
@@ -468,7 +467,7 @@ async def _settle_after_run(
         if location is not None:
             break
     location = location or last_known
-    if not is_code_channel_session(location[1]):
+    if location[1] != "0":
         await clear_slack_thinking_status_if_idle(thread_id, *location)
 
 
@@ -491,10 +490,9 @@ async def settle_slack_thread_status(channel_id: str, thread_ts: str) -> None:
 
 async def release_slack_location_status(channel_id: str, thread_ts: str) -> None:
     """Take the working indicator off a Slack location the thread no longer lives in."""
-    if is_code_channel_session(thread_ts):
-        await set_session_status(channel_id, "active")
-    else:
-        await set_slack_thread_status(channel_id, thread_ts, "")
+    if thread_ts == "0":
+        return
+    await set_slack_thread_status(channel_id, thread_ts, "")
 
 
 async def clear_slack_thinking_status_if_idle(
@@ -635,7 +633,7 @@ async def refresh_slack_background_status(
         if slack_thread is None or not slack_thread.location:
             return None
         channel_id, thread_ts = slack_thread.location
-        if is_code_channel_session(thread_ts):
+        if thread_ts == "0":
             return None
         if await _task_has_active_runs(thread_id):
             if resume:

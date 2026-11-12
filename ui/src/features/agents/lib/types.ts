@@ -650,7 +650,6 @@ export interface AgentThread {
   runCosts?: Record<string, number>
   sourceUrl?: string | null
   sourceAppUrl?: string | null
-  codeChannelUrl?: string | null
   sandboxId?: string | null
   /** For a thread bridged to someone's machine: which app serves it. */
   sandboxBridgeClient?: "cli" | "desktop" | null

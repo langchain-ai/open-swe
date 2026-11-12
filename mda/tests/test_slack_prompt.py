@@ -221,9 +221,7 @@ def test_formats_cards_forwarded_messages_and_authors() -> None:
 
 
 def test_the_guidance_texts_match_the_backends() -> None:
-    assert slack_prompt.thread_constant_context(
-        review_guide=False, concierge=True, kitchen=False
-    ) == "\n\n".join(
+    assert slack_prompt.thread_constant_context(concierge=True, kitchen=False) == "\n\n".join(
         [
             slack_prompt.CONCIERGE_CONTEXT,
             slack_prompt.NON_KITCHEN_CONTEXT,

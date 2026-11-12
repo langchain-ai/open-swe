@@ -340,7 +340,7 @@ class SystemPromptRecord:
 LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 # Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
-# empty reply so background titling never renames threads or code channels mid-spec.
+# empty reply so background titling never renames threads mid-spec.
 _THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
 
 # Gives every reply of the run a thought, as a reasoning model's would carry.
@@ -1379,38 +1379,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_resolve_thread_step),
         StepSpec(content="Resolved the target thread through the thread tools."),
     ),
-    "code_channel": (
-        _tool_step(
-            "This task warrants a dedicated Slack code channel.",
-            "manage_code_channel",
-            {"action": "create", "title": "Investigate flaky CI failures"},
-            "call-code-channel-create",
-        ),
-        _tool_step(
-            "Continuing the task in its dedicated code channel.",
-            "slack_reply",
-            {
-                "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session."
-            },
-            "call-code-channel-reply",
-        ),
-        _tool_step(
-            "Marking the code-channel session active.",
-            "manage_code_channel",
-            {"action": "status", "status": "active"},
-            "call-code-channel-active",
-        ),
-    ),
-    "code_channel_followup": (
-        _tool_step(
-            "Replying to the unmentioned code-channel follow-up.",
-            "slack_reply",
-            {
-                "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session."
-            },
-            "call-code-channel-followup",
-        ),
-    ),
     "inbox": tuple(_dynamic_step(_inbox_step) for _ in range(6)),
     "background_work": (
         _tool_step(
@@ -1920,14 +1888,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
-    ),
-    ScriptRule(
-        "code_channel_followup",
-        lambda ctx: "E2E_CODE_CHANNEL_FOLLOWUP" in ctx.last_text,
-    ),
-    ScriptRule(
-        "code_channel",
-        lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
     ),
     ScriptRule(
         "background_work",

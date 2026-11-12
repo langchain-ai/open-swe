@@ -114,7 +114,7 @@ async def slack_message_facts(
     if not channel_context.allows_operations:
         return SlackMessageFacts(channel=_refused(channel_context, message.channel_id))
     dm = message.channel_type == "im" or is_dm_channel(channel_context)
-    code_channel = await common.is_code_channel(message.channel_id)
+
     allowed_bot = (
         await resolve_allowed_slack_bot(
             message.team_id, message.bot_id, user_id=message.user_id, app_id=message.bot_app_id
@@ -122,17 +122,15 @@ async def slack_message_facts(
         if message.bot_id
         else None
     )
-    kitchen = not (code_channel or dm) and await is_kitchen_channel(
-        message.channel_id, slack_user_id=message.user_id
-    )
-    concierge = dm and not code_channel and await User.concierge_mode_for_slack(message.user_id)
+    kitchen = not dm and await is_kitchen_channel(message.channel_id, slack_user_id=message.user_id)
+    concierge = dm and await User.concierge_mode_for_slack(message.user_id)
     parsed = ParsedSlackMessage.parse(
         message.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
     )
     solo_followup = False
     if (
         parsed.action is not SlackAction.BY_THE_WAY
-        and not (code_channel or dm or message.bot_id)
+        and not (dm or message.bot_id)
         and message.subtype in {"", "file_share", "thread_broadcast"}
         and (message.reply_thread_ts or message.explicit_mention)
     ):
@@ -163,7 +161,6 @@ async def slack_message_facts(
         kitchen = solo_followup = False
     return SlackMessageFacts(
         dm=dm,
-        code_channel=code_channel,
         kitchen_channel=kitchen,
         concierge=concierge,
         allowed_bot=allowed_bot is not None,
@@ -544,7 +541,7 @@ async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> Slack
 async def act_on_slack_message(call: ChannelCall, message: ActOnSlackMessage) -> SlackMessageActed:
     """Answer a message MDA's Slack channel handed back, as ``/webhooks/slack`` always has.
 
-    Its conversation is the backend's, or it's in a code channel, which MDA's channel
+    Its conversation is the backend's, which MDA's channel
     doesn't take; Slack's Events URL points at Trigger Server, so this is how the backend
     hears it. Trigger Server verified Slack's signature, and MDA signed this call. The
     backend claims each Slack message once, so Slack's message and app_mention events

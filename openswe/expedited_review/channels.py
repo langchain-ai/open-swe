@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.slack.channels import SlackChannel
-from openswe.slack.code_channels import is_code_channel_session
 from openswe.source_context import SourceContext
 from openswe.threads.summary import thread_is_private, thread_updated_ms
 from openswe.utils.json_types import thread_metadata
@@ -54,7 +53,7 @@ async def _thread_channels(login: str, since: datetime) -> list[str]:
         if thread_is_private(metadata):
             continue
         slack_thread = SourceContext.from_metadata(metadata).slack_thread
-        if slack_thread is None or is_code_channel_session(slack_thread.thread_ts):
+        if slack_thread is None or slack_thread.thread_ts == "0":
             continue
         channels.append(slack_thread.channel_id)
     return channels
@@ -73,7 +72,7 @@ async def _offerable(channel_id: str) -> ChannelChoice | None:
 
 async def own_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
     """Just the card's own channel, which a thread reply can be broadcast to; empty outside one."""
-    if not approval.slack_thread_ts or is_code_channel_session(approval.slack_thread_ts):
+    if not approval.slack_thread_ts or approval.slack_thread_ts == "0":
         return []
     own = await SlackChannel.load(approval.slack_channel_id)
     if own is None or not own.name:

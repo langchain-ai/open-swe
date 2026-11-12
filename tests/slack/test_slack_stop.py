@@ -84,13 +84,7 @@ async def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
 
 
 def _patch_handler(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> None:
-    class FakeQueuedMessage:
-        @staticmethod
-        async def clear(thread_id: str) -> None:
-            client.cleared_queues.append(thread_id)
-
     monkeypatch.setattr(slack_stop, "get_client", lambda url: client)
-    monkeypatch.setattr(slack_stop, "QueuedMessage", FakeQueuedMessage)
     monkeypatch.setattr(slack_stop, "claim_slack_event", AsyncMock(return_value=True))
 
 
@@ -119,7 +113,7 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
 ) -> None:
     client = FakeClient()
     thread_id = await _add_thread(client)
-    code_thread_id = await _add_thread(client, "0")
+    channel_thread_id = await _add_thread(client, "0")
     client.runs.by_status["running"] = [{"run_id": "running"}]
     if has_follow_up:
         client.runs.by_status["pending"] = [
@@ -136,7 +130,7 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
         {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
     ]
     assert client.cleared_queues == []
-    assert "latest_run_status" not in client.threads.values[code_thread_id]["metadata"]
+    assert "latest_run_status" not in client.threads.values[channel_thread_id]["metadata"]
     status.assert_awaited_once_with("C123", "1.000", "")
     slack_client.post_slack_thread_reply.assert_not_awaited()
 
@@ -194,23 +188,18 @@ async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
 
 
 @pytest.mark.parametrize("thread_ts", ["0", None])
-async def test_native_stop_preserves_code_channel_routing(
+async def test_native_stop_without_an_ordinary_thread_is_ignored(
     monkeypatch: pytest.MonkeyPatch, thread_ts: str | None
 ) -> None:
     client = FakeClient()
-    thread_id = await _add_thread(client, "0")
+    await _add_thread(client, "0")
     client.runs.by_status["running"] = [{"run_id": "running"}]
     _patch_handler(monkeypatch, client)
-    status = AsyncMock()
-    monkeypatch.setattr(slack_stop, "set_session_status", status)
     event: dict[str, object] = {"channel": "C123"}
     if thread_ts is not None:
         event["thread_ts"] = thread_ts
 
     await slack_stop.process_agent_session_stopped(event, "EvStop")
 
-    assert client.runs.cancelled == [
-        {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
-    ]
-    assert client.cleared_queues == [thread_id]
-    status.assert_awaited_once_with("C123", "active")
+    assert client.runs.cancelled == []
+    assert client.cleared_queues == []

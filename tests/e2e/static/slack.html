@@ -64,7 +64,7 @@
         <div class="composer-wrap">
           <div class="compose">
             <select id="user" title="sender"></select>
-            <input id="text" aria-label="Message" value="<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL" />
+            <input id="text" aria-label="Message" value="<@U0BOT> What can you help with?" />
             <button class="send" id="send">Send</button>
             <button class="reset" id="reset">Reset</button>
           </div>
@@ -77,8 +77,6 @@
       const userNames = {};
       let selectedChannel = "CDEMO01";
       let pickedChannel = false;
-      let selectedIsCodeChannel = false;
-      let knownCodeChannels = 0;
       let resetGeneration = 0;
       let resetting = false;
 
@@ -186,35 +184,10 @@
         thread.scrollTop = thread.scrollHeight;
       }
 
-      function renderChrome(channel) {
-        const chrome = $("chrome");
-        chrome.replaceChildren();
-        if (!channel?.code_channel) { chrome.hidden = true; return; }
-        for (const item of channel.context_bar_items || []) {
-          const pill = document.createElement("span");
-          pill.className = "pill";
-          pill.textContent = `${item.icon === "folder" ? "▣" : "↗"} ${item.label}`;
-          chrome.appendChild(pill);
-        }
-        for (const command of channel.commands || []) {
-          const pill = document.createElement("span");
-          pill.className = "pill command";
-          pill.textContent = `/${command.name}`;
-          chrome.appendChild(pill);
-        }
-        chrome.hidden = false;
-      }
-
       async function selectChannel(channel) {
         selectedChannel = channel.id;
         pickedChannel = true;
-        selectedIsCodeChannel = Boolean(channel.code_channel);
         $("channel-title").textContent = `# ${channel.name}`;
-        $("channel-subtitle").textContent = selectedIsCodeChannel ? "Robin code channel · one task, one session" : "Team channel";
-        $("mention").checked = !selectedIsCodeChannel;
-        $("mention").disabled = selectedIsCodeChannel;
-        $("mention-label").textContent = selectedIsCodeChannel ? "Every message goes to Robin — no @mention needed" : "Mention Robin";
-        if (selectedIsCodeChannel && $("text").value.includes("E2E_CODE_CHANNEL")) $("text").value = "What is the current status? E2E_CODE_CHANNEL_FOLLOWUP";
         await pollMessages();
       }
 
@@ -222,36 +195,21 @@
         const state = await (await fetch(`/mock/slack/state?channel=${encodeURIComponent(selectedChannel)}`)).json();
         if (generation !== resetGeneration) return;
         if (!state.channels.some((channel) => channel.id === selectedChannel)) selectedChannel = state.selected_channel;
-        const codeChannels = state.channels.filter((channel) => channel.code_channel);
-        if (codeChannels.length > knownCodeChannels) {
-          knownCodeChannels = codeChannels.length;
-          selectedChannel = codeChannels.at(-1).id;
-        }
         const active = state.channels.find((channel) => channel.id === selectedChannel) || state.channels[0];
-        selectedIsCodeChannel = Boolean(active.code_channel);
         const channels = $("channels");
         channels.replaceChildren(...state.channels.map((channel) => {
           const button = document.createElement("button");
           button.className = `channel ${channel.id === active.id ? "active" : ""}`;
           button.dataset.channelId = channel.id;
-          button.textContent = `${channel.code_channel ? "✦ " : "# "}${channel.name}`;
+          button.textContent = `# ${channel.name}`;
           button.addEventListener("click", () => selectChannel(channel));
           return button;
         }));
         $("channel-title").textContent = `# ${active.name}`;
-        $("channel-subtitle").textContent = active.code_channel ? "Robin code channel · one task, one session" : "Team channel";
-        $("status").hidden = !active.code_channel;
-        $("status").className = `status ${active.status || "active"}`;
-        $("status-text").textContent = active.status || "active";
-        $("mention").checked = !active.code_channel;
-        $("mention").disabled = Boolean(active.code_channel);
-        $("mention-label").textContent = active.code_channel ? "Every message goes to Robin — no @mention needed" : "Mention Robin";
-        if (active.code_channel && $("text").value.includes("E2E_CODE_CHANNEL")) $("text").value = "What is the current status? E2E_CODE_CHANNEL_FOLLOWUP";
-        renderChrome(active);
       }
 
       async function pollMessages(generation = resetGeneration) {
-        const url = selectedIsCodeChannel || pickedChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages?current_thread=true";
+        const url = pickedChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages?current_thread=true";
         const messages = await (await fetch(url)).json();
         if (generation !== resetGeneration) return;
         renderMessages(messages);
@@ -286,9 +244,7 @@
           await fetch("/control/reset", { method: "POST" });
           selectedChannel = "CDEMO01";
           pickedChannel = false;
-          selectedIsCodeChannel = false;
-          knownCodeChannels = 0;
-          $("text").value = "<@U0BOT> investigate the flaky CI failures — use a dedicated code channel if this warrants one E2E_CODE_CHANNEL";
+          $("text").value = "<@U0BOT> What can you help with?";
           await pollState();
           await pollMessages();
         } finally {

@@ -124,7 +124,6 @@ from openswe.model_routing import RoutingArm
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
-from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
@@ -172,7 +171,6 @@ from openswe.tools import (
     background_execute,
     background_task,
     classify,
-    code_channel_set_view,
     configure_repository,
     configure_workspace,
     connect_managed_tools,
@@ -200,7 +198,6 @@ from openswe.tools import (
     list_workspaces,
     listen_events,
     manage_baby_sit,
-    manage_code_channel,
     manage_incident,
     manage_thread,
     merge_expedited_pr,
@@ -242,7 +239,6 @@ from openswe.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_search,
-    slack_start_review_channel,
     snapshotctl,
     start_thread,
     submit_thread_feedback,
@@ -270,7 +266,6 @@ from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.page_commands import PageTools
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
-from openswe.tools.review_walkthrough import walkthrough_tools
 from openswe.tools.slack_bots import allow_slack_bot, list_slack_bots, remove_slack_bot
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
@@ -320,26 +315,14 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
-# Each posts to the reader and ends the walkthrough's turn as surely as a final reply.
-GUIDE_REPLY_TOOLS = frozenset(
-    {
-        "walkthrough_show_chunk",
-        "walkthrough_show_lines",
-        "walkthrough_show_other",
-        "walkthrough_end",
-    }
-)
 # A `/oswe` request has a channel but no Slack thread, so only the tools that act
 # on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {
-        "code_channel_set_view",
-        "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
-        "slack_start_review_channel",
     }
 )
 SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
@@ -565,8 +548,6 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 
 INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
-        "code_channel_set_view",
-        "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
@@ -600,7 +581,6 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_move_thread",
         "slack_post_message",
         "slack_breakout_thread",
-        "slack_start_review_channel",
         "publish_workspace",
         "snapshotctl",
         "configure_repository",
@@ -634,8 +614,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "note_on_diff",
         "add_review_comment",
         "get_thread",
-        "code_channel_set_view",
-        "manage_code_channel",
         "manage_incident",
         "list_threads",
         "listen_events",
@@ -747,8 +725,6 @@ AGENT_TOOLS: Final = (
     request_rollout_check,
     listen_events,
     list_event_types,
-    manage_code_channel,
-    code_channel_set_view,
     manage_incident,
     slack_add_reaction,
     slack_attach_html,
@@ -762,7 +738,6 @@ AGENT_TOOLS: Final = (
     slack_reply,
     slack_search,
     slack_breakout_thread,
-    slack_start_review_channel,
     submit_thread_feedback,
     suggest_task,
     submit_review_assessment_feedback,
@@ -828,8 +803,6 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
             for tool in AGENT_TOOLS
             if _writes_database_rows() or tool not in (execute_database_sql, write_database_rows)
         ),
-        *walkthrough_tools("reviewer"),
-        *walkthrough_tools("author"),
         *apply_tool_descriptions(
             [
                 plan_walkthrough.walkthrough_plan_chunk,
@@ -1002,24 +975,20 @@ async def _run_mcp_tools(
 SANDBOX_TOOL_NAMES = frozenset({*FILESYSTEM_TOOL_NAMES, "delete", "background_execute"})
 # Never called from code: subagents, the replies a run waits on, and tools whose
 # results update graph state, which a call from code drops.
-_NOT_FROM_CODE = (
-    frozenset({"task"})
-    | GUIDE_REPLY_TOOLS
-    | frozenset(
-        {
-            "slack_reply",
-            "slack_no_reply_needed",
-            "record_incident_report",
-            "manage_incident",
-            "cli_result",
-            "connect_managed_tools",
-            "switch_to_performance_model",
-            "record_human_input",
-            "load_integration_tools",
-            "control_worker",
-            "message_task_thread",
-        }
-    )
+_NOT_FROM_CODE = frozenset({"task"}) | frozenset(
+    {
+        "slack_reply",
+        "slack_no_reply_needed",
+        "record_incident_report",
+        "manage_incident",
+        "cli_result",
+        "connect_managed_tools",
+        "switch_to_performance_model",
+        "record_human_input",
+        "load_integration_tools",
+        "control_worker",
+        "message_task_thread",
+    }
 )
 # Everyday tools code mode still offers the model directly. Every other tool it calls
 # from code, where the run's tools can differ from person to person and run to run without
@@ -1801,21 +1770,18 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     )
     (
-        walkthrough,
         profile_login,
         (credential_login, _),
         task_coordination,
         bridge_client,
         (thread_settings, settings_changed),
     ) = await asyncio.gather(
-        ReviewGuideSession.get(thread_id),
         resolve_github_login(as_json_object(config)),
         credential_scope,
         TaskCoordinationMiddleware.for_thread(thread_id),
         _timed(thread_id, "factory.bridged_thread", _bridge_client(thread_id)),
         _timed(thread_id, "factory.thread_settings", _thread_settings(thread_id)),
     )
-    guide = walkthrough if walkthrough is not None and not walkthrough.closed else None
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -2052,8 +2018,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ]
 
     slack_tools = [
-        manage_code_channel,
-        code_channel_set_view,
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
@@ -2065,7 +2029,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_reply,
         slack_search,
         slack_breakout_thread,
-        slack_start_review_channel,
     ]
     withheld = [
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
@@ -2105,15 +2068,13 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         ]
-    if guide is None and settings.get("implementation_walkthrough_enabled") is True:
+    if settings.get("implementation_walkthrough_enabled") is True:
         static_tools = [
             *static_tools,
             plan_walkthrough.walkthrough_plan_chunk,
             plan_walkthrough.walkthrough_split_hunks,
             plan_walkthrough.walkthrough_move_to_other,
         ]
-    if guide is not None:
-        static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
@@ -2200,8 +2161,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         fable_enabled=fable_enabled,
         saved_requested_model=thread_settings.get("requested_model"),
         bridge_client=bridge_client,
-        review_guide=guide is not None,
-        review_guide_closed=walkthrough is not None and walkthrough.closed,
         coordinator_thread_id=task_coordination.coordinator_thread_id
         if task_coordination
         else None,
@@ -2252,7 +2211,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             replies=sorted(
                 {
                     *CARD_TOOLS,
-                    *(GUIDE_REPLY_TOOLS if guide is not None else ()),
                 }
             ),
             nudges=reply_nudge(reply_tool, no_reply_tool),

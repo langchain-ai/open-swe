@@ -14,8 +14,7 @@ the thread's work in progress; any other follow-up waits its turn behind it. A
 concierge DM's runs go on the DM's one thread, and a ``/btw`` question's or a new
 breakout's on one of their own, which the backend names. When the backend starts
 nothing and says why, such as a person who must sign in to Open SWE first, the
-handler replies with it in the Slack thread. A code channel's messages stay with
-the backend, which holds its one session.
+handler replies with it in the Slack thread.
 """
 
 import logging
@@ -230,9 +229,7 @@ def _decide(
         # A person's mention in a channel with external participants hears why.
         refused = facts.channel == "external" and explicit and not message.subtype
         return EXTERNAL_CHANNEL if refused and message.user_id else None
-    if facts.code_channel:
-        # A code channel's one session stays with the backend.
-        return BACKEND
+
     bot = bool(message.bot_id)
     if bot and not (
         facts.allowed_bot
@@ -462,7 +459,6 @@ async def _start_turn(
             request="\n\n".join(prompt.turn_sections), resolved_links=links_section
         ),
         constant_context=slack_prompt.thread_constant_context(
-            review_guide=prompt.review_guide,
             concierge=facts.concierge,
             kitchen=turn.kitchen_channel,
             ask=prompt.ask_channel,

@@ -67,8 +67,6 @@ from openswe.review.publish import (
     TrackedReviewCheck,
     settle_review_check_run,
 )
-from openswe.review_guide.sessions import ARCHIVE_JOB as REVIEW_GUIDE_ARCHIVE
-from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
     is_transient_sandbox_error,
@@ -270,16 +268,6 @@ async def _review_check_timeout(job: Job) -> None:
     )
     if (await get_thread_metadata(thread_id)).get("review_check_run_id") == check_run_id:
         raise RuntimeError("Could not settle the timed-out review check")
-
-
-@WORKER.register(REVIEW_GUIDE_ARCHIVE)
-async def _review_guide_archive(job: Job) -> None:
-    thread_id, head_sha = _text(job, "thread_id"), _text(job, "head_sha")
-    if thread_id is None or head_sha is None:
-        return
-    session = await ReviewGuideSession.get(thread_id)
-    if session is not None:
-        await session.archive_finished(head_sha)
 
 
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)

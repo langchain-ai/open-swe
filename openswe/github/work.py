@@ -82,7 +82,7 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts) -> list[GitHubWorkNam
         work.append("track_pull_request_state")
     if action == "synchronize":
         # Not gated on automatic review: an approval outlives turning review off.
-        work += ["withdraw_superseded_approvals", "notify_pr_updated", "review_fork_push"]
+        work += ["withdraw_superseded_approvals", "review_fork_push"]
     if action == "opened" or action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("track_pull_request_usage")
     if action in APPROVAL_POLICY_ACTIONS:

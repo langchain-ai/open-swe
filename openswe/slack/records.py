@@ -50,7 +50,6 @@ from openswe.slack.client import (
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
 from openswe.threads import index
-from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -352,59 +351,6 @@ _TOGGLE_REACTION = text("""
 """)
 
 
-class SlackViewSuggestion(Base):
-    """The options a code-channel view's select menus suggest, by action id."""
-
-    __tablename__ = "slack_view_suggestion"
-
-    channel_id: Mapped[str] = mapped_column(ForeignKey("slack_channel.id"))
-    view_id: Mapped[str]
-    actions: Mapped[JsonObject] = mapped_column(JSONB)
-    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    created_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    updated_by: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-
-    @classmethod
-    async def actions_for(cls, channel_id: str, view_id: str) -> JsonObject:
-        async with postgres.session() as session:
-            actions = await session.scalar(
-                select(cls.actions).where(cls.channel_id == channel_id, cls.view_id == view_id)
-            )
-        return actions or {}
-
-    async def save(self) -> None:
-        upsert = insert(type(self)).values(
-            id=self.id,
-            channel_id=self.channel_id,
-            view_id=self.view_id,
-            actions=self.actions,
-        )
-        async with postgres.session() as session:
-            await SlackChannel.ensure(session, self.channel_id)
-            await session.execute(
-                upsert.on_conflict_do_update(
-                    index_elements=[type(self).channel_id, type(self).view_id],
-                    set_={
-                        "actions": upsert.excluded.actions,
-                        "updated_at": func.clock_timestamp(),
-                    },
-                )
-            )
-
-    @classmethod
-    async def discard(cls, channel_id: str, view_id: str) -> None:
-        async with postgres.session() as session:
-            await session.execute(
-                delete(cls).where(cls.channel_id == channel_id, cls.view_id == view_id)
-            )
-
-
 async def _clear_expired(
     session: AsyncSession,
     row: type[SlackThread] | type[SlackRun],
@@ -463,7 +409,6 @@ async def lookup_slack_thread_id(channel_id: str, thread_ts: str) -> str | None:
 
 async def lookup_slack_link_thread_id(url: str) -> str | None:
     """Resolve a permalink to its bound Open SWE thread, including reply-only links."""
-    from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 
     location = parse_slack_thread_url(url)
     if location is None:
@@ -475,7 +420,7 @@ async def lookup_slack_link_thread_id(url: str) -> str | None:
     if mapping and mapping.thread_ts:
         if thread_id := await lookup_slack_thread_id(channel, mapping.thread_ts):
             return thread_id
-    if thread_id := await lookup_slack_thread_id(channel, CODE_CHANNEL_SESSION_TS):
+    if thread_id := await lookup_slack_thread_id(channel, "0"):
         return thread_id
     try:
         async with SlackClient.bot() as client:

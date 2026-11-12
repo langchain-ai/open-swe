@@ -119,7 +119,7 @@ async def test_mention_and_message_deliveries_start_one_run(
     assert first["status"] == "accepted"
     assert second["status"] == "ignored"
     assert len(background_tasks.tasks) == 1
-    assert _patch_slack_webhook.held == {
+    assert {claim for claim in _patch_slack_webhook.held if claim[0] == "slack_event"} == {
         ("slack_event", "Ev1"),
         ("slack_event", "Ev2"),
         ("slack_event", "C1:1786573369.551099"),
@@ -165,7 +165,6 @@ async def test_bot_must_be_allowed_and_explicitly_mention_us(
     change: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(webhook_common, "is_code_channel", AsyncMock(return_value=True))
     payload = _bot_payload()
     payload["event"].update(change)
     tasks = _FakeBackgroundTasks()

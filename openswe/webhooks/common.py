@@ -115,16 +115,6 @@ from openswe.slack.client import (
     update_slack_message,
     verify_slack_signature,
 )
-from openswe.slack.code_channels import (  # noqa: F401
-    CODE_CHANNEL_SESSION_TS,
-    DEFAULT_CODE_CHANNEL_COMMANDS,
-    get_block_suggestions,
-    is_code_channel,
-    repo_context_bar_items,
-    set_commands,
-    set_context_bar,
-    set_session_status,
-)
 from openswe.slack.events import (
     claim_slack_event,
     slack_event_already_seen,
@@ -181,7 +171,6 @@ from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 __all__ = [
     "Any",
     "BackgroundTasks",
-    "CODE_CHANNEL_SESSION_TS",
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "FEEDBACK_REACTIONS",
@@ -263,7 +252,6 @@ __all__ = [
     "get_workspace_settings",
     "get_valid_access_token",
     "has_access_token_record",
-    "is_code_channel",
     "json",
     "list_reviewer_findings",
     "logger",
@@ -279,15 +267,12 @@ __all__ = [
     "queue_message_for_thread",
     "react_to_github_comment",
     "reconcile_findings_with_review_threads",
-    "repo_context_bar_items",
     "resolve_agent_model_id",
     "resolve_slack_links_in_context",
     "resolve_slack_thread_id",
     "sanitize_github_comment_body",
     "select_slack_context_messages",
-    "set_context_bar",
     "set_reviewer_thread_metadata",
-    "set_session_status",
     "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
@@ -1049,7 +1034,7 @@ async def post_account_link_prompt(
             channel_id,
             user_id,
             text,
-            thread_ts="" if thread_ts == CODE_CHANNEL_SESSION_TS else thread_ts,
+            thread_ts="" if thread_ts == "0" else thread_ts,
         )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)

@@ -500,7 +500,7 @@ Every run gets a sandbox booted from LangSmith's root snapshot; when your reposi
 Invite the bot to a channel and mention it: `@Robin what's in the repo?`.
 It replies in a thread.
 Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user.
-Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
+Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in).
 
 **GitHub.**
 GitHub-triggered conversations are public.
@@ -522,8 +522,8 @@ Workspace records and their repository and Slack-channel bindings, instance and 
 
 Open a section when you want that feature; everything above keeps working without it.
 
-<details id="slack-sign-in-and-code-channels">
-<summary><strong>Slack: "Sign in with Slack" linking and code channels</strong></summary>
+<details id="slack-sign-in">
+<summary><strong>Slack: "Sign in with Slack" linking</strong></summary>
 
 **"Sign in with Slack" account linking.**
 Lets a user link their Slack identity to their GitHub login from **Settings → Connections**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims.
@@ -552,19 +552,13 @@ Stop uses the linked clicker's dashboard cancellation permissions, interrupts cu
 Other participants' queued runs and pending follow-ups are preserved and may continue; a later message can also continue the thread.
 Anyone who can read a bot-triggered thread can stop it; it otherwise stays read-only.
 
-**Code channels (early access).**
-To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the Slack app, and reinstall it.
-In a code channel the whole channel is one Robin session: it answers without an `@`-mention, replies at the channel level by default, reports session status, and keeps the context bar current; the `manage_code_channel` tool covers channel lifecycle, status, views, and canvases.
-This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`; `slash_command_url` delivers runtime-registered commands to the signed Robin endpoint.
-If your workspace is not enrolled, leave the toggle off.
-
 </details>
 
 <details id="incidents">
 <summary><strong>Incidents</strong></summary>
 
 The **Incidents** dashboard at `/incidents` investigates public internal Slack channels.
-Each incident is one persistent, system-owned conversation on the main `agent` graph, driven by the same Slack webhook path as code channels, with the normal sandbox, coding/PR tools, subagents, organization skills, and configured workspace integrations.
+Each incident is one persistent, system-owned conversation on the main `agent` graph, driven by the Slack webhook path, with the normal sandbox, coding/PR tools, subagents, organization skills, and configured workspace integrations.
 Responders can copy the agent's postmortem summary and consult retained incident history.
 
 1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**.

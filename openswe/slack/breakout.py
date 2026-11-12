@@ -278,7 +278,6 @@ async def web_opening(
             "context_thread_ts": request.thread_ts,
             "prior_message_text": command.prior_text,
             "web_only": True,
-            "code_channel": False,
             "concierge_mode": False,
             "reply_thread_ts": "",
             "inherited_workspace": (

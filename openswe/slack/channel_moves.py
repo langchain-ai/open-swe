@@ -21,7 +21,6 @@ from openswe.slack import mda_forwarding
 from openswe.slack.breakout import BreakoutCommand
 from openswe.slack.breakout_links import mark_broken_out, source_thread_line
 from openswe.slack.client import append_slack_web_link_footer, get_active_slack_thread
-from openswe.slack.code_channels import is_code_channel
 from openswe.slack.move import record_slack_move
 from openswe.slack.tools.move_thread import CheckedMove, check_move
 from openswe.threads import index
@@ -50,11 +49,6 @@ async def prepare_channel_move(request: SlackMoveRequest) -> SlackMovePlan:
     indexed = await index.get(checked.thread_id)
     held = indexed is not None and channel_of(indexed.metadata) == mda_forwarding.CHANNEL
     same_channel = checked.target_channel == str(checked.active.get("channel_id") or "")
-    if held and not same_channel and await is_code_channel(checked.target_channel):
-        # A code channel is one agent session of its own; MDA posts nothing into one.
-        return SlackMovePlan(
-            result={"success": False, "error": "A thread cannot move into a code channel"}
-        )
     return SlackMovePlan(
         root_text=append_slack_web_link_footer(
             checked.message, dashboard_thread_url(checked.thread_id)

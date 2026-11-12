@@ -121,7 +121,6 @@ def _review(action: str = "submitted", body: str = "") -> dict:
                 "walkthrough_pull_request",
                 "track_pull_request_state",
                 "withdraw_superseded_approvals",
-                "notify_pr_updated",
                 "review_fork_push",
                 "track_pull_request_usage",
                 "evaluate_approval_policy",

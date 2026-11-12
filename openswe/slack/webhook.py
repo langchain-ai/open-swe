@@ -5,7 +5,6 @@ object (``common.X``) so tests that monkeypatch them keep working.
 """
 
 import asyncio
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -39,7 +38,6 @@ from openswe.input_messages import (
 )
 from openswe.model_routing import RoutingArm
 from openswe.prompts import prompt
-from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
@@ -58,7 +56,6 @@ from openswe.slack.thinking import (
     clear_slack_thinking_status_if_idle,
     restore_slack_thinking_status,
     show_slack_thinking_status,
-    stream_slack_thinking_steps,
 )
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.threads.identity import ThreadIdentity
@@ -77,11 +74,6 @@ from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
-_CODE_CHANNEL_CONTEXT = prompt("runs/slack-code-channel")
-# Slack opens a new code channel by quoting its origin message on the requester's behalf.
-_CODE_CHANNEL_ORIGIN_QUOTE = re.compile(
-    r"<https://[^|>\s]+/archives/[A-Z0-9]+/p\d+\|Context> from <#"
-)
 _CONCIERGE_CONTEXT = prompt("runs/slack-concierge")
 _KITCHEN_CONTEXT = prompt("runs/slack-kitchen")
 _NON_KITCHEN_CONTEXT = prompt("runs/slack-non-kitchen")
@@ -105,14 +97,13 @@ def _interrupts_active_run(
     bot_user_id: str,
     *,
     treat_all_messages_as_mentions: bool,
-    code_channel: bool,
     message_update: bool,
     explicit_request: bool,
 ) -> bool:
     return explicit_request or _is_explicit_slack_request(
         text,
         bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
         message_update=message_update,
     )
 
@@ -556,7 +547,6 @@ async def process_slack_mention(
     show_status = bool(
         request.channel_id
         and status_ts
-        and not request.code_channel
         and not request.concierge_mode
         and not request.message_update
     )
@@ -933,7 +923,6 @@ async def _process_slack_mention_impl(
         else SlackChannelContext(id=channel_id)
     )
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
-    code_channel = request.code_channel and not request.web_only
     concierge_mode = not request.web_only and (
         request.concierge_mode or is_concierge_thread(channel_context, thread_ts)
     )
@@ -1301,7 +1290,7 @@ async def _process_slack_mention_impl(
         slack_thread_context["triggering_bot_id"] = allowed_bot.bot_id
         slack_thread_context["triggering_bot_app_id"] = allowed_bot.app_id
         slack_thread_context["team_id"] = allowed_bot.team_id
-    if (code_channel or concierge_mode) and reply_thread_ts:
+    if concierge_mode and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     review_card = (
@@ -1332,8 +1321,7 @@ async def _process_slack_mention_impl(
     channel_identity = await _slack_channel_identity(
         channel_id, thread_ts, channel_context, thread_id=thread_id, repo=repo
     )
-    guide = await ReviewGuideSession.get(thread_id) if code_channel else None
-    review_guide = guide is not None
+
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
     try:
@@ -1348,7 +1336,6 @@ async def _process_slack_mention_impl(
     constant_context = "\n\n".join(
         section
         for section in (
-            _CODE_CHANNEL_CONTEXT if code_channel and not review_guide else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
             prompt("runs/slack-ask-channel")
             if ask_channel
@@ -1403,9 +1390,7 @@ async def _process_slack_mention_impl(
         "slack_action_token": request.action_token,
         "slack_search_message_ts": request.original_message_ts,
     }
-    if review_guide:
-        # The thread keeps the last run's configurable, which may be a click's.
-        configurable["review_guide_approve_ts"] = ""
+
     if authorization is not None:
         authorization.configure(configurable)
     if mapped_login:
@@ -1431,10 +1416,7 @@ async def _process_slack_mention_impl(
         configurable["model_selection"] = "explicit"
 
     configurable["slack_kickoff_eligible"] = (
-        is_first_mention
-        and not code_channel
-        and not concierge_mode
-        and not request.context_thread_ts
+        is_first_mention and not concierge_mode and not request.context_thread_ts
     )
     langgraph_client = get_langgraph_client()
     visibility = "private" if request.web_only else _slack_thread_visibility(channel_context)
@@ -1492,16 +1474,6 @@ async def _process_slack_mention_impl(
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 
-    # The guide starts its own first turn; this quote would only queue a second one behind it.
-    if review_guide and _CODE_CHANNEL_ORIGIN_QUOTE.match(text):
-        common.logger.info(
-            "Ignoring the code channel's origin quote in a review guide",
-            extra={"agent_thread_id": thread_id},
-        )
-        return False
-    # A person writing in a closed guide wants it back.
-    if guide is not None and guide.closed:
-        await guide.set_closed(False)
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
@@ -1521,16 +1493,14 @@ async def _process_slack_mention_impl(
 
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
-    # behind it. A review guide's turns wait instead: interrupting one mid-post
-    # loses the chunk it was showing.
-    interrupt_active_run = not review_guide and (
+    # behind it.
+    interrupt_active_run = (
         concierge_mode
         or request.kitchen_channel
         or _interrupts_active_run(
             text,
             bot_user_id,
             treat_all_messages_as_mentions=treat_all_messages_as_mentions,
-            code_channel=code_channel,
             message_update=message_update,
             explicit_request=request.explicit_request or performance_command,
         )
@@ -1549,7 +1519,6 @@ async def _process_slack_mention_impl(
                 for section in (dm_origin_section, request.turn_context, review_section)
                 if section
             ],
-            review_guide=review_guide,
             ask_channel=ask_channel,
         )
         channel_run.run = SlackChannelRun(
@@ -1593,16 +1562,6 @@ async def _process_slack_mention_impl(
         else request.trigger_system,
         explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
     )
-    if code_channel:
-        await common.set_session_status(channel_id, "processing")
-        if is_first_mention:
-            await common.set_context_bar(
-                channel_id,
-                common.repo_context_bar_items(
-                    repo_dict, dashboard_url=common.dashboard_thread_url(thread_id) or ""
-                ),
-            )
-            await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
     receipt_ts = original_message_ts if concierge_mode and not message_update else ""
     if receipt_ts:
         await slack_utils.add_slack_reaction(channel_id, receipt_ts, "hourglass_flowing_sand")
@@ -1628,10 +1587,7 @@ async def _process_slack_mention_impl(
             concierge_message_ts=receipt_ts,
         )
     except Exception:
-        # No run means no completion webhook, so nothing else would ever clear
-        # the loading UI this turn switched on.
-        if code_channel:
-            await common.set_session_status(channel_id, "active")
+        common.logger.exception("Slack run dispatch failed", extra={"agent_thread_id": thread_id})
         raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
@@ -1661,19 +1617,6 @@ async def _process_slack_mention_impl(
             score=1,
             source_info={"model_id": selected_model[0], "effort": selected_model[1]},
         )
-    if code_channel and isinstance(run_id, str) and run_id:
-        stream_thread_ts = reply_thread_ts or thread_ts
-        await stream_slack_thinking_steps(
-            client=langgraph_client,
-            thread_id=thread_id,
-            run_id=run_id,
-            channel_id=channel_id,
-            thread_ts=stream_thread_ts,
-            mapping_thread_ts=thread_ts,
-            original_message_ts=original_message_ts,
-            recipient_user_id=user_id,
-            recipient_team_id=request.team_id,
-        )
     if request.web_only:
         return bool(isinstance(run_id, str) and run_id)
     if is_first_mention:
@@ -1700,7 +1643,7 @@ async def _process_slack_mention_impl(
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    if not code_channel and not concierge_mode and isinstance(run_id, str) and run_id:
+    if not concierge_mode and isinstance(run_id, str) and run_id:
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,

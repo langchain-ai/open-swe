@@ -23,9 +23,7 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
 import { Icon } from "@langchain/macaw-components/Icon"
-import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
-import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import type {
@@ -146,22 +144,6 @@ function editedPaths(messages: Array<Message>): Array<string> {
     }
   }
   return [...paths]
-}
-
-function CodeChannelLink({ url }: { url?: string | null }) {
-  if (!url) return null
-  return (
-    <Button
-      as={<a href={url} target="_blank" rel="noreferrer" />}
-      color="secondary"
-      variant="plain"
-      leftDecorator={SlackLogoIcon}
-      rightDecorator={ArrowUpRightIcon}
-      className="mb-space-2 w-fit"
-    >
-      Open in Slack
-    </Button>
-  )
 }
 
 export function AgentThreadView({
@@ -1063,7 +1045,6 @@ export function AgentThreadView({
           )}
           {!isHydrating && (
             <AgentComposerDock>
-              <CodeChannelLink url={thread.codeChannelUrl} />
               {!embedded && (
                 <ThreadPullRequests
                   pullRequests={

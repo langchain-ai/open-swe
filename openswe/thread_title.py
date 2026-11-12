@@ -15,7 +15,6 @@ from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_links import breakout_root_blocks
 from openswe.slack.client import append_slack_web_link_footer, update_slack_message
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SourceContext
 from openswe.transcript.mirror import mirror_thread_metadata
@@ -160,18 +159,10 @@ async def generate_and_store_thread_title(
                 metadata={"title": title, "title_seed": None},
             )
             await mirror_thread_metadata(thread_id, {"title": title})
-            # Re-read after the update: the pre-update snapshot can be stale if the
-            # thread was promoted to a code channel between the check and the update.
+
             latest = await client.threads.get(thread_id=thread_id)
             context = SourceContext.from_metadata(_thread_metadata(latest))
-            # DMs share the session timestamp but have no session name to set.
             if (
-                context.slack_location
-                and context.slack_location[1] == CODE_CHANNEL_SESSION_TS
-                and await is_code_channel(context.slack_location[0])
-            ):
-                await rename_session(context.slack_location[0], title)
-            elif (
                 (ref := context.slack_thread)
                 and ref.location
                 and ref.breakout_root_suffix is not None

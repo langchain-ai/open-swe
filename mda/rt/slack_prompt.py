@@ -547,9 +547,7 @@ def channel_identity(
     return identity
 
 
-def thread_constant_context(
-    *, review_guide: bool, concierge: bool, kitchen: bool, ask: bool = False
-) -> str:
+def thread_constant_context(*, concierge: bool, kitchen: bool, ask: bool = False) -> str:
     """Guidance that holds for the whole thread, which the model is told once."""
     return "\n\n".join(
         section

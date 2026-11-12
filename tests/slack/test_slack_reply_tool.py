@@ -293,7 +293,7 @@ async def test_freshness_conflict_shows_the_model_images_posted_meanwhile(
     assert result[1] == image
 
 
-async def test_code_channel_reply_stays_in_user_started_thread(
+async def test_whole_channel_reply_stays_in_user_started_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def active_thread(thread_id: str, _fallback: Any) -> dict[str, str]:

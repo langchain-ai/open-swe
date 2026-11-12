@@ -75,7 +75,6 @@ class SlackMessageFacts(BaseModel):
     channel: Literal["ok", "external", "unverified"] = "ok"
     # A direct message with the app.
     dm: bool = False
-    code_channel: bool = False
     kitchen_channel: bool = False
     # The sender turned concierge mode on: their DM is one conversation.
     concierge: bool = False
@@ -138,8 +137,6 @@ class SlackTurnPrompt(BaseModel):
     # Sections from Open SWE's records this turn adds, such as the pull request a
     # review card asks about.
     turn_sections: list[str] = Field(default_factory=list)
-    # A review guide's thread: its constant guidance is the guide's own.
-    review_guide: bool = False
     ask_channel: bool = False
 
 
@@ -263,10 +260,7 @@ class SlackClickActed(BaseModel):
 
 
 class ActOnSlackMessage(BaseModel):
-    """A message MDA's Slack channel hands back to the backend, which answers it as
-    ``/webhooks/slack`` always has: one in a conversation the backend holds, or in a
-    code channel. Slack's Events URL points at Trigger Server, so the backend hears
-    these only this way."""
+    """A message in a backend-held conversation handed back by MDA's Slack channel."""
 
     # The Slack workspace and app the event came through, as Trigger Server keyed it.
     team_id: str = Field(min_length=1, max_length=64)

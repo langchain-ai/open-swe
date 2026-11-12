@@ -36,13 +36,6 @@ from openswe.slack.client import (
     get_slack_permalink,
     parse_github_pr_url,
 )
-from openswe.slack.code_channels import (
-    is_code_channel_session,
-    repo_context_bar_items,
-    set_agent_resource,
-    set_context_bar,
-    set_view,
-)
 from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.threads.store import THREADS
@@ -904,47 +897,7 @@ async def _record_pr_telemetry(
                     extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
                     exc_info=True,
                 )
-            active = await get_active_slack_thread(
-                thread_id,
-                cfg.slack_thread.dump() if cfg.slack_thread else None,
-            )
-            if active and is_code_channel_session(str(active.get("thread_ts") or "")):
-                channel_id = str(active.get("channel_id") or "")
-                await set_context_bar(
-                    channel_id,
-                    repo_context_bar_items(
-                        {"owner": owner, "name": repo},
-                        branch=head,
-                        pr_url=pr_url if isinstance(pr_url, str) else "",
-                        dashboard_url=dashboard_thread_url(thread_id) or "",
-                    ),
-                )
-                if isinstance(pr_url, str):
-                    await set_agent_resource(
-                        channel_id,
-                        {
-                            "url": pr_url,
-                            "resource_type": "pull_request",
-                            "title": (
-                                pr_title[:255]
-                                if isinstance(pr_title, str) and pr_title
-                                else "Pull request"
-                            ),
-                            "provider": "GitHub",
-                        },
-                    )
-                response = await client.get(
-                    f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
-                    headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
-                )
-                if response.status_code == 200 and response.text.strip():
-                    await set_view(
-                        channel_id,
-                        "diff",
-                        content=response.text,
-                        base_branch=base,
-                        head_branch=head,
-                    )
+
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True

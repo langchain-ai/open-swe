@@ -519,10 +519,9 @@ async def _post_slack_message_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     reply_broadcast: bool = False,
 ) -> str:
-    from openswe.slack.code_channels import is_code_channel_session
 
-    # A code channel is one flowing session: replies belong in the channel.
-    reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
+    # A whole-channel conversation is one flowing session: replies belong in the channel.
+    reply_ts = None if thread_ts == "0" else thread_ts
     text, blocks = await pr_review_links(text, blocks)
 
     try:
@@ -816,9 +815,8 @@ async def post_slack_thread_reply_with_ts(
     reply_broadcast: bool = False,
 ) -> str:
     """Post a reply in a Slack thread and return its timestamp."""
-    from openswe.slack.code_channels import is_code_channel_session
 
-    if is_code_channel_session(thread_ts):
+    if thread_ts == "0":
         agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
     blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
@@ -945,14 +943,13 @@ async def start_slack_stream(
     recipient_team_id: str = "",
 ) -> str:
     """Start a Slack Thinking Steps stream and return its message timestamp."""
-    from openswe.slack.code_channels import is_code_channel_session
 
     payload: dict[str, Any] = {
         "channel": channel_id,
         "chunks": chunks,
         "task_display_mode": "plan",
     }
-    if not is_code_channel_session(thread_ts):
+    if thread_ts != "0":
         payload["thread_ts"] = thread_ts
     if recipient_user_id:
         payload["recipient_user_id"] = recipient_user_id
@@ -1579,10 +1576,9 @@ async def fetch_slack_thread_messages(
 
     With ``complete``, a failed page raises instead of returning the pages fetched so far.
     """
-    from openswe.slack.code_channels import is_code_channel_session
 
-    # A code channel session spans the whole channel rather than one thread.
-    session_channel = is_code_channel_session(thread_ts)
+    # An incident session spans the whole channel rather than one thread.
+    session_channel = thread_ts == "0"
 
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -1699,9 +1695,8 @@ async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
 ) -> dict[str, Any] | None:
     """Fetch an exact reply from a Slack thread."""
-    from openswe.slack.code_channels import is_code_channel_session
 
-    session_channel = is_code_channel_session(thread_ts)
+    session_channel = thread_ts == "0"
     try:
         async with SlackClient.bot() as client:
             payload = (
@@ -1740,9 +1735,8 @@ async def fetch_latest_slack_thread_message(
     channel_id: str, thread_ts: str
 ) -> dict[str, Any] | None:
     """Fetch a Slack thread's newest message, or its parent while it has no replies."""
-    from openswe.slack.code_channels import is_code_channel_session
 
-    if is_code_channel_session(thread_ts):
+    if thread_ts == "0":
         try:
             async with SlackClient.bot() as client:
                 payload = await client.conversations_history(channel=channel_id, limit=1)
@@ -1822,12 +1816,11 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
 
 async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     """Return the public permalink for a Slack message, or None if unavailable."""
-    from openswe.slack.code_channels import is_code_channel_session
 
-    # A code channel session has no anchor message to permalink to.
+    # A whole-channel conversation has no anchor message to permalink to.
     if not channel_id or not message_ts:
         return None
-    if is_code_channel_session(message_ts):
+    if message_ts == "0":
         return None
 
     try:

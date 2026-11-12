@@ -8,7 +8,6 @@ from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack.client import get_slack_permalink
-from openswe.slack.code_channels import is_code_channel_session
 from openswe.utils.dashboard_links import dashboard_base_url
 
 logger = logging.getLogger(__name__)
@@ -39,9 +38,7 @@ def github_error(response: httpx2.Response) -> str:
 async def _review_body(approval: HumanReviewRequest) -> str:
     # The card is reposted when it is broadcast or closed; the thread root is the stable link.
     anchor = (
-        approval.slack_message_ts
-        if is_code_channel_session(approval.slack_thread_ts)
-        else approval.slack_thread_ts
+        approval.slack_message_ts if approval.slack_thread_ts == "0" else approval.slack_thread_ts
     )
     permalink = await get_slack_permalink(approval.slack_channel_id, anchor)
     if permalink is None:

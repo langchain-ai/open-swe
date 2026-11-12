@@ -95,10 +95,8 @@ type GitHubWorkName = Literal[
     # The agent thread that opened a pull request learns its state, and its usage.
     "track_pull_request_state",
     "track_pull_request_usage",
-    # A push to a pull request's branch: superseded approvals withdrawn, its guides
-    # paused, and a fork's head reviewed again.
+    # A push to a pull request's branch: superseded approvals withdrawn and a fork reviewed again.
     "withdraw_superseded_approvals",
-    "notify_pr_updated",
     "review_fork_push",
     "settle_review_on_close",
     # A pull request closed: its apps-only runs for a deployed preview stop (``PreviewReady``).

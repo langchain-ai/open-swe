@@ -49,7 +49,6 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 id="C-code", is_ext_shared=False, is_pending_ext_shared=False
             )
         ),
-        "is_code_channel": AsyncMock(return_value=True),
         "claim_slack_event": AsyncMock(return_value=True),
         "slack_event_already_seen": AsyncMock(return_value=False),
         "lookup_slack_thread_id": AsyncMock(return_value="thread-code"),
@@ -90,7 +89,7 @@ async def test_the_channel_narrating_itself_is_never_a_request(
 
 async def test_an_ordinary_message_still_reaches_the_session(webhook: dict[str, Any]) -> None:
     ordinary = {key: value for key, value in JOIN.items() if key != "subtype"}
-    await _post({**ordinary, "text": "what is the status?"})
+    await _post({**ordinary, "text": "<@U-BOT> what is the status?"})
 
     webhook["process_slack_mention"].assert_awaited_once()
     webhook["queue_message_for_thread"].assert_not_awaited()

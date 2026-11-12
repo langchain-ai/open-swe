@@ -159,48 +159,6 @@ async def test_breakout_mid_run_moves_the_working_status(
     assert statuses[-1] == ("C2", "2.0", "")
 
 
-async def test_moving_out_of_a_code_channel_releases_it_and_stops_its_steps(
-    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall]
-) -> None:
-    session_statuses: list[tuple[str, str]] = []
-
-    async def set_session_status(channel_id: str, status: str) -> bool:
-        session_statuses.append((channel_id, status))
-        return True
-
-    monkeypatch.setattr(slack_thinking, "set_session_status", set_session_status)
-    monkeypatch.setattr(slack_thinking, "_LOCATION_CHECK_SECONDS", 0.0)
-    client = _LangGraph({"channel_id": "C0", "thread_ts": "0"})
-    await slack_move.bind_slack_thread_id("C0", "0", "thread-1")
-    stream = slack_thinking.SlackThinkingStream(
-        client=client,
-        thread_id="thread-1",
-        run_id="run-1",
-        channel_id="C0",
-        thread_ts="5.0",
-        recipient_user_id="U1",
-        recipient_team_id="T1",
-        mapping_thread_ts="0",
-        original_message_ts="5.0",
-    )
-    step = slack_thinking.Step("step-1", "Reading auth.py", "in_progress")
-    stream.steps[((), "call-1")] = step
-
-    assert await stream.moved_away() is False
-    await slack_move.rebind_slack_thread(
-        "thread-1",
-        SlackThreadRef(channel_id="C0", thread_ts="0"),
-        SlackThreadRef(channel_id="C2", thread_ts="2.0"),
-    )
-    assert await stream.moved_away() is True
-    await stream.stop("moved")
-
-    assert session_statuses == [("C0", "active")]
-    assert ("C2", "2.0", "Thinking...") in statuses
-    assert step.status == "complete"
-    assert step.output == "Continued in the new thread"
-
-
 async def test_unverifiable_rebind_reverts_before_releasing_the_destination(
     statuses: list[StatusCall],  # noqa: ARG001
 ) -> None:

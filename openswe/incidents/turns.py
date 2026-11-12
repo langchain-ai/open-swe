@@ -36,7 +36,7 @@ from openswe.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)
 
-# The whole channel is one conversation, like a code channel session.
+# The whole incident channel is one conversation.
 SESSION_TS = "0"
 AUTOMATIC_DELAY_SECONDS = 15
 FIRST_INVESTIGATION_REQUEST = prompt("incidents/first-investigation")

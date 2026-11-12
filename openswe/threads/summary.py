@@ -21,8 +21,6 @@ from openswe.review.findings import (
 from openswe.review.session import ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
-from openswe.slack.links import SlackLink
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
@@ -315,20 +313,10 @@ def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
         or not team_id
         or not slack_thread.channel_id
         or not slack_thread.thread_ts
-        or slack_thread.thread_ts == CODE_CHANNEL_SESSION_TS
+        or slack_thread.thread_ts == "0"
     ):
         return None
     return f"slack://channel?{urlencode({'team': team_id, 'id': slack_thread.channel_id, 'message': slack_thread.thread_ts})}"
-
-
-def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
-        return None
-    channel_id = slack_thread.channel_id.strip()
-    if not channel_id:
-        return None
-    return SlackLink(channel_id, team_id=slack_thread.team_id or SLACK_TEAM_ID).channel_url
 
 
 def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
@@ -682,7 +670,6 @@ async def _thread_summary(
         "runCosts": run_costs,
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
-        "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
         # Which app serves a bridged thread's machine, so a client can tell
         # whether it is the one that can run the thread.

@@ -351,29 +351,24 @@ async def test_a_message_mda_hands_back_that_fails_is_run_again(
     released.assert_awaited_once_with("slack_message_call", "act:msg_1")
 
 
-@pytest.mark.parametrize("single_session", ["code_channel", "concierge_dm"])
 async def test_a_reply_in_a_thread_mda_held_stays_with_a_single_session(
-    monkeypatch: pytest.MonkeyPatch, single_session: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A code channel or concierge DM turned on after MDA took one of its threads.
+    # Concierge mode turned on after MDA took one of its threads.
     root = "1786573300.000001"
     owned = AsyncMock(side_effect=lambda _channel, ts: _MDA_THREAD if ts == root else None)
     monkeypatch.setattr(mda_forwarding, "owned_thread", owned)
     monkeypatch.setattr(
-        webhook_common, "is_code_channel", AsyncMock(return_value=single_session == "code_channel")
-    )
-    monkeypatch.setattr(
         slack_routes.User,
         "concierge_mode_for_slack",
-        AsyncMock(return_value=single_session == "concierge_dm"),
+        AsyncMock(return_value=True),
     )
     event: dict[str, JsonValue] = {
         "type": "message",
         "text": "and also",
         "thread_ts": "1786573300.000001",
     }
-    if single_session == "concierge_dm":
-        event |= {"channel": "D1", "channel_type": "im"}
+    event |= {"channel": "D1", "channel_type": "im"}
     reply = _mention(**event)
     tasks = _FakeBackgroundTasks()
 
@@ -460,7 +455,6 @@ def test_a_claimed_conversations_stub_has_not_started(
 
 _PLAIN: dict[str, JsonValue] = {
     "subtype": "",
-    "code_channel": False,
     "breakout": False,
 }
 
@@ -471,7 +465,6 @@ _PLAIN: dict[str, JsonValue] = {
         ({}, True),
         ({"subtype": "file_share"}, True),
         ({"subtype": "thread_broadcast"}, False),
-        ({"code_channel": True}, False),
         ({"breakout": True}, False),
     ],
 )
@@ -643,7 +636,6 @@ async def test_the_channel_api_answers_only_mda(monkeypatch: pytest.MonkeyPatch)
 def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
     """Open SWE's records as ``slack_message_facts`` reads them: a plain public channel."""
     lookups: dict[str, AsyncMock | Mock] = {
-        "code_channel": AsyncMock(return_value=False),
         "kitchen": AsyncMock(return_value=False),
         "concierge": AsyncMock(return_value=False),
         "bot": AsyncMock(return_value=None),
@@ -654,7 +646,6 @@ def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
         "indexed": AsyncMock(return_value=None),
         "workspace": AsyncMock(return_value=None),
     }
-    monkeypatch.setattr(webhook_common, "is_code_channel", lookups["code_channel"])
     monkeypatch.setattr(slack_channel, "is_kitchen_channel", lookups["kitchen"])
     monkeypatch.setattr(slack_channel.User, "concierge_mode_for_slack", lookups["concierge"])
     monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", lookups["bot"])
@@ -682,7 +673,6 @@ async def test_facts_of_a_mention_in_a_plain_channel(
     assert answered.json() == {
         "channel": "ok",
         "dm": False,
-        "code_channel": False,
         "kitchen_channel": False,
         "concierge": False,
         "allowed_bot": False,
@@ -1653,13 +1643,6 @@ async def test_a_modal_trigger_server_opened_closes_when_handed_to_it(
     "payload",
     [
         {"type": "message_action", "callback_id": "open_swe_explain", "user": {"id": "U1"}},
-        {"type": "block_suggestion", "container": {"type": "code_channel_view"}, "value": "a"},
-        {
-            "type": "block_actions",
-            "container": {"type": "code_channel_view", "view_id": "V1"},
-            "user": {"id": "U1"},
-            "actions": [],
-        },
         {
             "type": "view_submission",
             "user": {"id": "U1"},
@@ -1676,14 +1659,12 @@ async def test_a_modal_trigger_server_opened_closes_when_handed_to_it(
     ],
     ids=[
         "explain this",
-        "options load",
-        "code channel view",
         "backend-opened modal",
         "review signup link",
         "review acceptance link",
     ],
 )
-async def test_explain_this_code_channel_views_and_the_backends_modals_stay_here(
+async def test_explain_this_and_the_backends_modals_stay_here(
     monkeypatch: pytest.MonkeyPatch, payload: dict[str, JsonValue]
 ) -> None:
     act = AsyncMock(return_value={})
@@ -2014,7 +1995,6 @@ async def test_a_retry_sends_the_requesters_message_again(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(return_value={"type": "message", "user": "U1", "ts": "171.2", "text": "fix CI"}),
     )
-    monkeypatch.setattr(webhook_common, "is_code_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
 
     start = await _post_click(

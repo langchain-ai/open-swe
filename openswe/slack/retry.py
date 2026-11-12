@@ -175,7 +175,7 @@ class SlackRetry(BaseModel):
                 )
             text = message.text or ""
             attachments = message.attachments
-        code_channel = await common.is_code_channel(self.channel_id)
+
         return SlackRequest(
             channel_id=self.channel_id,
             thread_ts=self.thread_ts,
@@ -194,7 +194,6 @@ class SlackRetry(BaseModel):
             team_id=team_id,
             reply_thread_ts=self.reply_thread_ts,
             concierge_mode=self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D"),
-            code_channel=code_channel,
             kitchen_channel=await is_kitchen_channel(self.channel_id, slack_user_id=self.user_id),
             treat_all_messages_as_mentions=True,
             explicit_request=True,

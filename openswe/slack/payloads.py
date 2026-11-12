@@ -45,7 +45,7 @@ class SlackRef(SlackPayload):
 
 
 class SlackItem(SlackPayload):
-    """``event.item``: the reacted-to message, or a code-channel context-bar item."""
+    """``event.item``: the reacted-to message."""
 
     type: str = ""
     channel: str = ""

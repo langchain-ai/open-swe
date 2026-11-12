@@ -166,12 +166,10 @@ async def send_slack_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    from openswe.slack.code_channels import is_code_channel_session
-
     reply_thread_ts = active.get("reply_thread_ts")
     post_thread_ts = (
         str(reply_thread_ts)
-        if is_code_channel_session(str(thread_ts)) and isinstance(reply_thread_ts, str)
+        if (str(thread_ts) == "0") and isinstance(reply_thread_ts, str)
         else str(thread_ts)
     )
 
@@ -200,9 +198,7 @@ async def send_slack_reply(
             if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
                 message = markdown_to_mrkdwn(message)
         usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
-        agent_thread_id = (
-            None if is_code_channel_session(str(thread_ts)) else str(thread_id or "") or None
-        )
+        agent_thread_id = None if (str(thread_ts) == "0") else str(thread_id or "") or None
         try:
             message_ts = await _post_and_store_mapping(
                 channel_id,
@@ -228,7 +224,7 @@ async def send_slack_reply(
                 "message_chars": len(message),
                 "hint": _slack_reply_failure_hint(exc.code),
             }
-        if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
+        if message_ts and cfg.source == "slack" and not (str(thread_ts) == "0"):
             try:
                 await _handle_kickoff(
                     str(channel_id),
@@ -244,7 +240,7 @@ async def send_slack_reply(
                 )
     if message_ts and response_type == "final" and thread_id and run_id:
         await RoutedWork(thread_id).answered(run_id)
-    if run_id and not is_code_channel_session(str(thread_ts)):
+    if run_id and not (str(thread_ts) == "0"):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {

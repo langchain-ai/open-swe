@@ -25,7 +25,6 @@ from datetime import timedelta
 from typing import Any
 
 from langchain_core.messages import convert_to_messages
-from langgraph_sdk.client import LangGraphClient
 from runtime_api.model_errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 
 from openswe import event_claims
@@ -43,7 +42,6 @@ from openswe.slack.client import (
     post_slack_thread_reply,
     remove_slack_reaction,
 )
-from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.routed_work import RoutedWork
 from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
@@ -322,26 +320,6 @@ async def _finalize_agent_usage_telemetry(
     )
 
 
-async def _settle_code_channel_session(
-    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
-) -> None:
-    """Return a code channel session to ``active`` once its work stops.
-
-    A later message can already have started another run, so a completion that
-    arrives out of order must not clear the loading UI that run is relying on.
-    """
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or not is_code_channel_session(slack_thread.thread_ts):
-        return
-    try:
-        for status in ("pending", "running"):
-            if await client.runs.list(thread_id, status=status, limit=1):
-                return
-    except Exception:  # noqa: BLE001
-        logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
-    await set_session_status(slack_thread.channel_id, "active")
-
-
 async def _handle_successful_run(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
@@ -371,7 +349,6 @@ async def _handle_successful_run(
         return await turns.handle_run_completion(thread_id, run_id, "success")
     if metadata.get("kind") in {REVIEWER_THREAD_KIND, REVIEWER_SHADOW_THREAD_KIND}:
         return {"status": "ignored", "reason": "not an agent Slack run"}
-    await _settle_code_channel_session(client, thread_id, metadata)
     await refresh_slack_background_status(thread_id)
     # Slack shows no run cost, so nothing refreshes a reply's footer with it.
     return {"status": "ok", "reason": "run settled"}
@@ -556,7 +533,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         from openswe.incidents import turns
 
         return await turns.handle_run_completion(thread_id, run_id, str(status))
-    await _settle_code_channel_session(client, thread_id, metadata)
     await refresh_slack_background_status(thread_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped

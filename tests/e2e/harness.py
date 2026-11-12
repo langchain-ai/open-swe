@@ -757,7 +757,7 @@ async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response
 async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> JSONResponse:
     event = payload["event"]
     channel = str(event["channel"])
-    thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
+    thread_ts = str(event["thread_ts"])
     thread_id = await lookup_slack_thread_id(channel, thread_ts)
     if thread_id is None and channel.startswith("D"):
         # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
@@ -1157,22 +1157,16 @@ async def slack_state(channel: str = "") -> JSONResponse:
     selected_channel = (
         current_channel if current_channel != DEMO_CHANNEL else channel or DEMO_CHANNEL
     )
-    channels = [{"id": DEMO_CHANNEL, "name": "demo", "code_channel": False}]
+    channels = [{"id": DEMO_CHANNEL, "name": "demo"}]
     channels.extend(
         {
             "id": message_channel,
             "name": "direct-message"
             if message_channel.startswith("D")
             else message_channel.lower(),
-            "code_channel": False,
         }
         for message_channel in fakes.slack_channels()
-        if message_channel != DEMO_CHANNEL and message_channel not in fakes.CODE_CHANNELS
-    )
-    channels.extend(
-        {**value, "code_channel": True}
-        for value in fakes.CODE_CHANNELS.values()
-        if not value.get("archived")
+        if message_channel != DEMO_CHANNEL
     )
     return JSONResponse({"selected_channel": selected_channel, "channels": channels})
 
@@ -2037,8 +2031,7 @@ _CHANNEL_NAMES = {REVIEW_CHANNEL: "reviews"}
 
 @app.get("/fake-slack/conversations.info")
 async def slack_conversations_info(channel: str = "") -> JSONResponse:
-    code_channel = fakes.CODE_CHANNELS.get(channel)
-    name = code_channel["name"] if code_channel else _CHANNEL_NAMES.get(channel, "demo")
+    name = _CHANNEL_NAMES.get(channel, "demo")
     data: dict[str, Any] = {
         "id": channel,
         "name": name,
@@ -2052,8 +2045,6 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "topic": {"value": "Demo channel topic"},
         "purpose": {"value": "Demo channel purpose"},
     }
-    if code_channel:
-        data["properties"] = {"record_channel": {"record_type": "agent_channel"}}
     return _ok({"channel": data})
 
 
@@ -2097,71 +2088,6 @@ async def slack_conversations_history(channel: str = "") -> JSONResponse:
             ]
         }
     )
-
-
-@app.post("/fake-slack/agents.conversations.create")
-async def slack_create_code_channel(request: Request) -> JSONResponse:
-    channel = fakes.create_code_channel(await request.json())
-    return _ok({"channel": {"id": channel["id"]}})
-
-
-@app.post("/fake-slack/agents.sessions.setStatus")
-async def slack_set_code_channel_status(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(
-        str(body.get("channel_id") or ""), status=body.get("status")
-    )
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.sessions.rename")
-async def slack_rename_code_channel(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(str(body.get("channel_id") or ""), name=body.get("title"))
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.conversations.setProperties")
-async def slack_set_code_channel_properties(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel_id = str(body.get("channel_id") or "")
-    code_channel = body.get("code_channel") if isinstance(body.get("code_channel"), dict) else {}
-    values: dict[str, Any] = {}
-    if "context_bar_items" in code_channel:
-        values["context_bar_items"] = code_channel["context_bar_items"]
-    if "summary_message" in code_channel:
-        values["summary_message"] = code_channel["summary_message"]
-    if "agent_resource" in body:
-        values["agent_resource"] = body["agent_resource"]
-    channel = fakes.update_code_channel(channel_id, **values)
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.conversations.setCommands")
-async def slack_set_code_channel_commands(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(
-        str(body.get("channel_id") or ""), commands=body.get("commands", [])
-    )
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
-
-
-@app.post("/fake-slack/agents.conversations.setView")
-async def slack_set_code_channel_view(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.CODE_CHANNELS.get(str(body.get("channel_id") or ""))
-    if channel is None:
-        return JSONResponse({"ok": False, "error": "channel_not_found"})
-    view = {**body, "view_id": f"V{len(channel['views']) + 1}"}
-    channel["views"].append(view)
-    return _ok(view)
-
-
-@app.post("/fake-slack/agents.conversations.archive")
-async def slack_archive_code_channel(request: Request) -> JSONResponse:
-    body = await request.json()
-    channel = fakes.update_code_channel(str(body.get("channel_id") or ""), archived=True)
-    return _ok() if channel else JSONResponse({"ok": False, "error": "channel_not_found"})
 
 
 @app.get("/fake-slack/chat.getPermalink")

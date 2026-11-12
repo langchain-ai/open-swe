@@ -12,7 +12,6 @@ from openswe.slack.client import (
     post_slack_top_level_message_with_ts,
     slack_thread_mutation_lock,
 )
-from openswe.slack.code_channels import is_code_channel_session
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import (
     bind_slack_thread_id,
@@ -93,9 +92,7 @@ async def _carry_run_mapping(source: SlackThreadRef, destination: SlackThreadRef
         destination.channel_id,
         destination.thread_ts,
         source_run.run_id,
-        message_ts=(
-            None if is_code_channel_session(destination.thread_ts) else destination.thread_ts
-        ),
+        message_ts=(None if destination.thread_ts == "0" else destination.thread_ts),
         triggering_user_id=source_run.triggering_user_id,
     )
 

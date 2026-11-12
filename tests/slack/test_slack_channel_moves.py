@@ -42,7 +42,6 @@ def _checked(monkeypatch: pytest.MonkeyPatch, target: str = "C1") -> AsyncMock:
 def _held(monkeypatch: pytest.MonkeyPatch, channel: str | None = "slack") -> None:
     indexed = SimpleNamespace(metadata={"channel": channel})
     monkeypatch.setattr(channel_moves.index, "get", AsyncMock(return_value=indexed))
-    monkeypatch.setattr(channel_moves, "is_code_channel", AsyncMock(return_value=False))
 
 
 @pytest.mark.parametrize(
@@ -71,21 +70,6 @@ async def test_an_mda_conversation_moves_through_mda_into_any_channel(
     assert plan.root_text is not None
     assert plan.root_text.startswith("Breakout")
     assert "https://dash/thread-1" in plan.root_text
-
-
-async def test_a_thread_never_moves_into_a_code_channel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _checked(monkeypatch, "C2")
-    _held(monkeypatch)
-    monkeypatch.setattr(channel_moves, "is_code_channel", AsyncMock(return_value=True))
-
-    plan = await channel_moves.prepare_channel_move(
-        SlackMoveRequest(run_id="run-1", message="Breakout", channel_id="C2")
-    )
-
-    assert plan.result == {"success": False, "error": "A thread cannot move into a code channel"}
-    assert (plan.root_text, plan.via_mda) == (None, False)
 
 
 async def test_a_move_the_checks_stop_answers_with_their_reason(

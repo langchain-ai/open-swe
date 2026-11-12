@@ -41,9 +41,6 @@ def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[SlackRequest]:
     async def resolve_thread_id(channel_id: str, thread_ts: str) -> str:
         return f"thread-{thread_ts}"
 
-    async def is_code_channel(channel_id: str) -> bool:
-        return False
-
     async def claim(event_id: str, channel_id: str = "", event_ts: str = "") -> bool:
         return True
 
@@ -55,7 +52,6 @@ def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[SlackRequest]:
 
     monkeypatch.setattr(summon, "fetch_slack_thread_message_by_ts", fetch_message)
     monkeypatch.setattr(summon, "resolve_slack_thread_id", resolve_thread_id)
-    monkeypatch.setattr(summon, "is_code_channel", is_code_channel)
     monkeypatch.setattr(summon, "claim_slack_event", claim)
     monkeypatch.setattr(summon.common, "get_slack_repo_config", repo_config)
     monkeypatch.setattr(summon.webhook, "process_slack_mention", process_mention)

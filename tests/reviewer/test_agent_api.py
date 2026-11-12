@@ -430,29 +430,6 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert updated.await_count == 1
 
 
-async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The guide stays after a walkthrough closes, to tell the model its rules ended;
-    only an open one pins the checkout in the sandbox."""
-    from unittest.mock import AsyncMock
-
-    from openswe.agent_api import agent
-    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
-    from openswe.review_guide.middleware import ReviewGuideMiddleware
-
-    monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
-    turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna", review_guide_closed=True)
-
-    prepared = await agent.AgentKind().preparation(
-        {"configurable": {"thread_id": "thread-1"}}, RunSettings(agent=turn), sandbox_id="sandbox-1"
-    )
-
-    assert prepared is not None
-    assert any(isinstance(middleware, ReviewGuideMiddleware) for middleware in prepared)
-    assert not turn.reaches_sandbox
-
-
 async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_worker_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2022,22 +1999,19 @@ async def test_only_preparation_is_cancelled_on_disconnect(
         ("walkthrough_move_to_other", {"files": []}, "move_to_other"),
     ],
 )
-@pytest.mark.parametrize("scout", [False, True])
 @pytest.mark.parametrize("moved", [False, True])
 async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
     arguments: dict[str, JsonValue],
     method: str,
-    scout: bool,
     moved: bool,
 ) -> None:
-    from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     from langchain_core.tools import tool
 
-    from openswe.tools import plan_walkthrough, review_walkthrough
+    from openswe.tools import plan_walkthrough
     from openswe.walkthrough.plan import RangeError
     from openswe.walkthrough.record import PlanMovedError
 
@@ -2049,21 +2023,16 @@ async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
     workspace = AsyncMock()
     getattr(workspace, method).side_effect = error
     monkeypatch.setattr(plan_walkthrough, "_workspace", AsyncMock(return_value=workspace))
-    monkeypatch.setattr(
-        review_walkthrough.GuideContext,
-        "current",
-        AsyncMock(return_value=SimpleNamespace(workspace=workspace)),
-    )
-    run = RUN.model_copy(update={"thread_id": "scout" if scout else "guide"})
-    parts = _Offering(tool(getattr(plan_walkthrough if scout else review_walkthrough, name)))
-    state: dict[str, JsonValue] = {"scout_nothing_to_plan": False} if scout else {}
+    run = RUN.model_copy(update={"thread_id": "scout"})
+    parts = _Offering(tool(getattr(plan_walkthrough, name)))
+    state: dict[str, JsonValue] = {"scout_nothing_to_plan": False}
 
     result = await parts.operate(
         RunOperation(name=name, arguments=arguments, state=state, request_id="call-1"), run
     )
 
     # The flag is what ends the scout's run, in MDA's loop.
-    if scout and moved:
+    if moved:
         assert result.state == {"scout_nothing_to_plan": True}
         assert json.loads(str(result.content))["success"] is False
     else:

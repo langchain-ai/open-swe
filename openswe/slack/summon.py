@@ -7,7 +7,6 @@ from openswe.input_messages import SystemIdentity
 from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.client import SlackThreadMappingError, fetch_slack_thread_message_by_ts
-from openswe.slack.code_channels import is_code_channel
 from openswe.slack.dm import is_dm_channel
 from openswe.slack.events import claim_slack_event
 from openswe.slack.failures import SlackRequestError, run_slack_task
@@ -48,7 +47,7 @@ async def process_slack_summon_reaction(
     ):
         return
     # Every message there already reaches Open SWE, so a reaction adds nothing.
-    if is_dm_channel(channel_context) or await is_code_channel(item.channel):
+    if is_dm_channel(channel_context):
         return
     message = await fetch_slack_thread_message_by_ts(item.channel, item.ts, item.ts)
     # Later reactors are +1s, and acting on each would interrupt the first one's run.

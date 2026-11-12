@@ -6,6 +6,7 @@ const BASE_BOT_SCOPES = [
   "channels:read",
   "channels:join",
   "chat:write",
+  "files:read",
   "files:write",
   "groups:history",
   "groups:read",
@@ -48,10 +49,7 @@ export function slackManifestPlaceholdersRemain(
   return !config.backendUrl?.trim()
 }
 
-export function slackAppManifest(
-  codeChannelsEnabled = false,
-  config: SlackManifestConfig = {}
-) {
+export function slackAppManifest(config: SlackManifestConfig = {}) {
   const backendUrl =
     config.backendUrl?.trim().replace(/\/+$/, "") || BACKEND_URL_PLACEHOLDER
 
@@ -78,12 +76,6 @@ export function slackAppManifest(
       should_escape: false,
     })),
   }
-  if (codeChannelsEnabled) {
-    features.code_channels = {
-      enabled: true,
-      slash_command_url: `${backendUrl}/webhooks/slack/code-channel-commands`,
-    }
-  }
 
   return {
     display_information: {
@@ -95,24 +87,13 @@ export function slackAppManifest(
     oauth_config: {
       redirect_urls: [`${backendUrl}/dashboard/api/slack/callback`],
       scopes: {
-        bot: codeChannelsEnabled
-          ? [
-              ...BASE_BOT_SCOPES,
-              "code_channels:manage",
-              "files:read",
-              // conversations.invite, for public and private channels.
-              "channels:manage",
-              "groups:write",
-            ]
-          : BASE_BOT_SCOPES,
+        bot: BASE_BOT_SCOPES,
       },
     },
     settings: {
       event_subscriptions: {
         request_url: `${backendUrl}/webhooks/slack`,
-        bot_events: codeChannelsEnabled
-          ? [...BASE_BOT_EVENTS, "code_channel_action"]
-          : BASE_BOT_EVENTS,
+        bot_events: BASE_BOT_EVENTS,
       },
       interactivity: {
         is_enabled: true,
@@ -125,9 +106,6 @@ export function slackAppManifest(
   }
 }
 
-export function slackAppManifestJson(
-  codeChannelsEnabled = false,
-  config: SlackManifestConfig = {}
-): string {
-  return JSON.stringify(slackAppManifest(codeChannelsEnabled, config), null, 2)
+export function slackAppManifestJson(config: SlackManifestConfig = {}): string {
+  return JSON.stringify(slackAppManifest(config), null, 2)
 }
