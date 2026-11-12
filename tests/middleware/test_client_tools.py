@@ -11,9 +11,9 @@ from runtime_api.operations import OperationResult, RunOperation
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RemoteRun
+from openswe.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.plugin_chat import PluginChatTools
-from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.run_config import PluginChatConfig
 from openswe.threads.runs import _plugin_context
 from openswe.threads.summary import PLUGIN_CHAT_KEY

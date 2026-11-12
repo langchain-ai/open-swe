@@ -13,8 +13,8 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.runtime import Runtime
 
+from openswe.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.prompts import prompt
 from openswe.utils.json_types import JsonObject
 

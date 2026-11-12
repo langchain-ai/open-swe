@@ -66,6 +66,7 @@ from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
+from openswe.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
     load_profile,
@@ -121,7 +122,6 @@ from openswe.model_request import (
     model_selection_trace,
 )
 from openswe.model_routing import RoutingArm
-from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.run_config import RunConfig

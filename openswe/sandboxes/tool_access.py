@@ -8,7 +8,6 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, ValidationError
 
 from openswe.config import ENV
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.utils.dashboard_links import public_dashboard_api_base_url
 from openswe.utils.thread_reads import read_thread
 
@@ -19,8 +18,6 @@ TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"
 TOOLS_URL_ENV = "OPEN_SWE_TOOLS_URL"
 TOOLS_AUDIENCE = "open-swe-sandbox-tools"
-OPENAI_PATH = "/dashboard/api/sandbox-openai/v1"
-OPENAI_API_KEY_PLACEHOLDER = "sk-7kP9mT2vR5xN8qL4bH6wC3jF1dS0aG9uE2zY5rV8nM4pQ6tK"
 SANDBOX_HOST_THREAD_KEY = "sandbox_host_thread_id"
 SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
@@ -83,18 +80,9 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     if access is None:
         return None
     url, token = access
-    host = await read_thread(await sandbox_host_thread_id(thread_id), get_client())
-    workspace = (host.get("metadata") or {}).get("workspace")
-    settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
-    env_vars = {TOOLS_URL_ENV: url}
-    if settings.sandbox_openai_enabled:
-        env_vars.update(
-            OPENAI_BASE_URL=url.removesuffix(TOOLS_PATH) + OPENAI_PATH,
-            OPENAI_API_KEY=OPENAI_API_KEY_PLACEHOLDER,
-        )
     return {
         "name": TOOLS_RULE,
         "match_hosts": [urlsplit(url).hostname],
         "headers": [{"name": TOOLS_HEADER, "type": "opaque", "value": token}],
-        "env_vars": env_vars,
+        "env_vars": {TOOLS_URL_ENV: url},
     }

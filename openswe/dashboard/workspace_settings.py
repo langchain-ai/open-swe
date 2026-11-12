@@ -124,9 +124,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     expedited_review_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    sandbox_openai_enabled: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -388,7 +385,6 @@ def _default_settings() -> dict[str, Any]:
         "expedited_review_enabled": False,
         "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
-        "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
@@ -875,11 +871,6 @@ class WorkspaceSettings(Mapping[str, Any]):
     def human_review_auto_assign_minutes(self) -> int:
         value = self.get("human_review_auto_assign_minutes")
         return value if type(value) is int and value > 0 else 120
-
-    @property
-    def sandbox_openai_enabled(self) -> bool:
-        """Whether sandbox clients may use the experimental Responses API."""
-        return self.get("sandbox_openai_enabled") is True
 
     @property
     def managed_tools_gateway_id(self) -> str | None:

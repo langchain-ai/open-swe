@@ -116,20 +116,11 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
         await tool_access.authenticate_tool_access("x" * 64)
 
 
-@pytest.mark.parametrize("enabled", [False, True])
 async def test_proxy_refresh_preserves_tools_and_custom_rules(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
-    registry_db: None,
-    enabled: bool,
 ) -> None:
-    from openswe.dashboard.workspace_settings import (
-        WorkspaceSettingsUpdate,
-        upsert_instance_settings,
-    )
     from openswe.sandboxes.providers import langsmith
-
-    await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
     proxy_client = MagicMock()
@@ -162,11 +153,6 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     expected_env = {
         "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools",
     }
-    if enabled:
-        expected_env.update(
-            OPENAI_BASE_URL="https://agent.example.test/dashboard/api/sandbox-openai/v1",
-            OPENAI_API_KEY=tool_access.OPENAI_API_KEY_PLACEHOLDER,
-        )
     assert rule["env_vars"] == expected_env
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]

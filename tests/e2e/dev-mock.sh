@@ -15,12 +15,6 @@ UI_PORT="${UI_PORT:-3000}"
 API="http://127.0.0.1:${API_PORT}"
 UI="http://127.0.0.1:${UI_PORT}"
 
-# An Open SWE sandbox points OPENAI_BASE_URL at Open SWE's own Responses API,
-# behind a placeholder key. Each call there starts a production thread, so drop both.
-case "${OPENAI_BASE_URL:-}" in
-  */sandbox-openai/*) unset OPENAI_BASE_URL OPENAI_API_KEY ;;
-esac
-
 # Use a real OpenAI key. The agent talks to OpenAI directly, so a LangSmith
 # gateway key (lsv2_*) stray in the shell won't authenticate — prefer .env's
 # OPENAI_API_KEY unless the shell already holds an OpenAI-looking key (sk-…).

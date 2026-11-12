@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError, field_validator
 
-from openswe.openai_responses.client_tools import ClientToolSpec
+from openswe.client_tools import ClientToolSpec
 
 # Plugin tools are ``<plugin-name>__…`` and plugin names have no underscore, so a
 # page tool, whose own name starts with a letter, can never pass for one; no

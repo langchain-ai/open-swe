@@ -13,11 +13,11 @@ from fastapi import HTTPException, Request
 from sqlalchemy import text, update
 from starlette.types import Message
 
+from openswe.client_tools import ClientToolSpec
 from openswe.dashboard import repo_access
 from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
 from openswe.database import postgres
 from openswe.github import repos as github_repos
-from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import records as records_module
 from openswe.plugins import routes as plugin_routes
 from openswe.plugins.featured import FeaturedApps

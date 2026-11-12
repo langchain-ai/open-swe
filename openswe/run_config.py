@@ -30,8 +30,8 @@ from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
+from openswe.client_tools import ClientToolSpec
 from openswe.invocation import resolve_invocation_id
-from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.page_commands.offers import PageSession
 from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 

@@ -35,10 +35,10 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, aggregate_order_by, arr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, undefer
 
+from openswe.client_tools import ClientToolSpec
 from openswe.dashboard.settings_records import SettingsRecords
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins.manifest import PluginManifest, PluginPermission, read_bundle
 from openswe.run_config import PluginChatConfig
 from openswe.ui_invalidations import Topic
