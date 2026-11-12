@@ -524,8 +524,12 @@ export const ChatComposer = memo(function ChatComposer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
 
+  const didAutoFocus = useRef(false)
   useEffect(() => {
-    if (autoFocus) editorRef.current?.focus()
+    if (autoFocus && !didAutoFocus.current) {
+      editorRef.current?.focus()
+      didAutoFocus.current = true
+    }
   }, [autoFocus])
 
   useEffect(() => {

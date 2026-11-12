@@ -1097,6 +1097,7 @@ export function AgentThreadView({
                                 : "Send the first message"
                             : "Only Robin admins can send messages in this thread"
                 }
+                autoFocus={canPost && !embedded}
                 canOffload={!isStreaming}
                 compact
                 disabled={!canPost}

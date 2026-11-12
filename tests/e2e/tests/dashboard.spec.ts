@@ -99,7 +99,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(composer.editor).toBeVisible();
     await expect(composer.prompt).toBeVisible();
     // Continue from the web — a new agent reply streams into the same thread.
-    await typeIntoComposer(page, "Looks good — can you also add a docstring?");
+    await expect(composer.editor).toBeFocused();
+    await page.keyboard.type("Looks good — can you also add a docstring?");
+    await page.keyboard.press("Enter");
     await expect(
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
