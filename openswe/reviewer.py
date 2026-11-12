@@ -50,6 +50,7 @@ from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.http import GitHubClient
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -479,6 +480,7 @@ class PrepareReviewerRunState(PrepareRunState):
     review_approval_policy: NotRequired[str | None]
     review_approval_errors: NotRequired[list[str]]
     review_config_errors: NotRequired[list[str]]
+    review_changes_approval: NotRequired[bool]
     # A run for a deployed preview: the findings there were when it started, which its
     # publish leaves to the review that recorded them.
     review_earlier_finding_ids: NotRequired[list[str] | None]
@@ -837,6 +839,12 @@ async def prepare_reviewer_run(
             repo_owner, repo_name, pr_number, head_sha, token=github_token
         )
 
+    async def _fetch_changes_approval() -> bool:
+        if reviewer_eval or not isinstance(pr_number, int):
+            return False
+        async with GitHubClient.connect(token=github_token) as github:
+            return await ApprovalPolicy.changed_by(github.repo(repo_owner, repo_name), pr_number)
+
     # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
@@ -847,6 +855,7 @@ async def prepare_reviewer_run(
     org_guidelines_task = asyncio.create_task(_fetch_org_guidelines())
     approval_policy_task = asyncio.create_task(_fetch_approval_policy())
     config_errors_task = asyncio.create_task(_fetch_config_errors())
+    changes_approval_task = asyncio.create_task(_fetch_changes_approval())
     api_standards_task = asyncio.create_task(_fetch_api_standards_skill())
     scoped_agents_md_task = asyncio.create_task(_fetch_scoped_agents_md())
     tasks = (
@@ -859,6 +868,7 @@ async def prepare_reviewer_run(
         org_guidelines_task,
         approval_policy_task,
         config_errors_task,
+        changes_approval_task,
         api_standards_task,
         scoped_agents_md_task,
     )
@@ -873,6 +883,7 @@ async def prepare_reviewer_run(
         org_guidelines = await org_guidelines_task
         policy = await approval_policy_task
         config_errors = await config_errors_task
+        changes_approval = await changes_approval_task
         api_standards_skill = await api_standards_task
     finally:
         for task in tasks:
@@ -986,6 +997,7 @@ async def prepare_reviewer_run(
         "review_approval_policy": approval_policy,
         "review_approval_errors": policy.errors if policy is not None else [],
         "review_config_errors": config_errors,
+        "review_changes_approval": changes_approval,
         "review_earlier_finding_ids": earlier_finding_ids,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,

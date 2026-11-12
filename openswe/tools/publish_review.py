@@ -350,6 +350,19 @@ async def _publish_review_async(
         if not policy or mode == "off":
             assessment = None
         dry_run = mode != "approve"
+    if (
+        assessment is not None
+        and assessment.decision != "needs_human_review"
+        and (state or {}).get("review_changes_approval")
+    ):
+        assessment = assessment.model_copy(
+            update={
+                "decision": "needs_human_review",
+                "approval_condition": None,
+                "auto_approved": None,
+                "explanation": "This PR changes auto approval, which always needs a person to approve.",
+            }
+        )
     if assessment is not None and assessment.decision == "would_approve_conditionally":
         try:
             async with GitHubClient.connect(token=token) as github:

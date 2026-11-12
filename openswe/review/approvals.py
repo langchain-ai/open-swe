@@ -39,6 +39,13 @@ APPROVALS_PATH = ".open-swe/APPROVALS.md"
 AUTO_APPROVE_RULES_DIR = ".open-swe/auto-approve-rules"
 APPROVALS_MAX_CHARS = 15_000
 _CHANGED_FILE_PAGES = 30
+_APPROVAL_LOGIC_PATHS = (
+    "openswe/review/",
+    "openswe/expedited_review/",
+    "openswe/tools/publish_review.py",
+    "openswe/reviewer.py",
+    "openswe/resources/prompts/reviewer/",
+)
 _FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 
@@ -215,6 +222,21 @@ class ApprovalPolicy(BaseModel):
                 repo.pull_request(number), max_pages=_CHANGED_FILE_PAGES
             )
         )
+
+    @staticmethod
+    def changes_approval(path: str) -> bool:
+        """Whether ``path`` is auto-approval policy or Robin's approval logic, which never self-approves."""
+        if path.startswith(f"{AUTO_APPROVE_RULES_DIR}/") or path == APPROVALS_PATH:
+            return True
+        return path.removeprefix("open-swe/").startswith(_APPROVAL_LOGIC_PATHS)
+
+    @classmethod
+    async def changed_by(cls, repo: RepoClient, number: int) -> bool:
+        """Whether pull request ``number`` changes auto approval; an unknown file list counts as yes."""
+        changed = await ChangedFile.touched_paths(
+            repo.pull_request(number), max_pages=_CHANGED_FILE_PAGES
+        )
+        return changed is None or any(cls.changes_approval(path) for path in changed)
 
     @classmethod
     async def config_errors(cls, repo: RepoClient, number: int, head_sha: str) -> list[str]:

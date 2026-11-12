@@ -186,3 +186,23 @@ async def test_tool_rechecks_private_admin_and_repo_access(
     ):
         await manage_review_approval_mode("set", "private/repo", "approve")
     assert await REVIEW_STYLES.get("private/repo") is None
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (".open-swe/auto-approve-rules/03-documentation.md", True),
+        (".open-swe/APPROVALS.md", True),
+        ("open-swe/openswe/review/approvals.py", True),
+        ("openswe/expedited_review/eligibility.py", True),
+        ("open-swe/openswe/resources/prompts/reviewer/approval-policy.md.jinja", True),
+        ("open-swe/openswe/resources/prompts/reviewer/main.md.jinja", True),
+        ("open-swe/openswe/review/publish.py", True),
+        ("open-swe/openswe/tools/publish_review.py", True),
+        ("openswe/reviewer.py", True),
+        ("open-swe/openswe/threads/index.py", False),
+        ("docs/auto-approve-rules.md", False),
+    ],
+)
+def test_changes_approval_flags_policy_and_approval_logic(path: str, expected: bool) -> None:
+    assert ApprovalPolicy.changes_approval(path) is expected
