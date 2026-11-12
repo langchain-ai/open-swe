@@ -6307,17 +6307,6 @@
             ],
             "title": "Experimental Classify"
           },
-          "experimental_conditional_approval": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Conditional Approval"
-          },
           "personal_kitchen_channel_id": {
             "anyOf": [
               {

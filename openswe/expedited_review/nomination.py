@@ -153,9 +153,7 @@ class ExpeditedReviewNomination:
         return audited.hunks
 
     async def approval_condition(self, author: str, head_sha: str) -> ApprovalCondition | None:
-        """The condition Open SWE's review of ``head_sha`` would approve on, if the author opted in."""
-        if not (await User.preferences_for_login(author)).experimental_conditional_approval:
-            return None
+        """The condition Open SWE's review of ``head_sha`` would approve on."""
         pr_ref = self.pr_ref
         assessment = await PublishedAssessment.latest(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if assessment is None or not assessment.conditional_for_head(head_sha):

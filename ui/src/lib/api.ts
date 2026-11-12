@@ -394,7 +394,6 @@ export interface Profile {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  experimental_conditional_approval?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -412,7 +411,6 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  experimental_conditional_approval?: boolean
   experimental_classify?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

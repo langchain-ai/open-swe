@@ -18,6 +18,7 @@ from openswe.human_review.dashboard import DashboardReviewRequest
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.http import SlackRequestError
@@ -110,6 +111,7 @@ async def test_dashboard_selects_review_workflow(
     reopen = AsyncMock()
     monkeypatch.setattr(ExpeditedReviewNomination, "discard", discard)
     monkeypatch.setattr(ReviewCard, "reopen", reopen)
+    monkeypatch.setattr(PublishedAssessment, "latest", AsyncMock(return_value=None))
     approval.pull_request = pr
     approval.diff_fingerprint = diff_fingerprint(
         [

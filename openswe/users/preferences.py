@@ -40,16 +40,12 @@ class UserPreferences(BaseModel):
     # The person's Slack DM with the bot is one conversation instead of a thread per message.
     concierge_mode: bool = False
     personal_kitchen_channel_id: str = ""
-    experimental_conditional_approval: bool = False
     # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
     experimental_classify: bool = False
 
 
 class UserPreferencesPatch(KitchenChannelPreference):
     concierge_mode: bool | None = None
-    experimental_conditional_approval: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     experimental_classify: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
