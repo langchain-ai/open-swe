@@ -380,16 +380,13 @@ export function AgentThreadHeader({
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        threadTitle={title ?? ""}
         isDeleting={isDeleting}
         onConfirm={confirmDelete}
         detail={
-          worktreeThread
-            ? worktreeThread.managedTaskFolder
-              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
-              : worktreeThread.ownedWorktrees.length
-                ? "This deletes the worktree Robin created for it, including any uncommitted changes in it. Its branch and commits are kept."
-                : "This removes its history but does not revert changes made to your repository."
+          worktreeThread &&
+          !worktreeThread.managedTaskFolder &&
+          worktreeThread.ownedWorktrees.length
+            ? "This also deletes its worktree and uncommitted changes. Branch and commits are kept."
             : undefined
         }
       />

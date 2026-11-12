@@ -641,17 +641,14 @@ export function SidebarThreadRow({
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        threadTitle={item.title}
         isDeleting={isDeleting}
         onConfirm={onConfirmDelete}
         detail={
-          !worktreeThread
-            ? undefined
-            : worktreeThread.managedTaskFolder
-              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
-              : worktreeThread.ownedWorktrees.length
-                ? "This deletes the worktree Robin created for it, including any uncommitted changes in it. Its branch and commits are kept."
-                : "This removes its history but does not revert changes made to your repository."
+          worktreeThread &&
+          !worktreeThread.managedTaskFolder &&
+          worktreeThread.ownedWorktrees.length
+            ? "This also deletes its worktree and uncommitted changes. Branch and commits are kept."
+            : undefined
         }
       />
     </>
