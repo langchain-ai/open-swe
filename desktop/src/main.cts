@@ -68,6 +68,7 @@ const {
   readWorkspacePath,
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { PREVIEW_SCHEME, PreviewFiles } = require("./preview-files.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
 const { DesktopEnvironments } = require("./desktop-environments.cjs");
 const {
@@ -126,6 +127,17 @@ protocol.registerSchemesAsPrivileged([
       codeCache: true,
     },
   },
+  {
+    // A preview page loads its own module scripts and fonts, which need CORS.
+    scheme: PREVIEW_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
 ]);
 
 let backendUrl = null;
@@ -167,6 +179,7 @@ let loginFlow = null;
 const connectFlows = new Map();
 let quitting = false;
 let localThreadStore = null;
+const previewFiles = new PreviewFiles(localWorkspaceRoot);
 let localBridges = null;
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
@@ -376,6 +389,13 @@ function registeredProject(cwd) {
   } catch {
     return null;
   }
+}
+
+function localWorkspaceRoot(id: unknown): string {
+  const root =
+    threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd;
+  if (!root) throw new Error("Local workspace not found");
+  return root;
 }
 
 function threadRoot(thread) {
@@ -1053,12 +1073,6 @@ function configureDesktopIpc() {
       return { status: "error", files: [], truncated: false };
     }
   });
-  const localWorkspaceRoot = (id: unknown): string => {
-    const root =
-      threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd;
-    if (!root) throw new Error("Local workspace not found");
-    return root;
-  };
   ipcMain.handle("desktop:read-workspace-path", (event, input) => {
     requireTrustedDesktopIpc(event);
     const root = localWorkspaceRoot(input?.localSessionId);
@@ -1067,6 +1081,10 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:list-workspace-files", (event, localSessionId) => {
     requireTrustedDesktopIpc(event);
     return listWorkspaceFiles(localWorkspaceRoot(localSessionId));
+  });
+  ipcMain.handle("desktop:preview-workspace-file", (event, input) => {
+    requireTrustedDesktopIpc(event);
+    return previewFiles.mint(input?.localSessionId, input?.relativePath);
   });
   ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
@@ -1278,17 +1296,37 @@ function escapeHtml(value) {
   });
 }
 
-async function proxyBackendRequest(request) {
+// Electron sets `initiatorOrigin` on protocol requests, outside the standard Request type.
+async function proxyBackendRequest(
+  request: Request & { initiatorOrigin?: string },
+) {
   const source = new URL(request.url);
   const headers = new Headers(request.headers);
   const pageUrl = mainWindow?.webContents.getURL() || "";
   if (!isTrustedProxyRequest(pageUrl)) {
     return new Response("Forbidden", { status: 403 });
   }
+  const credentials = PreviewFiles.proxyCredentials(
+    request.method,
+    source.pathname,
+    request.initiatorOrigin,
+  );
+  if (credentials === "forbidden")
+    return new Response("Forbidden", { status: 403 });
+  if (credentials === "method-not-allowed")
+    return new Response("Method not allowed", { status: 405 });
   headers.delete("host");
   headers.set("accept-encoding", "identity");
-  headers.set("origin", APP_ORIGIN);
   const targetUrl = backendRequestUrl(backendUrl, request.url);
+  if (credentials === "anonymous") {
+    headers.delete("cookie");
+    return fetch(targetUrl, {
+      method: request.method,
+      headers,
+      redirect: "manual",
+    });
+  }
+  headers.set("origin", APP_ORIGIN);
   const cookies = await session.defaultSession.cookies.get({ url: targetUrl });
   if (cookies.length) {
     headers.set(
@@ -1810,6 +1848,17 @@ function createWindow(initialUrl = APP_URL) {
   window.webContents.on("will-navigate", (event, url) =>
     handleNavigation(window, event, url),
   );
+  window.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame) return;
+    const initiatedByApp =
+      event.initiator?.frameTreeNodeId ===
+      window.webContents.mainFrame.frameTreeNodeId;
+    const frames: { url: string; origin: string }[] = [];
+    for (let frame = event.frame; frame; frame = frame.parent)
+      frames.push({ url: frame.url, origin: frame.origin });
+    if (PreviewFiles.blocksNavigation(frames, event.url, initiatedByApp))
+      event.preventDefault();
+  });
   window.webContents.on("will-redirect", (event) => {
     if (event.isMainFrame) handleNavigation(window, event, event.url);
   });
@@ -2069,6 +2118,7 @@ if (!hasSingleInstanceLock) {
           : console.warn(message, error),
     });
     protocol.handle("open-swe", serveDesktopUi);
+    protocol.handle(PREVIEW_SCHEME, (request) => previewFiles.serve(request));
     configurePermissions();
     configureFraming();
     configureDesktopIpc();

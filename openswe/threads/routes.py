@@ -2,6 +2,7 @@
 
 import json
 import logging
+import posixpath
 from time import perf_counter
 from typing import Annotated, Any, Literal
 
@@ -27,6 +28,14 @@ from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
+)
+from openswe.threads.file_preview import (
+    ERROR_HEADERS,
+    PREVIEW_MAX_BYTES,
+    ByteRange,
+    FilePreviewGrant,
+    PreviewFileType,
+    PreviewLink,
 )
 from openswe.threads.files import (
     WorkspaceFileIndex,
@@ -490,6 +499,49 @@ async def api_get_thread_path(
 ) -> WorkspacePath:
     return await get_dashboard_thread_path(
         thread_id, session["sub"], path, email=session.get("email")
+    )
+
+
+class FilePreviewBody(BaseModel):
+    path: str
+
+
+@router.post("/threads/{thread_id}/files/preview-url")
+async def api_create_thread_file_preview(
+    thread_id: str,
+    body: FilePreviewBody,
+    session: dict[str, object] = SESSION_DEP,
+) -> PreviewLink:
+    """A short-lived link to one file's bytes, or an HTML page's folder, for the Files panel."""
+    return await FilePreviewGrant.mint(thread_id, session, body.path)
+
+
+# No session: the link's token is the credential, and a sandboxed preview frame sends no cookies.
+# Each request, a deck's every asset included, re-checks access and stats the file in the sandbox.
+@router.get("/threads/{thread_id}/files/raw/{token}/{rest:path}")
+async def api_get_thread_file_preview(
+    thread_id: str, token: str, rest: str, request: Request
+) -> Response:
+    try:
+        grant = FilePreviewGrant.decode(token, thread_id)
+        workspace = await grant.open(request.url.path, request.method)
+        file = await grant.stat(workspace, rest)
+        file_type = PreviewFileType.of(file.path)
+        span = ByteRange.of(request.headers.get("range"), file.size)
+        headers = file_type.headers(posixpath.basename(file.path)) | span.headers()
+        content = (
+            await workspace.read(file, span.start, span.end, limit=PREVIEW_MAX_BYTES)
+            if span.length
+            else b""
+        )
+    except HTTPException as exc:
+        raise HTTPException(
+            exc.status_code, exc.detail, headers={**ERROR_HEADERS, **(exc.headers or {})}
+        ) from exc
+    return Response(
+        content=content,
+        status_code=206 if span.partial else 200,
+        headers={**headers, "Content-Length": str(len(content))},
     )
 
 

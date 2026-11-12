@@ -2,6 +2,7 @@ import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type {
   WorkspaceFileIndex,
   WorkspacePath,
+  WorkspacePreviewLink,
 } from "@/features/agents/lib/workspaceFiles"
 import type { AgentPullRequest } from "@/features/agents/lib/types"
 
@@ -250,6 +251,11 @@ declare global {
       listWorkspaceFiles: (
         localSessionId: string
       ) => Promise<WorkspaceFileIndex>
+      /** Absent before the desktop release that serves local previews. */
+      previewWorkspaceFile?: (input: {
+        localSessionId: string
+        relativePath: string
+      }) => Promise<WorkspacePreviewLink>
       terminal: DesktopTerminalBridge
     }
   }

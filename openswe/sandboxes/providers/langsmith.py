@@ -37,6 +37,7 @@ from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
+from openswe.sandboxes.ranges import FileTooLargeError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.http_pool import pooled_transport
@@ -795,6 +796,17 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return FileDownloadResponse(path=path, content=content, error=None)
 
         return list(await asyncio.gather(*(download(path) for path in paths)))
+
+    async def aread_range(self, path: str, start: int, end: int, *, limit: int) -> bytes:
+        try:
+            chunk = await self._aget_sandbox().read_range(path, start=start, end=end)
+        except ResourceNotFoundError as exc:
+            raise FileNotFoundError(path) from exc
+        if max(chunk.total_bytes or 0, len(chunk.content)) > limit:
+            raise FileTooLargeError(path)
+        # A server that ignores the range sends the whole file; keep only what was asked.
+        offset = start - chunk.start
+        return chunk.content[offset : offset + end - start + 1]
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         """Upload through the sandbox file API, which creates missing parent directories.

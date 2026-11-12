@@ -53,6 +53,8 @@ export interface AgentRightPanelProps {
   onTerminalAddToChat?: (text: string) => void
   /** Offers Reply on text selected in an open file. */
   onReply?: (reply: PassageReply) => void
+  /** Whether the thread's run is going; an open file refreshes when it ends. */
+  running?: boolean
 }
 
 function useIsNarrowLayout(): boolean {
@@ -348,6 +350,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
           revealRequestId={shown.kind === "file" ? shown.revealRequestId : 0}
           onOpenFile={(path) => openFileSurface(threadRef, path)}
           onReply={props.onReply}
+          running={props.running}
         />
       ) : null}
       {/* Terminals stay mounted while hidden so their scrollback survives tab

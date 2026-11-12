@@ -258,6 +258,7 @@ export function AgentGitPanel({
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       onReply={onReply}
+      running={isRunning}
       {...(onReply && {
         // The terminal hands over only the selected text, so there is no context to add.
         onTerminalAddToChat: (text: string) =>

@@ -3151,6 +3151,19 @@
         ],
         "type": "string"
       },
+      "FilePreviewBody": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "FilePreviewBody",
+        "type": "object"
+      },
       "FileResponse": {
         "properties": {
           "path": {
@@ -6037,6 +6050,20 @@
           "deletions"
         ],
         "title": "PreviewFile",
+        "type": "object"
+      },
+      "PreviewLink": {
+        "description": "Where the dashboard fetches a file's bytes, relative to its API base.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "PreviewLink",
         "type": "object"
       },
       "PreviewModel": {
@@ -27488,6 +27515,124 @@
           }
         ],
         "summary": "Api Get Thread Path",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/files/preview-url": {
+      "post": {
+        "description": "A short-lived link to one file's bytes, or an HTML page's folder, for the Files panel.",
+        "operationId": "api_create_thread_file_preview_dashboard_api_threads__thread_id__files_preview_url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilePreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewLink"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Thread File Preview",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/files/raw/{token}/{rest}": {
+      "get": {
+        "operationId": "api_get_thread_file_preview_dashboard_api_threads__thread_id__files_raw__token___rest__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rest",
+            "required": true,
+            "schema": {
+              "title": "Rest",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Thread File Preview",
         "tags": [
           "dashboard",
           "threads"

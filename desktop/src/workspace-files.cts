@@ -57,13 +57,9 @@ async function readFile(target: string, size: number) {
   }
 }
 
-/** Lists a directory or reads a file inside `root`, never escaping it or entering .git. */
-async function readWorkspacePath(root: string, relativePath: unknown) {
-  if (typeof relativePath !== "string") throw new Error("Invalid path");
-  const realRoot = await fs.realpath(root);
-  const relative = relativePath.replace(/^\/+|\/+$/g, "");
-  const target = await fs.realpath(path.resolve(realRoot, relative));
-  const inside = path.relative(realRoot, target);
+/** `target`'s path below `root`, with `/` separators; throws outside it or inside .git. */
+function workspaceRelative(root: string, target: string): string {
+  const inside = path.relative(root, target);
   if (
     inside === ".." ||
     inside.startsWith(`..${path.sep}`) ||
@@ -72,8 +68,32 @@ async function readWorkspacePath(root: string, relativePath: unknown) {
   ) {
     throw new Error("Path must be inside the workspace and outside .git.");
   }
+  return inside.split(path.sep).join("/");
+}
+
+/** The real path `relativePath` names in `root`, never escaping it or entering .git. */
+async function resolveWorkspacePath(root: string, relativePath: unknown) {
+  if (typeof relativePath !== "string") throw new Error("Invalid path");
+  const realRoot = await fs.realpath(root);
+  const requested = relativePath.replace(/^\/+|\/+$/g, "");
+  const target = await fs.realpath(path.resolve(realRoot, requested));
+  return {
+    root: realRoot,
+    target,
+    requested,
+    relative: workspaceRelative(realRoot, target),
+  };
+}
+
+/** Lists a directory or reads a file inside `root`, never escaping it or entering .git. */
+async function readWorkspacePath(root: string, relativePath: unknown) {
+  const {
+    root: realRoot,
+    target,
+    requested,
+  } = await resolveWorkspacePath(root, relativePath);
   const stat = await fs.stat(target);
-  if (stat.isDirectory()) return listDirectory(realRoot, target, relative);
+  if (stat.isDirectory()) return listDirectory(realRoot, target, requested);
   return readFile(target, stat.size);
 }
 
@@ -119,4 +139,9 @@ async function listWorkspaceFiles(root: string) {
   };
 }
 
-module.exports = { listWorkspaceFiles, readWorkspacePath };
+module.exports = {
+  listWorkspaceFiles,
+  readWorkspacePath,
+  resolveWorkspacePath,
+  workspaceRelative,
+};

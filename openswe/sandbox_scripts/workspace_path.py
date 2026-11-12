@@ -1,4 +1,4 @@
-"""Runs inside a thread's sandbox to list a directory, read a file, or index files.
+"""Runs inside a thread's sandbox to list a directory, read or stat a file, or index files.
 
 Delivered as a heredoc by ``openswe.threads.files``; ``__PAYLOAD__`` is
 substituted with a base64 JSON blob before execution. Prints a single JSON line.
@@ -52,6 +52,30 @@ def read_file(target):
     }
 
 
+def stat_file(root, target, within):
+    """The file a preview may serve: a regular file, inside ``within`` when it is given.
+
+    ``within`` bounds where a symlink may lead, and no segment below it may be hidden,
+    so a page granted one folder reaches nothing beside it. The folder must be its own
+    real path: a symlink swapped in for it would carry the grant somewhere else.
+    """
+    if not os.path.isfile(target):
+        return {"error": "Path not found."}
+    if within is not None:
+        folder = os.path.normpath(os.path.join(root, within))
+        if os.path.realpath(folder) != folder:
+            return {"error": "Path is outside the preview's folder."}
+        below = os.path.relpath(target, folder).split(os.sep)
+        if below[0] == ".." or any(part.startswith(".") for part in below):
+            return {"error": "Path is outside the preview's folder."}
+    return {
+        "root": root,
+        "path": os.path.relpath(target, root).replace(os.sep, "/"),
+        "absolute": target,
+        "size": os.path.getsize(target),
+    }
+
+
 def git_paths(root, *flags):
     result = subprocess.run(
         ["git", "-C", root, "ls-files", "-z", *flags], capture_output=True, check=True
@@ -93,6 +117,8 @@ def main():
     inside = os.path.commonpath([root, target]) == root
     if not inside or ".git" in os.path.relpath(target, root).split(os.sep):
         return {"error": "Path must be inside the workspace and outside .git."}
+    if PAYLOAD["mode"] == "stat":
+        return stat_file(root, target, PAYLOAD.get("within"))
     if os.path.isdir(target):
         return list_directory(root, target, relative)
     if os.path.isfile(target):

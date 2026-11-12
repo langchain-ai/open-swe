@@ -6,9 +6,17 @@
  * rescues list items whose accidental over-indentation CommonMark reads as code.
  */
 
+/** A link with no scheme, host or leading slash, which names a file beside the document. */
+function isRelativeHref(href: string): boolean {
+  return !/^([a-z][a-z\d+.-]*:|\/|#|\?)/i.test(href)
+}
+
 interface MarkdownAstNode {
   type?: string
   value?: unknown
+  url?: unknown
+  title?: unknown
+  identifier?: unknown
   position?: { start?: { line?: number; offset?: number } }
   data?: { hProperties?: Record<string, unknown> }
   children?: MarkdownAstNode[]
@@ -53,6 +61,50 @@ function readGithubAlert(node: MarkdownAstNode): void {
       ...node.data?.hProperties,
       dataAlert: match[1].toLowerCase(),
     },
+  }
+}
+
+/**
+ * Resolves a document's relative image URLs against `images` and its relative
+ * links against `links`, reference-style ones (`[text][id]`) included.
+ *
+ * Takes its bases as options, never a closure: the renderer caches processors
+ * by plugin and options, so a closure would keep the first document's bases.
+ */
+export function remarkResolveRelativeUrls(bases: {
+  images: string
+  links: string
+}) {
+  return (tree: MarkdownAstNode) => {
+    const definitions = new Map<string, MarkdownAstNode>()
+    const collect = (node: MarkdownAstNode) => {
+      if (node.type === "definition" && typeof node.identifier === "string")
+        definitions.set(node.identifier.toLowerCase(), node)
+      node.children?.forEach(collect)
+    }
+    const visit = (node: MarkdownAstNode) => {
+      const definition =
+        typeof node.identifier === "string"
+          ? definitions.get(node.identifier.toLowerCase())
+          : undefined
+      if (definition && node.type === "linkReference") node.type = "link"
+      if (definition && node.type === "imageReference") node.type = "image"
+      if (definition && (node.type === "link" || node.type === "image")) {
+        node.url = definition.url
+        node.title = definition.title
+      }
+      const base =
+        node.type === "image"
+          ? bases.images
+          : node.type === "link"
+            ? bases.links
+            : undefined
+      if (base && typeof node.url === "string" && isRelativeHref(node.url))
+        node.url = new URL(node.url, base).href
+      node.children?.forEach(visit)
+    }
+    collect(tree)
+    visit(tree)
   }
 }
 

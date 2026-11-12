@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),
   listWorkspaceFiles: (localSessionId) =>
     ipcRenderer.invoke("desktop:list-workspace-files", localSessionId),
+  previewWorkspaceFile: (input) =>
+    ipcRenderer.invoke("desktop:preview-workspace-file", { ...input }),
   onLocalThreadsChanged: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("desktop:local-threads-changed", listener);

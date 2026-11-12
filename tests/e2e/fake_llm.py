@@ -202,6 +202,79 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
+FILE_PREVIEWS_MARKER = "E2E_FILE_PREVIEWS"
+_FILE_PREVIEWS_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAACXBIWXMAAAABAAAAAQBPJcTWAAAATElEQVR4nO3OMR"
+    "HAIAAAMbjDVLWhGQ/du/xIh0RB5n7O+JN1O/AlVISKUBEqQkWoCBWhIlSEilARKkJFqAgVoSJUhIpQESpCRagIlRd6"
+    "pgJfMNIJbQAAAABJRU5ErkJggg=="
+)
+
+# A checkout named after the thread's repository, which the Files panel opens at,
+# holding one file of each kind file_previews.spec.ts renders.
+_FILE_PREVIEWS_SCRIPT = f"""
+set -e
+rm -rf demo
+git clone "$E2E_REMOTE" demo
+cd demo
+mkdir -p docs/img site/css site/js data
+echo '{_FILE_PREVIEWS_PNG}' | base64 -d > docs/img/badge.png
+cat > docs/guide.md <<'MD'
+# Preview guide
+
+A rendered **Markdown** file with an image beside it.
+
+![Badge](img/badge.png)
+
+Open [the deck](../site/index.html) or the [scores](../data/scores.csv).
+MD
+cat > site/index.html <<'HTML'
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="css/deck.css">
+  <script type="module" src="js/deck.mjs"></script>
+</head>
+<body><h1>Quarterly deck</h1><p id="status">waiting</p></body>
+</html>
+HTML
+cat > site/css/deck.css <<'CSS'
+h1 {{ color: rgb(124, 58, 237); }}
+CSS
+cat > site/js/deck.mjs <<'JS'
+document.getElementById("status").textContent = "module loaded";
+JS
+printf 'region,revenue\\nEMEA,120\\nAPAC,"95,5"\\n' > data/scores.csv
+python3 - data <<'XLSX'
+import sys
+import zipfile
+
+NS = "http://schemas.openxmlformats.org"
+PARTS = [
+    ("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="' + NS + '/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'),
+    ("_rels/.rels", '<?xml version="1.0"?><Relationships xmlns="' + NS + '/package/2006/relationships"><Relationship Id="rId1" Type="' + NS + '/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
+    ("xl/workbook.xml", '<?xml version="1.0"?><workbook xmlns="' + NS + '/spreadsheetml/2006/main" xmlns:r="' + NS + '/officeDocument/2006/relationships"><sheets><sheet name="Summary" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+    ("xl/_rels/workbook.xml.rels", '<?xml version="1.0"?><Relationships xmlns="' + NS + '/package/2006/relationships"><Relationship Id="rId1" Type="' + NS + '/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'),
+]
+
+
+def book(path, rows):
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, text in PARTS:
+            archive.writestr(name, text)
+        archive.writestr("xl/worksheets/sheet1.xml", '<?xml version="1.0"?><worksheet xmlns="' + NS + '/spreadsheetml/2006/main"><sheetData>' + rows + '</sheetData></worksheet>')
+
+
+def text(ref, value):
+    return '<c r="' + ref + '" t="inlineStr"><is><t>' + value + '</t></is></c>'
+
+
+out = sys.argv[1]
+book(out + "/book.xlsx", '<row r="1">' + text("A1", "region") + text("B1", "revenue") + '</row><row r="2">' + text("A2", "EMEA") + '<c r="B2"><v>120</v></c></row>')
+book(out + "/bomb.xlsx", '<row r="100000000"><c r="A100000000"><v>1</v></c></row>')
+XLSX
+echo PREVIEW_FILES_OK
+""".strip()
+
 _IFRAME_HTML_PATH = "/workspace/iframe-output.html"
 _IFRAME_HTML = """<!doctype html>
 <html>
@@ -1377,6 +1450,21 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Started the build, the log monitor and a CI listener."),
     ),
+    "file_previews": (
+        _tool_step(
+            "Writing the preview files.",
+            "execute",
+            {"command": _FILE_PREVIEWS_SCRIPT},
+            "call-file-previews",
+        ),
+        _tool_step(
+            "Telling the thread the files are ready.",
+            "slack_reply",
+            {"message": "The preview files are ready."},
+            "call-file-previews-reply",
+        ),
+        StepSpec(content="Wrote the preview files."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -1844,6 +1932,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "background_work",
         lambda ctx: ctx.human_count <= 1 and BACKGROUND_WORK_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
+        "file_previews",
+        lambda ctx: ctx.human_count <= 1 and FILE_PREVIEWS_MARKER in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
