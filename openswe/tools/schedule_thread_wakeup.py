@@ -54,19 +54,6 @@ def _ceil_to_next_minute(value: datetime) -> datetime:
     return rounded + timedelta(minutes=1)
 
 
-def _build_one_shot_cron(fire_time: datetime) -> str:
-    """Build a 5-field cron expression that fires at ``fire_time`` (UTC)."""
-    return " ".join(
-        [
-            str(fire_time.minute),
-            str(fire_time.hour),
-            str(fire_time.day),
-            str(fire_time.month),
-            "*",
-        ]
-    )
-
-
 def _parse_iso(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None

@@ -10,8 +10,7 @@ GitHub App or its signing key:
   public-repo gate turned the sender away, and the handles that mention Open SWE.
   The backend gets every delivery itself, forwarded as GitHub sent it
   (``forward_to``, served at ``/mda/github/deliveries``), and logs it and runs its
-  own work there; ``record_github_delivery`` does the same for a channel deployed
-  before it forwarded, and answers the facts too.
+  own work there.
 - ``github_automation_rules``: the automations with a GitHub trigger on the
   delivery's repository, and whether the issue's or pull request's author is an
   Open SWE user; the channel matches them and writes each match's prompt.
@@ -272,15 +271,6 @@ class GitHubDeliveryActed(BaseModel):
     comment_run: GitHubThreadRun | None = None
 
 
-RECORD_GITHUB_DELIVERY: Final = Endpoint(
-    "record_github_delivery",
-    GitHubDelivery,
-    GitHubDeliveryFacts,
-    seconds=60.0,
-    # Recorded once per delivery ID, so a repeat logs nothing again.
-    delivery="idempotent",
-    prefix=CHANNEL_API_PREFIX,
-)
 GITHUB_DELIVERY_FACTS: Final = Endpoint(
     "github_delivery_facts",
     GitHubDelivery,

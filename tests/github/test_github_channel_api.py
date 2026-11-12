@@ -14,7 +14,6 @@ from runtime_api.github import (
     GITHUB_AUTOMATION_RULES,
     GITHUB_DELIVERY_FACTS,
     GITHUB_ISSUE_FACTS,
-    RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
     GitHubAutomationRulesRequest,
     GitHubDelivery,
@@ -150,7 +149,7 @@ async def test_only_calls_mda_signed_are_answered(app: FastAPI) -> None:
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            RECORD_GITHUB_DELIVERY.path,
+            GITHUB_DELIVERY_FACTS.path,
             json={"event": "issues", "delivery_id": "delivery-1", "payload": _issue_payload()},
         )
 
@@ -330,30 +329,6 @@ async def test_a_forward_mda_didnt_sign_or_that_names_no_event_is_refused(
         response = await client.post("/mda/github/deliveries", content=content, headers=headers)
 
     assert response.status_code == status
-
-
-async def test_the_backend_runs_its_work_when_it_records_the_delivery(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch, registry_db: None
-) -> None:
-    process = AsyncMock()
-    monkeypatch.setattr(github_webhooks, "process_github_ci_event", process)
-    delivery = GitHubDelivery(
-        event="status",
-        delivery_id="delivery-1",
-        payload={"repository": {"name": "api", "owner": {"login": "acme"}}},
-    )
-
-    await call_as_mda(app, RECORD_GITHUB_DELIVERY, delivery, secret=SERVICE_SECRET)
-    process.assert_awaited_once()
-    # A channel deployed before the backend picked its own work still names it; it
-    # doesn't run twice.
-    await call_as_mda(
-        app,
-        ACT_ON_GITHUB_DELIVERY,
-        ActOnGitHubDelivery(**delivery.model_dump(), work=["ci_event"]),
-        secret=SERVICE_SECRET,
-    )
-    process.assert_awaited_once()
 
 
 async def test_automations_that_fail_to_plan_start_nothing_and_stop_nothing(

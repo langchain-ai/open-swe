@@ -1,29 +1,20 @@
-"""Hand the Slack conversations that belong to MDA to MDA's Slack channel.
+"""The Slack conversations MDA's Slack channel holds.
 
-Open SWE's Slack app keeps its URLs at the backend's ``/webhooks/slack``. A
-conversation belongs to MDA when MDA's Slack channel can start it
-(:func:`mda_can_start`) or holds it already; the backend forwards Slack's request
-to LangSmith Trigger Server exactly as Slack sent it. Trigger Server verifies
-Slack's signature as if Slack had called it and hands the message to the
-deployment's Slack channel, which decides what it starts from the message itself,
-and makes a new conversation its own (:mod:`openswe.slack.channel`). Later
-messages in that Slack thread, Slack's Stop, and clicks on the agent's buttons
-there follow it. Every other conversation stays on today's intake.
+Robin's Slack app delivers its events to LangSmith Trigger Server, which hands each
+message to the MDA deployment's Slack channel. The channel decides what a message
+starts and makes a new conversation its own (:mod:`openswe.slack.channel`); later
+messages in that Slack thread, Slack's Stop, and clicks on the agent's buttons there
+follow it. It hands back what the backend answers itself.
 
-Every environment forwards: where MDA isn't set up, Trigger Server refuses the request
-(an unregistered Slack app gets a 401), and the backend answers a new conversation's
-message itself, as it always has; one in a conversation MDA's channel holds gets an
-error reply instead (the caller's ``on_refused``).
+This module keeps which thread holds a Slack conversation. A request for one of
+MDA's conversations that reaches the backend anyway starts nothing
+(``SlackEventsDelivery.held_by_mda``).
 """
 
-import asyncio
 import logging
-import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
-import httpx2
 from pydantic import JsonValue
 
 from openswe.dispatch import channel_of
@@ -33,60 +24,25 @@ from openswe.slack.records import bind_slack_thread_id, lookup_slack_thread_id
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
-from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks.common import (
     PROVISIONAL_VISIBILITY_KEY,
-    visibility_is_settled,
 )
 
 logger = logging.getLogger(__name__)
 
 CHANNEL: Final = "slack"
-#: Slack's headers Trigger Server verifies the request with; nothing else is forwarded.
-#: Slack's retry headers in particular make Trigger Server drop a request.
-FORWARDED_HEADERS: Final = ("X-Slack-Signature", "X-Slack-Request-Timestamp", "Content-Type")
-#: Trigger Server accepts a Slack signature this long after its timestamp.
-SIGNATURE_WINDOW_SECONDS: Final = 300
-_ATTEMPTS: Final = 5
-_TIMEOUT_SECONDS: Final = 10.0
-_FIRST_BACKOFF_SECONDS: Final = 1.0
 #: The job that once reported forwarded messages the channel never asked about; nothing is
 #: remembered for it any more, so its schedule is cancelled.
 RETIRED_SWEEP_JOB: Final = "mda_slack_lost_requests"
 
 #: The Slack message subtypes Trigger Server starts runs for: plain messages and uploads.
-#: It ignores every other (``thread_broadcast``, edits, joins), so none of those is forwarded.
+#: It ignores every other (``thread_broadcast``, edits, joins).
 FORWARDED_SUBTYPES: Final = frozenset({"", "file_share"})
-
-
-#: Trigger Server's Slack events URL, the same for every environment: it tells requests
-#: apart by the Slack app that signed them.
-TRIGGER_EVENTS_URL: Final = (
-    "https://api.smith.langchain.com/v1/triggers/webhooks/d809e66e-0000-4000-8000-000000000003"
-)
-#: Trigger Server's Slack interactivity URL.
-TRIGGER_INTERACTIVITY_URL: Final = (
-    "https://api.smith.langchain.com/v1/triggers/webhooks/slack-custom-app/interactivity"
-)
 
 
 def trigger_server_takes(subtype: str) -> bool:
     """Whether Trigger Server hands a Slack message of this subtype to MDA's channel."""
     return subtype in FORWARDED_SUBTYPES
-
-
-def mda_can_start(*, subtype: str, breakout: bool) -> bool:
-    """Whether MDA's Slack channel can start a new conversation with this message.
-
-    It can for a mention of Open SWE by a person or a bot on Open SWE's allow-list, a
-    kitchen channel's untagged message and a DM (a concierge DM as a whole,
-    :func:`startable_concierge`). The rest needs the backend:
-
-    - Breakouts open flows of their own; one into a new thread reaches MDA on a thread of
-      its own (:func:`side_thread_id`).
-    - Trigger Server ignores subtypes outside :data:`FORWARDED_SUBTYPES`.
-    """
-    return trigger_server_takes(subtype) and not breakout
 
 
 def mda_thread_id(app_id: str, team_id: str, channel_id: str, root_ts: str) -> str:
@@ -117,20 +73,10 @@ async def owned_conversation(channel_id: str, thread_ts: str) -> str | None:
     return None
 
 
-async def channel_started(thread_id: str) -> bool:
-    """Whether MDA's channel started a run in the conversation it was handed.
-
-    A claimed conversation's visibility stays provisional until the channel's first run
-    writes the thread's metadata, so one still provisional never started anything.
-    """
-    thread = await index.get(thread_id)
-    return thread is None or visibility_is_settled(thread.metadata)
-
-
 async def claim_conversation(
     app_id: str, team_id: str, channel_id: str, root_ts: str, *, owner_login: str | None = None
 ) -> str:
-    """Make a new Slack conversation MDA's, as :func:`startable_thread` named it: its thread id.
+    """Make a new Slack conversation MDA's: its thread id (:func:`mda_thread_id`).
 
     ``owner_login`` is the GitHub login of the person who started it, who may prompt the
     thread while it is still private. Raises :class:`SlackThreadMappingError` when
@@ -193,17 +139,6 @@ def concierge_thread_id(app_id: str, team_id: str, channel_id: str) -> str:
     return mda_thread_id(app_id, team_id, channel_id, CONCIERGE_TS)
 
 
-async def startable_concierge(
-    *, app_id: str, team_id: str, channel_id: str, can_start: bool
-) -> str | None:
-    """The thread MDA would claim for a concierge DM no thread holds yet, or ``None``."""
-    if not (can_start and app_id and team_id and channel_id):
-        return None
-    if await lookup_slack_thread_id(channel_id, CONCIERGE_TS) is not None:
-        return None
-    return concierge_thread_id(app_id, team_id, channel_id)
-
-
 async def claim_concierge(
     app_id: str, team_id: str, channel_id: str, *, owner_login: str | None = None
 ) -> str:
@@ -227,98 +162,5 @@ async def join_concierge(channel_id: str, root_ts: str, thread_id: str) -> None:
         )
 
 
-async def startable_thread(
-    *,
-    app_id: str,
-    team_id: str,
-    channel_id: str,
-    root_ts: str,
-    can_start: bool,
-) -> str | None:
-    """The thread MDA would claim for a new conversation, or ``None`` to keep it on the backend.
-
-    A new conversation goes to MDA when MDA's channel ``can_start`` it
-    (:func:`mda_can_start`); one the backend already holds never moves. Nothing is
-    claimed yet: the backend gates the message first (:func:`claim_conversation`).
-    """
-    if not (can_start and app_id and team_id and channel_id and root_ts):
-        return None
-    if await lookup_slack_thread_id(channel_id, root_ts) is not None:
-        return None
-    thread_id = mda_thread_id(app_id, team_id, channel_id, root_ts)
-    # A conversation that moved to another Slack thread took its thread along, and MDA
-    # handed it to that Slack thread, so this one starts on the backend again.
-    if await index.get(thread_id) is not None:
-        return None
-    return thread_id
-
-
-def forwarded_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """The headers of Slack's request Trigger Server verifies, by their canonical names."""
-    return {name: value for name in FORWARDED_HEADERS if (value := headers.get(name))}
-
-
 class MdaHandoffLost(RuntimeError):
-    """A Slack message forwarded to MDA's channel that will never start a run."""
-
-
-async def forward_to_trigger_server(
-    url: str,
-    body: bytes,
-    headers: Mapping[str, str],
-    *,
-    thread_id: str,
-    event_id: str,
-    on_refused: Callable[[], Awaitable[None]] | None = None,
-) -> None:
-    """Deliver a Slack request to Trigger Server unchanged, retrying while its signature is valid.
-
-    When Trigger Server refuses it, or every attempt fails, ``on_refused`` answers it here.
-    """
-    sent_at = float(headers.get("X-Slack-Request-Timestamp") or 0)
-    backoff = _FIRST_BACKOFF_SECONDS
-    status: int | None = None
-    attempt = 0
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_TIMEOUT_SECONDS, follow_redirects=False
-    ) as client:
-        for attempt in range(1, _ATTEMPTS + 1):
-            try:
-                response = await client.post(url, content=body, headers=dict(headers))
-            except httpx2.TransportError:
-                status = None
-                logger.warning(
-                    "Forwarding a Slack request to Trigger Server failed",
-                    extra={"slack_event_id": event_id, "attempt": attempt},
-                    exc_info=True,
-                )
-            else:
-                status = response.status_code
-                if status < 500:
-                    break
-                logger.warning(
-                    "Trigger Server could not take a forwarded Slack request yet",
-                    extra={"slack_event_id": event_id, "status": status, "attempt": attempt},
-                )
-            if attempt == _ATTEMPTS or time.time() + backoff >= sent_at + SIGNATURE_WINDOW_SECONDS:
-                break
-            await asyncio.sleep(backoff)
-            backoff *= 2
-    # An unfollowed redirect took nothing either.
-    delivered = status is not None and 200 <= status < 300
-    outcome = "delivered" if delivered else "refused" if status and status < 500 else "gave_up"
-    logger.log(
-        logging.INFO if delivered else logging.ERROR,
-        "Forwarded a Slack request to Trigger Server"
-        if delivered
-        else "Trigger Server never took a forwarded Slack request",
-        extra={
-            "slack_event_id": event_id,
-            "agent_thread_id": thread_id,
-            "forward_outcome": outcome,
-            "status": status,
-            "attempts": attempt,
-        },
-    )
-    if not delivered and on_refused is not None:
-        await on_refused()
+    """A Slack message in a conversation MDA's channel holds that will never start a run."""

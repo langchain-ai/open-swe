@@ -12,11 +12,6 @@ class WebhookResponse(TypedDict):
     error_id: NotRequired[str]
 
 
-class SlashCommandResponse(TypedDict):
-    response_type: Literal["ephemeral", "in_channel"]
-    text: str
-
-
 class ChallengeResponse(TypedDict):
     challenge: str
 
@@ -45,7 +40,3 @@ def ignored(reason: str) -> WebhookResponse:
 
 def failed(error_id: str) -> WebhookResponse:
     return {"status": "error", "error_id": error_id}
-
-
-def ephemeral(text: str) -> SlashCommandResponse:
-    return {"response_type": "ephemeral", "text": text}

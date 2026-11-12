@@ -16,13 +16,6 @@ _DROPPED_RESPONSE_HEADERS: Final = frozenset(
 _object = TypeAdapter(dict[str, JsonValue])
 
 
-def configurable_of(container: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    """``config.configurable`` of a run-create body, or an empty one."""
-    config = container.get("config")
-    configurable = config.get("configurable") if isinstance(config, dict) else None
-    return _object.validate_python(configurable) if isinstance(configurable, dict) else {}
-
-
 async def read_body(receive: Receive) -> bytes:
     chunks: list[bytes] = []
     while True:

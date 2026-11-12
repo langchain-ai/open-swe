@@ -13,8 +13,6 @@ from openswe.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
     FindingObservedPayload,
-    FindingStatePayload,
-    FindingSurfacedPayload,
     PRDistanceMeasuredPayload,
     PRObservedPayload,
     PROpenedPayload,
@@ -396,55 +394,6 @@ async def review_published(
         pr_id=opaque_id("pr", pr_key),
         repository_id=opaque_id("repository", f"{owner.lower()}/{repo.lower()}"),
     )
-
-
-@fail_soft
-async def finding_transition(
-    *,
-    thread_key: str,
-    finding_key: str,
-    head_sha: str,
-    owner: str,
-    repo: str,
-    number: int,
-    state: str,
-    severity: Literal["low", "medium", "high", "critical"],
-    category: str,
-    version: str,
-) -> None:
-    pr_key = f"{owner.lower()}/{repo.lower()}#{number}"
-    finding_id = opaque_id("finding", f"{thread_key}:{finding_key}")
-    pr_id = opaque_id("pr", pr_key)
-    repository_id = opaque_id("repository", f"{owner.lower()}/{repo.lower()}")
-    if finding_id is None or pr_id is None or repository_id is None:
-        return
-    if state == "surfaced":
-        await emit(
-            EventName.FINDING_SURFACED,
-            f"finding:{thread_key}:{finding_key}:surfaced:{version}",
-            FindingSurfacedPayload(severity=severity, category=category or "unknown"),
-            source="github",
-            finding_id=finding_id,
-            review_id=opaque_id("review", f"{thread_key}:{head_sha}"),
-            pr_id=pr_id,
-            repository_id=repository_id,
-        )
-        return
-    name = {
-        "resolved": EventName.FINDING_RESOLVED,
-        "dismissed": EventName.FINDING_DISMISSED,
-        "reopened": EventName.FINDING_REOPENED,
-    }.get(state)
-    if name is not None:
-        await emit(
-            name,
-            f"finding:{thread_key}:{finding_key}:{state}:{version}",
-            FindingStatePayload(previous_state=None),
-            source="github",
-            finding_id=finding_id,
-            pr_id=pr_id,
-            repository_id=repository_id,
-        )
 
 
 async def pr_observed(

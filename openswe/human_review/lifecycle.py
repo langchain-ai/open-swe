@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx2
-from langgraph_sdk import get_client
 
 from openswe.dispatch import dispatch_agent_run
 from openswe.expedited_review import card as expedited_card
@@ -61,32 +60,6 @@ from openswe.users import User
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
-
-LEGACY_CRON_TASK = "expedited_review"
-_LEGACY_CRON_KIND = "expedited_review_watch"
-
-
-async def delete_legacy_crons(watch_key: str) -> dict[str, int]:
-    """Delete the per-approval crons that still tick the scheduler for ``watch_key``."""
-    client = get_client()
-    crons = await client.crons.search(
-        metadata={"kind": _LEGACY_CRON_KIND, "watch_key": watch_key}, limit=10
-    )
-    deleted = 0
-    for cron in crons or []:
-        cron_id = cron.get("cron_id") if isinstance(cron, dict) else None
-        if not isinstance(cron_id, str) or not cron_id:
-            continue
-        try:
-            await client.crons.delete(cron_id)
-            deleted += 1
-        except Exception:
-            logger.warning(
-                "Failed to delete legacy expedited review cron",
-                extra={"cron_id": cron_id},
-                exc_info=True,
-            )
-    return {"deleted": deleted}
 
 
 @dataclass

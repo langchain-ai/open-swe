@@ -1,6 +1,6 @@
 """Which of the backend's own jobs a GitHub delivery starts.
 
-MDA's GitHub channel hands every delivery to the backend (``record_github_delivery``),
+MDA's GitHub channel hands every delivery to the backend (``/mda/github/deliveries``),
 and the backend picks its work here, from the delivery's event, its action and what
 Open SWE knows about its repository: reviews, walkthroughs, human review, the merge
 queue, CI and the pull request state the dashboard shows. The channel decides only

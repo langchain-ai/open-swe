@@ -25,7 +25,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from starlette.types import Receive, Scope, Send
 
 from openswe.github.app import get_github_app_installation_token
-from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_request_diff import (
     fetch_file_versions,
     pull_request_patches,
@@ -415,24 +415,6 @@ class ReviewCheck(BaseModel):
             )
             for run in runs or []
         ]
-
-
-async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
-    """Return the PR's current head SHA from GitHub, or "" if unavailable.
-
-    A lightweight alternative to :func:`get_review` for callers that only need to
-    detect whether the PR head has moved (e.g. the chat staleness check).
-    """
-    try:
-        async with GitHubClient.as_app() as github:
-            pull = github.repo(owner, repo).pull_request(pr_number)
-            return await or_none(pull.head_sha()) or ""
-    except GitHubAppUnavailable:
-        logger.warning(
-            "No GitHub App token to read the PR head",
-            extra={"repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-        )
-        return ""
 
 
 PullRequestReviewEvent = Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"]

@@ -497,7 +497,6 @@ ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )
 ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
-ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 
 # --- Sandboxes ---------------------------------------------------------------------------------
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")

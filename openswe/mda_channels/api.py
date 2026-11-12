@@ -41,7 +41,6 @@ def _handlers() -> Handlers[ChannelCall]:
         GITHUB_AUTOMATION_RULES,
         GITHUB_DELIVERY_FACTS,
         GITHUB_ISSUE_FACTS,
-        RECORD_GITHUB_DELIVERY,
     )
     from runtime_api.linear import (
         LINEAR_AUTOMATION_RULES,
@@ -63,7 +62,6 @@ def _handlers() -> Handlers[ChannelCall]:
     from openswe.slack import channel as slack
 
     handlers = Handlers[ChannelCall]()
-    handlers.serve(RECORD_GITHUB_DELIVERY, github.record_github_delivery)
     handlers.serve(GITHUB_DELIVERY_FACTS, github.github_delivery_facts)
     handlers.serve(GITHUB_AUTOMATION_RULES, github.github_automation_rules)
     handlers.serve(GITHUB_ISSUE_FACTS, github.github_issue_facts)

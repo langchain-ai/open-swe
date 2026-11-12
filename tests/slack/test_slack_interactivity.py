@@ -20,7 +20,7 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 def _backend_acts_on_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
     """These drive the backend's own handling of a click, which ``act_on_slack_click``
     runs for each click MDA's Slack channel hands it."""
-    monkeypatch.setattr(slack_routes, "_answered_here", lambda _interaction: True)
+    monkeypatch.setattr(slack_routes, "_answers_slack", lambda _interaction: True)
 
 
 def _request(payload: dict[str, Any]) -> Request:

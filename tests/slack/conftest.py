@@ -16,12 +16,10 @@ def pytest_configure(config: pytest.Config) -> None:
 def _backend_keeps_conversations(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Slack conversations stay on the backend unless a test says MDA holds or starts them."""
+    """Slack conversations stay on the backend unless a test says MDA holds them."""
     if request.node.get_closest_marker("mda_lookups"):
         return
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=None))
-    monkeypatch.setattr(mda_forwarding, "startable_thread", AsyncMock(return_value=None))
-    monkeypatch.setattr(mda_forwarding, "startable_concierge", AsyncMock(return_value=None))
 
 
 @pytest.fixture(autouse=True)

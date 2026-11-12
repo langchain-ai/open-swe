@@ -3,8 +3,8 @@
 A button whose ``action_id`` is ``mda_modal::<name>:<id>`` carries its view in its
 ``value``; Trigger Server opens it inside the click and sends the submission to MDA's
 Slack channel with that ``action_id`` and the button's channel and thread. Where
-Trigger Server refuses the click, the backend opens it itself (:func:`open_here`),
-and its submission stays here (:func:`origin_here`).
+Slack delivers the click to the backend instead, the backend opens it itself
+(:func:`open_here`), and its submission stays here (:func:`origin_here`).
 """
 
 import json

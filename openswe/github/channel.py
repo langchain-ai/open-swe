@@ -1,8 +1,8 @@
 """What MDA's GitHub channel calls on the backend (``runtime_api.github``).
 
 Open SWE's GitHub App delivers its webhooks to the MDA deployment's GitHub
-channel, which verifies each delivery and hands every one to the backend
-(``record_github_delivery``). The backend logs it, runs its own work for it
+channel, which verifies each delivery and forwards every one to the backend
+(``/mda/github/deliveries``). The backend logs it, runs its own work for it
 (reviews, walkthroughs, human review, the merge queue, CI and the pull request
 state the dashboard shows, ``openswe.github.work``), and answers what Open SWE
 knows about its repository. The channel decides only what starts an agent run,
@@ -147,40 +147,6 @@ async def github_delivery_facts(
     """
     refs = EventRefs.github(json.dumps(delivery.payload).encode())
     return await _repository_facts(delivery) if _allowed(delivery, refs) else _OUTSIDE_THE_ALLOWLIST
-
-
-async def record_github_delivery(
-    call: ChannelCall, delivery: GitHubDelivery
-) -> GitHubDeliveryFacts:
-    """Log the delivery once, run the backend's own work for it after answering, and
-    say what Open SWE knows about its repository, for the channel's agent runs.
-
-    Every delivery the channel forwards (``/mda/github/deliveries``) comes here; a
-    channel deployed before it forwarded calls it too. A delivery is logged and its
-    work run once, however many times it arrives.
-
-    A repository outside the allowlist is neither logged nor looked up: its delivery
-    starts nothing. A workspace lookup that fails raises, so the delivery fails rather
-    than drop work a workspace may own.
-    """
-    body = json.dumps(delivery.payload).encode()
-    refs = EventRefs.github(body)
-    if not _allowed(delivery, refs):
-        return _OUTSIDE_THE_ALLOWLIST
-    await EventLog.record_once(
-        call.request,
-        body,
-        "github",
-        event_type=delivery.event,
-        delivery_id=delivery.delivery_id,
-        refs=refs,
-    )
-    if refs.pull_request is not None:
-        await Topic.for_pull_request_event(delivery.event).invalidate(key=refs.pull_request)
-    facts = await _repository_facts(delivery)
-    if work := delivery_work(delivery.event, delivery.payload, facts):
-        await _accept_work(call, delivery, work)
-    return facts
 
 
 async def _gated(payload: _Payload, event: str) -> bool:

@@ -1139,13 +1139,6 @@ def get_thread_last_reviewed_sha(metadata: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
-    pr = metadata.get("pr")
-    if not isinstance(pr, dict):
-        return None
-    return cast(ReviewerPRMeta, pr)
-
-
 def reviewer_thread_title(pr: ReviewerPRMeta) -> str:
     """Sidebar title for a reviewer thread: ``Review: #nn <PR title>``."""
     number = pr.get("number")

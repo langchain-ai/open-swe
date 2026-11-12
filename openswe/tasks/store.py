@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, Text, select, text, update
+from sqlalchemy import ForeignKey, Text, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -237,20 +237,6 @@ class TaskDelegation(Base):
                     select(cls).where(cls.task_id == task_id).order_by(cls.worker_thread_id)
                 )
             )
-
-    @classmethod
-    async def set_launch_error(cls, worker_thread_id: str, error: str | None) -> None:
-        from openswe.ui_invalidations.topics import Topic
-
-        async with postgres.session() as session:
-            coordinator_thread_id = await session.scalar(
-                update(cls)
-                .where(cls.worker_thread_id == worker_thread_id)
-                .values(launch_error=error)
-                .returning(cls.coordinator_thread_id)
-            )
-        if coordinator_thread_id is not None:
-            await Topic.TASK_WORKERS.invalidate(key=coordinator_thread_id)
 
 
 @dataclass(frozen=True)

@@ -117,68 +117,12 @@ def _verify_signature(request: common.Request, body: bytes, what: str) -> None:
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
 
-def _hand_to_mda(
-    background_tasks: common.BackgroundTasks,
-    body: bytes,
-    headers: dict[str, str],
-    message: str,
-    *,
-    thread_id: str,
-    event_id: str,
-    url: str = mda_forwarding.TRIGGER_EVENTS_URL,
-    on_refused: Callable[[], Awaitable[None]] | None = None,
-) -> WebhookResponse:
-    """Forward Slack's request to MDA's Slack channel, through Trigger Server, after answering Slack.
-
-    ``on_refused`` answers it here when Trigger Server never takes it
-    (:func:`mda_forwarding.forward_to_trigger_server`).
-    """
-    background_tasks.add_task(
-        mda_forwarding.forward_to_trigger_server,
-        url,
-        body,
-        headers,
-        thread_id=thread_id,
-        event_id=event_id,
-        on_refused=on_refused,
-    )
-    return accepted(message)
-
-
-async def _answer_here(
-    request: SlackRequest, start: Callable[[SlackRequest], Awaitable[object]]
-) -> None:
-    """Answer a new conversation's message Trigger Server refused here, as before MDA, on
-    the Slack thread's own backend thread."""
-    try:
-        thread_id = await common.resolve_slack_thread_id(request.channel_id, request.thread_ts)
-    except common.SlackThreadMappingError:
-        common.logger.warning(
-            "A refused Slack message's thread belongs to another thread",
-            extra={"slack_channel_id": request.channel_id, "slack_event_id": request.event_id},
-        )
-        return
-    await start(request.model_copy(update={"thread_id": thread_id}))
-
-
-async def _process_web(
-    request: SlackRequest, *, breakout: BreakoutCommand, repo: common.SlackRepoResolution | None
-) -> None:
-    await process_slack_web(request, breakout, repo)
-
-
-async def _process_breakout(
-    request: SlackRequest, *, breakout: BreakoutCommand, repo: common.SlackRepoResolution | None
-) -> None:
-    await process_slack_breakout(request, breakout, repo)
-
-
 async def _report_lost(request: SlackRequest, repo: common.SlackRepoResolution | None) -> None:
     """Tell the Slack thread of a conversation MDA's channel holds its message won't run."""
     await service.notify_slack_processing_error(
         request,
         repo.repo if repo else None,
-        mda_forwarding.MdaHandoffLost("Trigger Server never took the message"),
+        mda_forwarding.MdaHandoffLost("Slack delivered the message to the backend"),
     )
 
 
@@ -352,11 +296,7 @@ class SlackEventsDelivery:
         from_mda: bool = False,
     ) -> WebhookResponse | ChallengeResponse | DuplicateIncidentResponse:
         """Act on a verified request, as ``/webhooks/slack`` always has; ``from_mda`` for
-        one MDA's channel handed back, which never goes back to MDA."""
-        hand_to_mda = functools.partial(cls.hand_to_mda, from_mda=from_mda)
-        # Taken now: `dispatch` below rebinds `request` to the Slack request it gates.
-        slack_headers = mda_forwarding.forwarded_headers(request.headers)
-
+        one MDA's channel handed back."""
         payload = parse_json_object(body)
         envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
         logged = await EventLog.record(
@@ -542,13 +482,12 @@ class SlackEventsDelivery:
                 and isinstance(stopped_ts, str)
                 and (stopped_thread := await mda_forwarding.owned_thread(channel_id, stopped_ts))
             ):
-                return await hand_to_mda(
+                return await cls.held_by_mda(
                     background_tasks,
-                    body,
-                    slack_headers,
-                    "Session stop handed to MDA",
+                    "Session stop",
                     thread_id=stopped_thread,
                     event_id=event_id,
+                    from_mda=from_mda,
                 )
             background_tasks.add_task(
                 common.process_agent_session_stopped, raw_event, event_id, team_id
@@ -730,13 +669,12 @@ class SlackEventsDelivery:
                     # check an edited message against.
                     return ignored("MDA's Slack channel doesn't take a concierge DM's edits")
                 # MDA's channel holds the conversation, and gives the agent the correction.
-                return await hand_to_mda(
+                return await cls.held_by_mda(
                     background_tasks,
-                    body,
-                    slack_headers,
-                    "Slack edit handed to MDA",
+                    "Slack edit",
                     thread_id=edited_thread,
                     event_id=event_id,
+                    from_mda=from_mda,
                 )
             try:
                 claimed = await common.claim_slack_event(event_id, channel_id, event_ts)
@@ -800,71 +738,16 @@ class SlackEventsDelivery:
                     reply_thread_ts=thread_ts,
                     message_ts=original_message_ts,
                 )
-                if mda_forwarding.trigger_server_takes(event.subtype):
-                    # Answered by MDA's Slack channel on a thread of its own, whoever owns the
-                    # Slack thread it was asked in.
-                    return await hand_to_mda(
-                        background_tasks,
-                        body,
-                        slack_headers,
-                        "Slack by-the-way question handed to MDA",
-                        thread_id=mda_forwarding.side_thread_id(channel_id, original_message_ts),
-                        event_id=event_id,
-                        on_refused=functools.partial(process_slack_ask, ask),
-                    )
                 background_tasks.add_task(process_slack_ask, ask)
                 return accepted("Slack by-the-way question queued")
 
-            # A conversation MDA owns, or a new one MDA's Slack channel can start, goes there.
-            # A concierge DM moves as a whole (``thread_ts``).
+            # A conversation MDA's Slack channel holds is its own. A concierge DM is one
+            # conversation as a whole (``thread_ts``).
             root_ts = reply_thread_ts or original_message_ts
             breakout = BreakoutCommand.from_message(message)
-            # A breakout into a new thread goes to MDA's Slack channel, which runs the new Slack
-            # thread.
-            breakout_in_mda = (
-                message.action is SlackAction.BREAKOUT
-                and bool(breakout.instruction)
-                and explicit_mention
-                and not in_dm_channel
-                and allowed_bot is None
-                and mda_forwarding.trigger_server_takes(event.subtype)
-            )
-            # A web breakout goes to MDA's Slack channel too, on a thread of its own; its later
-            # turns happen on the dashboard.
-            web_in_mda = (
-                message.action is SlackAction.BREAKOUT_WEB
-                and bool(breakout.instruction)
-                and explicit_mention
-                and not in_dm_channel
-                and allowed_bot is None
-                and mda_forwarding.trigger_server_takes(event.subtype)
-            )
-            can_start = mda_forwarding.mda_can_start(
-                subtype=event.subtype,
-                breakout=message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB},
-            )
             mda_thread_id = await mda_forwarding.owned_thread(
                 channel_id, thread_ts if in_concierge_mode else root_ts
             )
-            if mda_thread_id is not None or from_mda:
-                # A message MDA's channel handed back stays here: binding its conversation to
-                # MDA now would only send the next one back and forth.
-                new_mda_thread_id = None
-            elif in_concierge_mode:
-                new_mda_thread_id = await mda_forwarding.startable_concierge(
-                    app_id=envelope.api_app_id,
-                    team_id=team_id or "",
-                    channel_id=channel_id,
-                    can_start=can_start,
-                )
-            else:
-                new_mda_thread_id = await mda_forwarding.startable_thread(
-                    app_id=envelope.api_app_id,
-                    team_id=team_id or "",
-                    channel_id=channel_id,
-                    root_ts=root_ts,
-                    can_start=can_start,
-                )
             if mda_thread_id is not None and not mda_forwarding.trigger_server_takes(event.subtype):
                 # Trigger Server would drop it, and the thread is MDA's, so nothing can run it.
                 common.logger.info(
@@ -872,9 +755,8 @@ class SlackEventsDelivery:
                     extra={"agent_thread_id": mda_thread_id, "slack_subtype": event.subtype},
                 )
                 return ignored("MDA's Slack channel doesn't take this kind of message")
-            mda_owned_thread_id = mda_thread_id or new_mda_thread_id
             try:
-                thread_id = mda_owned_thread_id or await common.resolve_slack_thread_id(
+                thread_id = mda_thread_id or await common.resolve_slack_thread_id(
                     channel_id, thread_ts
                 )
             except common.SlackThreadMappingError as exc:
@@ -923,28 +805,14 @@ class SlackEventsDelivery:
                     # Names no channel Slack knows: the backend's breakout says so.
                     background_tasks.add_task(process_slack_breakout, request, breakout, repo)
                     return accepted("Slack breakout queued")
-                # MDA's Slack channel decides what a message there starts, from the message:
-                # a breakout or a web question opens a conversation of its own, whoever holds
-                # this one. Where Trigger Server refuses it, the backend answers it as before
-                # MDA, unless MDA's channel holds the conversation already.
-                here: Callable[[SlackRequest], Awaitable[object]] | None = None
-                if web_in_mda:
-                    here = functools.partial(_process_web, breakout=breakout, repo=repo)
-                elif breakout_in_mda:
-                    here = functools.partial(_process_breakout, breakout=breakout, repo=repo)
-                elif new_mda_thread_id is not None:
-                    here = functools.partial(service.process_slack_mention, repo=repo)
-                if here is not None or mda_thread_id is not None:
-                    return await hand_to_mda(
+                if mda_thread_id is not None:
+                    return await cls.held_by_mda(
                         background_tasks,
-                        body,
-                        slack_headers,
-                        "Slack message handed to MDA",
-                        thread_id=mda_owned_thread_id or "",
+                        "Slack message",
+                        thread_id=mda_thread_id,
                         event_id=event_id,
-                        on_refused=functools.partial(_answer_here, request, here)
-                        if here is not None and mda_thread_id is None
-                        else functools.partial(_report_lost, request, repo),
+                        from_mda=from_mda,
+                        report=functools.partial(_report_lost, request, repo),
                     )
                 if (
                     message.action is SlackAction.BREAKOUT_WEB
@@ -969,37 +837,34 @@ class SlackEventsDelivery:
         return await answer_slack_request(target, dispatch)
 
     @staticmethod
-    async def hand_to_mda(
+    async def held_by_mda(
         background_tasks: common.BackgroundTasks,
-        body: bytes,
-        headers: dict[str, str],
-        message: str,
+        what: str,
         *,
         thread_id: str,
         event_id: str,
-        url: str = mda_forwarding.TRIGGER_EVENTS_URL,
-        on_refused: Callable[[], Awaitable[None]] | None = None,
         from_mda: bool,
+        report: Callable[[], Awaitable[None]] | None = None,
     ) -> WebhookResponse:
-        """:func:`_hand_to_mda`, except for a message MDA's channel handed back
-        (``from_mda``): it already decided not to take it, so sending it there again
-        would loop."""
-        if not from_mda:
-            return _hand_to_mda(
-                background_tasks,
-                body,
-                headers,
-                message,
-                thread_id=thread_id,
-                event_id=event_id,
-                url=url,
-                on_refused=on_refused,
-            )
+        """Leave alone a request in a conversation MDA's Slack channel holds.
+
+        Trigger Server delivers those to MDA's channel, so one that arrives here starts
+        nothing: MDA's channel handed it back (``from_mda``) after deciding not to take
+        it, or Slack delivered it to ``/webhooks/slack`` in an environment whose Slack
+        app Trigger Server doesn't know, where ``report`` tells the Slack thread.
+        """
         common.logger.warning(
-            "Slack message MDA's channel handed back would go to MDA again; dropped",
-            extra={"agent_thread_id": thread_id, "slack_event_id": event_id, "outcome": message},
+            "Slack request in a conversation MDA's channel holds reached the backend; dropped",
+            extra={
+                "agent_thread_id": thread_id,
+                "slack_event_id": event_id,
+                "outcome": what,
+                "from_mda": from_mda,
+            },
         )
-        return ignored("MDA's Slack channel handed this message back")
+        if report is not None and not from_mda:
+            background_tasks.add_task(report)
+        return ignored(f"{what} belongs to a conversation MDA's Slack channel holds")
 
 
 @router.post("/webhooks/slack/interactivity")
@@ -1032,29 +897,18 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
-    if not _answered_here(interaction):
-        # Trigger Server takes every other click and MDA's Slack channel decides what it
-        # does; where Trigger Server refuses it, the backend acts on it after all.
-        handed = _hand_to_mda(
-            background_tasks,
-            body,
-            mda_forwarding.forwarded_headers(request.headers),
-            "Slack click handed to MDA",
-            thread_id="",
-            event_id=interaction.trigger_id,
-            url=mda_forwarding.TRIGGER_INTERACTIVITY_URL,
-            on_refused=functools.partial(_act_here, interaction, payload_raw),
-        )
-        # Slack closes a submitted modal only on an empty answer, as Trigger Server gives.
-        return {} if interaction.type == "view_submission" else handed
+    if not _answers_slack(interaction):
+        background_tasks.add_task(_act_here, interaction, payload_raw)
+        # Slack closes a submitted modal only on an empty answer.
+        return {} if interaction.type == "view_submission" else accepted("Slack click queued")
     return await act_on_interaction(interaction, payload_raw, background_tasks)
 
 
-def _answered_here(interaction: SlackInteraction) -> bool:
-    """Handle review links and backend modals without Trigger Server."""
+def _answers_slack(interaction: SlackInteraction) -> bool:
+    """Whether Slack waits for what the click does: review links, the backend's own
+    modals and option lists. Every other click is acted on after Slack has its answer."""
     if interaction.type in {"message_action", "block_suggestion"}:
         return True
-
     if interaction.type == "block_actions" and any(
         action.action_id in {"open_swe_option_select_review", "open_swe_option_select_accept"}
         for action in interaction.actions

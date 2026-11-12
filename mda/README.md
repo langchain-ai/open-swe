@@ -299,7 +299,6 @@ The channel's handler (`rt/github.py`) takes only the events that may start an a
 The channel takes the App's own issues and pull requests too (`include_own_events`), so the agent's own pull requests still fire automations, and the backend gets every delivery either way; the handler skips the App's own comments and reviews.
 Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Robin's failure reply on the issue, as before.
 A handler's backend call that fails starts nothing, and MDA logs why.
-Deploy the backend before MDA: a channel deployed before it forwarded still names the backend's work through `record_github_delivery`, and the backend runs each delivery's work once either way.
 
 The channel uses Robin's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret) and points its webhook at `<deployment>/channels/github/events`.
 A deployment whose deploy kept the App's webhook at the backend (`MDA_GITHUB_WEBHOOK_ELSEWHERE`) keeps it there until it moves: change it once in the App's settings, or run `mda deploy` in a terminal and confirm the move.
@@ -317,50 +316,49 @@ Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
 ## Slack
 
 The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake.
-Robin's Slack app keeps its URLs at the backend's `/webhooks/slack`.
-When the first message of a new conversation is one MDA's channel can start, the backend forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
-It claims nothing and remembers nothing: the channel decides what the message starts from the message itself, so nothing changes in the channel when Slack's Events URL points at Trigger Server instead.
-Later messages in that Slack thread, and Slack's Stop, go the same way.
+Robin's Slack app delivers its events and clicks to LangSmith Trigger Server, which verifies each request and hands it to the channel.
+The backend forwards nothing: an environment whose Slack app still points at the backend's `/webhooks/slack` (local development, the e2e suite) is answered by the backend alone.
+The channel decides what a message starts from the message itself.
+Later messages in that Slack thread, and Slack's Stop, reach it the same way.
 A kitchen channel's untagged messages start conversations too, each Slack thread its own; the backend routes the run to the channel's workspace when it builds it.
 A concierge DM is one conversation for the whole DM: a DM no thread holds yet goes to MDA as a whole, bound for Slack's `0` timestamp to the DM's thread (`uuid5` of `slack:v1:{app}:{team}:{channel}:0`), and each Slack thread a message opens in it is bound to that thread too, so Slack's Stop there and the handler's question find it.
 The handler starts each of the DM's runs on that thread (`thread: {"mode": "persistent", "id": ...}`), so Stop in a Slack thread cancels only the runs that thread started; the run context names the Slack thread the agent answers in.
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, whose handler (`rt/slack.py`) decides what it starts, as `/webhooks/slack` decides for the backend's own conversations, and builds the turn's prompt from the Slack thread, read with the deployment's bot token (`rt/slack_prompt.py`, a copy of the backend's builder; `rt/slack_message.py`, of its message parser).
 It asks the backend only for what needs Robin's records: `slack_message_facts` (is the channel external, a DM, a kitchen channel; concierge mode; the bot allow-list; a solo follow-up; who holds the conversation) and then `start_slack_turn`.
 A message the backend answers itself isn't the channel's to start (one in a conversation the backend holds, a breakout naming a channel with nothing to do there, a web question with nothing to ask): the handler hands it back to the backend's `act_on_slack_message` with Slack's event, and the backend answers it as `/webhooks/slack` always has, never sending it to MDA again.
-Once Slack's Events URL points at Trigger Server, that is the only way the backend hears those messages.
+That is the only way the backend hears those messages.
 `start_slack_turn` gates the turn as the backend gates its own Slack runs (a person without a usable GitHub account gets a reply saying so, and the conversation stays unclaimed), binds a new conversation's Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`) and indexes it as the channel's, writes the thread's metadata, signs the run, and answers what the prompt needs from its records: logins, the people a private thread may quote, the channel's context block, a review card's pull request, where a DM started.
 A `/btw` question, a breakout and a move come back built, as the backend always built them.
 The handler leaves out of the prompt what the thread already holds, from `thread.get_state()`, Agent Server's state as LangGraph's `threads.get_state` reads it (MDA [#1231](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1231)).
-A person's edit of a message the conversation holds goes to the `edit` handler (`/webhooks/slack` forwards it unchanged; once Slack's Events URL points at Trigger Server, Trigger Server does, MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175)): an edit of its text by its author, of a message the thread's state shows the agent got, becomes `start_slack_turn`'s `edit`, which gives the agent the correction as the backend does, a note for the run in progress or a turn of its own.
+A person's edit of a message the conversation holds goes to the `edit` handler (MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175)): an edit of its text by its author, of a message the thread's state shows the agent got, becomes `start_slack_turn`'s `edit`, which gives the agent the correction as the backend does, a note for the run in progress or a turn of its own.
 An unfurl, another author's or a bot's edit, and a concierge DM's edits start nothing; deletions start nothing, as on the backend.
-Reactions reach the `reaction` handler once Slack's Events URL points at Trigger Server, which hands them to the backend's `/mda/slack/reactions`: it records a feedback reaction on the run that posted the message and treats the summon reaction as its reactor tagging Robin, as `/webhooks/slack` does, and starts no run of MDA's.
-Until then the backend hears reactions itself.
+Reactions reach the `reaction` handler, which hands them to the backend's `/mda/slack/reactions`: it records a feedback reaction on the run that posted the message and treats the summon reaction as its reactor tagging Robin, as `/webhooks/slack` does, and starts no run of MDA's.
 A mention, a direct message or an explicit request redirects the thread's run in progress (`interrupt`); any other follow-up waits its turn behind it (`enqueue`), as on the backend's own Slack threads.
 The agent replies with Robin's Slack tools (`auto_post=False`), and the channel shows the run's status and Stop.
 
-Every Slack click goes to the channel too: `/webhooks/slack/interactivity` forwards it unchanged to Trigger Server's interactivity URL (`TRIGGER_INTERACTIVITY_URL`), after answering Slack, so the Slack app's Interactivity URL can move to Trigger Server with no code change.
-Only "Explain this" (a message shortcut) and modals the backend opened itself stay on the backend.
-Once the URL points at Trigger Server, "Explain this" comes to the channel's `shortcut` handler (MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175) with LangSmith Trigger Server forwarding `message_action`), which hands it to `act_on_slack_click` too.
-Where Trigger Server refuses a click (an environment without MDA), the backend acts on it after all.
+Every Slack click goes to the channel too, from Trigger Server's interactivity URL.
+Option lists (`block_suggestion`) and modals the backend opened itself stay on the backend.
+"Explain this" comes to the channel's `shortcut` handler (MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175) with LangSmith Trigger Server forwarding `message_action`), which hands it to `act_on_slack_click` too.
+A click Slack delivers to the backend's `/webhooks/slack/interactivity` instead is acted on there.
 A channel's own changes (created, renamed, archived, unarchived, deleted) reach the channel's `channel` handler once Slack's Events URL points at Trigger Server (MDA [#1175](https://github.com/langchain-ai/managed-deepagents-sdk/pull/1175), LangSmith Trigger Server [#57973](https://github.com/langchain-ai/langchainplus/pull/57973)); it hands them to the backend's `/mda/slack/channel-events`, which keeps the channel directory, incident channels as `/webhooks/slack` does, and starts no run.
 The handler (`rt/slack_clicks.py`) takes the clicker Trigger Server verified, refuses an option meant for someone else and a Retry by anyone but its requester (an ephemeral reply, nothing started), and updates the clicked message through its `response_url`; Retry removes its button before anything runs.
 The backend's `plan_slack_click` finds the click's conversation from its own bindings, acts on each clicked message once (a call MDA sends again under its `webhook-id` gets its run again), decides a workflow push under its lock, finds the message a Retry sends again, and builds and signs the run, which redirects or waits as a message would.
 A Retry button carries its fields in its value, with no token: Slack signs the click, and only Robin's own message carries the value.
 Every other click, and one in a conversation the backend holds, the handler hands to the backend's `act_on_slack_click` with Slack's payload as Trigger Server forwarded it: the backend acts on it as it always has, as the clicker Trigger Server verified, once per call.
-That covers the review cards (votes, sign-ups, picks, dismissals), act-as approvals, suggested actions, run feedback and older Retry buttons, which carry a token.
+That covers the review cards (votes, sign-ups, picks, dismissals), act-as approvals, suggested actions and run feedback.
 A review card's modals (another channel to send it to, a pick's Decline and Snooze) open through Trigger Server: the button's `action_id` is `mda_modal::<name>:<id>` and its value the view, whose inputs are required, since Trigger Server answers Slack before the backend sees the submission.
 The submission reaches the handler as a click on the button's Slack thread.
 Answers to review clicks, and their updates to the clicked message, go through the click's `response_url`.
 It adds no reaction to the message that starts a run (`reactions=False`).
 
-The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.
-There is no setting: an environment whose Slack app isn't registered with Trigger Server gets a 401, and the backend handles the conversation as before.
+Trigger Server's Slack events URL is the same on US LangSmith for every environment: it routes each request by its Slack app.
+An environment whose Slack app isn't registered with Trigger Server points that app at the backend's `/webhooks/slack`, and the backend handles its conversations as before MDA.
 
-When Trigger Server doesn't take a message (it refuses, or the forward gives up), the backend answers a new conversation's message itself, as it did before MDA, and replies in the Slack thread with an error id for one in a conversation the channel holds.
+A message in a conversation the channel holds that Slack delivers to the backend instead starts nothing, and the backend replies in the Slack thread with an error id.
 When building a turn's run fails, the backend replies in the Slack thread with an error id, as for its own runs.
 A message lost between Trigger Server and the channel (a deployment restart) is lost: an accepted risk, as for every channel.
 When MDA retries `start_slack_turn` (same `webhook-id`), the backend builds the run again, but answers a decline once.
-Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each answer without a run logs its `no_run_reason`.
+Each answer without a run logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 
 A `/btw` question, a breakout into a new thread and a `/breakout:web` question branch off the conversation they're sent in (`openswe/slack/forks.py`).
@@ -370,14 +368,14 @@ The new thread is the channel's, so MDA can start its runs; an Agent Server copy
 Otherwise the branch is seeded from the Slack thread as before.
 The original thread and its running work are left alone.
 
-Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):
+Which conversations go where (`_decide` in `mda/rt/slack.py`):
 
 | Goes to MDA | Stays on the backend, and why |
 |---|---|
 | An @mention of Robin in a channel, by a person or a bot on Robin's allow-list, as a new message or in a thread Robin isn't in yet |  |
 | A person's DM to Robin (a thread per message) | Breakouts, `/btw`, slash commands |
-| A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves. Once Slack's Events URL points at Trigger Server, MDA's channel hands their messages back (`act_on_slack_message`) |
-| A new concierge DM, as one conversation on one thread | "Explain this" while Slack's URL points at the backend (MDA's `shortcut` handler takes it after the move) |
+| A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves. MDA's channel hands their messages back (`act_on_slack_message`) |
+| A new concierge DM, as one conversation on one thread | Option lists the backend loads (`block_suggestion`) |
 | Every later message in those conversations, and Slack's Stop | Reactions (`:x:` stop, feedback), edits and `thread_broadcast` replies: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |
 | Every click: the agent's options, workflow push approvals and Retry in those conversations start their run in MDA; the backend acts on every other one (`act_on_slack_click`) | Modals the backend opened itself, before their cards opened them through Trigger Server |
 
@@ -386,7 +384,7 @@ Trigger Server keeps an app once registered, so later deploys need neither.
 Preview deploys run labeled PRs' code and never get them: register the preview's app once from a trusted checkout, with `mda/.env` as above plus the preview app's `MDA_SLACK_BOT_TOKEN` and `MDA_SLACK_SIGNING_SECRET`, by running the hand deploy for `open-swe-mda-preview`.
 
 An environment's Slack conversations go to MDA once `mda deploy` has registered its Slack app (without a terminal it prints no Slack URLs).
-To keep an environment on the backend, leave its `MDA_SLACK_*_<ENV>` secrets out of its deploy; to take one off MDA again, roll its backend back to a revision without the forwarder.
+To keep an environment on the backend, leave its `MDA_SLACK_*_<ENV>` secrets out of its deploy and point its Slack app's URLs at the backend's `/webhooks/slack` and `/webhooks/slack/interactivity`.
 
 ## Observability
 
