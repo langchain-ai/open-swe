@@ -40,9 +40,10 @@ _NOTE_MARKER = "<!-- robin-approves-note -->"
 _STANDING_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
 # Robin can't read a ruleset's bypass list, so this says where the bypass shows up.
 _BREAK_GLASS = (
-    "**Break glass:** if this can't wait, or Robin is down and the check never reports, "
-    "anyone on the bypass list of the ruleset that requires this check can merge anyway: "
-    "tick *bypass rules* in the pull request's merge box. GitHub records who did."
+    "<details>\n<summary>Break glass</summary>\n\n"
+    "For urgent merges or a Robin outage, someone on the required ruleset's bypass list "
+    "can select **bypass rules** in the PR's merge box. GitHub records who bypassed the check."
+    "\n\n</details>"
 )
 
 
@@ -137,7 +138,7 @@ class PullRequestApproval:
         if self._is_bot(user):
             return None if login == self._login(self.author) else "is a bot"
         if review.get("commit_id") != self.head_sha:
-            return "approved an earlier commit, not the current head"
+            return "approved an earlier commit; re-approve the latest commit"
         if login not in self.writers:
             return "doesn't have write access to this repository"
         return None
@@ -164,9 +165,8 @@ class PullRequestApproval:
         if approvers := self.approvers():
             return True, f"Approved at the current head by {', '.join(approvers)}."
         lines = [
-            "Robin opened this pull request for someone else, so it needs a second person: an "
-            "approval of the current head from someone with write access who neither asked for "
-            "the change nor pushed to it."
+            "Robin opened this PR, so it needs approval of the latest commit from someone with "
+            "write access who neither requested this change nor authored or committed to this branch."
         ]
         rejected = {
             login: reason
@@ -174,11 +174,13 @@ class PullRequestApproval:
             if (reason := self._rejection(login, review))
         }
         if rejected:
-            lines.append("Approvals that don't count yet:")
-            lines += [f"- `{login}` {reason}." for login, reason in sorted(rejected.items())]
+            lines.append(
+                "**Approvals not counted**\n\n"
+                + "\n".join(f"- `{login}` {reason}." for login, reason in sorted(rejected.items()))
+            )
         else:
-            lines.append("Nobody has approved the current head yet.")
-        return False, "\n".join(lines)
+            lines.append("No approval of the latest commit yet.")
+        return False, "\n\n".join(lines)
 
     @classmethod
     async def evaluate(cls, owner: str, repo: str, number: int) -> None:
