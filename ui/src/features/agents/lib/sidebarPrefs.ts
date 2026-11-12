@@ -39,7 +39,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
     "/agents/bots",
     "/agents/reviews",
   ],
-  organize: "none",
+  organize: "date",
 }
 
 function asStringArray(value: unknown): Array<string> {
