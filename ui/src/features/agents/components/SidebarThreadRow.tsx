@@ -131,68 +131,8 @@ function openContextMenuFromKeyboard(
   )
 }
 
-/** Pixels per second every title travels at, whatever its length. */
-const MARQUEE_SPEED = 45
-/** Keeps a barely-overflowing title from flicking past in a few frames. */
-const MARQUEE_MIN_DURATION = 0.5
-
-/**
- * Slides an overflowing title far enough to read its tail while hovered. The
- * shift is measured on enter rather than tracked continuously because it only
- * matters for the row the pointer is actually over, and the duration is derived
- * from it so long and short titles read at the same speed.
- */
-function useTitleMarquee() {
-  const viewport = useRef<HTMLSpanElement>(null)
-  const text = useRef<HTMLSpanElement>(null)
-  const [shift, setShift] = useState(0)
-
-  const measure = () => {
-    const overflow =
-      (text.current?.scrollWidth ?? 0) - (viewport.current?.clientWidth ?? 0)
-    setShift(overflow > 4 ? -overflow : 0)
-  }
-
-  const duration = Math.max(
-    MARQUEE_MIN_DURATION,
-    Math.abs(shift) / MARQUEE_SPEED
-  )
-
-  return { viewport, text, shift, duration, measure, reset: () => setShift(0) }
-}
-
-function SidebarRowTitle({
-  marquee: { viewport, text, shift, duration },
-  title,
-}: {
-  marquee: ReturnType<typeof useTitleMarquee>
-  title: string
-}) {
-  return (
-    <span
-      ref={viewport}
-      className={cn(
-        "sidebar-title-viewport relative min-w-0 flex-1 overflow-hidden",
-        shift !== 0 && "sidebar-title-marquee-mask"
-      )}
-    >
-      <span
-        ref={text}
-        className={cn(
-          "block w-max text-sm whitespace-nowrap will-change-transform",
-          shift !== 0 && "sidebar-title-marquee"
-        )}
-        style={
-          {
-            "--marquee-shift": `${shift}px`,
-            "--marquee-duration": `${duration}s`,
-          } as React.CSSProperties
-        }
-      >
-        {title}
-      </span>
-    </span>
-  )
+function SidebarRowTitle({ title }: { title: string }) {
+  return <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
 }
 
 const TREE_STEP = 20
@@ -394,7 +334,6 @@ export function SidebarThreadRow({
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const menuNavigated = useRef(false)
-  const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
   const activeSubagentId =
     useSearch({
@@ -474,7 +413,7 @@ export function SidebarThreadRow({
           onToggle={() => setWorkersExpanded((expanded) => !expanded)}
         />
       )}
-      <SidebarRowTitle marquee={marquee} title={item.title} />
+      <SidebarRowTitle title={item.title} />
 
       <span
         className={cn(
@@ -560,8 +499,6 @@ export function SidebarThreadRow({
               "group/row relative mb-0.5 select-none [-webkit-touch-callout:none]",
               isDeleting && "opacity-50"
             )}
-            onMouseEnter={marquee.measure}
-            onMouseLeave={marquee.reset}
           >
             <RowHoverCard
               trigger={link}
@@ -695,8 +632,6 @@ function SidebarSubagentRow({
   depth: number
   onNavigate?: () => void
 }) {
-  const marquee = useTitleMarquee()
-
   const link = (
     <Link
       to="/agents/$threadId"
@@ -710,7 +645,7 @@ function SidebarSubagentRow({
         depth,
       })}
     >
-      <SidebarRowTitle marquee={marquee} title={subagent.title} />
+      <SidebarRowTitle title={subagent.title} />
       <span className="flex shrink-0 items-center gap-space-2">
         {subagent.status === "error" && (
           <ErrorIndicator label="Subagent failed" />
@@ -723,11 +658,7 @@ function SidebarSubagentRow({
   )
 
   return (
-    <li
-      className="group/row relative mb-0.5"
-      onMouseEnter={marquee.measure}
-      onMouseLeave={marquee.reset}
-    >
+    <li className="group/row relative mb-0.5">
       <RowHoverCard
         trigger={link}
         card={<SubagentHoverCard subagent={subagent} />}
@@ -992,7 +923,6 @@ function SidebarTaskWorkerRow({
   indent: boolean
   onNavigate?: () => void
 }) {
-  const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
   const subagents = (worker.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
@@ -1016,11 +946,7 @@ function SidebarTaskWorkerRow({
             ? "Running"
             : "Idle"
   return (
-    <li
-      className="group/row relative mb-0.5"
-      onMouseEnter={marquee.measure}
-      onMouseLeave={marquee.reset}
-    >
+    <li className="group/row relative mb-0.5">
       <Link
         to="/agents/$threadId"
         params={{ threadId: worker.id }}
@@ -1046,7 +972,7 @@ function SidebarTaskWorkerRow({
             onToggle={() => toggleSubagentsCollapsed(`cloud:${worker.id}`)}
           />
         )}
-        <SidebarRowTitle marquee={marquee} title={worker.title} />
+        <SidebarRowTitle title={worker.title} />
         <span className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
