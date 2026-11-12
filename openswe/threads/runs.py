@@ -133,8 +133,10 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "events",
 )
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_OPAQUE_FILE_MIME_TYPE = "application/octet-stream"
 _SUPPORTED_FILE_MIME_TYPES = frozenset(
     {
+        _OPAQUE_FILE_MIME_TYPE,
         "application/pdf",
         "text/plain",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -186,7 +188,7 @@ class DashboardImageBody(BaseModel):
                 cls(
                     kind="file",
                     base64=data,
-                    mimeType=mime,
+                    mimeType=mime if mime in _SUPPORTED_FILE_MIME_TYPES else _OPAQUE_FILE_MIME_TYPE,
                     fileName=name if isinstance(name, str) else None,
                 )
             )

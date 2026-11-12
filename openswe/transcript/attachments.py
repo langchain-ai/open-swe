@@ -24,6 +24,7 @@ ALLOWED_MIME_TYPES = frozenset(
         "image/jpeg",
         "image/gif",
         "image/webp",
+        "application/octet-stream",
         "application/pdf",
         "text/plain",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

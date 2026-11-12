@@ -430,6 +430,19 @@ describe("ChatComposer options", () => {
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
   })
+
+  it("attaches files of any type, such as a typeless JSONL", async () => {
+    renderComposer(false)
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]')!
+
+    fireEvent.change(input, {
+      target: { files: [new File(['{"a":1}\n'], "trace.jsonl")] },
+    })
+
+    expect(await screen.findByText("trace.jsonl")).toBeTruthy()
+    expect(screen.queryByText(/skipped/)).toBeNull()
+  })
 })
 
 describe("ChatComposer people autocomplete", () => {

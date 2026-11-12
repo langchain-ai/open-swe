@@ -50,11 +50,11 @@ async def test_file_blocks_are_queued_for_the_sandbox_and_replaced_by_a_note(
     content = params["input"]["messages"][0]["content"]
     assert [block["type"] for block in content] == ["text", "text"]
     assert "/workspace/.open-swe/attachments/a.pdf" in content[1]["text"]
-    pdf["mime_type"] = "application/zip"
-    with pytest.raises(HTTPException):
-        await runs.DashboardImageBody.stage_files(
-            "t1", {"input": {"messages": [{"content": [pdf]}]}}
-        )
+    pdf["mime_type"] = "text/html"
+    (opaque,) = await runs.DashboardImageBody.stage_files(
+        "t1", {"input": {"messages": [{"content": [pdf]}]}}
+    )
+    assert opaque.mime_type == "application/octet-stream"
 
 
 async def test_retried_run_start_stages_files_under_the_same_attachment_ids(
