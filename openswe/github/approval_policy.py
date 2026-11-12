@@ -38,6 +38,12 @@ EVALUATE_JOB = "robin_approves_evaluate"
 _RETRY_DELAY = timedelta(minutes=1)
 _NOTE_MARKER = "<!-- robin-approves-note -->"
 _STANDING_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
+# Robin can't read a ruleset's bypass list, so this says where the bypass shows up.
+_BREAK_GLASS = (
+    "**Break glass:** if this can't wait, or Robin is down and the check never reports, "
+    "anyone on the bypass list of the ruleset that requires this check can merge anyway: "
+    "tick *bypass rules* in the pull request's merge box. GitHub records who did."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +191,8 @@ class PullRequestApproval:
             if not approval.head_sha:
                 return
             passed, summary = approval.verdict()
+            if not passed:
+                summary = f"{summary}\n\n{_BREAK_GLASS}"
             await pull.repo.create_check_run(
                 {
                     "name": APPROVAL_CHECK_RUN_NAME,
