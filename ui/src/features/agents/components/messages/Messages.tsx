@@ -11,11 +11,10 @@ import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { TurnFoldRow } from "./timeline/foldRows"
 import { groupQuietRuns } from "./quietRuns"
-import type { QuietStretch, TranscriptEntry } from "./quietRuns"
+import type { QuietStretch } from "./quietRuns"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { SentReply, UserMessage } from "./UserMessage"
-import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import type { Message } from "@/features/agents/lib/types"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
@@ -104,19 +103,6 @@ function QueuedMessages({
   )
 }
 
-type MessageEntry = Extract<TranscriptEntry, { type: "message" }>
-type DisplayEntry =
-  | TranscriptEntry
-  | { type: "events"; events: [MessageEntry, ...Array<MessageEntry>] }
-
-function isEventListener(message: Message): boolean {
-  return (
-    message.structuredSenderKind === "system" &&
-    message.structuredSenderId === "system:event-subscription" &&
-    !message.taskEvent
-  )
-}
-
 function quietStretchLabel(stretch: QuietStretch): string {
   const parts = [`${stretch.runCount} runs without a reply`]
   if (stretch.durationMs !== null && stretch.durationMs >= 1000)
@@ -182,6 +168,18 @@ export const Messages = memo(function MessagesComponent({
     () => messages.filter((message) => !message.hidden),
     [messages]
   )
+  const renderableMessageIds = new Set(
+    visibleMessages
+      .filter(
+        (message) =>
+          message.structuredSenderKind !== "system" ||
+          message.taskEvent ||
+          message.structuredSenderId === "system:sandbox-handoff" ||
+          message.structuredSenderId?.startsWith("system:api_key/") ||
+          message.structuredSenderId?.startsWith("system:github_actions/")
+      )
+      .map((message) => message.id)
+  )
   const costsByTurn = useMemo(
     () => turnCosts(visibleMessages, runCosts),
     [visibleMessages, runCosts]
@@ -213,21 +211,6 @@ export const Messages = memo(function MessagesComponent({
       ),
     [visibleMessages, isStreaming]
   )
-  // Back-to-back event listener messages left in view share one chip.
-  const displayEntries = useMemo(
-    () =>
-      transcriptEntries.reduce<Array<DisplayEntry>>((entries, entry) => {
-        if (entry.type !== "message" || !isEventListener(entry.message)) {
-          entries.push(entry)
-          return entries
-        }
-        const previous = entries.at(-1)
-        if (previous?.type === "events") previous.events.push(entry)
-        else entries.push({ type: "events", events: [entry] })
-        return entries
-      }, []),
-    [transcriptEntries]
-  )
   const [expandedStretches, setExpandedStretches] = useState<
     Record<string, boolean>
   >({})
@@ -254,6 +237,7 @@ export const Messages = memo(function MessagesComponent({
       : undefined
 
   const renderMessage = (message: Message, index: number) => {
+    if (!renderableMessageIds.has(message.id)) return null
     const isLastMessage = index === visibleMessages.length - 1
     const messageIsStreaming = isStreaming && isLastMessage
     const messageIsMarkdownLive = message.id === liveMarkdownMessageId
@@ -327,35 +311,11 @@ export const Messages = memo(function MessagesComponent({
                   : "Load earlier turns"}
               </Button>
             )}
-            {visibleMessages.length === 0 && emptyState}
+            {!isStreaming && renderableMessageIds.size === 0 && emptyState}
             <div ref={transcriptRef}>
-              {displayEntries.map((entry) => {
+              {transcriptEntries.map((entry) => {
                 if (entry.type === "message")
                   return renderMessage(entry.message, entry.index)
-                if (entry.type === "events") {
-                  const [first] = entry.events
-                  if (entry.events.length === 1)
-                    return renderMessage(first.message, first.index)
-                  return (
-                    <div key={first.message.id} className="my-space-4">
-                      <ExpandableMessageChip
-                        messageIds={entry.events.map(
-                          ({ message }) => message.id
-                        )}
-                        label={`${entry.events.length} events`}
-                        accessibleLabel={`${entry.events.length} event listener messages`}
-                      >
-                        {entry.events.map(({ message }) => (
-                          <UserMessage
-                            key={message.id}
-                            message={message}
-                            threadId={threadId}
-                          />
-                        ))}
-                      </ExpandableMessageChip>
-                    </div>
-                  )
-                }
                 const { stretch } = entry
                 const expanded = expandedStretches[stretch.key] ?? false
                 return (

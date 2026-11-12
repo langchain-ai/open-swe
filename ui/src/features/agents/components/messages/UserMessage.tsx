@@ -14,7 +14,7 @@ import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
-import { ExpandableMessageChip } from "./ExpandableMessageChip"
+import { Banner } from "@langchain/macaw-components/Banner"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
@@ -102,10 +102,8 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
       {hasBody && (
         <div
           className={cn(
-            "relative max-w-full overflow-hidden rounded-xl p-space-3",
-            isSystem
-              ? "mt-space-1 border border-default bg-user-message"
-              : "bg-user-message"
+            "relative max-w-full overflow-hidden",
+            !isSystem && "rounded-xl bg-user-message p-space-3"
           )}
         >
           {excerpts.map((excerpt, i) => (
@@ -208,8 +206,8 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
     >
       <div
         className={cn(
-          "flex max-w-[80%] flex-col",
-          isSystem ? "items-start" : "items-end"
+          "flex flex-col",
+          isSystem ? "w-full" : "max-w-[80%] items-end"
         )}
       >
         {!isSystem &&
@@ -265,21 +263,12 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
             </div>
           )}
         {isSystem ? (
-          <ExpandableMessageChip
-            testId="system-message-toggle"
-            label={
-              <>
-                <span>{message.structuredSenderName || "Context"}</span>
-                {message.structuredSenderNote && (
-                  <span className="text-tertiary">
-                    · {message.structuredSenderNote}
-                  </span>
-                )}
-              </>
-            }
+          <Banner
+            intent="neutral"
+            title={message.structuredSenderName || "Notice"}
           >
             {body}
-          </ExpandableMessageChip>
+          </Banner>
         ) : (
           body
         )}

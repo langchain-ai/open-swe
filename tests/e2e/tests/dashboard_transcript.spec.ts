@@ -427,10 +427,9 @@ test.describe("transcript rendering", () => {
     ).toBeVisible();
     await expect(page.locator("img[data-e2e-injected]")).toHaveCount(0);
     await expect(page.getByText("Automation checks CI")).toHaveCount(0);
-    const systemChip = page.getByRole("button", { name: "Scheduler" });
-    await expect(systemChip).toBeVisible();
-    await systemChip.click();
-    await expect(page.getByText("Automation checks CI")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Scheduler" })).toHaveCount(
+      0,
+    );
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
     await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
       0,
@@ -447,6 +446,6 @@ test.describe("transcript rendering", () => {
       page
         .locator('[data-message-sender-kind="system"]')
         .filter({ hasText: "Automation checks CI" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
   });
 });
