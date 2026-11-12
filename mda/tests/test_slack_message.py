@@ -70,6 +70,8 @@ def test_options_parse_and_strip_the_same_way(
         ("<@U0BOT> /breakout in <#C2>", Breakout("", "<#C2>", "C2")),
         ("<@U0BOT> /breakout in #target fix it", Breakout("fix it", "#target")),
         ("<@U0BOT> /breakout in the parser", Breakout("in the parser")),
+        ("<@U0BOT> /breakout to <#C2|target> fix it", Breakout("fix it", "<#C2|target>", "C2")),
+        ("<@U0BOT> /breakout to the parser", Breakout("to the parser")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Breakout("fix it", "<#C2|target>", "C2"),

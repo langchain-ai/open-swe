@@ -76,6 +76,8 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
         ("<@U0BOT> /breakout in <#C2>", Command("", "<#C2>", "C2")),
         ("<@U0BOT> /breakout in #target fix it", Command("fix it", "#target")),
         ("<@U0BOT> /breakout in the parser", Command("in the parser")),
+        ("<@U0BOT> /breakout to <#C2|target> fix it", Command("fix it", "<#C2|target>", "C2")),
+        ("<@U0BOT> /breakout to the parser", Command("to the parser")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),
