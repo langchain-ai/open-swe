@@ -398,15 +398,14 @@ async def _first_write(proxy: SandboxProxyWriter, runtime: Runtime, sandbox_id: 
 
 
 async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
-    """``backend``'s sandbox, retried while the sandbox service fails transiently.
-
-    A bound sandbox that is gone is replaced, and the run told its workspace was lost.
-    """
+    """Open ``backend``'s sandbox, retrying transient failures and replacing missing sandboxes."""
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
             return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
-        except BoundSandboxMissingError:
+        except (BoundSandboxMissingError, ResourceNotFoundError) as exc:
+            if isinstance(exc, ResourceNotFoundError) and exc.resource_type != "sandbox":
+                return _not_opened(exc)
             try:
                 await replace_sandbox(backend, missing_only=True)
                 return OpenedSandbox(

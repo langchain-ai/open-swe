@@ -7,6 +7,7 @@ import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import replace
+from itertools import chain, repeat
 from pathlib import Path
 from typing import Final, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -64,10 +65,16 @@ from pydantic import BaseModel, JsonValue
 from rt import backend as rt_backend
 from rt import search_tools
 from rt.backend import Run, current_run
-from rt.managed_sandbox import PROXY_WRITE_BACKOFF_SECONDS, definition, opened_sandbox
+from rt.managed_sandbox import (
+    PROXY_WRITE_BACKOFF_SECONDS,
+    OpenedSandbox,
+    booted_sandbox,
+    definition,
+    opened_sandbox,
+)
 from rt.outbox import Outbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
-from rt.sandbox_setup import SandboxUnavailableError
+from rt.sandbox_setup import SandboxSetup, SandboxUnavailableError
 from runtime_api.catalog import (
     BrowserSpec,
     Catalog,
@@ -490,8 +497,95 @@ async def test_a_sandbox_that_never_boots_ends_the_run_at_its_first_shell_call_w
 
     assert prepared == [("sandbox-thread-1", None)]
     assert unreachable == ["ResourceCreationError: Image pull failed"]
-    # Only the boot opens the sandbox: nothing reaches for it again, which would make another.
-    assert opened.call_count == 1
+    assert opened.call_count == 2
+
+
+class TestSandboxBootRecovery:
+    @pytest.mark.parametrize("resource_type", ["sandbox", "snapshot"])
+    async def test_missing_resource_during_boot(
+        self, monkeypatch: pytest.MonkeyPatch, resource_type: str
+    ) -> None:
+        files = MagicMock(spec=SandboxBackendProtocol)
+        opening = AsyncMock(
+            side_effect=[ResourceNotFoundError("deleted", resource_type=resource_type), "fresh"]
+        )
+        replacing = AsyncMock()
+        monkeypatch.setattr("rt.managed_sandbox.open_sandbox", opening)
+        monkeypatch.setattr("rt.managed_sandbox.replace_sandbox", replacing)
+
+        result = await booted_sandbox(files)
+
+        if resource_type == "sandbox":
+            assert result == OpenedSandbox(sandbox_id="fresh", workspace_lost=True)
+            replacing.assert_awaited_once_with(files, missing_only=True)
+            assert opening.await_count == 2
+            opening.assert_awaited_with(files, wait=True)
+        else:
+            assert result.error == "ResourceNotFoundError: deleted"
+            assert result.workspace_lost is False
+            replacing.assert_not_awaited()
+            assert opening.await_count == 1
+
+    @pytest.mark.parametrize("retry_fails", [False, True])
+    async def test_cached_boot_failure_retries_once(self, retry_fails: bool) -> None:
+        files = MagicMock(spec=SandboxBackendProtocol)
+        files.aexecute = AsyncMock(return_value=ExecuteResponse(output="ok", exit_code=0))
+        boot = AsyncMock(
+            side_effect=[
+                OpenedSandbox(error="TimeoutError: boot timed out"),
+                OpenedSandbox(error="TimeoutError: still unavailable")
+                if retry_fails
+                else OpenedSandbox(sandbox_id="fresh"),
+            ]
+        )
+        setup = SandboxSetup()
+        setup.start(files, boot)
+
+        if retry_fails:
+            for _ in range(2):
+                with pytest.raises(SandboxUnavailableError, match="still unavailable"):
+                    await setup.done()
+            files.aexecute.assert_not_awaited()
+        else:
+            await asyncio.gather(setup.booted(), setup.done(), setup.done())
+            files.aexecute.assert_awaited_once()
+        assert boot.await_args_list == [((files,), {}), ((files,), {})]
+
+    async def test_missing_sandbox_at_startup_completes_its_shell_call(
+        self, monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
+    ) -> None:
+        files = MagicMock(spec=SandboxBackendProtocol)
+        files.id = "sandbox-thread-1"
+        files.aexecute = AsyncMock(return_value=ExecuteResponse(output="recovered", exit_code=0))
+        monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", lambda *args: files.id)
+        monkeypatch.setattr(
+            mda_runtime,
+            "_resolve_managed_sandbox",
+            MagicMock(
+                side_effect=chain(
+                    [ResourceNotFoundError("deleted", resource_type="sandbox")], repeat(files)
+                )
+            ),
+        )
+        replacing = AsyncMock()
+        monkeypatch.setattr("rt.managed_sandbox.replace_sandbox", replacing)
+        monkeypatch.setattr(
+            agent,
+            "_DEFAULT_MODEL",
+            _calling(ToolCall(name="execute", args={"command": "ls"}, id="c")),
+        )
+
+        await _run(
+            InMemoryStore(),
+            "thread-1",
+            _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a")),
+        )
+
+        assert prepared == [("sandbox-thread-1", None)]
+        assert replacing.await_count == 1
+        assert replacing.await_args is not None
+        assert replacing.await_args.kwargs == {"missing_only": True}
+        assert any(call.args == ("ls",) for call in files.aexecute.await_args_list)
 
 
 @pytest.mark.parametrize("failure", ["lookup", "restart", "unusable", "conflict"])

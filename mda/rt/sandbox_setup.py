@@ -6,14 +6,15 @@ leaves a readied sandbox as it was. The run asks for a new sandbox without waiti
 boot, so readying it first waits for the boot. A call that needs the sandbox waits for the
 boot (``booted``), and a tool that may change a checkout for the readying (``done``),
 both in ``rt.file_tools``; the turn's git baseline (``rt.git_evidence``) waits for the
-readying too, since it reads the work dir, so a sandbox that never booted is never reached
-for, and so never made again.
+readying too, since it reads the work dir. A failed boot gets one fresh attempt, shared
+by all callers; if that also fails, calls report the sandbox as unavailable.
 """
 
 import asyncio
 import logging
 import shlex
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Final, Protocol
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -47,6 +48,7 @@ class SandboxSetup:
 
     def __init__(self) -> None:
         self._booted: asyncio.Future[Boot] | None = None
+        self._retry: Callable[[], Awaitable[Boot]] | None = None
         self._ready: asyncio.Task[None] | None = None
 
     def start(
@@ -54,11 +56,11 @@ class SandboxSetup:
         files: object,
         boot: Callable[[SandboxBackendProtocol], Awaitable[Boot]] | None = None,
     ) -> None:
-        """Ready the sandbox ``files`` reaches in the background, once ``boot`` says it has
-        booted; without ``boot``, it already has."""
+        """Ready ``files`` in the background once ``boot`` succeeds, or immediately without it."""
         if not isinstance(files, SandboxBackendProtocol):
             return
-        self._booted = None if boot is None else asyncio.ensure_future(boot(files))
+        self._retry = None if boot is None else partial(boot, files)
+        self._booted = None if self._retry is None else asyncio.ensure_future(self._retry())
         self._ready = asyncio.ensure_future(self._setup(files))
 
     async def booted(self) -> None:
@@ -67,7 +69,13 @@ class SandboxSetup:
             return
         boot = await asyncio.shield(self._booted)
         if boot.error is not None:
-            raise SandboxUnavailableError(boot.error)
+            if self._retry is not None:
+                logger.warning("Sandbox boot failed; retrying", extra={"cause": boot.error})
+                self._booted = asyncio.ensure_future(self._retry())
+                self._retry = None
+            boot = await asyncio.shield(self._booted)
+            if boot.error is not None:
+                raise SandboxUnavailableError(boot.error)
 
     async def done(self) -> None:
         await self.booted()
