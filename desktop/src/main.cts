@@ -71,6 +71,7 @@ const { isDesktopCommandId } = require("./commands.cjs");
 const { PREVIEW_SCHEME, PreviewFiles } = require("./preview-files.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
 const { DesktopEnvironments } = require("./desktop-environments.cjs");
+const { CloseConfirmation } = require("./close-confirmation.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -1475,6 +1476,8 @@ async function loadApp(window: Electron.BrowserWindow, url = APP_URL) {
   }
 }
 
+const closeConfirmation = new CloseConfirmation(app, dialog, appRuntime.name);
+
 function createMenu() {
   const backendSettingsItem = {
     label: "Backend URL…",
@@ -1512,7 +1515,15 @@ function createMenu() {
               { role: "hideOthers" },
               { role: "unhide" },
               { type: "separator" },
-              { role: "quit" },
+              {
+                label: `Quit ${app.name}`,
+                accelerator: "Command+Q",
+                click: () =>
+                  void closeConfirmation.request(
+                    "quit",
+                    BrowserWindow.getFocusedWindow(),
+                  ),
+              },
             ],
           },
         ]
@@ -1535,7 +1546,19 @@ function createMenu() {
           ? []
           : [{ type: "separator" }, settingsItem, ...backendItems]),
         { type: "separator" },
-        { role: process.platform === "darwin" ? "close" : "quit" },
+        ...(process.platform === "darwin"
+          ? [
+              {
+                label: "Close Window",
+                accelerator: "Command+W",
+                click: () =>
+                  void closeConfirmation.request(
+                    "close",
+                    BrowserWindow.getFocusedWindow(),
+                  ),
+              },
+            ]
+          : [{ role: "quit" }]),
       ],
     },
     {
