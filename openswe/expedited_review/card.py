@@ -6,6 +6,7 @@ from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.slack.app_modals import modal_button
 from openswe.slack.blocks import (
+    MESSAGE_MAX_BLOCKS,
     SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
@@ -34,6 +35,8 @@ _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
 _MAX_PATCH_LINES = 60
 _OVERFLOW_NOTE_RESERVE = 64
+# The base-branch warning and origin footer the lifecycle adds around a card.
+_WRAPPER_BLOCKS = 2
 
 
 def _button_value(action: str, approval: HumanReviewRequest) -> str:
@@ -52,31 +55,40 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     if approval.approval_condition:
         blocks.append(section(f"*You're approving:* {escape(approval.approval_condition)}"))
         blocks.append(context(f"Covered by auto-approve: {escape(approval.auto_approved)}"))
-    if approval.tldr:
+    if approval.tldr and not approval.approval_condition:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
 
 
 def _diff_sections(
-    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
+    approval: HumanReviewRequest,
+    files: list[ChangedFile],
+    diff_image_id: str | None,
+    budget: int,
 ) -> list[Block]:
+    """The visible diff and omitted-file details, in at most ``budget`` blocks."""
     diff = ExpeditedDiff(files, approval.excluded_hunks)
     shown = diff.shown
-    trailer = [
-        *_overflow_note(shown),
+    omitted = [
         *_diffstat("Tests", "test files", diff.tests),
         *_diffstat("Generated", "generated files", diff.generated),
         *_condition_summary(diff),
         *_excluded_summary(diff),
+        context(f"<{approval.pull_request.url}/files|Review the full diff and omitted files>"),
     ]
     if diff_image_id:
         names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
-        return [image(diff_image_id, f"Diff of {names}"), *trailer]
+        return [
+            image(diff_image_id, f"Diff of {names}"),
+            *_overflow_note(shown, _MAX_FILE_SECTIONS),
+            *omitted,
+        ]
+    drawn = max(0, min(_MAX_FILE_SECTIONS, (budget - len(omitted) - 1) // 2))
     sections: list[Block] = []
-    for file in shown[:_MAX_FILE_SECTIONS]:
+    for file in shown[:drawn]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
         sections.append(section(code_block(_clip(file.patch or ""))))
-    return [*sections, *trailer]
+    return [*sections, *_overflow_note(shown, drawn), *omitted]
 
 
 def _clip(patch: str) -> str:
@@ -88,10 +100,10 @@ def _clip(patch: str) -> str:
     )
 
 
-def _overflow_note(files: list[ChangedFile]) -> list[Block]:
-    if len(files) <= _MAX_FILE_SECTIONS:
+def _overflow_note(files: list[ChangedFile], drawn: int) -> list[Block]:
+    if len(files) <= drawn:
         return []
-    return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
+    return [context(f"{len(files) - drawn} more files on GitHub.")]
 
 
 def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
@@ -109,7 +121,7 @@ def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
         lines.append(line)
     if len(lines) < len(files):
         lines.append(f"{len(files) - len(lines)} more {noun} on GitHub.")
-    return [context(heading + "\n".join(lines))]
+    return [{**section(heading + "\n".join(lines)), "expand": False}]
 
 
 def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
@@ -137,7 +149,7 @@ def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
         lines.append(line)
     if len(lines) < len(stats):
         lines.append(f"{len(stats) - len(lines)} more files on GitHub.")
-    return [context(heading + "\n".join(lines))]
+    return [{**section(heading + "\n".join(lines)), "expand": False}]
 
 
 def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
@@ -170,7 +182,7 @@ def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
         lines.append(line)
     if len(lines) < len(stats):
         lines.append(f"{len(stats) - len(lines)} more guidelines; see the audit log.")
-    return [context(heading + "\n".join(lines))]
+    return [{**section(heading + "\n".join(lines)), "expand": False}]
 
 
 def _vote_buttons(approval: HumanReviewRequest) -> list[ButtonElement]:
@@ -240,15 +252,14 @@ def readiness_prompt(
     """The full author-only draft card."""
     pr = approval.pull_request
     text = f"Review {pr.url} carefully yourself before clicking Mark ready for review."
-    return text, [
-        *_header(approval, title, author),
-        divider(),
-        *_voting_diff(approval, files, diff_image_id),
+    head = [*_header(approval, title, author), divider()]
+    tail = [
         section(
             f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
         ),
         actions(_ready_button(approval), _dismiss_button(approval)),
     ]
+    return text, [*head, *_voting_diff(approval, files, diff_image_id, [*head, *tail]), *tail]
 
 
 def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
@@ -260,12 +271,16 @@ def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
 
 
 def _voting_diff(
-    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
+    approval: HumanReviewRequest,
+    files: list[ChangedFile],
+    diff_image_id: str | None,
+    around: list[Block],
 ) -> list[Block]:
-    """The diff voters read; an approved card no longer needs it."""
+    """The diff voters read, fit beside the ``around`` blocks; an approved card no longer needs it."""
     if approval.approved:
         return []
-    return [*_diff_sections(approval, files, diff_image_id), divider()]
+    budget = MESSAGE_MAX_BLOCKS - _WRAPPER_BLOCKS - len(around) - 1
+    return [*_diff_sections(approval, files, diff_image_id, budget), divider()]
 
 
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
@@ -310,11 +325,12 @@ def open_card(
     header = _header(approval, title, author)
     if thread_url:
         header.append(context(f"Sent from <{thread_url}|this thread>."))
+    head = [*header, divider()]
+    status = _status(approval, author, [] if thread_url is not None else choices or [])
     blocks: list[Block] = [
-        *header,
-        divider(),
-        *_voting_diff(approval, files, diff_image_id),
-        *_status(approval, author, [] if thread_url is not None else choices or []),
+        *head,
+        *_voting_diff(approval, files, diff_image_id, [*head, *status]),
+        *status,
     ]
     text = f"Expedited review requested for {pr.url}"
     return text, blocks
@@ -343,12 +359,15 @@ def closed_card(
                 f"{icon}*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(title)}{author_label}"
             )
         ]
-    blocks: list[Block] = [
-        *_header(approval, title, author),
-        divider(),
-        *_voting_diff(approval, files, diff_image_id),
+    head = [*_header(approval, title, author), divider()]
+    tail = [
         section(f"*{outcome}*"),
         *([context(_vote_summary(approval))] if approval.approvals else []),
+    ]
+    blocks: list[Block] = [
+        *head,
+        *_voting_diff(approval, files, diff_image_id, [*head, *tail]),
+        *tail,
     ]
     return f"{outcome} — {pr.url}", blocks
 

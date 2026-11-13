@@ -319,16 +319,11 @@ test.describe("Expedited Slack review", () => {
     await expect(diff).toBeVisible();
     await expect(diff).toHaveAttribute("alt", /config\.py.*greet\.py/);
     await expect(diff).not.toHaveAttribute("alt", /CHANGELOG/);
-    // 44 lines changed outside tests; only the 4 not covered by the auto-approve rule are
-    // drawn, and the other 40 are listed by guideline.
     await expect(card(page)).toContainText(
-      /Robin judged these auto-approvable under `?\.open-swe\/auto-approve-rules\/`? \(not shown\)/,
+      /Robin judged these auto-approvable/,
     );
     await expect(card(page)).toContainText(
-      /Release notes_?: `?CHANGELOG\.md`? \+30 −0/,
-    );
-    await expect(card(page)).toContainText(
-      /Generated constants_?: `?config\.py`? 1 hunk \+10 −0/,
+      "Review the full diff and omitted files",
     );
     // Git appends the enclosing line to a header, so compare only the ranges.
     expect(

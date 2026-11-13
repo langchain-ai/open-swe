@@ -9,7 +9,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
-from openswe.slack.blocks import SECTION_TEXT_MAX_CHARS
+from openswe.slack.blocks import MESSAGE_MAX_BLOCKS, SECTION_TEXT_MAX_CHARS
 from openswe.users.models import User, UserIdentity
 
 
@@ -79,8 +79,9 @@ def test_long_test_paths_stay_under_the_slack_limit_and_count_the_rest() -> None
     ]
 
     [block] = _diffstat("Tests", "test files", tests)
-    text = block["elements"][0]["text"]
+    text = block["text"]["text"]
 
+    assert block["expand"] is False
     assert len(text) <= SECTION_TEXT_MAX_CHARS
     shown = text.count("test_")
     assert 0 < shown < len(tests)
@@ -111,7 +112,8 @@ async def test_configured_channel_hides_send_controls(
     assert "kitchen" in str(blocks)
 
 
-def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline() -> None:
+@pytest.mark.parametrize("condition", [False, True])
+def test_card_draws_unexcluded_hunks_and_summarizes_omissions(condition: bool) -> None:
     generated = "\n".join(f"+GEN_{index} = {index}" for index in range(12))
     app = ChangedFile(
         filename="src/app.py",
@@ -140,8 +142,14 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
     ]
 
     pr = PullRequest(owner="lc", repo="repo", number=7)
+    for entry in excluded:
+        entry["approval_condition"] = condition
     approval = HumanReviewRequest(
-        pull_request_id=pr.id, head_sha="abc", kind="expedited", excluded_hunks=excluded
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        excluded_hunks=excluded,
+        tldr="Additional PR summary",
     )
     approval.pull_request = pr
     _, blocks = open_card(approval, title="t", author="<@U1>", files=files)
@@ -156,13 +164,56 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
     drawn = [text for text in texts if text.startswith("```")]
     assert drawn == ["```\n@@ -1,3 +1,3 @@\n-DEBUG = True\n+DEBUG = False\n a\n b\n```"]
     assert "`src/app.py`  +1 −1" in texts
-    assert texts[-2:] == [
-        "*Tests (not shown)*\n`tests/test_app.py`  +5 −0",
-        "*Robin judged these auto-approvable under `.open-swe/auto-approve-rules/` (not shown)*\n"
-        "_Generated constants_: `src/app.py` 1 hunk +12 −0\n"
-        "_Logging config_: `src/app.py` 1 hunk +3 −0\n"
-        "_Release notes_: `CHANGELOG.md` +30 −0",
+    assert (">Additional PR summary" in texts) is not condition
+    omitted = [
+        block for block in blocks if block["type"] == "section" and block.get("expand") is False
     ]
+    assert len(omitted) == 2
+    details = "\n".join(block["text"]["text"] for block in omitted)
+    assert "`tests/test_app.py`  +5 −0" in details
+    assert "`src/app.py`" in details
+    assert "`CHANGELOG.md`" in details
+    assert ("Fully described by the change above" in details) is condition
+    assert ("Generated constants" in details) is not condition
+    assert texts[-1] == f"<{pr.url}/files|Review the full diff and omitted files>"
+
+
+def test_fallback_card_fits_slack_block_limit_with_every_omitted_group() -> None:
+    shown = [
+        ChangedFile(filename=f"src/module_{index}.py", additions=1, patch="@@ -0,0 +1 @@\n+x")
+        for index in range(21)
+    ]
+    files = [
+        *shown,
+        ChangedFile(filename="tests/test_app.py", additions=1, patch="+x"),
+        ChangedFile(filename="swagger.json", additions=1, patch="+x"),
+        ChangedFile(filename="docs/a.md", additions=1, patch="@@ -0,0 +1 @@\n+a"),
+        ChangedFile(filename="docs/b.md", additions=1, patch="@@ -0,0 +1 @@\n+b"),
+    ]
+    excluded = [
+        *Exclusion(path="docs/a.md", guideline="Docs", reason="r").resolve(files),
+        *Exclusion(path="docs/b.md", guideline="Docs", reason="r").resolve(files),
+    ]
+    excluded[0]["approval_condition"] = True
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    approval = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        excluded_hunks=excluded,
+        slack_channel_id="C1",
+    )
+    approval.pull_request = pr
+    choices = [{"id": "C1", "name": "kitchen"}, {"id": "C2", "name": "reviews"}]
+
+    _, blocks = open_card(approval, title="t", author="<@U1>", files=files, choices=choices)  # type: ignore[arg-type]
+
+    assert len(blocks) + 2 <= MESSAGE_MAX_BLOCKS
+    drawn = sum(block.get("text", {}).get("text", "").startswith("```") for block in blocks)
+    contexts = [element["text"] for block in blocks for element in block.get("elements", [])]
+    assert f"{len(shown) - drawn} more files on GitHub." in contexts
+    assert f"<{pr.url}/files|Review the full diff and omitted files>" in contexts
+    assert blocks[-1]["block_id"] == "expedited_review_send"
 
 
 def test_send_controls_are_buttons_trigger_server_forwards() -> None:
