@@ -3,7 +3,7 @@ from collections import deque
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 
 from scripts import deploy_preview
@@ -45,19 +45,19 @@ async def test_waits_for_published_commit_without_triggering_deployment(
         ]
     )
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"
         if request.url.path.endswith("/revisions"):
             offset, page = responses.popleft()
             assert request.url.params["offset"] == offset
-            return httpx.Response(200, json=page.model_dump())
+            return httpx2.Response(200, json=page.model_dump())
         assert request.url.path.endswith("/revisions/expected")
-        return httpx.Response(
+        return httpx2.Response(
             200, json=expected.model_copy(update={"status": "DEPLOYED"}).model_dump()
         )
 
-    async with httpx.AsyncClient(
-        base_url="https://deploy.test", transport=httpx.MockTransport(respond)
+    async with httpx2.AsyncClient(
+        base_url="https://deploy.test", transport=httpx2.MockTransport(respond)
     ) as client:
         await Deployer(client, "preview", "published").deploy()
     assert not responses
@@ -78,12 +78,12 @@ async def test_rejects_failed_or_wrong_commit(
 ) -> None:
     monkeypatch.setattr(deploy_preview, "POLL_SECONDS", 0)
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"
         if request.url.path.endswith("/logs"):
-            return httpx.Response(200, json={"logs": []})
+            return httpx2.Response(200, json={"logs": []})
         if request.url.path.endswith("/revisions"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 json={
                     "resources": [
@@ -96,7 +96,7 @@ async def test_rejects_failed_or_wrong_commit(
                     "offset": 1,
                 },
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             json={
                 "id": "expected",
@@ -105,8 +105,8 @@ async def test_rejects_failed_or_wrong_commit(
             },
         )
 
-    async with httpx.AsyncClient(
-        base_url="https://deploy.test", transport=httpx.MockTransport(respond)
+    async with httpx2.AsyncClient(
+        base_url="https://deploy.test", transport=httpx2.MockTransport(respond)
     ) as client:
         with pytest.raises(DeployError, match=error):
             await Deployer(client, "preview", "published").deploy()
@@ -123,7 +123,7 @@ async def test_stops_when_preview_branch_is_superseded(
     github_output = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"
         assert request.url.path.endswith("/revisions")
         preview_branch.return_value = "replacement"
@@ -138,10 +138,10 @@ async def test_stops_when_preview_branch_is_superseded(
             if status
             else []
         )
-        return httpx.Response(200, json={"resources": resources, "offset": 0})
+        return httpx2.Response(200, json={"resources": resources, "offset": 0})
 
-    async with httpx.AsyncClient(
-        base_url="https://deploy.test", transport=httpx.MockTransport(respond)
+    async with httpx2.AsyncClient(
+        base_url="https://deploy.test", transport=httpx2.MockTransport(respond)
     ) as client:
         await Deployer(client, "preview", "published").deploy()
     output = capsys.readouterr().out
@@ -155,7 +155,7 @@ async def test_branch_lookup_failure_is_not_treated_as_superseded(
     preview_branch: AsyncMock,
 ) -> None:
     preview_branch.side_effect = DeployError("could not read the preview branch")
-    async with httpx.AsyncClient(base_url="https://deploy.test") as client:
+    async with httpx2.AsyncClient(base_url="https://deploy.test") as client:
         with pytest.raises(DeployError, match="could not read the preview branch"):
             await Deployer(client, "preview", "published").deploy()
 
@@ -165,13 +165,13 @@ async def test_times_out_when_automatic_revision_never_appears(
 ) -> None:
     monkeypatch.setattr(deploy_preview, "POLL_SECONDS", 0)
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"
         deployer.deadline = time.monotonic() - 1
-        return httpx.Response(200, json={"resources": [], "offset": 0})
+        return httpx2.Response(200, json={"resources": [], "offset": 0})
 
-    async with httpx.AsyncClient(
-        base_url="https://deploy.test", transport=httpx.MockTransport(respond)
+    async with httpx2.AsyncClient(
+        base_url="https://deploy.test", transport=httpx2.MockTransport(respond)
     ) as client:
         deployer = Deployer(client, "preview", "published")
         with pytest.raises(DeployError, match="no automatic revision for published"):

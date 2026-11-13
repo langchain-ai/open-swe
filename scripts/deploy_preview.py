@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["httpx>=0.28", "pydantic>=2.12"]
+# dependencies = ["httpx2>=2.12.0", "pydantic>=2.12"]
 # ///
 """Wait for the automatic preview deployment and verify the published commit deploys."""
 
@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Literal
 
-import httpx
+import httpx2
 from pydantic import BaseModel
 
 POLL_SECONDS = 15
@@ -109,7 +109,7 @@ class Logs(BaseModel):
 
 
 class Deployer:
-    def __init__(self, client: httpx.AsyncClient, deployment_id: str, expected_sha: str) -> None:
+    def __init__(self, client: httpx2.AsyncClient, deployment_id: str, expected_sha: str) -> None:
         self.client = client
         self.path = f"/v2/deployments/{deployment_id}"
         self.expected_sha = expected_sha
@@ -210,11 +210,11 @@ async def main() -> None:
     headers = {"X-Api-Key": os.environ["LANGSMITH_API_KEY"]}
     if workspace := os.environ.get("LANGSMITH_WORKSPACE_ID"):
         headers["X-Tenant-Id"] = workspace
-    async with httpx.AsyncClient(
+    async with httpx2.AsyncClient(
         base_url=os.environ.get("LANGSMITH_HOST_URL") or "https://api.host.langchain.com",
         headers=headers,
         timeout=30,
-        transport=httpx.AsyncHTTPTransport(retries=3),
+        transport=httpx2.AsyncHTTPTransport(retries=3),
     ) as client:
         deployer = Deployer(client, os.environ["DEPLOYMENT_ID"], os.environ["EXPECTED_SHA"])
         await deployer.deploy()
@@ -223,12 +223,12 @@ async def main() -> None:
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except httpx.HTTPStatusError as exc:
+    except httpx2.HTTPStatusError as exc:
         print(
             f"::error::{exc.request.method} {exc.request.url.path} returned {exc.response.status_code}: {exc.response.text}",
             file=sys.stderr,
         )
         sys.exit(1)
-    except (DeployError, httpx.HTTPError) as exc:
+    except (DeployError, httpx2.HTTPError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         sys.exit(1)
