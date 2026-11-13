@@ -351,6 +351,7 @@ export interface AgentSchedule {
   lastTriggeredAt?: string | null
   lastError?: string | null
   lastErrorAt?: string | null
+  ownerId?: string | null
   createdBy?: string | null
   updatedBy?: string | null
   createdAt?: string | null

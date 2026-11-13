@@ -15,6 +15,7 @@ from langchain_core.messages import (
     messages_from_dict,
 )
 from pydantic import BaseModel, JsonValue
+from rt.automation_budget import AutomationBudgetMiddleware
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
@@ -36,6 +37,8 @@ from runtime_api.catalog import (
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
+    AutomationAllowance,
+    AutomationUsage,
     Done,
     GitHubProxyRefreshed,
     PhaseResult,
@@ -829,3 +832,50 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_automation_budget_gates_calls_and_records_usage(
+    monkeypatch: pytest.MonkeyPatch, allowed: bool
+) -> None:
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+    backend, calls = _backend(
+        monkeypatch,
+        {"automation_usage": AutomationAllowance(allowed=allowed)},
+        LoopRules(automation=True),
+    )
+    monkeypatch.setattr("rt.automation_budget.run_id", lambda: "run-1")
+    reply = AIMessage(
+        content="Done",
+        id="ai-1",
+        usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+    )
+    graph = create_agent(
+        model=GenericFakeChatModel(messages=iter([reply] if allowed else [])),
+        middleware=[AutomationBudgetMiddleware(backend)],
+    )
+    result = await graph.ainvoke({"messages": [HumanMessage(content="Work")]})
+    responses = [
+        AutomationUsage.model_validate(body).response
+        for name, body in calls
+        if name == "automation_usage" and body["response"]
+    ]
+    assert [m for m in result["messages"] if isinstance(m, AIMessage)] == (
+        [reply] if allowed else []
+    )
+    assert len(responses) == int(allowed)
+    if allowed:
+        [recorded] = messages_from_dict(responses[0])
+        assert isinstance(recorded, AIMessage)
+        assert recorded.usage_metadata == reply.usage_metadata
+
+
+async def test_pinned_automation_ignores_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, calls = _backend(monkeypatch, {}, LoopRules(pinned_model=True))
+    result = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="Work"), requested_model="expensive", model_route="fast")
+    )
+    assert result.call is not None
+    assert result.call.model == _MAIN
+    assert calls == []

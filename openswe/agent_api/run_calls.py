@@ -55,6 +55,7 @@ from runtime_api import files as file_api
 from runtime_api.catalog import JOINED_TASK_CONTEXT, ModelSpec
 from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
+    AUTOMATION_USAGE,
     BROWSER,
     FINISH_SCOUT_PLAN,
     GATEWAY_CREDENTIAL,
@@ -76,6 +77,8 @@ from runtime_api.loop import (
     TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
+    AutomationAllowance,
+    AutomationUsage,
     BrowserReport,
     ChosenModel,
     Done,
@@ -185,6 +188,8 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
     take_stale_boot,
 )
+from openswe.schedules.policy import AutomationPolicy
+from openswe.schedules.store import get_agent_schedule
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
@@ -662,10 +667,29 @@ class TokenRun:
         selection = await classify_route(messages_from_dict(request.humans))
         return Route(route=selection.route, persist=selection.persist)
 
+    async def automation_usage(self, request: AutomationUsage) -> AutomationAllowance:
+        schedule_id = self.run.configurable.get("schedule_id")
+        if not isinstance(schedule_id, str):
+            return AutomationAllowance()
+        record = await get_agent_schedule(schedule_id)
+        if record is None:
+            return AutomationAllowance(allowed=False)
+        policy = await AutomationPolicy.for_record(record)
+        return AutomationAllowance(
+            allowed=await policy.permits_call(schedule_id, messages_from_dict(request.response))
+        )
+
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         """A model a person asked for. MDA now answers this itself from the catalog's
         models; kept for one release, for MDA deployments that still ask."""
         fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional()
+        schedule_id = self.run.configurable.get("schedule_id")
+        if isinstance(schedule_id, str):
+            record = await get_agent_schedule(schedule_id)
+            if record is None or not (await AutomationPolicy.for_record(record)).admin:
+                return chosen_model(
+                    self.run.settings.model_id or request.model_id, self.run.settings.effort
+                )
         return chosen_model(request.model_id, request.effort, fallback_model_id=fallback_model_id)
 
     async def task_context(self, _request: RunRequest) -> TaskContext:
@@ -884,6 +908,7 @@ CALLS.serve(RESOLVE, TokenRun.resolve_tool)
 CALLS.serve(TOOL_SET, TokenRun.tool_set)
 CALLS.serve(INBOX, TokenRun.inbox)
 CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
+CALLS.serve(AUTOMATION_USAGE, TokenRun.automation_usage)
 CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 CALLS.serve(TOOL_RESULT, TokenRun.tool_result)

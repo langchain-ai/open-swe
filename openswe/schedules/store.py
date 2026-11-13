@@ -44,6 +44,7 @@ from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
+from openswe.schedules.policy import AutomationPolicy
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
 from openswe.threads.access import agent_version_metadata, resolve_run_email
@@ -266,6 +267,7 @@ def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
         "lastError": record.get("last_error"),
         "lastErrorAt": record.get("last_error_at"),
         "createdBy": record.get("created_by"),
+        "ownerId": record.get("created_by_user_id"),
         "updatedBy": record.get("updated_by") or record.get("created_by"),
         "createdAt": record.get("created_at"),
         "updatedAt": record.get("updated_at"),
@@ -684,7 +686,8 @@ async def create_agent_schedule(
     allow_admin_thread: bool = False,
     use_workspace_credentials: bool = False,
 ) -> dict[str, Any]:
-    if body.admin_thread and not allow_admin_thread:
+    policy = await AutomationPolicy.for_login(login)
+    if body.admin_thread and (not allow_admin_thread or not policy.admin):
         raise HTTPException(403, "admin only")
     if use_workspace_credentials:
         profile: dict[str, Any] = {}
@@ -702,14 +705,18 @@ async def create_agent_schedule(
     if workspace_id is None:
         raise HTTPException(422, f"no workspace named {workspace!r}")
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
+    if not policy.admin:
+        chosen_model, chosen_effort = (
+            await get_workspace_settings(workspace)
+        ).agent_routing_models["fast"]
     automation_id = str(uuid.uuid4())
     trigger_ids = [uuid.uuid4() for _ in triggers]
-    creator = await User.for_login("github", login)
     cron_ids = await _create_crons(
         automation_id, triggers, trigger_ids, enabled=True, created_by=login, saved_by=login
     )
     try:
         async with transaction() as conn:
+            await policy.check_creation(conn)
             await conn.execute(
                 text(
                     "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, "
@@ -730,7 +737,7 @@ async def create_agent_schedule(
                     "branch_prefix": profile.get("branch_prefix"),
                     "login": login,
                     "user_email": (run_email or "").strip().lower(),
-                    "creator_id": creator.id if creator is not None else None,
+                    "creator_id": policy.owner.id if policy.owner else None,
                 },
             )
             await _insert_triggers(conn, automation_id, triggers, trigger_ids, cron_ids)
@@ -755,6 +762,10 @@ async def update_agent_schedule(
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(existing)
     assert existing is not None
+    actor = await AutomationPolicy.for_login(login)
+    (await AutomationPolicy.for_record(existing)).authorize(actor.owner)
+    if not actor.admin and body.admin_thread is True:
+        raise HTTPException(403, "admin only")
     if (
         body.admin_thread is True
         and existing.get("admin_thread") is not True
@@ -781,6 +792,12 @@ async def update_agent_schedule(
     if body.workspace is not None:
         workspace = await _existing_workspace(body.workspace)
         columns["workspace_id"] = await WORKSPACES.id_for_slug(workspace)
+
+    if not (await AutomationPolicy.for_record(existing)).admin:
+        workspace = str(body.workspace or existing["workspace"])
+        columns["model"], columns["effort"] = (
+            await get_workspace_settings(workspace)
+        ).agent_routing_models["fast"]
 
     current_triggers = _parsed_triggers(existing)
     triggers = current_triggers
@@ -843,10 +860,14 @@ async def update_agent_schedule(
     return _schedule_summary(updated)
 
 
-async def delete_agent_schedule(schedule_id: str) -> None:
+async def delete_agent_schedule(schedule_id: str, *, login: str | None = None) -> None:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(existing)
     assert existing is not None
+    if login is not None:
+        (await AutomationPolicy.for_record(existing)).authorize(
+            (await AutomationPolicy.for_login(login)).owner
+        )
     for trigger in existing.get("triggers") or []:
         await _delete_cron(trigger.get("cron_id"))
     async with transaction() as conn:
@@ -1032,6 +1053,9 @@ async def _launch_agent_schedule_record(
     if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
 
+    policy = await AutomationPolicy.for_record(record)
+    if not await policy.permits_call(schedule_id, []):
+        return {"status": "token_limit", "schedule_id": schedule_id}
     workspace = _record_workspace(record)
     if not await WORKSPACES.slug_exists(workspace):
         # Running in another workspace would hand it that workspace's settings
@@ -1039,6 +1063,11 @@ async def _launch_agent_schedule_record(
         error = f"workspace {workspace!r} no longer exists"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
         return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
+
+    if not policy.admin:
+        settings = await get_workspace_settings(_record_workspace(record))
+        model, effort = settings.agent_routing_models["fast"]
+        record = {**record, "model": model, "effort": effort, "admin_thread": False}
 
     if repo:
         try:
@@ -1692,10 +1721,14 @@ async def launch_scheduled_agent_run(
     return await _launch_agent_schedule_record(record, repo=None)
 
 
-async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
+async def trigger_agent_schedule(schedule_id: str, *, login: str | None = None) -> dict[str, Any]:
     record = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(record)
     assert record is not None
+    if login is not None:
+        (await AutomationPolicy.for_record(record)).authorize(
+            (await AutomationPolicy.for_login(login)).owner
+        )
 
     result = await _launch_agent_schedule_record(record, repo=_test_run_repo(record), test_run=True)
     status = result.get("status")
@@ -1707,6 +1740,8 @@ async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
             status_code if isinstance(status_code, int) else 403,
             result.get("error") or "automation repository unavailable",
         )
+    if status == "token_limit":
+        raise HTTPException(429, "Daily limit of 30M tokens reached; resumes at 00:00 UTC")
     if status == "unknown_workspace":
         raise HTTPException(409, result.get("error") or "automation workspace no longer exists")
     raise HTTPException(502, result.get("error") or "failed to start automation test")

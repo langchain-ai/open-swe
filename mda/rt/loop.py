@@ -384,7 +384,13 @@ class RunLoop:
         # route kept for this run alone is already on the run.
         if (kept := kept_route(current.get("model_route"))) is not None:
             self._backend.run.route = kept
-        model = None if self._models is None else model_for(self._models, current)
+        model = (
+            None
+            if self._models is None
+            else self._models.model
+            if self.rules.pinned_model
+            else model_for(self._models, current)
+        )
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         if self.rules.client_prompt:
             system_prompt = f"{system_prompt}\n\n{self.rules.client_prompt}"

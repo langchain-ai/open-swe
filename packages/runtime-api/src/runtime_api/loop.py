@@ -166,6 +166,19 @@ class ModelResult(Report):
     offloading: dict[str, JsonValue] | None = None
 
 
+class AutomationUsage(RunRequest):
+    response: list[dict[str, JsonValue]] = []
+
+
+class AutomationAllowance(BaseModel):
+    allowed: bool = True
+
+
+AUTOMATION_USAGE = Endpoint(
+    "automation_usage", AutomationUsage, AutomationAllowance, seconds=LOOP_CALL_SECONDS
+)
+
+
 class ToolCallReport(Report):
     """A tool call the runtime runs, for the transcript to record."""
 

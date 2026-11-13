@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,6 +11,7 @@ from openswe.tools import automations
 @pytest.fixture(autouse=True)
 def admin(monkeypatch, grant_tool_access: Callable[..., None]) -> None:  # noqa: ANN001
     grant_tool_access(admin=True, admin_thread=True)
+    monkeypatch.setattr(automations, "actor_is_admin", AsyncMock(return_value=True))
     monkeypatch.setattr(
         automations,
         "configurable",
@@ -69,3 +71,15 @@ async def test_sole_writer_sees_only_an_acknowledgement(
     result = await automations.update_automation("schedule-1", prompt="New prompt")
 
     assert result == {"ok": True, "automation": {"id": "schedule-1"}}
+
+
+async def test_member_can_create_from_own_private_thread(monkeypatch, grant_tool_access) -> None:  # noqa: ANN001
+    grant_tool_access(private=True, owner=True)
+    monkeypatch.setattr(automations, "actor_is_admin", AsyncMock(return_value=False))
+    create = AsyncMock(return_value={"id": "schedule-1"})
+    monkeypatch.setattr(automations.schedules, "create_agent_schedule", create)
+    result = await automations.create_automation(
+        "Report", "default", [automations.schedules.ScheduleTrigger(cron="0 9 * * *")]
+    )
+    assert result["ok"] is True
+    assert create.call_args.kwargs["allow_admin_thread"] is False
