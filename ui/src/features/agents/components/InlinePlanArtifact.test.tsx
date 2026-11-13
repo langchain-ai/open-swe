@@ -41,6 +41,17 @@ afterEach(() => {
 })
 
 describe("InlinePlanArtifact", () => {
+  it("opens the artifact beside the conversation when a panel opener is provided", () => {
+    const onOpen = vi.fn()
+    render(<InlinePlanArtifact threadId="thread-1" onOpen={onOpen} />, {
+      wrapper: TooltipProvider,
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open artifact in the conversation" })
+    )
+    expect(onOpen).toHaveBeenCalledOnce()
+  })
+
   it("uses artifact terminology for shared HTML reports", () => {
     mocks.status = "shared"
     render(<InlinePlanArtifact threadId="thread-1" />, {

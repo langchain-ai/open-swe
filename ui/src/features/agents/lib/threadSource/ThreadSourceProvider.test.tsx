@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, act } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { useState } from "react"
 
 import { setUseStreamPreference } from "@/lib/streamPreference"
-import { ThreadSourceProvider, useThreadSource } from "./ThreadSourceProvider"
+import {
+  ThreadSourceProvider,
+  useThreadSource,
+  useRefreshThreadSource,
+} from "./ThreadSourceProvider"
 
 vi.mock("./useAgentStreamSource", () => ({
   useAgentStreamSource: () => ({ kind: "stream" }),
@@ -15,6 +20,34 @@ vi.mock("./useTranscriptSource", () => ({
 afterEach(() => {
   cleanup()
   window.localStorage.clear()
+})
+
+it("preserves submitted review state when refreshing a stream source", () => {
+  function Review() {
+    const [submitted, setSubmitted] = useState(false)
+    const refresh = useRefreshThreadSource()
+    return (
+      <button
+        disabled={submitted}
+        onClick={() => {
+          setSubmitted(true)
+          refresh?.()
+        }}
+      >
+        {submitted ? "Submitted" : "Submit to Robin"}
+      </button>
+    )
+  }
+  render(
+    <ThreadSourceProvider threadId="thread" transcript={false}>
+      <Review />
+    </ThreadSourceProvider>
+  )
+  act(() => screen.getByRole("button", { name: "Submit to Robin" }).click())
+  expect(
+    (screen.getByRole("button", { name: "Submitted" }) as HTMLButtonElement)
+      .disabled
+  ).toBe(true)
 })
 
 it("switches a recorded thread to SDK streaming and back without changing its UI", () => {

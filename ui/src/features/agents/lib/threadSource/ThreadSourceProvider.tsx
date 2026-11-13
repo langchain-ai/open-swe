@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react"
+import { createContext, useContext, useState } from "react"
 
 import { useStreamPreference } from "@/lib/streamPreference"
 
@@ -8,6 +8,12 @@ import type { ReactNode } from "react"
 import type { ThreadSource } from "./types"
 
 const ThreadSourceContext = createContext<ThreadSource | null>(null)
+const RefreshThreadSourceContext = createContext<(() => void) | null>(null)
+
+/** Rehydrate after a run is started outside the thread source. */
+export function useRefreshThreadSource(): (() => void) | null {
+  return useContext(RefreshThreadSourceContext)
+}
 
 /**
  * The thread's transcript and run controls, whichever backend serves them.
@@ -28,12 +34,14 @@ export function useOptionalThreadSource(): ThreadSource | null {
 
 function StreamSource({
   threadId,
+  generation,
   children,
 }: {
   threadId: string
+  generation: number
   children: ReactNode
 }) {
-  const source = useAgentStreamSource(threadId)
+  const source = useAgentStreamSource(threadId, generation)
   return (
     <ThreadSourceContext.Provider value={source}>
       {children}
@@ -73,9 +81,19 @@ export function ThreadSourceProvider({
   children: ReactNode
 }) {
   const preferStream = useStreamPreference()
-  return transcript && !preferStream ? (
-    <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
-  ) : (
-    <StreamSource threadId={threadId}>{children}</StreamSource>
-  )
+  const [generation, setGeneration] = useState(0)
+
+  if (!transcript || preferStream) {
+    return (
+      <RefreshThreadSourceContext.Provider
+        value={() => setGeneration((current) => current + 1)}
+      >
+        <StreamSource generation={generation} threadId={threadId}>
+          {children}
+        </StreamSource>
+      </RefreshThreadSourceContext.Provider>
+    )
+  }
+
+  return <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
 }

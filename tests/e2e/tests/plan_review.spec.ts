@@ -130,12 +130,14 @@ test.describe("HTML artifacts", () => {
       owner.locator('button[aria-current="page"]', { hasText: "Plan" }),
     ).toHaveCount(0);
     await reviewLink.click();
-    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
     await expect(owner.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(owner.getByText("Back to conversation")).toBeVisible();
-    const ownerArtifact = owner.getByTestId("plan-artifact-frame");
+    await expect(owner.getByTestId("composer-editor")).toBeVisible();
+    await expect(owner.getByText("Back to conversation")).toHaveCount(0);
+    const ownerReview = owner.getByTestId("plan-review");
+    const ownerArtifact = ownerReview.getByTestId("plan-artifact-frame");
     await expect(
       ownerArtifact.contentFrame().getByText("Add greet() helper"),
     ).toBeVisible({
@@ -207,41 +209,49 @@ test.describe("HTML artifacts", () => {
     ).toHaveCount(0);
     await expect(owner.getByTestId("edit-plan")).toHaveCount(0);
     await expect(owner.getByTestId("plan-editor")).toHaveCount(0);
-    await expect(owner.getByTestId("plan-comments")).toBeVisible();
+    await expect(ownerReview.getByTestId("plan-comments")).toBeHidden();
 
     const verificationHeading = ownerArtifact
       .contentFrame()
       .getByText("Verification");
-    const selectHeading = () =>
-      verificationHeading.evaluate((element) => {
+    const selectHeading = async () => {
+      const position = await verificationHeading.evaluate((element) => {
+        // The full-width heading's center can lie beyond its selectable text.
         const range = document.createRange();
         range.selectNodeContents(element);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        const text = range.getBoundingClientRect();
+        const heading = element.getBoundingClientRect();
+        return {
+          x: text.left - heading.left + text.width / 2,
+          y: text.top - heading.top + text.height / 2,
+        };
       });
-    const clearSelection = () => verificationHeading.click();
+      await verificationHeading.dblclick({ position });
+    };
+    const clearSelection = () =>
+      ownerReview.getByTestId("plan-summary").click();
     await selectHeading();
-    await expect(owner.getByTestId("comment-composer")).toBeVisible();
+    await expect(ownerReview.getByTestId("comment-composer")).toBeVisible();
     await clearSelection();
-    await expect(owner.getByTestId("comment-composer")).toHaveCount(0);
+    await expect(ownerReview.getByTestId("comment-composer")).toHaveCount(0);
     await selectHeading();
-    await expect(owner.getByTestId("comment-composer")).toContainText(
+    await expect(ownerReview.getByTestId("comment-composer")).toContainText(
       "Verification",
     );
-    await owner
+    await ownerReview.getByTestId("comment-input").fill("Draft to discard.");
+    await ownerReview.getByTestId("comment-input").press("Escape");
+    await expect(ownerReview.getByTestId("comment-composer")).toHaveCount(0);
+    await selectHeading();
+    await expect(ownerReview.getByTestId("comment-input")).toHaveValue("");
+    await ownerReview
       .getByTestId("comment-input")
       .fill("Clarify the expected output.");
-    await clearSelection();
-    await expect(owner.getByTestId("comment-input")).toHaveValue(
-      "Clarify the expected output.",
-    );
-    await expect(owner.getByTestId("comment-composer")).toContainText(
-      "Verification",
-    );
-    await owner.getByTestId("comment-submit").click();
-    await expect(owner.getByTestId("plan-comment")).toContainText(
+    await ownerReview.getByTestId("comment-submit").click();
+    await expect(ownerReview.getByTestId("comment-composer")).toHaveCount(0);
+    await ownerReview
+      .getByRole("button", { name: "Comments (1)", exact: true })
+      .click();
+    await expect(ownerReview.getByTestId("plan-comment")).toContainText(
       "Clarify the expected output.",
     );
     await expect(
@@ -277,7 +287,10 @@ test.describe("HTML artifacts", () => {
       "Clarify the expected output.",
     );
     await expect(collab.getByTestId("comment-delete")).toHaveCount(0);
-    await owner.getByTestId("comment-delete").click();
+    await ownerReview
+      .getByRole("button", { name: "Comments (1)", exact: true })
+      .click();
+    await ownerReview.getByTestId("comment-delete").click();
     await expect(owner.getByTestId("plan-comment")).toHaveCount(0);
     await expect(collab.getByTestId("plan-comment")).toHaveCount(0);
     await expect(

@@ -1,3 +1,4 @@
+import { useRightPanelStore } from "@/features/agents/lib/rightPanelStore"
 import { productAnalytics } from "@/lib/analytics"
 import { LogoMark } from "@/components/Branding"
 import { CopyErrorButton } from "@/components/CopyErrorButton"
@@ -1011,6 +1012,19 @@ export function AgentThreadView({
                     threadId={thread.id}
                     scrollKey={thread.id}
                     showPlanArtifact={Boolean(thread.planStatus)}
+                    onOpenArtifact={
+                      !embedded
+                        ? () => {
+                            useRightPanelStore
+                              .getState()
+                              .open(
+                                { scope: "cloud", threadId: thread.id },
+                                "artifact"
+                              )
+                            handlePanelCollapsedChange(false)
+                          }
+                        : undefined
+                    }
                     runCosts={thread.runCosts}
                     emptyState={
                       <div className="flex min-h-60 items-center justify-center">

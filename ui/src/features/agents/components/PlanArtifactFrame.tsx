@@ -20,6 +20,25 @@ function frameScript(channel: string): string {
     const ranges = new Map();
     const ignored = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
     let port = null;
+    let scrollLocked = false;
+    let selecting = false;
+    document.addEventListener("pointerdown", event => {
+      selecting = event.button === 0 && !scrollLocked &&
+        !(event.target instanceof Element && event.target.closest("[data-plan-annotation]"));
+    }, { passive: true });
+    document.addEventListener("pointercancel", () => { selecting = false; });
+    for (const type of ["wheel", "touchmove"]) {
+      document.addEventListener(type, event => {
+        if (scrollLocked) event.preventDefault();
+      }, { passive: false, capture: true });
+    }
+    document.addEventListener("keydown", event => {
+      if (scrollLocked && event.key === "Escape") {
+        event.preventDefault();
+        post({ type: "dismiss-comments" });
+      }
+      if (scrollLocked && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) event.preventDefault();
+    }, true);
     document.documentElement.dataset.annotationReady = "true";
 
     function post(message) {
@@ -126,7 +145,7 @@ function frameScript(channel: string): string {
         marker.className = "plan-annotation-marker";
         marker.textContent = String(comment.number);
         marker.title = "Open comment " + comment.number;
-        marker.addEventListener("click", () => post({ type: "comment-selected", id: comment.id }));
+        marker.addEventListener("click", () => post({ type: "comment-selected", id: comment.id, selectionBounds: range.getBoundingClientRect().toJSON() }));
         document.body.append(marker);
         markers.set(comment.id, marker);
         ranges.set(comment.id, range);
@@ -187,20 +206,32 @@ function frameScript(channel: string): string {
       }, true);
     }
 
-    document.addEventListener("mouseup", () => {
+    document.addEventListener("mouseup", event => {
+      if (event.button !== 0) return;
+      const startedHere = selecting;
+      selecting = false;
+      if (!startedHere) return;
       setTimeout(() => {
-        post({ type: "text-selected", anchor: selectedAnchor() });
+        const anchor = selectedAnchor();
+        const selection = window.getSelection();
+        const selectionBounds = anchor && selection?.rangeCount
+          ? selection.getRangeAt(0).getBoundingClientRect().toJSON()
+          : null;
+        post({ type: "text-selected", anchor, selectionBounds });
       });
     });
 
     function receive(message) {
+      if (message.type === "set-scroll-locked" && typeof message.locked === "boolean") {
+        scrollLocked = message.locked;
+      }
       if (message.type === "set-comments" && Array.isArray(message.comments)) {
         setAnnotations(message.comments);
       }
       if (message.type === "focus-comment" && typeof message.id === "string") {
         const range = ranges.get(message.id);
         const marker = markers.get(message.id);
-        if (range) range.startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (range && !scrollLocked) range.startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" });
         if (marker) {
           marker.classList.remove("plan-annotation-marker-active");
           requestAnimationFrame(() => marker.classList.add("plan-annotation-marker-active"));
@@ -267,10 +298,19 @@ function isAnchor(value: unknown): value is PlanTextAnchor {
   )
 }
 
+export interface ArtifactSelectionBounds {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
 export function PlanArtifactFrame({
   html,
   comments = [],
   onTextSelected,
+  scrollLocked = false,
+  onDismissComments,
   onCommentSelected,
   focusCommentId,
   focusCommentKey = 0,
@@ -279,8 +319,16 @@ export function PlanArtifactFrame({
 }: {
   html: string
   comments?: Array<PlanComment>
-  onTextSelected?: (anchor: PlanTextAnchor | null) => void
-  onCommentSelected?: (id: string) => void
+  onTextSelected?: (
+    anchor: PlanTextAnchor | null,
+    selectionBounds: ArtifactSelectionBounds | null
+  ) => void
+  scrollLocked?: boolean
+  onDismissComments?: () => void
+  onCommentSelected?: (
+    id: string,
+    selectionBounds: ArtifactSelectionBounds | null
+  ) => void
   focusCommentId?: string | null
   focusCommentKey?: number
   title?: string
@@ -316,6 +364,35 @@ export function PlanArtifactFrame({
   }, [anchoredComments])
 
   const receive = useEffectEvent((event: MessageEvent) => {
+    const raw: unknown = event.data?.selectionBounds
+    const selectionBounds = (() => {
+      const isRecord = (input: unknown): input is Record<string, unknown> =>
+        typeof input === "object" && input !== null
+
+      const isBounds = (input: unknown): input is ArtifactSelectionBounds => {
+        if (!isRecord(input)) return false
+        return (
+          Number.isFinite(input.left) &&
+          Number.isFinite(input.top) &&
+          Number.isFinite(input.right) &&
+          Number.isFinite(input.bottom) &&
+          Number(input.right) >= Number(input.left) &&
+          Number(input.bottom) >= Number(input.top)
+        )
+      }
+
+      if (!isBounds(raw)) return null
+
+      const frameWidth = frameRef.current?.clientWidth ?? 0
+      const frameHeight = frameRef.current?.clientHeight ?? 0
+      return {
+        left: Math.max(0, Math.min(raw.left, frameWidth)),
+        top: Math.max(0, Math.min(raw.top, frameHeight)),
+        right: Math.max(0, Math.min(raw.right, frameWidth)),
+        bottom: Math.max(0, Math.min(raw.bottom, frameHeight)),
+      }
+    })()
+
     if (
       event.data?.type === "open-external" &&
       typeof event.data.url === "string" &&
@@ -333,21 +410,34 @@ export function PlanArtifactFrame({
         return
       }
     }
-    if (event.data?.type === "ready")
+    if (event.data?.type === "dismiss-comments") {
+      onDismissComments?.()
+    }
+
+    if (event.data?.type === "ready") {
+      portRef.current?.postMessage({
+        type: "set-scroll-locked",
+        locked: scrollLocked,
+      })
       portRef.current?.postMessage({
         type: "set-comments",
         comments: commentsRef.current,
       })
+    }
+
     if (
       event.data?.type === "text-selected" &&
       (event.data.anchor === null || isAnchor(event.data.anchor))
-    )
-      onTextSelected?.(event.data.anchor)
+    ) {
+      onTextSelected?.(event.data.anchor, selectionBounds)
+    }
+
     if (
       event.data?.type === "comment-selected" &&
       typeof event.data.id === "string"
-    )
-      onCommentSelected?.(event.data.id)
+    ) {
+      onCommentSelected?.(event.data.id, selectionBounds)
+    }
   })
 
   const connect = () => {
@@ -377,6 +467,13 @@ export function PlanArtifactFrame({
       comments: anchoredComments,
     })
   }, [anchoredComments])
+
+  useEffect(() => {
+    portRef.current?.postMessage({
+      type: "set-scroll-locked",
+      locked: scrollLocked,
+    })
+  }, [scrollLocked])
 
   useEffect(() => {
     if (!focusCommentId) return

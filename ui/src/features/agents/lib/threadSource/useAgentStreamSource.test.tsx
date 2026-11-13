@@ -53,7 +53,7 @@ it.each<[string, RunAcceptance, PromiseSettledResult<void>]>([
         respond = resolve
       })
     )
-    stream.submit.mockImplementation(async (_, options) => {
+    stream.submit.mockImplementation(async (_impl, options) => {
       options?.onError?.(error)
     })
     const { result } = renderHook(() => useAgentStreamSource("thread-1"))

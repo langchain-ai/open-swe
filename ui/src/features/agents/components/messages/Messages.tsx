@@ -126,6 +126,7 @@ export const Messages = memo(function MessagesComponent({
   threadId,
   scrollKey,
   showPlanArtifact = false,
+  onOpenArtifact,
   runCosts,
   emptyState,
   footer,
@@ -351,7 +352,7 @@ export const Messages = memo(function MessagesComponent({
             </div>
             <ReviewChatActions messages={visibleMessages} />
             {threadId && showPlanArtifact && (
-              <InlinePlanArtifact threadId={threadId} />
+              <InlinePlanArtifact threadId={threadId} onOpen={onOpenArtifact} />
             )}
             {threadId && (
               <WorkflowApprovalCard

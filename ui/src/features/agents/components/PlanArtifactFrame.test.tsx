@@ -89,6 +89,80 @@ describe("withArtifactShell", () => {
 })
 
 describe("PlanArtifactFrame", () => {
+  it("passes the selection bounds with a selected annotation and restores scrolling", () => {
+    const port = {
+      onmessage: null as ((event: { data: unknown }) => void) | null,
+      start: vi.fn(),
+      close: vi.fn(),
+      postMessage: vi.fn(),
+    }
+    vi.stubGlobal(
+      "MessageChannel",
+      class {
+        port1 = port
+        port2 = {}
+      }
+    )
+    const onCommentSelected = vi.fn()
+    const onDismissComments = vi.fn()
+    const { rerender } = render(
+      <PlanArtifactFrame
+        html="<h1>Report</h1>"
+        onCommentSelected={onCommentSelected}
+        onDismissComments={onDismissComments}
+        scrollLocked
+      />
+    )
+    const frame = screen.getByTitle("Artifact")
+    Object.defineProperties(frame, {
+      clientWidth: { value: 600 },
+      clientHeight: { value: 400 },
+    })
+    fireEvent.load(frame)
+    act(() => port.onmessage?.({ data: { type: "ready" } }))
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: "set-scroll-locked",
+      locked: true,
+    })
+    act(() =>
+      port.onmessage?.({
+        data: {
+          type: "comment-selected",
+          id: "comment-1",
+          selectionBounds: { left: 120, top: 200, right: 250, bottom: 240 },
+        },
+      })
+    )
+    expect(onCommentSelected).toHaveBeenCalledWith("comment-1", {
+      left: 120,
+      top: 200,
+      right: 250,
+      bottom: 240,
+    })
+    act(() =>
+      port.onmessage?.({
+        data: {
+          type: "comment-selected",
+          id: "comment-1",
+          selectionBounds: { left: Infinity, top: 200 },
+        },
+      })
+    )
+    expect(onCommentSelected).toHaveBeenLastCalledWith("comment-1", null)
+    act(() => port.onmessage?.({ data: { type: "dismiss-comments" } }))
+    expect(onDismissComments).toHaveBeenCalledOnce()
+    rerender(
+      <PlanArtifactFrame
+        html="<h1>Report</h1>"
+        onCommentSelected={onCommentSelected}
+      />
+    )
+    expect(port.postMessage).toHaveBeenLastCalledWith({
+      type: "set-scroll-locked",
+      locked: false,
+    })
+  })
+
   it("requires confirmation for untrusted destinations and preserves the displayed address", () => {
     const port = {
       onmessage: null as ((event: { data: unknown }) => void) | null,

@@ -1,3 +1,4 @@
+import { PlanView } from "@/features/agents/components/PlanView"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
@@ -239,6 +240,9 @@ export function AgentGitPanel({
       cwd={cwd}
       terminalAvailable={terminalAvailable}
       diffAvailable
+      {...(thread.planStatus
+        ? { renderArtifact: () => <PlanView threadId={thread.id} embedded /> }
+        : {})}
       browserAvailable={browserAvailable}
       renderBrowser={() => (
         <BrowserPanel threadId={thread.id} opened={browserOpened} />

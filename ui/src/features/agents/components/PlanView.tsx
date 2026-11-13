@@ -32,7 +32,7 @@ function artifactTitle(html: string, markdown: string): string | null {
   return decoded || null
 }
 
-function usePlanDocumentTitle(threadId: string) {
+function usePlanDocumentTitle(threadId: string, embedded: boolean) {
   const query = useQuery({
     queryKey: ["plan", threadId],
     queryFn: () => getPlan(threadId),
@@ -49,13 +49,13 @@ function usePlanDocumentTitle(threadId: string) {
     : null
 
   useEffect(() => {
-    if (!title) return
+    if (embedded || !title) return
     const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
       if (document.title === documentTitle) document.title = DEFAULT_TITLE
     }
-  }, [title])
+  }, [embedded, title])
 
   return query
 }
@@ -107,13 +107,15 @@ export function PlanSignInButton() {
 export function PlanView({
   threadId,
   standalone = false,
+  embedded = false,
 }: {
   threadId: string
   standalone?: boolean
+  embedded?: boolean
 }) {
   const mounted = useIsHydrated()
 
-  const query = usePlanDocumentTitle(threadId)
+  const query = usePlanDocumentTitle(threadId, embedded)
   const backLink = standalone ? <BackLink threadId={threadId} /> : null
 
   if (!mounted || query.isLoading) {
@@ -163,7 +165,7 @@ export function PlanView({
           {backLink}
         </div>
       )}
-      <PlanReview plan={plan} />
+      <PlanReview plan={plan} embedded={embedded} />
     </div>
   )
 }

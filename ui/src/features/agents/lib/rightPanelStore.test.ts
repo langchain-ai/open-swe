@@ -18,10 +18,10 @@ describe("right panel store", () => {
 
   it("opens a singleton surface once and keeps it active", () => {
     const { open } = useRightPanelStore.getState()
-    open(ref, "diff")
-    open(ref, "diff")
-    expect(state().surfaces.map((surface) => surface.id)).toEqual(["diff"])
-    expect(state().activeSurfaceId).toBe("diff")
+    open(ref, "artifact")
+    open(ref, "artifact")
+    expect(state().surfaces.map((surface) => surface.id)).toEqual(["artifact"])
+    expect(state().activeSurfaceId).toBe("artifact")
     expect(state().isOpen).toBe(true)
   })
 

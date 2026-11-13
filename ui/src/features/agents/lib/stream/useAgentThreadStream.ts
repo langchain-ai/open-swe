@@ -33,18 +33,26 @@ export interface AgentThreadStream {
  * client — the run keeps going server-side and is picked up again from the
  * thread's history on the next visit — so nothing needs to outlive the page.
  */
-export function useAgentThreadStream(threadId: string): AgentThreadStream {
+export function useAgentThreadStream(
+  threadId: string,
+  generation = 0
+): AgentThreadStream {
   const queryClient = useQueryClient()
   const [runAcceptance] = useState(() =>
     createRunAcceptanceTracker(dashboardFetch)
   )
+  // HACK: useStream recreates and hydrates its controller when the client changes.
+  // Renew only the client so rejoining preserves the review's submission state.
+  // Ideally, client should expose a method for joining an existing stream
   const client = useMemo(
     () =>
       createDashboardClient(
         agentsApi.langGraphApiUrl,
         orderRunStarts(runAcceptance.fetch)
       ),
-    [runAcceptance]
+    // force recreation of client on generation change
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+    [runAcceptance, generation]
   )
   const { connection, onReconnect, onConnected } = useReconnectNotice()
   const [runTracker] = useState(() => new RunTracker({ threadId }))

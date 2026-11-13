@@ -47,6 +47,7 @@ export interface AgentRightPanelProps {
   backgroundWorkAvailable?: boolean
   /** Rendered for the App surface, once the thread's agent previews an app. */
   renderApp?: () => ReactNode
+  renderArtifact?: () => ReactNode
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
@@ -320,6 +321,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const body = (
     <>
+      {shown?.kind === "artifact" ? props.renderArtifact?.() : null}
       {shown?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
         : null}

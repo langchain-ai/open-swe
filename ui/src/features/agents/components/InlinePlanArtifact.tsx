@@ -10,7 +10,13 @@ import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFram
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { dismissPlan, getPlan, type PlanData } from "@/lib/plan"
 
-export function InlinePlanArtifact({ threadId }: { threadId: string }) {
+export function InlinePlanArtifact({
+  threadId,
+  onOpen,
+}: {
+  threadId: string
+  onOpen?: () => void
+}) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const queryKey = ["plan", threadId]
@@ -48,6 +54,10 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         aria-label="Open artifact in the conversation"
         onClick={() => {
           productAnalytics.featureOpened("artifact")
+          if (onOpen) {
+            onOpen()
+            return
+          }
           void navigate({
             to: "/agents/$threadId/plan",
             params: { threadId },

@@ -17,6 +17,7 @@ import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { InlinePlanArtifact } from "./InlinePlanArtifact"
 import { PlanReview } from "./PlanReview"
 import { makeQueryClient } from "@/lib/query"
+import type { ArtifactSelectionBounds } from "./PlanArtifactFrame"
 import type { PlanComment, PlanData, PlanTextAnchor } from "@/lib/plan"
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +28,11 @@ const mocks = vi.hoisted(() => ({
   reportError: vi.fn(),
   getPlan: vi.fn(),
   dismissPlan: vi.fn(),
+  refreshThreadSource: vi.fn(),
+}))
+
+vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
+  useRefreshThreadSource: () => mocks.refreshThreadSource,
 }))
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
@@ -48,20 +54,26 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   }: {
     html: string
     className?: string
-    onTextSelected?: (anchor: PlanTextAnchor | null) => void
+    onTextSelected?: (
+      anchor: PlanTextAnchor | null,
+      selectionBounds: ArtifactSelectionBounds | null
+    ) => void
   }) => (
     <div data-testid="plan-artifact-frame" className={className}>
       {html}
       <button
         type="button"
         onClick={() =>
-          onTextSelected?.({
-            exact: "Plan",
-            prefix: "",
-            suffix: " details",
-            start: 0,
-            end: 4,
-          })
+          onTextSelected?.(
+            {
+              exact: "Plan",
+              prefix: "",
+              suffix: " details",
+              start: 0,
+              end: 4,
+            },
+            { left: 450, top: 350, right: 500, bottom: 400 }
+          )
         }
       >
         Select text
@@ -112,6 +124,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe("InlinePlanArtifact", () => {
@@ -145,6 +159,85 @@ describe("InlinePlanArtifact", () => {
 })
 
 describe("PlanReview", () => {
+  it("positions button comments beneath the trigger and repositions the selection composer as it grows", () => {
+    let height = 100
+    const resize = { notify: () => {} }
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.getAttribute("aria-controls") === "artifact-comments")
+          return new DOMRect(540, 24, 80, 24)
+        return this.dataset.testid === "plan-comments"
+          ? new DOMRect(0, 0, 320, height)
+          : new DOMRect(100, 60, 600, 500)
+      }
+    )
+    vi.stubGlobal(
+      "ResizeObserver",
+      class implements ResizeObserver {
+        constructor(readonly callback: ResizeObserverCallback) {
+          resize.notify = () => this.callback([], this)
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
+    render(<PlanReview plan={plan} embedded />)
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    expect(screen.getByTestId("plan-comments").style.top).toBe("242px")
+    height = 260
+    act(() => resize.notify())
+    expect(screen.getByTestId("plan-comments").style.top).toBe("82px")
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
+    expect(screen.getByTestId("plan-comments").style.left).toBe("200px")
+    expect(screen.getByTestId("plan-comments").style.top).toBe("12px")
+  })
+
+  it("keeps selection comments separate and dismisses them on Cancel, Escape, or an outside click", async () => {
+    mocks.getPlanComments.mockResolvedValue([comment])
+    render(<PlanReview plan={plan} embedded />)
+    expect(
+      screen.getByRole("heading", { name: "Viewing as Alice" })
+    ).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Comments (1)" })).toBeTruthy()
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    expect(screen.queryByTestId("plan-comment")).toBeNull()
+    expect(screen.getByTestId("comment-composer")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByTestId("comment-composer")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByTestId("comment-composer")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Draft to cancel" },
+    })
+    fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Escape" })
+    expect(screen.queryByTestId("comment-composer")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    expect(
+      (screen.getByTestId("comment-input") as HTMLTextAreaElement).value
+    ).toBe("")
+    fireEvent.keyDown(document, { key: "Escape" })
+    fireEvent.click(screen.getByRole("button", { name: "Comments (1)" }))
+    expect(screen.getByTestId("plan-comment").textContent).toContain(
+      comment.body
+    )
+    expect(
+      screen
+        .getByRole("button", { name: "Comments (1)" })
+        .getAttribute("aria-expanded")
+    ).toBe("true")
+    fireEvent.pointerDown(document.body)
+    expect(
+      screen
+        .getByRole("button", { name: "Comments (1)" })
+        .getAttribute("aria-expanded")
+    ).toBe("false")
+  })
+
   it("uses the available viewport for the plan artifact", () => {
     render(<PlanReview plan={plan} />)
 
@@ -161,47 +254,117 @@ describe("PlanReview", () => {
     expect(screen.getByTestId("plan-comments")).toBeTruthy()
   })
 
-  it.each(["click", "metaKey", "ctrlKey"])(
-    "adds an anchored comment via %s",
-    async (method) => {
-      render(<PlanReview plan={plan} />)
+  it("adds an anchored comment via click", async () => {
+    render(<PlanReview plan={plan} embedded />)
+    const toggle = screen.getByRole("button", { name: "Comments" })
+    expect(toggle.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-expanded")).toBe("true")
+    fireEvent.click(toggle)
 
-      fireEvent.click(screen.getByRole("button", { name: "Select text" }))
-      expect(screen.getByTestId("comment-composer").textContent).toContain(
-        "Plan"
-      )
-      fireEvent.change(screen.getByTestId("comment-input"), {
-        target: { value: "Clarify this step" },
-      })
-      fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
-      expect(mocks.addPlanComment).not.toHaveBeenCalled()
-      if (method === "click") {
-        fireEvent.click(screen.getByRole("button", { name: "Comment" }))
-      } else {
-        fireEvent.keyDown(screen.getByTestId("comment-input"), {
-          key: "Enter",
-          [method]: true,
-        })
-      }
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    expect(
+      screen
+        .getByRole("button", { name: "Comments" })
+        .getAttribute("aria-expanded")
+    ).toBe("false")
 
-      await waitFor(() =>
-        expect(mocks.addPlanComment).toHaveBeenCalledWith(
-          "thread-1",
-          "Clarify this step",
-          {
-            exact: "Plan",
-            prefix: "",
-            suffix: " details",
-            start: 0,
-            end: 4,
-          }
-        )
+    expect(screen.getByTestId("comment-composer").textContent).toContain("Plan")
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Clarify this step" },
+    })
+    fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
+    expect(mocks.addPlanComment).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+
+    await waitFor(() =>
+      expect(mocks.addPlanComment).toHaveBeenCalledWith(
+        "thread-1",
+        "Clarify this step",
+        {
+          exact: "Plan",
+          prefix: "",
+          suffix: " details",
+          start: 0,
+          end: 4,
+        }
       )
-      expect((await screen.findByTestId("plan-comment")).textContent).toContain(
-        "Clarify this step"
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Comments/ }))
+    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+      "Clarify this step"
+    )
+  })
+
+  it("adds an anchored comment via Meta+Enter", async () => {
+    render(<PlanReview plan={plan} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+
+    expect(screen.getByTestId("comment-composer").textContent).toContain("Plan")
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Clarify this step" },
+    })
+    fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
+    expect(mocks.addPlanComment).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByTestId("comment-input"), {
+      key: "Enter",
+      metaKey: true,
+    })
+
+    await waitFor(() =>
+      expect(mocks.addPlanComment).toHaveBeenCalledWith(
+        "thread-1",
+        "Clarify this step",
+        {
+          exact: "Plan",
+          prefix: "",
+          suffix: " details",
+          start: 0,
+          end: 4,
+        }
       )
-    }
-  )
+    )
+
+    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+      "Clarify this step"
+    )
+  })
+
+  it("adds an anchored comment via Ctrl+Enter", async () => {
+    render(<PlanReview plan={plan} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+
+    expect(screen.getByTestId("comment-composer").textContent).toContain("Plan")
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Clarify this step" },
+    })
+    fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
+    expect(mocks.addPlanComment).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByTestId("comment-input"), {
+      key: "Enter",
+      ctrlKey: true,
+    })
+
+    await waitFor(() =>
+      expect(mocks.addPlanComment).toHaveBeenCalledWith(
+        "thread-1",
+        "Clarify this step",
+        {
+          exact: "Plan",
+          prefix: "",
+          suffix: " details",
+          start: 0,
+          end: 4,
+        }
+      )
+    )
+
+    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+      "Clarify this step"
+    )
+  })
 
   it("adds a general comment without selecting text and clears a previous anchor", async () => {
     mocks.addPlanComment.mockResolvedValue({ ...comment, anchor: null })
@@ -269,18 +432,19 @@ describe("PlanReview", () => {
 
   it("submits comments once and allows another submission after new feedback", async () => {
     render(<PlanReview plan={plan} />)
-    expect(screen.queryByRole("button", { name: "Submit comments" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Submit to Robin" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Select text" }))
     fireEvent.change(screen.getByTestId("comment-input"), {
       target: { value: "Clarify this step" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Comment" }))
     fireEvent.click(
-      await screen.findByRole("button", { name: "Submit comments" })
+      await screen.findByRole("button", { name: "Submit to Robin" })
     )
     await waitFor(() =>
       expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
     )
+    expect(mocks.refreshThreadSource).toHaveBeenCalledOnce()
     expect(
       (
         screen.getByRole("button", {
@@ -295,7 +459,7 @@ describe("PlanReview", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Comment" }))
     expect(
-      await screen.findByRole("button", { name: "Submit comments" })
+      await screen.findByRole("button", { name: "Submit to Robin" })
     ).toBeTruthy()
   })
 
@@ -346,7 +510,7 @@ describe("PlanReview", () => {
     expect(within(parent).getByTestId("plan-reply").textContent).toContain(
       "Also show an example"
     )
-    fireEvent.click(screen.getByRole("button", { name: "Submit comments" }))
+    fireEvent.click(screen.getByRole("button", { name: "Submit to Robin" }))
     await waitFor(() =>
       expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
     )

@@ -28,6 +28,7 @@ export const RIGHT_PANEL_KINDS = [
   "terminal",
   "agents",
   "background",
+  "artifact",
   "app",
 ] as const
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number]
@@ -55,6 +56,7 @@ export type RightPanelSurface =
   | { id: "agents"; kind: "agents" }
   | { id: "background"; kind: "background" }
   | { id: "app"; kind: "app" }
+  | { id: "artifact"; kind: "artifact" }
 
 const RIGHT_PANEL_STORAGE_KEY = "open-swe:right-panel-state"
 const RIGHT_PANEL_STORAGE_VERSION = 2
@@ -111,6 +113,8 @@ const singletonSurface = (kind: SingletonKind): RightPanelSurface => {
       return { id: "agents", kind }
     case "background":
       return { id: "background", kind }
+    case "artifact":
+      return { id: "artifact", kind }
     case "app":
       return { id: "app", kind }
   }
@@ -210,6 +214,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               kind === "files" ||
               kind === "agents" ||
               kind === "background" ||
+              kind === "artifact" ||
               kind === "app"
             ) {
               return surface.id === kind ? [singletonSurface(kind)] : []

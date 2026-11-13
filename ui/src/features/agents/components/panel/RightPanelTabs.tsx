@@ -489,6 +489,8 @@ export function surfaceTitle(
       return "Browser"
     case "background":
       return "Background work"
+    case "artifact":
+      return "Artifact"
     case "app":
       return "App"
   }
@@ -503,6 +505,7 @@ const SURFACE_ICONS = {
   agents: RobotIcon,
   background: PulseIcon,
   app: PuzzlePieceIcon,
+  artifact: FileIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
