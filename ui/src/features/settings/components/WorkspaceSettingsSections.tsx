@@ -5,6 +5,7 @@ import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@langchain/macaw-components/Button"
 import { Select } from "@langchain/macaw-components/Select"
+import { Switch } from "@langchain/macaw-components/Switch"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
   useScopedSettings,
@@ -435,6 +436,22 @@ export function ModelRoutingSection({
               }}
               disabled={!settings.data}
               triggerClassName="w-48"
+            />
+          }
+        />
+        <TierRow
+          settings={settings}
+          fields={["model_selection_enabled"]}
+          label="Allow model selection in thread composers"
+          description="Off hides the model picker and uses Auto for new threads. Existing thread selections and requests in conversation or other surfaces remain available."
+          control={
+            <Switch
+              aria-label="Allow model selection in thread composers"
+              checked={settings.data?.model_selection_enabled === true}
+              onChange={(next) =>
+                settings.save({ model_selection_enabled: next })
+              }
+              disabled={!settings.data}
             />
           }
         />

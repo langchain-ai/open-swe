@@ -5,7 +5,7 @@ import {
   type Page,
 } from "@playwright/test";
 
-import { seedRepoSidebar } from "./helpers/dashboard";
+import { seedRepoSidebar, typeIntoComposer } from "./helpers/dashboard";
 
 const USER = {
   login: "thread-tools-e2e",
@@ -90,14 +90,6 @@ async function seedTargetThread(request: APIRequestContext) {
     },
   });
   expect(response.ok(), await response.text()).toBeTruthy();
-}
-
-async function typeIntoComposer(page: Page, text: string) {
-  const editor = page.getByTestId("composer-editor");
-  await expect(editor).toBeVisible();
-  await editor.click();
-  await editor.pressSequentially(text);
-  await editor.press("Enter");
 }
 
 async function successfulThreadTools(

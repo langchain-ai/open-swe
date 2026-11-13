@@ -142,10 +142,13 @@ export function useSubmitAgentMessage(threadId: string) {
         // nothing may flip it back afterwards.
         setAgentThreadStatus(queryClient, threadId, "running")
 
-        const configurable = modelConfigurable(
-          { modelId: vars.model_id, effort: vars.effort },
-          vars.model_selection_changed
-        )
+        const configurable =
+          vars.inherit_model_selection && !vars.model_selection_changed
+            ? {}
+            : modelConfigurable(
+                { modelId: vars.model_id, effort: vars.effort },
+                vars.model_selection_changed
+              )
         const surface = useThreadRunConfig.getState().byThread[threadId]
         const [offered] = await Promise.all([
           pageTools.offer(),

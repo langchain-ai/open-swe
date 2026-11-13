@@ -91,6 +91,46 @@ function renderComposer(
   )
 }
 
+describe("ChatComposer model selection", () => {
+  it("hides the picker and model command when selection is disabled", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [],
+    })
+    const models = [
+      {
+        id: "openai:test",
+        label: "Test",
+        efforts: ["low"],
+        default_effort: "low",
+        supports_images: true,
+      },
+    ]
+    renderComposer(false, {
+      models,
+      modelSelectionEnabled: false,
+      restoreDraft: { key: 1, text: "/model", images: [] },
+    })
+    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull()
+    expect(screen.queryByRole("option", { name: /Pick a model/ })).toBeNull()
+    cleanup()
+
+    renderComposer(false, {
+      models,
+      modelSelectionEnabled: true,
+      restoreDraft: { key: 2, text: "/model", images: [] },
+    })
+    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
+    expect(
+      await screen.findByRole("option", { name: /Pick a model/ })
+    ).toBeTruthy()
+  })
+})
+
 describe("ChatComposer stop button", () => {
   it("offers to stop a run this client never joined", async () => {
     renderComposer(true)

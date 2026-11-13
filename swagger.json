@@ -11117,6 +11117,18 @@
             ],
             "title": "Model Routing Split"
           },
+          "model_selection_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Selection Enabled"
+          },
           "org_guidelines": {
             "anyOf": [
               {

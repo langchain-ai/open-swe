@@ -3,8 +3,8 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
-  useMemo,
   useRef,
+  useState,
 } from "react"
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
@@ -810,25 +810,17 @@ function ComposerPromptEditorInner({
 }
 
 export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
-  const initialValueRef = useRef(props.value)
-  const initialSkillNamesRef = useRef(props.skillNames ?? new Set<string>())
-  const initialConfig = useMemo<InitialConfigType>(
-    () => ({
-      namespace: "open-swe-composer",
-      editable: true,
-      nodes: [ComposerMentionNode, ComposerSkillNode, ComposerSlackNode],
-      editorState: () => {
-        $setComposerPrompt(
-          initialValueRef.current,
-          initialSkillNamesRef.current
-        )
-      },
-      onError: (error: Error) => {
-        throw error
-      },
-    }),
-    []
-  )
+  const [initialConfig] = useState<InitialConfigType>(() => ({
+    namespace: "open-swe-composer",
+    editable: !props.disabled,
+    nodes: [ComposerMentionNode, ComposerSkillNode, ComposerSlackNode],
+    editorState: () => {
+      $setComposerPrompt(props.value, props.skillNames ?? new Set<string>())
+    },
+    onError: (error: Error) => {
+      throw error
+    },
+  }))
 
   return (
     <LexicalComposer initialConfig={initialConfig}>

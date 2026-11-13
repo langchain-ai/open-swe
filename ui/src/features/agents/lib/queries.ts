@@ -1516,6 +1516,7 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   model_selection_changed?: boolean
+  inherit_model_selection?: boolean
   client_message_id?: string
   /** Queue behind the live run instead of steering it. */
   enqueue?: boolean

@@ -797,6 +797,25 @@ async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     assert configurable["model_selection_changed"] is selection_changed
 
 
+async def test_enrich_run_start_command_inherits_explicit_model_without_picker_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {"model": _TEXT_ONLY_MODEL, "effort": "high", "model_selection": "explicit"}
+    created: dict[str, object] = {"metadata": metadata}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"type": "human", "content": "Continue"}]}},
+    }
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid", "octocat", command, metadata=metadata
+    )
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["model_selection"] == "explicit"
+    assert configurable["model_selection_changed"] is False
+
+
 @pytest.mark.parametrize("creating", [False, True])
 async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
     monkeypatch: pytest.MonkeyPatch,

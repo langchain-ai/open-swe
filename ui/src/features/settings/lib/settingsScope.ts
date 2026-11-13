@@ -144,6 +144,7 @@ export function useScopedSettings(
         return
       await Promise.all([
         qc.invalidateQueries({ queryKey: settingsQueryKey(edit.scope) }),
+        qc.invalidateQueries({ queryKey: ["options"] }),
         edit.scope.kind === "instance" &&
           qc.invalidateQueries({ queryKey: ["workspaceSettings"] }),
       ])

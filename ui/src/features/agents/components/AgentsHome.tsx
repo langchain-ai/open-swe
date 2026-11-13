@@ -309,8 +309,17 @@ export function AgentsHome({
 
   // The picker offers the workspace being composed in its own models and
   // default, not the deployment default's.
-  const { models, defaultSelection } = useModelOptions(selectedWorkspace)
-  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
+  const {
+    models,
+    defaultSelection,
+    modelSelectionEnabled,
+    isLoading: modelsLoading,
+    isError: modelsError,
+  } = useModelOptions(selectedWorkspace)
+  const activeSelection =
+    !modelSelectionEnabled || autoSelected
+      ? null
+      : (selection ?? defaultSelection)
 
   // The thread id is minted here: the first `run.start` posted against it is
   // what creates the thread server-side.
@@ -769,9 +778,10 @@ export function AgentsHome({
               <AgentChatEmptyState logo={traceFlight.logo} />
             )}
             <AgentComposerDock>
-              {localError && (
+              {(localError || modelsError) && (
                 <Banner intent="error" className="mb-space-3 w-full">
-                  {localError}
+                  {localError ??
+                    "Could not load model settings. Reload to try again."}
                 </Banner>
               )}
               <AgentPromptBar
@@ -790,9 +800,10 @@ export function AgentsHome({
                 placeholder="Describe a task or ask a question…"
                 onSubmit={handleSubmit}
                 onStop={startingThread ? stopPendingSubmit : undefined}
-                disabled={Boolean(submittedDraft)}
+                disabled={Boolean(submittedDraft) || modelsLoading}
                 busy={Boolean(startingThread)}
                 models={models}
+                modelSelectionEnabled={modelSelectionEnabled}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
                 repos={workspaceRepos}

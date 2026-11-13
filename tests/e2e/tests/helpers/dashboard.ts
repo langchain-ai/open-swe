@@ -82,6 +82,7 @@ export function composerFor(page: Page, placeholder: RegExp) {
 export async function readyComposerEditor(page: Page): Promise<Locator> {
   const editor = page.getByTestId("composer-editor");
   await expect(editor).toHaveAttribute("data-lexical-editor", "true");
+  await expect(editor).toHaveAttribute("contenteditable", "true");
   return editor;
 }
 

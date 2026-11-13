@@ -16,16 +16,28 @@ from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 async def test_an_override_applies_to_its_workspace_only(registry_db) -> None:
+    assert (await get_instance_settings())["model_selection_enabled"] is False
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
+        WorkspaceSettingsUpdate(
+            org_guidelines="internal only", fable_enabled=True, model_selection_enabled=True
+        )
     )
     view = await upsert_workspace_overrides(
-        "oss", WorkspaceSettingsUpdate(org_guidelines="be public", fable_enabled=False)
+        "oss",
+        WorkspaceSettingsUpdate(
+            org_guidelines="be public", fable_enabled=False, model_selection_enabled=False
+        ),
     )
     assert view["effective"]["org_guidelines"] == "be public"
     assert view["effective"]["fable_enabled"] is False
-    assert view["overrides"] == {"org_guidelines": "be public", "fable_enabled": False}
+    assert view["effective"]["model_selection_enabled"] is False
+    assert view["overrides"] == {
+        "org_guidelines": "be public",
+        "fable_enabled": False,
+        "model_selection_enabled": False,
+    }
     assert (await get_workspace_settings("core"))["org_guidelines"] == "internal only"
+    assert (await get_workspace_settings("core"))["model_selection_enabled"] is True
     assert (await get_instance_settings())["org_guidelines"] == "internal only"
 
 

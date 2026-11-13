@@ -258,7 +258,13 @@ export function AgentThreadView({
     ? undefined
     : pullRequestStatus.data?.pullRequests
 
-  const { models, defaultSelection } = useModelOptions()
+  const {
+    models,
+    defaultSelection,
+    modelSelectionEnabled,
+    isLoading: modelsLoading,
+    isError: modelsError,
+  } = useModelOptions(thread.workspace)
   const threadSelection = useMemo<ModelSelection | null>(() => {
     if (!thread.model || !thread.effort) return null
     const supported = models.some(
@@ -270,12 +276,13 @@ export function AgentThreadView({
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
   const [autoIntent] = useState(createAutoSelectionIntent)
-  const activeSelection = autoSelected
-    ? null
-    : (selection ??
-      (thread.modelSelection === "auto"
-        ? null
-        : (threadSelection ?? defaultSelection)))
+  const activeSelection =
+    !modelSelectionEnabled || autoSelected
+      ? null
+      : (selection ??
+        (thread.modelSelection === "auto"
+          ? null
+          : (threadSelection ?? defaultSelection)))
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
@@ -340,6 +347,7 @@ export function AgentThreadView({
       options?: SubmitOptions,
       onStartError?: () => void
     ) => {
+      if (modelsLoading) throw new Error("Could not load model settings")
       // While a run is live the message either waits for it as a queued run of
       // its own, or goes straight in and steers it. The preference sets the
       // default; ⌘↵ flips it for one message.
@@ -366,7 +374,7 @@ export function AgentThreadView({
       else if (!enqueue) scrollControlRef.current?.pinMessage(messageId)
       const carriesAutoSelection = autoIntent.claim(
         messageId,
-        !offload && (!isStreaming || queue)
+        modelSelectionEnabled && !offload && (!isStreaming || queue)
       )
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
@@ -381,6 +389,7 @@ export function AgentThreadView({
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
+          inherit_model_selection: !modelSelectionEnabled,
           enqueue,
           onStartError: () => {
             restoreAutoSelection()
@@ -399,6 +408,8 @@ export function AgentThreadView({
       ensureLocalBridge,
       followUpBehavior,
       isStreaming,
+      modelSelectionEnabled,
+      modelsLoading,
       sendMessage,
       session.data?.user_id,
     ]
@@ -1086,6 +1097,11 @@ export function AgentThreadView({
                 />
               )}
               {reviewChat && <ReviewExcerptChips />}
+              {modelsError && (
+                <Banner intent="error" className="mb-space-3 w-full">
+                  Could not load model settings. Reload to try again.
+                </Banner>
+              )}
               <AgentPromptBar
                 key={`${session.data?.user_id}:${thread.id}`}
                 draftKey={
@@ -1113,7 +1129,7 @@ export function AgentThreadView({
                 autoFocus={canPost && !embedded}
                 canOffload={!isStreaming}
                 compact
-                disabled={!canPost}
+                disabled={!canPost || modelsLoading}
                 busy={isStreaming}
                 activeRun={activeRun}
                 onStop={stopRun}
@@ -1124,6 +1140,7 @@ export function AgentThreadView({
                 droppedFiles={droppedFiles}
                 addedReply={addedReply}
                 models={models}
+                modelSelectionEnabled={modelSelectionEnabled}
                 routed={routed}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}

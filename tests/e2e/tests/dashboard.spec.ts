@@ -9,6 +9,7 @@ import {
   openRunningThreadViaSlackLink,
   optIntoQueue,
   openThreadViaSlackLink,
+  readyComposerEditor,
   threadIdFromUrl,
   threadState,
   typeIntoComposer,
@@ -430,7 +431,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       ).toHaveLength(1);
     };
 
-    const editor = page.getByTestId("composer-editor");
+    const editor = await readyComposerEditor(page);
     await editor.focus();
     await editor.pressSequentially("first sender payload message");
     await editor.press("Enter");
@@ -501,11 +502,17 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await page.route("**/dashboard/api/options?*", (route) =>
+      route.fulfill({ status: 503, json: { detail: "Options unavailable" } }),
+    );
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
+    await expect(
+      page.getByText("Could not load model settings. Reload to try again."),
+    ).toBeVisible();
 
     const prompt = "Reproduce the new chat send experience";
-    const editor = page.getByTestId("composer-editor");
+    const editor = await readyComposerEditor(page);
     await editor.click();
     await editor.pressSequentially(prompt);
     await page.evaluate((submittedPrompt) => {

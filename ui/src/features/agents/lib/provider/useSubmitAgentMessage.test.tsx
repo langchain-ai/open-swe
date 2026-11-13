@@ -139,6 +139,25 @@ describe("useSubmitAgentMessage", () => {
     }
   )
 
+  it.each([false, true])(
+    "inherits the thread model with a hidden picker, unless an Auto action is pending (changed=%s)",
+    async (changed) => {
+      const { result } = setup()
+      await result.current.mutateAsync({
+        content: "Continue",
+        inherit_model_selection: true,
+        model_selection_changed: changed,
+      })
+      expect(source.startRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configurable: changed
+            ? { model_selection: "auto", model_selection_changed: true }
+            : {},
+        })
+      )
+    }
+  )
+
   it("offloads without adding a user message", async () => {
     const { client, result } = setup()
     await result.current.mutateAsync({ content: "/offload", images: [] })

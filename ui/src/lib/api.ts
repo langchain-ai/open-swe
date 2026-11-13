@@ -377,6 +377,7 @@ export interface ModelOption {
 
 export interface OptionsPayload {
   models: Array<ModelOption>
+  model_selection_enabled?: boolean
   default_agent_model: string
   default_agent_reasoning_effort: string
   default_agent_subagent_model: string
@@ -474,6 +475,7 @@ export interface WorkspaceSettings {
   model_routing_enabled?: boolean | null
   /** Routing v2: split Auto threads 50/50 between Balanced and Performance instead of classifying. */
   model_routing_split?: boolean | null
+  model_selection_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean

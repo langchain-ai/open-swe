@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 
 import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
+import { invalidationTopic } from "./invalidations/topics"
 import { hasLinkedGitHub } from "./linkedGitHub"
 import {
   REPOS_CACHE_MAX_AGE_MS,
@@ -63,6 +64,7 @@ export function useOptions(workspace?: string | null) {
   return useQuery({
     queryKey: ["options", slug],
     queryFn: () => api.options(slug),
+    meta: { invalidatedBy: [invalidationTopic("workspaces")] },
   })
 }
 

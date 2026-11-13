@@ -328,6 +328,14 @@ test.describe("transcript rendering", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await page.route("**/dashboard/api/options?**", async (route) => {
+      const response = await route.fetch();
+      const options = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response,
+        json: { ...options, model_selection_enabled: true },
+      });
+    });
     await openThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
@@ -337,8 +345,49 @@ test.describe("transcript rendering", () => {
     await page.getByText("GPT-6.1 Sol", { exact: true }).last().hover();
     await page.getByRole("option", { name: /Opus 5\.5/ }).click();
     await typeIntoComposer(page, "Use Opus for this thread");
+    await waitForStateToContain(page, threadId, "Use Opus for this thread");
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
+    await expect
+      .poll(async () => {
+        const thread = (await (
+          await page.request.get(`/threads/${threadId}`)
+        ).json()) as {
+          metadata?: { agent_settings?: { model_id?: string } };
+        };
+        return thread.metadata?.agent_settings?.model_id;
+      })
+      .toBe("anthropic:claude-opus-5-5");
+
+    await page.unroute("**/dashboard/api/options?**");
+    await page.route("**/dashboard/api/options?*", (route) =>
+      route.fulfill({ status: 503, json: { detail: "Options unavailable" } }),
+    );
+    await page.reload();
+    await expect(
+      page.getByText("Could not load model settings. Reload to try again."),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /Opus 5\.5/ })).toHaveCount(
+      0,
+    );
+    const followUp = "Keep Opus with model settings unavailable";
+    await typeIntoComposer(page, followUp);
+    await waitForStateToContain(page, threadId, followUp);
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+    const webThread = (await (
+      await page.request.get(`/threads/${threadId}`)
+    ).json()) as {
+      metadata?: {
+        model_selection?: string;
+        agent_settings?: { model_id?: string; effort?: string };
+      };
+    };
+    expect(webThread.metadata?.model_selection).toBe("explicit");
+    expect(webThread.metadata?.agent_settings).toMatchObject({
+      model_id: "anthropic:claude-opus-5-5",
+      effort: "high",
+    });
 
     const slackState = (await (
       await page.request.get("/control/state")

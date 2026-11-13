@@ -122,6 +122,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     model_routing_split: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    model_selection_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     gateway_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -386,6 +389,7 @@ def _default_settings() -> dict[str, Any]:
         # On by default; the settings show it on until an admin turns it off.
         "model_routing_enabled": True,
         "model_routing_split": False,
+        "model_selection_enabled": False,
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,

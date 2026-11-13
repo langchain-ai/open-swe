@@ -221,6 +221,7 @@ export interface ChatComposerProps {
   /** A reply to a passage the user selected; it rides ahead of their next message. */
   addedReply?: { key: number; reply: PassageReply } | null
   models?: Array<ModelOption>
+  modelSelectionEnabled?: boolean
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
   /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
@@ -414,6 +415,7 @@ export const ChatComposer = memo(function ChatComposer({
   droppedFiles = null,
   addedReply = null,
   models = [],
+  modelSelectionEnabled = true,
   selection = null,
   onSelectionChange,
   repos,
@@ -496,14 +498,18 @@ export const ChatComposer = memo(function ChatComposer({
         group: "Composer",
         showInPalette: false,
       },
-      {
-        id: "open-model-picker",
-        label: "Choose model",
-        aliases: ["model picker", "change model", "reasoning effort"],
-        shortcuts: ["mod+shift+m"],
-        group: "Composer",
-        run: () => setModelPickerOpen(true),
-      },
+      ...(modelSelectionEnabled && models.length > 0
+        ? [
+            {
+              id: "open-model-picker",
+              label: "Choose model",
+              aliases: ["model picker", "change model", "reasoning effort"],
+              shortcuts: ["mod+shift+m"],
+              group: "Composer",
+              run: () => setModelPickerOpen(true),
+            },
+          ]
+        : []),
       ...(activeRun?.running
         ? [
             {
@@ -516,7 +522,7 @@ export const ChatComposer = memo(function ChatComposer({
           ]
         : []),
     ],
-    [activeRun?.running]
+    [activeRun?.running, modelSelectionEnabled, models.length]
   )
   useRegisterAppCommands(composerShortcuts)
 
@@ -567,7 +573,7 @@ export const ChatComposer = memo(function ChatComposer({
             trigger,
             mentionPaths,
             skills,
-            models.length > 0,
+            modelSelectionEnabled && models.length > 0,
             canOffload,
             slackChannels,
             recentSlackChannels,
@@ -577,6 +583,7 @@ export const ChatComposer = memo(function ChatComposer({
     [
       mentionPaths,
       models.length,
+      modelSelectionEnabled,
       skills,
       trigger,
       canOffload,
@@ -1233,7 +1240,7 @@ export const ChatComposer = memo(function ChatComposer({
           </DropdownMenu>
 
           <div className="flex min-w-0 flex-wrap items-center gap-space-1">
-            {models.length > 0 && (
+            {modelSelectionEnabled && models.length > 0 && (
               <ModelPicker
                 models={models}
                 onOpenChange={setModelPickerOpen}
@@ -1260,7 +1267,11 @@ export const ChatComposer = memo(function ChatComposer({
             }
             onStop={onStop}
             stoppable={stoppable}
-            stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
+            stopOnEscape={
+              !menuOpen &&
+              !(modelSelectionEnabled && modelPickerOpen) &&
+              !extrasMenuOpen
+            }
             submitting={isSubmitting}
           />
         </div>

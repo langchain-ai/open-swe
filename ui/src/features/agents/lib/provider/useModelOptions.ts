@@ -10,7 +10,9 @@ export interface ModelSelection {
 export interface ModelOptionsResult {
   models: Array<ModelOption>
   defaultSelection: ModelSelection | null
+  modelSelectionEnabled: boolean
   isLoading: boolean
+  isError: boolean
 }
 
 const STORAGE_KEY = "open-swe.agents.model-selection"
@@ -65,7 +67,9 @@ export function useModelOptions(workspace?: string | null): ModelOptionsResult {
   return {
     models,
     defaultSelection,
+    modelSelectionEnabled: optionsQuery.data?.model_selection_enabled === true,
     isLoading: optionsQuery.isLoading || session.isLoading,
+    isError: optionsQuery.isError && !optionsQuery.data,
   }
 }
 

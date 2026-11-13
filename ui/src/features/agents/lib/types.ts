@@ -623,6 +623,7 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  workspace?: string | null
   /** The Open SWE project the thread was started in or moved to. */
   projectId?: string | null
   branch: string
