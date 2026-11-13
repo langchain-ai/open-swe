@@ -6,15 +6,18 @@ import {
 } from "@langchain/macaw-components/icons"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Button } from "@langchain/macaw-components/Button"
+import { Divider } from "@langchain/macaw-components/Divider"
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -393,6 +396,20 @@ function PullRequestLink({
 
   return (
     <div className="@container flex min-w-0 items-center gap-space-1 rounded-xl border border-default bg-surface-level-1 p-space-1 text-xs text-secondary shadow-sm">
+      <IconButton
+        asChild
+        icon={GithubLogoIcon}
+        iconClassName="size-3.5"
+        iconWeight="regular"
+        label={`Open ${pullRequest.repoFullName}#${pullRequest.number} on GitHub`}
+        size="sm"
+        color="secondary"
+        variant="plain"
+        tooltipProps={{ title: "Open on GitHub" }}
+      >
+        <a href={pullRequest.url} target="_blank" rel="noreferrer" />
+      </IconButton>
+      <Divider orientation="vertical" className="my-space-1" />
       <HoverCard openDelay={250} closeDelay={100}>
         <HoverCardTrigger asChild>
           <Link
