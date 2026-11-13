@@ -56,6 +56,9 @@ class TurnTrace:
     def __init__(self) -> None:
         self.root: RunTree | None = None
         self._ending: asyncio.Task[None] | None = None
+        self._tool_calls = 0
+        self._failed_tool_calls = 0
+        self._nonzero_shell_exits = 0
 
     @staticmethod
     def current_root() -> RunTree | None:
@@ -87,9 +90,11 @@ class TurnTrace:
 
     def start(self) -> None:
         self.root = None
+        self._tool_calls = self._failed_tool_calls = self._nonzero_shell_exits = 0
         try:
             self.root = self.current_root()
             self.update({})
+            self._count_tools()
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
 
@@ -108,6 +113,29 @@ class TurnTrace:
         """Tag the turn with its most recently attempted model, without relabeling child calls."""
         if self.root is not None:
             self.root.metadata["model"] = model_id
+
+    def record_tool(self, *, errored: bool, nonzero_shell_exit: bool) -> None:
+        """Count a tool call the turn finished on its root.
+
+        Every call made at any level counts once: an ``eval`` and each tool its code calls,
+        a ``task`` and each call its subagent makes. ``failed_tool_calls`` counts the calls
+        that answered with an error and the shell commands that exited non-zero;
+        ``nonzero_shell_exits`` counts those commands alone, as a ``grep`` that matched
+        nothing exits 1. A call paused for the person to answer is not counted.
+
+        Written as each call ends, so a run cut off or failed still carries its counts. A
+        run resumed after a pause does not prepare again, finds no root, and carries none.
+        """
+        self._tool_calls += 1
+        self._failed_tool_calls += errored or nonzero_shell_exit
+        self._nonzero_shell_exits += nonzero_shell_exit
+        self._count_tools()
+
+    def _count_tools(self) -> None:
+        if self.root is not None:
+            self.root.metadata["tool_calls"] = self._tool_calls
+            self.root.metadata["failed_tool_calls"] = self._failed_tool_calls
+            self.root.metadata["nonzero_shell_exits"] = self._nonzero_shell_exits
 
     @staticmethod
     def current_headers() -> dict[str, str]:

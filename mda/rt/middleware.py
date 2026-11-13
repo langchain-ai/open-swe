@@ -91,7 +91,6 @@ from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
-    Run,
     RunContext,
     RunLocal,
     harness_message,
@@ -112,7 +111,7 @@ from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles, RunArtifacts
 from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, run_id, tool_report
-from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -266,14 +265,6 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**tool_call, "args": args}))
 
 
-_TRACES: Final = RunLocal(TurnTrace)
-
-
-def turn_trace(run: Run) -> TurnTrace:
-    """The trace of the turn ``run`` is playing."""
-    return _TRACES.get(run)
-
-
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
 
@@ -377,7 +368,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     ) -> tuple[dict[str, object] | None, bool]:
         """The update preparing the run makes, and whether the sandbox is open, as far as
         this run tried."""
-        trace = turn_trace(self._backend.run)
+        trace = self._backend.run.trace
         trace.start()
         trace.update(self._trace_metadata())
         trace.tag(self._backend.run.catalog.trace_tags)
@@ -607,7 +598,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        trace = turn_trace(self._backend.run)
+        trace = self._backend.run.trace
         own = self._own_model()
         if own is not None:
             # The run's own model, unless the loop names another for this call.
@@ -692,7 +683,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
         finally:
-            turn_trace(run).end(self._trace_metadata(), turn_git(run).metadata)
+            run.trace.end(self._trace_metadata(), turn_git(run).metadata)
 
 
 class ReportRepliesMiddleware(AgentMiddleware):
@@ -786,9 +777,9 @@ async def reported(
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.outbox.finished(report, failure)
+        backend.run.tool_finished(report, failure)
         raise
-    backend.outbox.finished(report, _tool_message(result, tool_call_id))
+    backend.run.tool_finished(report, _tool_message(result, tool_call_id))
     return result
 
 

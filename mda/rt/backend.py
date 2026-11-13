@@ -28,6 +28,7 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    ToolMessage,
     add_notification_metadata,
     messages_to_dict,
 )
@@ -43,7 +44,7 @@ from pydantic import (
 )
 from runtime_api.catalog import Catalog, ToolSpec
 from runtime_api.endpoint import Delivery, call
-from runtime_api.loop import VISIBLE_FROM, RunCall
+from runtime_api.loop import VISIBLE_FROM, RunCall, ToolCallReport
 from runtime_api.provenance import Provenance
 from runtime_api.sandbox_setup import GitIdentity
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
@@ -270,11 +271,27 @@ class Run:
         self.backend = OpenSweBackend(self)
         # What the run tells the backend happened, until the backend takes it.
         self.outbox = Outbox(self.backend)
+        # The trace of the turn the run plays.
+        self.trace = TurnTrace()
         # The route the run's model calls take, once the run starts; its subagents follow it.
         self.route: str | None = None
         # Jev's answers about the run's request, for its trace, once the classifier ran.
         self.classified: dict[str, str] = {}
         self._locals: dict[object, object] = {}
+
+    def tool_finished(self, report: ToolCallReport, result: ToolMessage) -> None:
+        """Tell the backend how a tool call the run made ended, and count it on its trace.
+
+        deepagents answers any shell command that ran with success, and puts its exit code,
+        when known, on the result's artifact.
+        """
+        self.outbox.finished(report, result)
+        self.trace.record_tool(
+            errored=result.status == "error",
+            nonzero_shell_exit=report.name == "execute"
+            and isinstance(result.artifact, Mapping)
+            and result.artifact.get("exit_code", 0) != 0,
+        )
 
     def local[T](self, key: object, make: Callable[[], T]) -> T:
         """Keep a lazily created value for this run alone."""

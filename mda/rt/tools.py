@@ -22,6 +22,7 @@ from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langchain_core.tools import StructuredTool
 from langchain_quickjs import UnresolvedToolError
 from langgraph.config import get_config
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 from managed_deepagents import (
     ConnectionNotFoundError,
@@ -280,10 +281,15 @@ async def called(
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.outbox.finished(report, failure)
+        if isinstance(exc, GraphBubbleUp):
+            # A pause is not a failure, so the trace does not count it; the report closes all
+            # the same, as the code runs again once the person answers and reports under a new id.
+            backend.outbox.finished(report, failure)
+        else:
+            backend.run.tool_finished(report, failure)
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
-    backend.outbox.finished(report, message)
+    backend.run.tool_finished(report, message)
     if isinstance(result, ToolMessage):
         return message
     return Command(update={**_update(result), "messages": [message]})

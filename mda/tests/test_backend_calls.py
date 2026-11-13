@@ -17,11 +17,13 @@ import openai
 import pytest
 from deepagents import create_deep_agent
 from deepagents.backends.local_shell import LocalShellBackend
+from deepagents.backends.protocol import ExecuteResponse
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import (
     FakeListChatModel,
     GenericFakeChatModel,
@@ -37,7 +39,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
-from langchain_core.tools import tool
+from langchain_core.tools import ToolException, tool
 from langchain_core.tracers.langchain import LangChainTracer
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
@@ -78,10 +80,10 @@ from rt.file_tools import FileToolsMiddleware
 from rt.git_evidence import TurnGit, turn_git
 from rt.kinds import KINDS
 from rt.managed_sandbox import declared_sandbox
-from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
+from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
-from rt.tools import STATE_KEY, operation_tool
+from rt.tools import STATE_KEY, called, operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
     JOINED_TASK_CONTEXT,
@@ -1167,6 +1169,183 @@ async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
     ] == expected_calls
 
 
+class _AnsweringThenDown(GenericFakeChatModel):
+    """A model that answers with its messages, then fails every later call."""
+
+    def bind_tools(self, *_args: object, **_kwargs: object) -> Self:
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        try:
+            return super()._generate(messages, stop, run_manager, **kwargs)
+        except StopIteration:
+            raise RuntimeError("the model is down") from None
+
+
+_TOOL_COUNTS: Final = ("tool_calls", "failed_tool_calls", "nonzero_shell_exits")
+
+
+class _Shell(LocalShellBackend):
+    """A shell where ``make test`` exits 2, a ``grep`` that matches nothing exits 1, and
+    ``wait`` answers with no exit code; every other command exits 0."""
+
+    EXITS: Final = {"make test": 2, "grep -r TODO .": 1, "wait": None}
+
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        return ExecuteResponse(output=command, exit_code=self.EXITS.get(command, 0))
+
+
+@pytest.mark.parametrize(
+    ("arm", "model_id"),
+    [("active", "openai:sol"), ("inactive", "anthropic:claude-opus-5-5")],
+)
+@pytest.mark.parametrize("fails", [False, True], ids=["ends", "fails"])
+async def test_the_turn_root_counts_its_tool_calls_and_their_errors_on_either_arm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, arm: str, model_id: str, fails: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    spec = ModelSpec(model_id=model_id, kwargs={})
+    backend = _run_backend(
+        invocation_id="turn",
+        catalog=_models(spec).model_copy(
+            update={
+                "trace_metadata": {"model_routing": arm},
+                "trace_tags": [f"model_routing:{arm}"],
+            }
+        ),
+    )
+    _answering(monkeypatch, backend, _preparing())
+    calls = [
+        ToolCall(name="look", args={"path": "a"}, id="call-1"),
+        ToolCall(name="look", args={"path": "missing"}, id="call-2"),
+        ToolCall(name="look", args={"path": "b"}, id="call-3"),
+        ToolCall(name="execute", args={"command": "make test"}, id="call-4"),
+        ToolCall(name="execute", args={"command": "make lint"}, id="call-5"),
+        ToolCall(name="execute", args={"command": "grep -r TODO ."}, id="call-6"),
+        ToolCall(name="execute", args={"command": "wait"}, id="call-7"),
+    ]
+    replies = [AIMessage(content="", tool_calls=calls)]
+    if not fails:
+        replies.append(AIMessage(content="done"))
+    model = _AnsweringThenDown(messages=iter(replies))
+    monkeypatch.setattr("rt.middleware.build_model", lambda _spec, use_gateway: model)
+
+    @tool
+    def look(path: str) -> str:
+        """Read a path."""
+        if path == "missing":
+            raise ToolException("no such path")
+        return path
+
+    # As the tools node answers a tool's failure: an error result the model reads.
+    look.handle_tool_error = True
+    # deepagents' own shell tool, which answers a command that exits non-zero with success.
+    execute = next(
+        shell_tool
+        for shell_tool in FilesystemMiddleware(backend=_Shell(root_dir=tmp_path)).tools
+        if shell_tool.name == "execute"
+    )
+
+    client = MagicMock(spec=Client)
+    patches: dict[object, dict[str, object]] = {}
+    client.update_run.side_effect = lambda run_id, **kwargs: patches.update(
+        {run_id: deepcopy(kwargs)}
+    )
+    monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        tools=[look, execute],
+        middleware=cast(
+            list[AgentMiddleware],
+            [BackendRunMiddleware(backend), RuntimeToolsMiddleware(backend, ())],
+        ),
+    )
+    with tracing_context(enabled=True):
+        ran = graph.ainvoke(
+            {"messages": [HumanMessage("look around")]},
+            {
+                "callbacks": [LangChainTracer(client=client, project_name="test")],
+                "metadata": {"invocation_id": "turn"},
+            },
+        )
+        if fails:
+            with pytest.raises(RuntimeError, match="the model is down"):
+                await ran
+        else:
+            await ran
+    await backend.run.trace.ended()
+
+    created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
+    root_id = next(run_id for run_id, run in created.items() if not run.get("parent_run_id"))
+    root = _run_metadata(patches[root_id])
+    # The same fields on both arms of the routing experiment, a failed run's included. The
+    # tool's error fails its call alone; each non-zero exit fails its call and counts as one.
+    assert {key: root[key] for key in (*_TOOL_COUNTS, "model")} == {
+        "tool_calls": 7,
+        "failed_tool_calls": 3,
+        "nonzero_shell_exits": 2,
+        "model": model_id,
+    }
+    children = [patch for run_id, patch in patches.items() if run_id != root_id]
+    assert children
+    assert not any(key in _run_metadata(patch) for patch in children for key in _TOOL_COUNTS)
+
+
+@pytest.mark.parametrize(
+    ("raised", "counts"),
+    [(None, (1, 1, 0)), (RuntimeError, (1, 1, 0)), (GraphInterrupt, (0, 0, 0))],
+    ids=["errs", "raises", "pauses"],
+)
+async def test_a_code_mode_call_paused_for_the_person_is_not_counted(
+    monkeypatch: pytest.MonkeyPatch,
+    raised: type[Exception] | None,
+    counts: tuple[int, int, int],
+) -> None:
+    from rt.backend import reporting, subagent_of
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    backend = _run_backend()
+    started = MagicMock()
+    finished = MagicMock()
+    monkeypatch.setattr(backend.outbox, "started", started)
+    monkeypatch.setattr(backend.outbox, "finished", finished)
+    root = RunTree(name="turn", run_type="chain")
+    backend.run.trace.root = root
+
+    async def make(tool_call_id: str) -> ToolMessage:
+        if raised is not None:
+            # As an MCP tool fails, or asks the person to grant its connection.
+            raise raised
+        return ToolMessage(content="no such page", tool_call_id=tool_call_id, status="error")
+
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id=None,
+        store=None,
+    )
+    with subagent_of("eval-1"), reporting("eval-1"):
+        if raised is None:
+            await called(backend, "fetch_page", {}, runtime, make)
+        else:
+            with pytest.raises(raised):
+                await called(backend, "fetch_page", {}, runtime, make)
+
+    assert tuple(root.metadata.get(key, 0) for key in _TOOL_COUNTS) == counts
+    # Code mode runs a paused call again under a new id, so this one's report still closes.
+    assert started.call_count == finished.call_count == 1
+
+
 async def test_a_stalled_subagent_call_answers_with_the_timeout() -> None:
     # Its `task` call hands this answer back; a raise would end the delegating run.
     subagent = create_agent(
@@ -1341,7 +1520,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         await graph.ainvoke(
             {"messages": [("user", "hello")], "open_swe_state": {"kept": True}}, config
         )
-    await turn_trace(backend.run).ended()
+    await backend.run.trace.ended()
     saved = await graph.aget_state(config)
     # A turn starts with no task joined since its catalog was planned.
     assert saved.values["open_swe_state"] == {"kept": True, JOINED_TASK_CONTEXT: None}
@@ -1391,7 +1570,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
             {"messages": [("user", "next turn")]},
             {**config, "metadata": {"invocation_id": "turn"}},
         )
-    await turn_trace(backend.run).ended()
+    await backend.run.trace.ended()
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
 
 
@@ -1425,7 +1604,7 @@ async def test_root_attribution_survives_a_missing_catalog(
                     "metadata": {"invocation_id": "turn", "created_by": creator, **billing},
                 },
             )
-    root = turn_trace(backend.run).root
+    root = backend.run.trace.root
     assert root is not None
     assert root.metadata.items() >= billing.items()
     assert root.metadata.get("created_by") == (None if creator == "system" else creator)
