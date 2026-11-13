@@ -403,10 +403,10 @@ class EventSubscription(Base):
         return cls.expires_at <= func.clock_timestamp()
 
     @classmethod
-    async def deliver(cls, event: LoggedEvent) -> None:
-        """Wake every thread listening for ``event``. Never raises."""
+    async def deliver(cls, event: LoggedEvent) -> bool:
+        """Wake listeners; False means matching failed and the event should be retried."""
         if event.workspace_id is None:
-            return
+            return True
         try:
             summary = EventSummary.of(event)
         except ValidationError:
@@ -415,9 +415,9 @@ class EventSubscription(Base):
                 extra={"webhook_source": event.source, "event_delivery_id": event.delivery_id},
                 exc_info=True,
             )
-            return
+            return True
         if summary.from_open_swe:
-            return
+            return True
         try:
             subscriptions = await cls._matching(event, summary)
         except Exception:  # noqa: BLE001
@@ -426,7 +426,8 @@ class EventSubscription(Base):
                 extra={"event_delivery_id": event.delivery_id},
                 exc_info=True,
             )
-            return
+            return False
+        complete = True
         strategies: dict[str, MultitaskStrategy] = {}
         for subscription in subscriptions:
             try:
@@ -443,11 +444,14 @@ class EventSubscription(Base):
                     },
                     exc_info=True,
                 )
+                complete = False
                 continue
             if strategies.get(subscription.thread_id) != "interrupt":
                 strategies[subscription.thread_id] = subscription.multitask_strategy
         for thread_id, strategy in strategies.items():
             await cls.deliver_to(thread_id, strategy)
+
+        return complete
 
     @classmethod
     async def deliver_to(cls, thread_id: str, strategy: MultitaskStrategy) -> None:
@@ -490,6 +494,7 @@ class EventSubscription(Base):
             rows = await session.scalars(
                 select(cls).where(
                     cls.workspace_id == event.workspace_id,
+                    cls.created_at <= event.received_at,
                     ~cls._expired(),
                     cls.sources.contains([event.source])
                     if event.source in ADMIN_ONLY_SOURCES

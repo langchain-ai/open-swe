@@ -37,7 +37,7 @@ RETAINED_DAYS = 14
 _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 # Longer than any sender keeps retrying one delivery.
-_DELIVERY_CLAIM_TTL = timedelta(hours=24)
+_DELIVERY_WINDOW = timedelta(hours=24)
 
 # ``source:event_type`` pairs, comma-separated, logged and dropped before the event log.
 # Incident mitigation: CI deliveries overwhelm the database, so they are dropped by default.
@@ -377,12 +377,12 @@ class EventLog:
         refs: EventRefs | None = None,
         visibility: EventVisibility = "public",
         visible_to_user_id: UUID | None = None,
+        once: bool = False,
     ) -> bool:
         """Log, then wake subscribed threads.
 
-        Never raises. False means the row was not stored, so a caller that must
-        not drop the delivery can ask the sender to retry. A dropped event is not stored
-        and counts as handled.
+        Never raises; False asks the sender to retry storage or unfinished matching.
+        Dropped events count as handled.
         """
         if cls.dropped(source, event_type, delivery_id, cls._action(request, body)):
             return True
@@ -412,6 +412,7 @@ class EventLog:
             refs=refs,
             visibility=visibility,
             visible_to_user_id=visible_to_user_id,
+            once=once,
         )
 
     @classmethod
@@ -426,10 +427,11 @@ class EventLog:
         refs: EventRefs | None = None,
         visibility: EventVisibility = "public",
         visible_to_user_id: UUID | None = None,
+        once: bool = False,
     ) -> bool:
         """Store one event and wake subscribed threads; ``record`` for a webhook request.
 
-        Never raises. False means the row was not stored.
+        Never raises. False means storage or retryable matching failed.
         """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
@@ -439,20 +441,47 @@ class EventLog:
             logger.warning("Rotating event log partitions failed", exc_info=True)
         try:
             async with transaction() as conn:
-                result = await conn.execute(
-                    _INSERT,
-                    {
-                        "source": source,
-                        "endpoint": endpoint,
-                        "event_type": event_type,
-                        "delivery_id": delivery_id,
-                        "payload": json.dumps(payload),
-                        "visibility": visibility,
-                        "visible_to_user_id": visible_to_user_id,
-                        **(refs or EventRefs()).model_dump(),
-                    },
-                )
-                row = result.mappings().one()
+                row = None
+                if once:
+                    await conn.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                        {"key": f"event_log:{source}:{delivery_id}"},
+                    )
+                    row = (
+                        (
+                            await conn.execute(
+                                text(
+                                    "SELECT * FROM event_log WHERE source = :source "
+                                    "AND delivery_id = :delivery_id "
+                                    "AND received_at >= statement_timestamp() - CAST(:ttl AS interval) "
+                                    "ORDER BY received_at DESC LIMIT 1"
+                                ),
+                                {
+                                    "source": source,
+                                    "delivery_id": delivery_id,
+                                    "ttl": _DELIVERY_WINDOW,
+                                },
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                inserted = row is None
+                if inserted:
+                    result = await conn.execute(
+                        _INSERT,
+                        {
+                            "source": source,
+                            "endpoint": endpoint,
+                            "event_type": event_type,
+                            "delivery_id": delivery_id,
+                            "payload": json.dumps(payload),
+                            "visibility": visibility,
+                            "visible_to_user_id": visible_to_user_id,
+                            **(refs or EventRefs()).model_dump(),
+                        },
+                    )
+                    row = result.mappings().one()
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Recording an event in the event log failed",
@@ -462,11 +491,28 @@ class EventLog:
             return False
         from openswe.analytics.posthog import record_webhook
 
-        event = LoggedEvent.model_validate({**row, "payload": payload})
-        task = asyncio.create_task(record_webhook(event))
-        _POSTHOG_TASKS.add(task)
-        task.add_done_callback(_POSTHOG_TASKS.discard)
-        await EventSubscription.deliver(event)
+        event = LoggedEvent.model_validate({"payload": payload, **row})
+        if inserted:
+            task = asyncio.create_task(record_webhook(event))
+            _POSTHOG_TASKS.add(task)
+            task.add_done_callback(_POSTHOG_TASKS.discard)
+        if not once:
+            await EventSubscription.deliver(event)
+            return True
+        completion_key = f"{source}:{delivery_id}:{event.received_at.isoformat()}"
+        try:
+            if await event_claims.held("event_log_matched", completion_key):
+                return True
+            if not await EventSubscription.deliver(event):
+                return False
+            await event_claims.claim("event_log_matched", completion_key, ttl=_DELIVERY_WINDOW)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Recording event matching completion failed",
+                extra={"webhook_source": source, "event_delivery_id": delivery_id},
+                exc_info=True,
+            )
+            return False
         return True
 
     @classmethod
@@ -482,28 +528,8 @@ class EventLog:
         visibility: EventVisibility = "public",
         visible_to_user_id: UUID | None = None,
     ) -> bool:
-        """``record`` a delivery the sender may send more than once, at most once.
-
-        A retry, or another call for the same delivery, logs and wakes nothing
-        again. A delivery that was not stored gives its claim back, so its next
-        try records it. Never raises; False means the row was not stored.
-        """
-        if cls.dropped(source, event_type, delivery_id, cls._action(request, body)):
-            return True
-        scope = f"{_TABLE}:{source}"
-        claimed = False
-        try:
-            claimed = await event_claims.claim(scope, delivery_id, ttl=_DELIVERY_CLAIM_TTL)
-        except Exception:  # noqa: BLE001 - a duplicate row beats a lost one
-            logger.warning(
-                "Claiming a delivery for the event log failed; recording it unclaimed",
-                extra={"webhook_source": source, "webhook_delivery": delivery_id},
-                exc_info=True,
-            )
-        else:
-            if not claimed:
-                return True
-        stored = await cls.record(
+        """Store once in 24 hours, replaying unfinished matches when the sender retries."""
+        return await cls.record(
             request,
             body,
             source,
@@ -512,17 +538,8 @@ class EventLog:
             refs=refs,
             visibility=visibility,
             visible_to_user_id=visible_to_user_id,
+            once=True,
         )
-        if not stored and claimed:
-            try:
-                await event_claims.release(scope, delivery_id)
-            except Exception:  # noqa: BLE001 - the claim lapses on its own
-                logger.warning(
-                    "Releasing an unrecorded delivery's event log claim failed",
-                    extra={"webhook_source": source, "webhook_delivery": delivery_id},
-                    exc_info=True,
-                )
-        return stored
 
     @classmethod
     async def kinds(

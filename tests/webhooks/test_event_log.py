@@ -395,7 +395,7 @@ async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
 ) -> None:
     from openswe.webhooks.event_subscriptions import EventSubscription
 
-    wake = AsyncMock()
+    wake = AsyncMock(return_value=True)
     monkeypatch.setattr(EventSubscription, "deliver", wake)
     request = Request(
         {
@@ -408,12 +408,6 @@ async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
     )
     body = json.dumps({"type": "Comment", "action": "create"}).encode()
 
-    # A delivery that wasn't stored gives its claim back, so its retry records it.
-    with monkeypatch.context() as unstored:
-        unstored.setattr(EventLog, "record", AsyncMock(return_value=False))
-        assert not await EventLog.record_once(
-            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
-        )
     for _ in range(2):
         assert await EventLog.record_once(
             request, body, "linear", event_type="Comment", delivery_id="delivery-1"
@@ -422,7 +416,7 @@ async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
     async with transaction() as conn:
         count = await conn.scalar(text("SELECT count(*) FROM event_log"))
     assert count == 1
-    wake.assert_awaited_once()
+    assert wake.await_count == 1
 
 
 @pytest.mark.parametrize("kind", ["message", "me_message", "edit", "multiple", "unknown"])
@@ -537,14 +531,14 @@ async def test_dropped_events_are_not_stored(monkeypatch: pytest.MonkeyPatch) ->
     from openswe.webhooks import event_log
 
     monkeypatch.setattr(event_log, "DROPPED_EVENTS", frozenset({"slack:message"}))
-    claim = AsyncMock()
-    monkeypatch.setattr(event_log.event_claims, "claim", claim)
+    append = AsyncMock()
+    monkeypatch.setattr(event_log.EventLog, "append", append)
 
     assert await event_log.EventLog.record_once(
         MagicMock(), b"{}", "slack", event_type="message", delivery_id="d-1"
     )
     assert await event_log.EventLog.record(MagicMock(), b"{}", "slack", event_type="message")
-    claim.assert_not_awaited()
+    append.assert_not_awaited()
 
 
 async def test_dropped_events_match_their_action(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -557,3 +551,50 @@ async def test_dropped_events_match_their_action(monkeypatch: pytest.MonkeyPatch
     assert await event_log.EventLog.record(
         MagicMock(headers={}), b'{"action": "completed"}', "github", event_type="check_run"
     )
+
+
+class TestConcurrentEventStorage:
+    async def test_retry_waits_for_failed_insert_then_stores(
+        self, registry_db: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from contextlib import asynccontextmanager
+
+        entered, release, concurrent = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original = event_log.transaction
+        calls = 0
+
+        @asynccontextmanager
+        async def failing_transaction():
+            nonlocal calls
+            calls += 1
+            first = calls == 1
+            async with original() as conn:
+                if not first:
+                    concurrent.set()
+                yield conn
+                if first:
+                    entered.set()
+                    await release.wait()
+                    raise RuntimeError("insert rolled back")
+
+        await EventLog.ensure_partitions()
+        monkeypatch.setattr(event_log, "transaction", failing_transaction)
+        request = Request({"type": "http", "path": "/webhooks/rollout", "headers": []})
+        first = asyncio.create_task(
+            EventLog.record_once(
+                request, b"{}", "deployment", event_type="deployed", delivery_id="concurrent"
+            )
+        )
+        await entered.wait()
+        second = asyncio.create_task(
+            EventLog.record_once(
+                request, b"{}", "deployment", event_type="deployed", delivery_id="concurrent"
+            )
+        )
+        await concurrent.wait()
+        assert not second.done()
+        release.set()
+        assert await first is False
+        assert await second is True
+        async with original() as conn:
+            assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 1

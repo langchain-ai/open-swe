@@ -2,7 +2,7 @@
 
 import json
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import DEFAULT, AsyncMock
 
 import httpx
 import jwt
@@ -45,13 +45,15 @@ def _token(**overrides: object) -> str:
 
 
 @pytest.fixture
-def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+def app(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     async def allowed(full_name: str) -> str | None:
         return "default" if full_name == _REPO else None
 
     monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
     monkeypatch.setattr("openswe.rollout_events.WORKSPACES.thread_starter_of_repo", allowed)
-    record = AsyncMock(return_value=True)
+    from openswe.webhooks.event_log import EventLog
+
+    record = AsyncMock(wraps=EventLog.record)
     monkeypatch.setattr("openswe.rollout_events.EventLog.record", record)
     api = FastAPI()
     api.state.record = record
@@ -160,3 +162,40 @@ async def test_rollout_webhook_asks_for_a_retry_when_the_event_is_not_stored(
     body = json.dumps({"target": "gcp-staging", "commits": ["a" * 40]}).encode()
     response = await _post(app, body, _token())
     assert response.status_code == 503
+    app.state.record.return_value = DEFAULT
+    assert (await _post(app, body, _token())).status_code == 200
+    assert (await _post(app, body, _token())).status_code == 200
+    assert app.state.record.await_count == 3
+
+
+class TestRolloutRetries:
+    async def test_reordered_normalized_commits_are_recorded_once(self, app: FastAPI) -> None:
+        for target, commits in [
+            (" GCP-Dev ", ["A" * 40, "b" * 40, "a" * 40]),
+            ("gcp-dev", ["b" * 40, "a" * 40]),
+        ]:
+            body = json.dumps({"target": target, "commits": commits}).encode()
+            assert (await _post(app, body, _token())).status_code == 200
+        from sqlalchemy import text
+
+        from openswe.database import transaction
+
+        async with transaction() as conn:
+            assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 1
+
+    async def test_distinct_repositories_targets_and_commits_are_recorded(
+        self, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "openswe.rollout_events.WORKSPACES.thread_starter_of_repo",
+            AsyncMock(return_value="default"),
+        )
+        for repository, target, commit in [
+            (_REPO, "gcp-dev", "a" * 40),
+            ("other/repo", "gcp-dev", "a" * 40),
+            (_REPO, "gcp-us-prod", "a" * 40),
+            (_REPO, "gcp-dev", "b" * 40),
+        ]:
+            body = json.dumps({"target": target, "commits": [commit]}).encode()
+            assert (await _post(app, body, _token(repository=repository))).status_code == 200
+        assert app.state.record.await_count == 4

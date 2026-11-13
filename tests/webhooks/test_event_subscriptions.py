@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -564,3 +565,63 @@ async def test_restricted_event_requires_its_audience(workspace: dict[str, UUID]
         delivery_id="public-user",
         visible_to_user_id=uuid4(),
     )
+
+
+@pytest.mark.parametrize("failure", ["lookup", "match"])
+async def test_retry_recovers_unmatched_delivery_without_rewaking_matched_thread(
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    await _subscribe(workspace, sources=["deployment"], one_shot=True)
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
+    request = _request("/webhooks/rollout")
+    with monkeypatch.context() as failed:
+        failed.setattr(
+            EventSubscription,
+            "_matching" if failure == "lookup" else "match",
+            AsyncMock(side_effect=RuntimeError("database unavailable")),
+        )
+        assert not await EventLog.record_once(
+            request,
+            body,
+            "deployment",
+            event_type="deployed",
+            delivery_id="retry-deployment",
+            refs=EventRefs(github_repository="acme/widgets"),
+        )
+    await EventSubscription(
+        thread_id="late-listener",
+        workspace_id=workspace["workspace"],
+        multitask_strategy="enqueue",
+        run_config={},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        sources=["deployment"],
+    ).create()
+    assert await EventLog.record_once(
+        request,
+        body,
+        "deployment",
+        event_type="deployed",
+        delivery_id="retry-deployment",
+        refs=EventRefs(github_repository="acme/widgets"),
+    )
+    with monkeypatch.context() as failed:
+        failed.setattr(
+            EventSubscription,
+            "_matching",
+            AsyncMock(side_effect=RuntimeError("database unavailable")),
+        )
+        assert await EventLog.record_once(
+            request,
+            body,
+            "deployment",
+            event_type="deployed",
+            delivery_id="retry-deployment",
+            refs=EventRefs(github_repository="acme/widgets"),
+        )
+    assert delivered == [(_THREAD, "enqueue")]
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 1
+        assert await conn.scalar(text("SELECT count(*) FROM event_match")) == 1

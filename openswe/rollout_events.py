@@ -99,6 +99,17 @@ class RolloutEvent(BaseModel):
             return None
         return cls(target=target.strip().lower(), commits=kept)
 
+    async def delivery_id(self, repository: str) -> str:
+        canonical = json.dumps(
+            {
+                "repository": repository.lower(),
+                "target": self.target,
+                "commits": sorted(self.commits),
+            },
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
 
 def _bearer(header: str) -> str:
     scheme, _, token = header.strip().partition(" ")
@@ -113,11 +124,6 @@ def _stored_body(target: str, commits: list[str]) -> bytes:
         {"target": target, "commits": commits},
         separators=(",", ":"),
     ).encode()
-
-
-def _delivery_id(target: str, commits: list[str]) -> str:
-    canonical = json.dumps({"commits": commits, "target": target}, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _ask_to_monitor(sha: str) -> str:
@@ -405,12 +411,12 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
     event = RolloutEvent.parse(payload)
     if event is None:
         raise HTTPException(status_code=400, detail="Invalid rollout event")
-    stored = await EventLog.record(
+    stored = await EventLog.record_once(
         request,
         _stored_body(event.target, event.commits),
         "deployment",
         event_type=_DEPLOYED,
-        delivery_id=_delivery_id(event.target, event.commits),
+        delivery_id=await event.delivery_id(claims.repository),
         refs=EventRefs(github_repository=claims.repository),
     )
     if not stored:
