@@ -590,7 +590,7 @@ function ReviewsRow({
                 {unresolved} unresolved
               </Button>
             )}
-            {status.draft === false && <RequestHumanReview pr={status} />}
+            <RequestHumanReview pr={status} />
           </>
         }
       >

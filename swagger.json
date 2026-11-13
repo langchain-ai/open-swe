@@ -3240,6 +3240,11 @@
             "title": "Available",
             "type": "boolean"
           },
+          "awaiting_ready": {
+            "default": false,
+            "title": "Awaiting Ready",
+            "type": "boolean"
+          },
           "blockers": {
             "default": [],
             "items": {
@@ -19859,6 +19864,16 @@
             "schema": {
               "title": "Number",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Active Only",
+              "type": "boolean"
             }
           }
         ],

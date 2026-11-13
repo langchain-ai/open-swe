@@ -338,12 +338,6 @@ class ExpeditedReviewNomination:
                 head_sha=head_sha,
                 nominated_in=self.event_origin(channel_id, thread_ts),
             )
-            if active.awaiting_ready and not payload.draft:
-                updated = await HumanReviewRequest.transition(
-                    active.id, expected=("open",), awaiting_ready=False
-                )
-                if updated is not None:
-                    active = updated
             card = ReviewCard(active)
             if not active.awaiting_ready:
                 await card.refresh()

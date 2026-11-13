@@ -63,6 +63,18 @@ const pr: OpenPullRequest = {
   conversationResolutionRequired: false,
 }
 
+function expectOpensInSlack(control: HTMLElement, permalink: string) {
+  expect({
+    href: control.getAttribute("href"),
+    target: control.getAttribute("target"),
+    disabled: control.hasAttribute("disabled"),
+  }).toEqual(
+    permalink
+      ? { href: permalink, target: "_blank", disabled: false }
+      : { href: null, target: null, disabled: true }
+  )
+}
+
 it.each([
   "",
   "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
@@ -70,7 +82,6 @@ it.each([
   "silently reuses an existing request returned after choosing a channel with permalink %j",
   async (permalink) => {
     const successToast = vi.spyOn(toast, "success")
-    const open = vi.spyOn(window, "open").mockReturnValue(null)
     vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
       available: false,
       active: false,
@@ -130,15 +141,11 @@ it.each([
         channel_name: "reviews",
       })
     )
-    const requested = await screen.findByRole("button", {
-      name: "Review requested",
-    })
-    await waitFor(() =>
-      expect(requested.hasAttribute("disabled")).toBe(!permalink)
-    )
-    if (permalink) fireEvent.click(requested)
-    expect(open.mock.calls).toEqual(
-      permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
+    expectOpensInSlack(
+      await screen.findByRole(permalink ? "link" : "button", {
+        name: "Review requested",
+      }),
+      permalink
     )
     expect(request).toHaveBeenCalledTimes(1)
     expect(successToast).not.toHaveBeenCalled()
@@ -147,13 +154,17 @@ it.each([
 )
 
 it.each([
-  "",
-  "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+  { draft: false, permalink: "" },
+  { draft: true, permalink: "" },
+  ...[false, true].map((draft) => ({
+    draft,
+    permalink:
+      "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+  })),
 ])(
-  "reuses persisted status and permalink %j on remount and focus",
-  async (permalink) => {
+  "reuses persisted status $permalink with draft=$draft on remount and focus",
+  async ({ draft, permalink }) => {
     const successToast = vi.spyOn(toast, "success")
-    const open = vi.spyOn(window, "open").mockReturnValue(null)
     const request = vi.spyOn(api, "requestHumanReview")
     const result =
       Promise.withResolvers<
@@ -170,16 +181,16 @@ it.each([
     const content = (
       <QueryClientProvider client={client}>
         <TooltipProvider>
-          <RequestHumanReview pr={pr} />
+          <RequestHumanReview pr={{ ...pr, draft }} />
         </TooltipProvider>
       </QueryClientProvider>
     )
     const view = render(content)
     expect(
       screen
-        .getByRole("button", { name: "Request review in Slack" })
-        .hasAttribute("disabled")
-    ).toBe(true)
+        .queryByRole("button", { name: "Request review in Slack" })
+        ?.hasAttribute("disabled")
+    ).toBe(draft ? undefined : true)
     await act(async () =>
       result.resolve({
         available: false,
@@ -188,10 +199,11 @@ it.each([
         blockers: [],
       })
     )
-    const requested = await screen.findByRole("button", {
-      name: "Review requested",
-    })
-    expect(requested.hasAttribute("disabled")).toBe(!permalink)
+    const role = permalink ? "link" : "button"
+    expectOpensInSlack(
+      await screen.findByRole(role, { name: "Review requested" }),
+      permalink
+    )
     expect(screen.queryByRole("button", { name: "Choose channel" })).toBeNull()
     view.unmount()
     render(content)
@@ -199,13 +211,9 @@ it.each([
       focusManager.setFocused(false)
       focusManager.setFocused(true)
     })
-    const restored = screen.getByRole("button", {
-      name: "Review requested",
-    })
-    expect(restored.hasAttribute("disabled")).toBe(!permalink)
-    fireEvent.click(restored)
-    expect(open.mock.calls).toEqual(
-      permalink ? [[permalink, "_blank", "noopener,noreferrer"]] : []
+    expectOpensInSlack(
+      screen.getByRole(role, { name: "Review requested" }),
+      permalink
     )
     expect(request).not.toHaveBeenCalled()
     expect(successToast).not.toHaveBeenCalled()
@@ -311,7 +319,9 @@ it.each([
           </TooltipProvider>
         </QueryClientProvider>
       )
-      await screen.findByRole("button", { name: "Review requested" })
+      await screen.findByRole(permalink ? "link" : "button", {
+        name: "Review requested",
+      })
       expect(
         screen.queryByRole("button", { name: "Retry review status" })
       ).toBeNull()
@@ -337,7 +347,8 @@ it.each([
       fireEvent.click(
         await screen.findByRole("button", { name: "Request review in Slack" })
       )
-      await screen.findByRole("button", { name: "Review requested" })
+      // The replacement request returns a card link, so the control opens Slack.
+      await screen.findByRole("link", { name: "Review requested" })
       expect(request).toHaveBeenCalledWith(pr, "")
       expect(errorToast).not.toHaveBeenCalled()
     } finally {
@@ -496,15 +507,24 @@ it("can request a selected channel without recovering availability", async () =>
 it.each<Partial<OpenPullRequest>>([
   { draft: true },
   { reviewDecision: "approved" },
-])("does not offer a review request for %j", (status) => {
-  const availability = vi.spyOn(api, "humanReviewAvailability")
+])("does not offer a new review request for %j", async (status) => {
+  const availability = vi
+    .spyOn(api, "humanReviewAvailability")
+    .mockResolvedValue({
+      available: true,
+      active: false,
+      permalink: "",
+      blockers: [],
+    })
   render(
     <QueryClientProvider client={new QueryClient()}>
       <RequestHumanReview pr={{ ...pr, ...status }} />
     </QueryClientProvider>
   )
+  await waitFor(() =>
+    expect(availability).toHaveBeenCalledTimes(status.draft ? 1 : 0)
+  )
   expect(screen.queryByRole("button")).toBeNull()
-  expect(availability).not.toHaveBeenCalled()
 })
 
 it("removes the channel picker when the PR becomes approved", async () => {

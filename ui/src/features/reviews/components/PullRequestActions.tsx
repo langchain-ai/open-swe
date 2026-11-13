@@ -54,7 +54,7 @@ export function PullRequestActions({
         {pr.draft === true && (
           <MarkPullRequestReady pr={pr} onReady={onReady} />
         )}
-        {pr.draft === false && <RequestHumanReview pr={pr} />}
+        <RequestHumanReview pr={pr} />
         {canUpdateBranch(pr) && (
           <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
         )}

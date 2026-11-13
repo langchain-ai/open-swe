@@ -85,6 +85,7 @@ async def test_review_channel_lookup_failure_is_actionable(
         "active_timestamp_failed",
         "active_cleanup_failed",
         "active_other_user",
+        "active_pending_other_user",
         "active_unposted",
         "reviews_unavailable",
         "codeowners_unreadable",
@@ -96,7 +97,7 @@ async def test_dashboard_selects_review_workflow(
 ) -> None:
     pr_ref = GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7")
     requester = User(identities=[UserIdentity(provider="slack", external_id="U1")])
-    pr = PullRequest(owner="lc", repo="repo", number=7)
+    pr = PullRequest(owner="lc", repo="repo", number=7, author_user_id=requester.id)
     approval = HumanReviewRequest(
         pull_request_id=pr.id,
         head_sha="abc",
@@ -104,7 +105,11 @@ async def test_dashboard_selects_review_workflow(
         slack_channel_id="C1",
         slack_message_ts="1.0",
     )
-    approval.requested_by_user_id = User().id if case == "active_other_user" else requester.id
+    if case == "active_pending_other_user":
+        pr.author_user_id = User().id
+    approval.requested_by_user_id = (
+        User().id if case in {"active_other_user", "active_pending_other_user"} else requester.id
+    )
     delete = AsyncMock(return_value=case != "active_cleanup_failed")
     monkeypatch.setattr("openswe.expedited_review.nomination.delete_slack_message", delete)
     discard = AsyncMock()
@@ -131,20 +136,18 @@ async def test_dashboard_selects_review_workflow(
             )
         ]
     )
-    approval.awaiting_ready = case in {"active_ready", "active_unposted"}
-    if approval.awaiting_ready:
+    approval.awaiting_ready = case in {"active_ready", "active_pending_other_user"}
+    if approval.awaiting_ready or case == "active_unposted":
         approval.slack_message_ts = ""
+    if approval.awaiting_ready:
+        approval.slack_dm_channel_id = "D1"
+        approval.slack_dm_message_ts = "4.0"
     monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
     monkeypatch.setattr(ReviewCard, "retire", AsyncMock(return_value=approval))
-    ready_approval = HumanReviewRequest(
-        pull_request_id=pr.id,
-        head_sha="abc",
-        kind="expedited",
-        id=approval.id,
-        slack_channel_id="C1",
-        slack_message_ts="1.0" if case == "active_ready" else "",
+    monkeypatch.setattr(
+        "openswe.human_review.requests.get_slack_permalink",
+        AsyncMock(return_value="https://slack/dm"),
     )
-    monkeypatch.setattr(HumanReviewRequest, "transition", AsyncMock(return_value=ready_approval))
     monkeypatch.setattr(SlackChannel, "name_for", AsyncMock(return_value="reviews"))
     monkeypatch.setattr(HumanReviewRequest, "log_event", AsyncMock())
 
@@ -196,7 +199,7 @@ async def test_dashboard_selects_review_workflow(
             "pull",
             AsyncMock(
                 side_effect=AssertionError("Retrieval must not nominate or read GitHub")
-                if case == "active_other_user"
+                if case in {"active_other_user", "active_pending_other_user"}
                 else None,
                 return_value={
                     "state": "open",
@@ -241,15 +244,7 @@ async def test_dashboard_selects_review_workflow(
             autospec=True,
             side_effect=save_request,
         ) as save,
-        patch.object(
-            HumanReviewRequest,
-            "get",
-            AsyncMock(
-                return_value=ready_approval
-                if case in {"active_ready", "active_unposted"}
-                else approval
-            ),
-        ),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=approval)),
         patch.object(
             ReviewCard,
             "post_expedited",
@@ -309,11 +304,20 @@ async def test_dashboard_selects_review_workflow(
         assert saved.requested_by_user_id == requester.id
         assert saved.thread_id == ""
         assert saved.run_config == {"expedited_review_channel": ""}
-    elif case in {"active", "active_ready", "active_other_user"}:
+    elif case in {"active", "active_ready", "active_other_user", "active_pending_other_user"}:
         assert result.request_id == str(approval.id)
         assert result.reused
         assert result.channel == "C1"
-        assert result.permalink == "https://slack/card"
+        assert result.permalink == (
+            "https://slack/dm"
+            if case == "active_ready"
+            else ""
+            if case == "active_pending_other_user"
+            else "https://slack/card"
+        )
+        if case in {"active_ready", "active_pending_other_user"}:
+            assert approval.awaiting_ready
+            assert not approval.slack_message_ts
         post.assert_not_awaited()
         standard.assert_not_awaited()
     else:

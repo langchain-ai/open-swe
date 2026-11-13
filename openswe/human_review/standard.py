@@ -47,6 +47,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.deadlines import PUBLISH_STEP
 from openswe.human_review.deadlines import schedule as _schedule
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
@@ -296,10 +297,6 @@ async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: Sl
         )
 
 
-async def _permalink(request: HumanReviewRequest) -> str:
-    return await request.card_url()
-
-
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
     """Add two hours within local weekday 9am–6pm windows."""
     cursor = start.astimezone(timezone)
@@ -322,10 +319,15 @@ async def _existing(
     active: HumanReviewRequest, auto_merge: bool | None = None, requested_channel: str = ""
 ) -> RequestResult:
     if active.kind == "expedited":
-        permalink = await _permalink(active)
+        permalink = await active.permalink()
         return RequestResult(
             success=False,
-            error=prompt("tools/human-review-existing-expedited", permalink=permalink),
+            error=prompt(
+                "tools/human-review-existing-expedited",
+                permalink=permalink,
+                awaiting_ready=active.awaiting_ready,
+                posted=bool(active.slack_message_ts),
+            ),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
@@ -341,7 +343,7 @@ async def _existing(
         auto_merge=enabled,
         request_id=str(active.id),
         channel=active.slack_channel_id,
-        permalink=await _permalink(active),
+        permalink=await active.permalink(),
         reused=True,
         channel_mismatch=bool(requested_channel and requested_channel != active.slack_channel_id),
         requested_channel=requested_channel,
@@ -609,7 +611,7 @@ async def _request_review(
         request_id=str(request.id),
         channel=target.id,
         channel_name=target.name,
-        permalink=await _permalink(request),
+        permalink=await request.permalink(),
     )
 
 
@@ -898,7 +900,7 @@ async def assign(
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = f" Accept within {minutes} minutes, or Robin will ask someone else."
     accept = actions(accept_button(added), decline_button(added), snooze_button(added))
-    permalink = await _permalink(added)
+    permalink = await added.permalink()
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
@@ -1118,12 +1120,14 @@ async def _posted_deadline(request: HumanReviewRequest) -> str | None:
 
 
 async def settle(request: HumanReviewRequest) -> bool:
-    """Re-read the pull request and move the request on: react, update the card, or merge.
+    """Re-read the pull request and move the request on: react, publish or update the card, or merge.
 
     ``False`` only when GitHub could not be read, so nothing is known to have changed.
     """
     if request.kind == "posted" and skip_on_preview("settle_posted"):
         return True
+    if request.kind == "expedited":
+        return await ReviewCard(request).publish_when_ready()
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request
@@ -1696,7 +1700,7 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
 
 
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
-    """Scheduler entry point for the unclaimed, pick-expiry and auto-merge deadlines."""
+    """Scheduler entry point for the review deadlines and retried expedited card posts."""
     try:
         request = await HumanReviewRequest.get(UUID(request_id))
     except ValueError:
@@ -1782,4 +1786,14 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}
+    if step == PUBLISH_STEP:
+        card = ReviewCard(request)
+        if not await card.publish():
+            raise RuntimeError("Could not publish ready expedited card")
+        # The first attempt may also have failed to replace the author's confirmation
+        # button; raising retries the job, and publish() is a no-op once the card is up.
+        dm = card.request.slack_dm_channel_id and card.request.slack_dm_message_ts
+        if dm and not await card.refresh_author_dm(None):
+            raise RuntimeError("Could not update the author's confirmation DM")
+        return {"status": "published"}
     return {"status": "unknown_step"}

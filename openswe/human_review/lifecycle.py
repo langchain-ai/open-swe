@@ -6,7 +6,7 @@ just acted, a GitHub event arrived, or one of the request's deadlines passed.
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import httpx2
@@ -32,6 +32,7 @@ from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.repositories import Repository
 from openswe.human_review import card as standard_card
+from openswe.human_review.deadlines import PUBLISH_STEP, schedule
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import (
     ChannelChoice,
@@ -60,6 +61,8 @@ from openswe.users import User
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
+
+_PUBLISH_RETRY = timedelta(minutes=1)
 
 
 @dataclass
@@ -158,7 +161,7 @@ class ReviewCard:
             else await User.for_login("github", pr.author)
         )
         if author is None or not author.slack_user_id:
-            return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
+            return "The author must link their Slack account to confirm this review request."
         files = await self._files()
         if files is None:
             return "Could not read the diff for the author-only card; try again."
@@ -185,10 +188,64 @@ class ReviewCard:
             origin=origin,
         )
         if dm_location is None:
-            return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+            return "Slack could not deliver the author-only confirmation; retry sending the prompt."
         approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
         await approval.save()
         return None
+
+    async def mark_ready(self) -> bool:
+        """Open a draft's card for approval now its PR is ready; ``False`` once the request closed."""
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or row.state != "open":
+                return False
+            undrafted = row.awaiting_ready
+            row.awaiting_ready = False
+        if undrafted and (current := await HumanReviewRequest.get(self.request.id)) is not None:
+            self.request = current
+            await self.refresh()
+        return True
+
+    async def publish_when_ready(self) -> bool:
+        """Recover an authorized post without treating GitHub readiness as permission to send."""
+        if self.request.unpublished:
+            await self.refresh()
+        return True
+
+    async def publish(self) -> bool:
+        """Post a ready expedited card that has none yet; ``False`` when it could not be posted."""
+        if not self.request.unpublished:
+            return True
+        files = await self._files()
+        if files is None:
+            logger.warning(
+                "Could not publish ready expedited card without its changed files",
+                extra={"request_id": str(self.request.id)},
+            )
+            return False
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or not row.unpublished:
+                return True
+            pr = row.pull_request
+            settings = await RepoSettings.cached(pr.owner, pr.repo)
+            row.run_config = {
+                **row.run_config,
+                "expedited_review_channel": settings.channel_for_files(
+                    [file.filename for file in files]
+                ),
+            }
+            try:
+                row.slack_message_ts = await ReviewCard(row).post_expedited(
+                    title=row.pull_request.title, files=files
+                )
+            except SlackRequestError as exc:
+                logger.warning(
+                    "Could not publish ready expedited card",
+                    extra={"request_id": str(row.id), "slack_error": exc.code},
+                )
+                return False
+        self.request = row
+        await self.broadcast_configured()
+        return True
 
     async def post_standard(self) -> str:
         """Post a standard card: a thread reply also sent to the channel, or a top-level post."""
@@ -428,38 +485,14 @@ class ReviewCard:
     async def refresh(self, *, outcome: str | None = None) -> None:
         """Re-render the posted card from current state; used after clicks and outcomes."""
         request = self.request
-        await self.refresh_author_dm(outcome)
-        if (
-            request.kind == "expedited"
-            and request.state == "open"
-            and not request.awaiting_ready
-            and not request.slack_message_ts
-            and outcome is None
-        ):
-            files = await self._files()
-            if files is None:
-                logger.warning("Could not publish ready expedited card without its changed files")
-                return
-            pr = request.pull_request
-            settings = await RepoSettings.cached(pr.owner, pr.repo)
-            request.run_config = {
-                **request.run_config,
-                "expedited_review_channel": settings.channel_for_files(
-                    [file.filename for file in files]
-                ),
-            }
-            try:
-                message_ts = await self.post_expedited(
-                    title=request.pull_request.title, files=files
-                )
-            except SlackRequestError as exc:
-                logger.warning(
-                    "Could not publish ready expedited card", extra={"slack_error": exc.code}
-                )
-            else:
-                request.slack_message_ts = message_ts
-                await request.save()
-                await self.broadcast_configured()
+        dm_updated = await self.refresh_author_dm(outcome)
+        if request.unpublished and outcome is None:
+            published = await self.publish()
+            dm_pending = (
+                request.slack_dm_channel_id and request.slack_dm_message_ts and not dm_updated
+            )
+            if not published or dm_pending:
+                await schedule(request, PUBLISH_STEP, _PUBLISH_RETRY)
             return
         if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
             return

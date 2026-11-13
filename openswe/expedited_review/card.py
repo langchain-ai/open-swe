@@ -234,7 +234,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
 
 def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
-        "Mark ready for review",
+        "Request review in Slack",
         action_id="open_swe_option_select_ready",
         value=_button_value("ready", approval),
         style="primary",
@@ -251,11 +251,11 @@ def readiness_prompt(
 ) -> tuple[str, list[Block]]:
     """The full author-only draft card."""
     pr = approval.pull_request
-    text = f"Review {pr.url} carefully yourself before clicking Mark ready for review."
+    text = f"Review {pr.url} carefully yourself before clicking Request review in Slack."
     head = [*_header(approval, title, author), divider()]
     tail = [
         section(
-            f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
+            f"Review <{pr.url}|the pull request> carefully yourself, then click *Request review in Slack* to post the review request. This also marks the PR ready if it is still a draft. Marking it ready on GitHub alone does not post anything in Slack."
         ),
         actions(_ready_button(approval), _dismiss_button(approval)),
     ]
@@ -286,7 +286,7 @@ def _voting_diff(
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
     if approval.awaiting_ready:
         return [
-            section(f"*Draft.* Waiting for {author} to mark it ready for review."),
+            section(f"Waiting for {author} to confirm the review request in their Slack DM."),
             actions(_dismiss_button(approval)),
         ]
     return [

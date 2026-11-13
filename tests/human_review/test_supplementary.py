@@ -525,7 +525,9 @@ async def test_request_reuses_open_review_without_replacing_engineering(
     with (
         patch.object(supplementary.RepoSettings, "cached", AsyncMock(return_value=settings)),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=review)),
-        patch.object(standard, "_permalink", AsyncMock(return_value="https://slack.example/card")),
+        patch.object(
+            HumanReviewRequest, "permalink", AsyncMock(return_value="https://slack.example/card")
+        ),
         patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
         patch.object(
             ChangedFile,

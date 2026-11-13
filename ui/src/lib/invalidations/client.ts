@@ -262,13 +262,33 @@ export class InvalidationTab {
   ): Promise<void> {
     if (!topics.length) return
     const invalidated = new Set(topics)
-    await this.queryClient.invalidateQueries(
-      {
-        predicate: (query) =>
-          queryTopics(query).some((topic) => invalidated.has(topic)),
-      },
-      { cancelRefetch }
-    )
+    const paginating = this.queryClient
+      .getQueryCache()
+      .getAll()
+      .filter(
+        (query) =>
+          query.state.fetchStatus === "fetching" &&
+          query.state.fetchMeta?.fetchMore &&
+          queryTopics(query).some((topic) => invalidated.has(topic))
+      )
+    await Promise.all([
+      this.queryClient.invalidateQueries(
+        {
+          predicate: (query) =>
+            !paginating.includes(query) &&
+            queryTopics(query).some((topic) => invalidated.has(topic)),
+        },
+        { cancelRefetch }
+      ),
+      ...paginating.map(async (query) => {
+        await Promise.allSettled([query.promise])
+        if (this.stopped) return
+        await this.queryClient.invalidateQueries(
+          { queryKey: query.queryKey, exact: true },
+          { cancelRefetch: false }
+        )
+      }),
+    ])
   }
 
   private cover(topics: readonly InvalidationTopic[], at: number): void {

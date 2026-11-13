@@ -311,7 +311,9 @@ test.describe("Expedited Slack review", () => {
     await page
       .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
       .click();
-    await expect(card(page)).toContainText(/Draft\./);
+    await expect(card(page)).toContainText(
+      /Marking it ready on GitHub alone does not post anything in Slack/,
+    );
     await expect(
       card(page).getByRole("button", { name: "Approve" }),
     ).toHaveCount(0);
@@ -364,9 +366,9 @@ test.describe("Expedited Slack review", () => {
     // 3. Only the author can mark it ready. Their click undrafts the PR and
     //    opens the card for approval; it is not an approval.
     await expect(
-      card(page).getByRole("button", { name: "Mark ready for review" }),
+      card(page).getByRole("button", { name: "Request review in Slack" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Mark ready for review" }).click();
+    await page.getByRole("button", { name: "Request review in Slack" }).click();
     await expect
       .poll(async () => (await latest(request)).awaiting_ready, {
         timeout: 60_000,

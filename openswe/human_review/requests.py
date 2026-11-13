@@ -48,7 +48,7 @@ from openswe.github.repositories import Repository
 from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import fetch_slack_thread_messages
+from openswe.slack.client import fetch_slack_thread_messages, get_slack_permalink
 from openswe.slack.dm import DmOrigin
 from openswe.slack.payloads import SlackMessage
 from openswe.slack.records import lookup_slack_thread_id
@@ -171,6 +171,16 @@ class HumanReviewRequest(Base):
     @property
     def active(self) -> bool:
         return self.state == "open"
+
+    @property
+    def unpublished(self) -> bool:
+        """An open expedited request, ready for approval, whose card is not posted yet."""
+        return (
+            self.kind == "expedited"
+            and self.state == "open"
+            and not self.awaiting_ready
+            and not self.slack_message_ts
+        )
 
     @property
     def has_card(self) -> bool:
@@ -315,6 +325,22 @@ class HumanReviewRequest(Base):
         if permalink:
             return permalink
         return SlackLink(channel, timestamp, self.slack_thread_ts).url
+
+    async def permalink(self, viewer: User | None = None) -> str:
+        """Where ``viewer`` can open the request in Slack: its card, else the author's own confirmation DM."""
+        from openswe.slack.links import SlackLink
+
+        if self.slack_channel_id and self.slack_message_ts:
+            return await self.card_url()
+        channel, timestamp = self.slack_dm_channel_id, self.slack_dm_message_ts
+        if (
+            viewer is None
+            or not channel
+            or not timestamp
+            or not self.is_author(viewer.id, viewer.github_login)
+        ):
+            return ""
+        return await get_slack_permalink(channel, timestamp) or SlackLink(channel, timestamp).url
 
     @property
     def slack_location(self) -> tuple[str, str] | None:

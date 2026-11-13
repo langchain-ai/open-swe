@@ -8,6 +8,8 @@ from openswe.jobs import queue
 
 logger = logging.getLogger(__name__)
 SCHEDULER_TASK = "human_review"
+# Retries posting a ready expedited card that Slack or GitHub kept from going up.
+PUBLISH_STEP = "publish"
 
 
 async def schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
@@ -17,6 +19,7 @@ async def schedule(request: HumanReviewRequest, step: str, after: timedelta) -> 
             SCHEDULER_TASK,
             {"request_id": str(request.id), "step": step},
             due_at=due_at,
+            key=f"human_review:{request.id}:{step}" if step == PUBLISH_STEP else None,
             metadata={"kind": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
         )
     except Exception:

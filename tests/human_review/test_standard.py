@@ -36,6 +36,45 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
+async def test_only_the_author_gets_a_permalink_to_their_confirmation_dm() -> None:
+    author, other = User(), User()
+    pr = PullRequest(owner="lc", repo="repo", number=7, author_user_id=author.id)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        slack_channel_id="C1",
+        slack_dm_channel_id="D1",
+        slack_dm_message_ts="4.0",
+        awaiting_ready=True,
+    )
+    request.pull_request = pr
+    lookup = AsyncMock(return_value="https://slack.example.com/dm")
+    with patch("openswe.human_review.requests.get_slack_permalink", lookup):
+        links = [await request.permalink(viewer) for viewer in (author, other, None)]
+    assert links == ["https://slack.example.com/dm", "", ""]
+    lookup.assert_awaited_once_with("D1", "4.0")
+
+
+async def test_the_author_dm_link_survives_a_failed_permalink_lookup() -> None:
+    from openswe.slack.links import SlackLink
+
+    author = User()
+    pr = PullRequest(owner="lc", repo="repo", number=7, author_user_id=author.id)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        slack_dm_channel_id="D1",
+        slack_dm_message_ts="4.0",
+        awaiting_ready=True,
+    )
+    request.pull_request = pr
+    with patch("openswe.human_review.requests.get_slack_permalink", AsyncMock(return_value=None)):
+        assert await request.permalink(author) == SlackLink("D1", "4.0").url
+        assert await request.permalink(User()) == ""
+
+
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
 async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
     from openswe.human_review.people import Outcome, Participant
@@ -270,7 +309,7 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
     monkeypatch.setattr(standard, "_request_github_review", AsyncMock(return_value=True))
     monkeypatch.setattr(standard, "_schedule", AsyncMock(return_value=True))
     monkeypatch.setattr(standard, "_assignment_minutes", AsyncMock(return_value=120))
-    monkeypatch.setattr(standard, "_permalink", AsyncMock(return_value=""))
+    monkeypatch.setattr(HumanReviewRequest, "permalink", AsyncMock(return_value=""))
 
     @asynccontextmanager
     async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
@@ -350,7 +389,7 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(standard, "send_dm_with_location", AsyncMock(return_value=None)) as dm,
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(HumanReviewRequest, "permalink", AsyncMock(return_value="")),
     ):
         clock.now.return_value = now
         result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
@@ -1069,7 +1108,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         ),
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(HumanReviewRequest, "permalink", AsyncMock(return_value="")),
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
         patch.object(
             standard.SupplementaryReviews,

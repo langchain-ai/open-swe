@@ -33,13 +33,13 @@ class DashboardReviewRequest:
         pr = self.pr_ref
         active = await HumanReviewRequest.active_for(pr.owner, pr.repo, pr.number)
         if active is not None and active.kind == "expedited":
-            if active.slack_message_ts and not self.origin.asked(active):
+            if (active.slack_message_ts or active.awaiting_ready) and not self.origin.asked(active):
                 return RequestResult(
                     success=True,
                     reused=True,
                     request_id=str(active.id),
                     channel=active.slack_channel_id,
-                    permalink=await active.card_url(),
+                    permalink=await active.permalink(self.origin.requester),
                     auto_merge=active.auto_merge,
                 )
             try:
@@ -54,17 +54,17 @@ class DashboardReviewRequest:
             if not result["success"]:
                 return RequestResult(success=False, error=str(result["error"]))
             approval = await HumanReviewRequest.get(UUID(str(result["approval_id"])))
-            if approval is None or not approval.slack_message_ts:
+            if approval is None or (not approval.slack_message_ts and not approval.awaiting_ready):
                 return RequestResult(
                     success=False,
-                    error="The review card is not posted yet. Check the author's readiness prompt in Slack or retry once the pull request is ready.",
+                    error="The review card is not posted yet. Check the author's confirmation prompt in Slack or retry after they confirm the request.",
                 )
             return RequestResult(
                 success=True,
                 reused=approval.id == active.id,
                 request_id=str(approval.id),
                 channel=approval.slack_channel_id,
-                permalink=await approval.card_url(),
+                permalink=await approval.permalink(self.origin.requester),
                 auto_merge=approval.auto_merge,
             )
         if active is None and (await get_workspace_settings()).expedited_review_enabled:
@@ -104,7 +104,9 @@ class DashboardReviewRequest:
                                 channel=target.id,
                                 channel_name=target.name,
                                 permalink=(
-                                    await approval.card_url() if approval is not None else ""
+                                    await approval.permalink(self.origin.requester)
+                                    if approval
+                                    else ""
                                 ),
                             )
             except GitHubAppUnavailable:

@@ -88,28 +88,43 @@ class HumanReviewAvailability(BaseModel):
     available: bool
     active: bool
     permalink: str = ""
+    # The open request is a draft's expedited card only its author can see until they mark it ready.
+    awaiting_ready: bool = False
     blockers: list[str] = []
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/human-review")
 async def api_human_review_availability(
-    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
+    owner: str,
+    repo: str,
+    number: int,
+    session: dict[str, Any] = SESSION_DEP,
+    active_only: bool = False,
 ) -> HumanReviewAvailability:
     _pr_ref(owner, repo, number)
-    await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
-    async with GitHubClient.as_app(owner, repo) as github:
-        pull = github.repo(owner, repo).pull_request(number)
-        sha = await or_none(pull.head_sha())
-        if sha is None:
-            raise HTTPException(404, "Pull request is unavailable")
-        settings = await RepoSettings.cached(owner, repo)
-        channel = await settings.channel_for_pr(pull)
-        active = await HumanReviewRequest.active_for(owner, repo, number)
-        blockers = None if active is not None else await review_blockers(pull)
+    login = str(session["sub"])
+    await require_repo_access_for_user(login, f"{owner}/{repo}")
+    active = await HumanReviewRequest.active_for(owner, repo, number)
+    channel = ""
+    blockers = None
+    if not active_only:
+        async with GitHubClient.as_app(owner, repo) as github:
+            pull = github.repo(owner, repo).pull_request(number)
+            sha = await or_none(pull.head_sha())
+            if sha is None:
+                raise HTTPException(404, "Pull request is unavailable")
+            settings = await RepoSettings.cached(owner, repo)
+            channel = await settings.channel_for_pr(pull)
+            blockers = None if active is not None else await review_blockers(pull)
     return HumanReviewAvailability(
         available=bool(channel),
         active=active is not None,
-        permalink=await active.card_url() if active is not None else "",
+        permalink=(
+            await active.permalink(await User.for_login("github", login))
+            if active is not None
+            else ""
+        ),
+        awaiting_ready=active is not None and active.awaiting_ready,
         blockers=blockers or [],
     )
 

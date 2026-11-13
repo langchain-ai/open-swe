@@ -421,11 +421,11 @@ test.describe("Human review in Slack", () => {
     await page.goto(
       `/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
     );
-    const reviewRequested = page.getByRole("button", {
+    const reviewRequested = page.getByRole("link", {
       name: "Review requested",
       exact: true,
     });
-    await expect(reviewRequested).toBeEnabled();
+    await expect(reviewRequested).toBeVisible();
     const popupPromise = page.waitForEvent("popup");
     await reviewRequested.click();
     const slackPage = await popupPromise;
@@ -653,8 +653,8 @@ test.describe("Human review in Slack", () => {
     ).toBeEnabled();
     await row.getByRole("button", { name: "Request review in Slack" }).click();
     await expect(
-      row.getByRole("button", { name: "Review requested" }),
-    ).toBeEnabled();
+      row.getByRole("link", { name: "Review requested" }),
+    ).toBeVisible();
     await expect
       .poll(async () => (await latestRequest(request)).pr_number)
       .toBe(seeded.number);

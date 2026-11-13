@@ -2010,14 +2010,17 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
-  humanReviewAvailability: (pr: Pick<OpenPullRequest, "repo" | "number">) =>
+  humanReviewAvailability: (
+    pr: Pick<OpenPullRequest, "repo" | "number" | "draft">
+  ) =>
     request<{
       available: boolean
       active: boolean
       permalink: string
+      awaiting_ready?: boolean
       blockers: string[]
     }>(
-      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review${pr.draft === true ? "?active_only=true" : ""}`
     ),
   requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(

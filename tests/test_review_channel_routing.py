@@ -38,10 +38,11 @@ def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
     assert RepoSettings(reviewChannel="#fallback").channel_for_files(["README.md"]) == "#fallback"
 
 
+@pytest.mark.parametrize("active_only", [False, True])
 @pytest.mark.parametrize("routed", [False, True])
 @pytest.mark.parametrize("filename", ["ui/button.tsx", "README.md"])
 async def test_review_availability_uses_cached_settings(
-    routed: bool, filename: str, github_app: AsyncMock
+    active_only: bool, routed: bool, filename: str, github_app: AsyncMock
 ) -> None:
     settings = RepoSettings.model_validate(
         {
@@ -55,18 +56,27 @@ async def test_review_availability_uses_cached_settings(
         patch.object(
             RepoClient, "read_file", AsyncMock(side_effect=AssertionError("uncached read"))
         ),
-        patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")),
-        patch.object(PullRequestClient, "files", AsyncMock(return_value=[{"filename": filename}])),
+        patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")) as head,
+        patch.object(
+            PullRequestClient, "files", AsyncMock(return_value=[{"filename": filename}])
+        ) as files,
         patch.object(routes.HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
-        patch.object(routes, "review_blockers", AsyncMock(return_value=[])),
+        patch.object(routes, "review_blockers", AsyncMock(return_value=[])) as blockers,
     ):
-        result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
-    assert result.available is (not routed or filename.startswith("ui/"))
+        result = await routes.api_human_review_availability(
+            "lc", "repo", 7, session={"sub": "ada"}, active_only=active_only
+        )
+    if active_only:
+        head.assert_not_awaited()
+        files.assert_not_awaited()
+        blockers.assert_not_awaited()
+    assert result.available is (not active_only and (not routed or filename.startswith("ui/")))
     assert result.active is False
 
 
+@pytest.mark.parametrize("active_only", [False, True])
 async def test_active_review_links_to_slack_when_permalink_lookup_fails(
-    github_app: AsyncMock,
+    active_only: bool, github_app: AsyncMock
 ) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7)
     active = HumanReviewRequest(
@@ -81,8 +91,11 @@ async def test_active_review_links_to_slack_when_permalink_lookup_fails(
         patch.object(RepoSettings, "cached", AsyncMock(return_value=RepoSettings())),
         patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=active)),
+        patch.object(routes.User, "for_login", AsyncMock(return_value=None)),
         patch("openswe.slack.client.get_slack_permalink", AsyncMock(return_value=None)),
     ):
-        result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
+        result = await routes.api_human_review_availability(
+            "lc", "repo", 7, session={"sub": "ada"}, active_only=active_only
+        )
     assert result.active
     assert result.permalink.endswith("/dashboard/api/slack/open?channel=C1&message_ts=123.456")

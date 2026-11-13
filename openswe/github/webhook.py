@@ -2141,7 +2141,7 @@ class _HumanReviewEvent(BaseModel):
 
 
 async def settle_human_reviews(payload: dict[str, Any]) -> None:
-    """Re-check the open standard review requests of the pull requests an event names."""
+    """Re-check the open review requests of the pull requests an event names."""
     try:
         event = _HumanReviewEvent.model_validate(payload)
     except ValidationError:
