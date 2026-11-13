@@ -118,20 +118,31 @@ describe("useSubmitAgentMessage", () => {
     }
   )
 
-  it.each([false, true])(
-    "sends Auto picker intent separately from inherited Auto (changed=%s)",
-    async (changed) => {
+  it.each([
+    { model: null, changed: false },
+    { model: null, changed: true },
+    { model: "gpt-5.5", changed: false },
+    { model: "gpt-5.5", changed: true },
+  ])(
+    "sends a picker action separately from the shown model ($model, changed=$changed)",
+    async ({ model, changed }) => {
       const { result } = setup()
       await result.current.mutateAsync({
         content: "Fix the typo",
-        model_id: null,
-        effort: null,
+        model_id: model,
+        effort: model ? "high" : null,
         model_selection_changed: changed,
       })
       expect(source.startRun).toHaveBeenCalledWith(
         expect.objectContaining({
           configurable: {
-            model_selection: "auto",
+            ...(model
+              ? {
+                  agent_model_id: model,
+                  agent_effort: "high",
+                  model_selection: "explicit",
+                }
+              : { model_selection: "auto" }),
             ...(changed ? { model_selection_changed: true } : {}),
           },
         })

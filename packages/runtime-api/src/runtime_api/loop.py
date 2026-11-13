@@ -160,6 +160,9 @@ class ModelResult(Report):
     response: list[dict[str, JsonValue]]
     # The human messages added since the model last answered, which the transcript records.
     humans: list[dict[str, JsonValue]] = []
+    # Whether the run's model answered before this call, so ``humans`` reached a turn
+    # already under way and steered it.
+    mid_turn: bool = False
     # The route the call took, which usage tags the reply with.
     model_route: str | None = None
     # A conversation offload's status, which the transcript notes once.

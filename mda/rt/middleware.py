@@ -265,6 +265,16 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**tool_call, "args": args}))
 
 
+class _Answered:
+    """Whether the run's model has answered yet, which makes a later follow-up a steer."""
+
+    def __init__(self) -> None:
+        self.yet = False
+
+
+_ANSWERED: Final = RunLocal(_Answered)
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
 
@@ -731,6 +741,7 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 }
         offloading = held.get("conversation_offloading")
         inside = namespace()
+        answered = _ANSWERED.get(self._backend.run)
         self._backend.outbox.replied(
             ModelResult(
                 run_id=run_id(),
@@ -738,12 +749,15 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 response=_json_dicts.validate_python(messages_to_dict(response.result)),
                 # A subagent's own messages are its task, never something a person said.
                 humans=[] if inside else human_messages(since_last_reply(request.messages)),
+                mid_turn=not inside and answered.yet,
                 model_route=route,
                 offloading=_json_object.validate_python(offloading)
                 if isinstance(offloading, Mapping)
                 else None,
             )
         )
+        if not inside:
+            answered.yet = True
 
 
 async def reported(

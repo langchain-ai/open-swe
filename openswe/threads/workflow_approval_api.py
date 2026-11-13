@@ -133,15 +133,13 @@ async def dispatch_followup(
         text,
         configurable,
         source=configurable["source"],
-        context=(
-            {
-                "sender_id": "system:workflow-push-approval",
-                "surface": "automation",
-                "kind": "system",
-            }
-            if bot_thread
-            else None
-        ),
+        # A decision is a click, not a message, so the run's input is a system event even
+        # when a person decided; the configurable above still says who the run acts for.
+        context={
+            "sender_id": "system:workflow-push-approval",
+            "surface": "automation",
+            "kind": "system",
+        },
         thread_title=None,
         multitask_strategy=multitask_strategy,
     )

@@ -22,6 +22,7 @@ from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederated
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
+from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.prompts import prompt
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -52,6 +53,16 @@ _LISTEN_DAYS = 7
 _ROLLOUT_SKILL = ".agents/skills/rollout-check/SKILL.md"
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
+_ROLLOUT_ASK: SystemIdentity = {
+    "id": "system:rollout-check",
+    "display_name": "Rollout check",
+    "platform": "open-swe",
+}
+_ROLLOUT_ASK_CONTEXT: InputMessageContext = {
+    "sender_id": _ROLLOUT_ASK["id"],
+    "surface": "automation",
+    "kind": "system",
+}
 _CONFIG_KEYS = (
     "source",
     "workspace",
@@ -389,6 +400,8 @@ async def ask_to_monitor_rollout(
             config,
             source=source if isinstance(source, str) else "github",
             thread_title=None,
+            context=_ROLLOUT_ASK_CONTEXT,
+            systems=[_ROLLOUT_ASK],
             multitask_strategy="enqueue",
         )
     except Exception:  # noqa: BLE001

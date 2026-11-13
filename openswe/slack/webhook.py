@@ -1414,6 +1414,9 @@ async def _process_slack_mention_impl(
     if thread_model_choice and not image_model_override:
         configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
         configurable["model_selection"] = "explicit"
+    if performance_command:
+        # The person picked a model on this message, as the dashboard's picker flags it.
+        configurable["model_selection_changed"] = True
 
     configurable["slack_kickoff_eligible"] = (
         is_first_mention and not concierge_mode and not request.context_thread_ts

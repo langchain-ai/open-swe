@@ -32,6 +32,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repositories import Repository
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.slack.client import GitHubPrRef, post_slack_thread_reply
@@ -56,6 +57,16 @@ WATCH_LOCK_WAIT = timedelta(seconds=60)
 _WATCH_LOCK_RETRY_BASE_SECONDS = 0.1
 _WATCH_LOCK_RETRY_MAX_SECONDS = 2.0
 _WATCH_LOCK_SCOPE = "baby_sit_watch"
+_WATCHER: SystemIdentity = {
+    "id": "system:baby-sit",
+    "display_name": "Baby-sit",
+    "platform": "open-swe",
+}
+_WATCHER_CONTEXT: InputMessageContext = {
+    "sender_id": _WATCHER["id"],
+    "surface": "automation",
+    "kind": "system",
+}
 
 
 class BabySitError(Exception):
@@ -468,6 +479,8 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
                 thread_title=None,
+                context=_WATCHER_CONTEXT,
+                systems=[_WATCHER],
                 metadata={},
                 multitask_strategy="enqueue",
             )
@@ -507,6 +520,8 @@ async def _finish_ready(watch: BabySitWatch) -> str:
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,
+            context=_WATCHER_CONTEXT,
+            systems=[_WATCHER],
             metadata={},
             multitask_strategy="enqueue",
         )
@@ -656,6 +671,8 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,
+            context=_WATCHER_CONTEXT,
+            systems=[_WATCHER],
             metadata={},
             multitask_strategy="enqueue",
         )

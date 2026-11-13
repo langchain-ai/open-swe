@@ -1,11 +1,11 @@
-/** Track the Auto picker action carried by one optimistic submission. */
-export function createAutoSelectionIntent() {
+/** Track the model picker action carried by one optimistic submission. */
+export function createSelectionIntent() {
   let pending = false
   let submittedMessageId: string | null = null
 
   return {
-    select(auto: boolean) {
-      pending = auto
+    select() {
+      pending = true
       submittedMessageId = null
     },
     claim(messageId: string, eligible: boolean): boolean {

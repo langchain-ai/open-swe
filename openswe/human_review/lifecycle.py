@@ -40,6 +40,7 @@ from openswe.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
+from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
@@ -62,6 +63,16 @@ from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
 
+_AGENT_WAKER: SystemIdentity = {
+    "id": "system:human-review",
+    "display_name": "Human review",
+    "platform": "open-swe",
+}
+_AGENT_WAKE_CONTEXT: InputMessageContext = {
+    "sender_id": _AGENT_WAKER["id"],
+    "surface": "automation",
+    "kind": "system",
+}
 _PUBLISH_RETRY = timedelta(minutes=1)
 
 
@@ -667,6 +678,8 @@ class ReviewCard:
                 configurable,
                 source=str(configurable["source"]),
                 thread_title=None,
+                context=_AGENT_WAKE_CONTEXT,
+                systems=[_AGENT_WAKER],
                 metadata={},
                 multitask_strategy="enqueue",
             )

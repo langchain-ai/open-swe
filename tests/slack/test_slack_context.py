@@ -1618,6 +1618,8 @@ async def test_performance_directive_switches_unless_quoted(
         "1700000000.000100" if concierge else ""
     )
     configurable = dispatch.call_args.args[3]
+    # Only the command is a person's pick, never the model the thread already runs.
+    assert configurable.get("model_selection_changed", False) is switches
     if not switches:
         assert "agent_model_id" not in configurable
         notice.assert_not_awaited()

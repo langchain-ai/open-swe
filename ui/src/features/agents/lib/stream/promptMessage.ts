@@ -41,14 +41,13 @@ export function modelConfigurable(
     | undefined,
   selectionChanged = false
 ): Record<string, unknown> {
+  const changed = selectionChanged ? { model_selection_changed: true } : {}
   if (!selection?.modelId || !selection.effort)
-    return {
-      model_selection: "auto",
-      ...(selectionChanged ? { model_selection_changed: true } : {}),
-    }
+    return { model_selection: "auto", ...changed }
   return {
     agent_model_id: selection.modelId,
     agent_effort: selection.effort,
     model_selection: "explicit",
+    ...changed,
   }
 }

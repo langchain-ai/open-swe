@@ -189,6 +189,7 @@ from openswe.schedules.policy import AutomationPolicy
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
+from openswe.threads.interjections import RunInterjections
 from openswe.threads.store import THREADS
 from openswe.utils.thread_reads import shared_thread_reads
 
@@ -451,14 +452,17 @@ class TokenRun:
             observed = await _chain(observers, respond)(_observed_request(state, runtime))
             return observed.result
 
+        humans = messages_from_dict(request.humans)
         await self._reporting(
             request,
             "model_result",
             observe,
-            messages=messages_from_dict(request.humans),
+            messages=humans,
             model_route=request.model_route,
             conversation_offloading=request.offloading,
         )
+        if request.mid_turn and request.run_id and self.kind.assistant_id == "agent":
+            RunInterjections(self.run.thread_id, request.run_id).steered(humans)
         return Done()
 
     async def prepare(self, request: Prepare) -> Prepared:
@@ -524,10 +528,13 @@ class TokenRun:
         async def record(_state: dict[str, object], _runtime: Runtime) -> None:
             await self.kind.started(self.config, self.run.settings, request, carried=carried)
 
-        await self._reporting(
-            request, "run_started", record, messages=messages_from_dict(request.humans)
-        )
+        humans = messages_from_dict(request.humans)
+        await self._reporting(request, "run_started", record, messages=humans)
         await self.activity.request_started(request, carried=carried)
+        if not carried and request.run_id and self.kind.assistant_id == "agent":
+            RunInterjections(self.run.thread_id, request.run_id).started(
+                humans, RunConfig.from_config(self.config)
+            )
         return Done()
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:

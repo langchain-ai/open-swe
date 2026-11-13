@@ -55,7 +55,7 @@ import type {
 } from "@/features/agents/components/messages"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
-import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
+import { createSelectionIntent } from "@/features/agents/lib/selectionIntent"
 import {
   agentThreadKeys,
   useAgentSkills,
@@ -275,7 +275,7 @@ export function AgentThreadView({
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
-  const [autoIntent] = useState(createAutoSelectionIntent)
+  const [selectionIntent] = useState(createSelectionIntent)
   const activeSelection =
     !modelSelectionEnabled || autoSelected
       ? null
@@ -286,7 +286,7 @@ export function AgentThreadView({
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
-    autoIntent.select(next === null)
+    selectionIntent.select()
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
@@ -372,11 +372,11 @@ export function AgentThreadView({
       // run starts, and an offload sends no message at all.
       if (offload) scrollControlRef.current?.scrollToBottom()
       else if (!enqueue) scrollControlRef.current?.pinMessage(messageId)
-      const carriesAutoSelection = autoIntent.claim(
+      const carriesSelection = selectionIntent.claim(
         messageId,
         modelSelectionEnabled && !offload && (!isStreaming || queue)
       )
-      const restoreAutoSelection = () => autoIntent.restore(messageId)
+      const restoreSelection = () => selectionIntent.restore(messageId)
       try {
         await ensureLocalBridge()
         await sendMessage.mutateAsync({
@@ -388,23 +388,23 @@ export function AgentThreadView({
           analyticsAction,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
-          model_selection_changed: carriesAutoSelection,
+          model_selection_changed: carriesSelection,
           inherit_model_selection: !modelSelectionEnabled,
           enqueue,
           onStartError: () => {
-            restoreAutoSelection()
+            restoreSelection()
             onStartError?.()
           },
         })
       } catch (error) {
         analyticsAction.failed(error)
-        restoreAutoSelection()
+        restoreSelection()
         throw error
       }
     },
     [
       activeSelection,
-      autoIntent,
+      selectionIntent,
       ensureLocalBridge,
       followUpBehavior,
       isStreaming,
@@ -438,7 +438,7 @@ export function AgentThreadView({
     [submitMessage]
   )
 
-  const restoreQueuedAutoSelection = autoIntent.restore
+  const restoreQueuedSelection = selectionIntent.restore
 
   const queuedText = (entry: QueuedTurn) =>
     entry.message.chunks
@@ -557,9 +557,9 @@ export function AgentThreadView({
         action.failed(error)
         throw error
       }
-      restoreQueuedAutoSelection(entry.message.id)
+      restoreQueuedSelection(entry.message.id)
     },
-    [restoreQueuedAutoSelection, source, thread.id]
+    [restoreQueuedSelection, source, thread.id]
   )
   const removeQueuedMessage = useCallback(
     (id: string) => {
@@ -598,8 +598,8 @@ export function AgentThreadView({
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
     if (!(await source.stop())) return
-    for (const entry of pending) restoreQueuedAutoSelection(entry.message.id)
-    for (const message of unacknowledged) restoreQueuedAutoSelection(message.id)
+    for (const entry of pending) restoreQueuedSelection(entry.message.id)
+    for (const message of unacknowledged) restoreQueuedSelection(message.id)
     if (source.kind === "stream" && pending.length > 0) {
       // Same reasoning as withdrawQueued: syncs the adapter's queue store.
       await Promise.allSettled(
@@ -642,7 +642,7 @@ export function AgentThreadView({
     isOwnQueued,
     queryClient,
     queued,
-    restoreQueuedAutoSelection,
+    restoreQueuedSelection,
     restoreQueuedToComposer,
     source,
     thread.id,

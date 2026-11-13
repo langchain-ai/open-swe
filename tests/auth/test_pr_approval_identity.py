@@ -35,6 +35,8 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch):
     await workflow_approval_api.approve_workflow_push("thread-1", "fp", session=session)
 
     assert dispatch.await_args is not None
+    # The click resumes the run; the person did not write to Robin.
+    assert dispatch.await_args.kwargs["context"]["kind"] == "system"
     config = {"configurable": dispatch.await_args.args[2]}
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(

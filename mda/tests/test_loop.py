@@ -829,6 +829,8 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         ["human-1"],
         [],
     ]
+    # Only a call after the model answered once can carry a person steering the turn.
+    assert [r.mid_turn for r in replies] == [False, True]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
 

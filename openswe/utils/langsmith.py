@@ -548,7 +548,14 @@ async def create_langsmith_thread_feedback(
     score: float | None,
     comment: str | None = None,
     source_info: dict[str, Any] | None = None,
+    value: str | None = None,
+    event_id: str | None = None,
 ) -> bool:
+    """Create or update feedback ``key`` on the thread's traces.
+
+    One row per thread and key, or per ``event_id`` when given, so the same key can
+    be recorded once for each event and a retried event updates its own row.
+    """
     client = _build_langsmith_client()
     if client is None:
         logger.warning("No LangSmith API key configured, skipping thread feedback")
@@ -557,7 +564,7 @@ async def create_langsmith_thread_feedback(
     if not project_id:
         logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
         return False
-    feedback_id = _feedback_id(thread_id, key)
+    feedback_id = _feedback_id(thread_id, key if event_id is None else f"{key}:{event_id}")
     payload = {
         "id": str(feedback_id),
         "key": key,
@@ -566,6 +573,7 @@ async def create_langsmith_thread_feedback(
         "session_id": project_id,
         "feedback_thread_id": thread_id,
         "feedback_source": {"type": "api", "metadata": source_info or {}},
+        **({} if value is None else {"value": value}),
     }
     try:
         await client._arequest_with_retries("POST", "/feedback", json=payload)  # noqa: SLF001
@@ -576,7 +584,11 @@ async def create_langsmith_thread_feedback(
         await client._arequest_with_retries(  # noqa: SLF001
             "PATCH",
             f"/feedback/{feedback_id}",
-            json={"score": score, "comment": comment},
+            json={
+                "score": score,
+                "comment": comment,
+                **({} if value is None else {"value": value}),
+            },
         )
         return True
     except Exception:
