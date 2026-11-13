@@ -116,6 +116,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           onValueChange={setChannel}
           placeholder="Choose a review channel"
           aria-label="Review channel"
+          size="xs"
           eligible={(option) => option.is_member}
           disabled={requestReview.isPending}
         />
