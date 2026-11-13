@@ -79,6 +79,7 @@ logger = logging.getLogger(__name__)
 ThreadScope = Literal["all", "interactive", "automation"]
 ThreadAction = Literal[
     "send_message",
+    "rename",
     "cancel",
     "admin_cancel",
     "resolve",
@@ -934,7 +935,7 @@ def _available_actions(
         actions.append("add_plan_comment")
     if can_delete_plan_comment:
         actions.append("delete_plan_comment")
-    actions.extend(["mark_read", "mark_unread"])
+    actions.extend(["rename", "mark_read", "mark_unread"])
     actions.append("unresolve" if resolved else "resolve")
     if running:
         actions.append("cancel")
@@ -1152,6 +1153,7 @@ def _unexpected_action_arguments(
     action: str,
     *,
     message: str | None,
+    title: str | None,
     comment: str | None,
     comment_id: str | None,
     content: str | None,
@@ -1162,6 +1164,7 @@ def _unexpected_action_arguments(
 ) -> list[str]:
     allowed = {
         "send_message": {"message", "model_id", "effort"},
+        "rename": {"title"},
         "cancel": set(),
         "admin_cancel": set(),
         "resolve": set(),
@@ -1177,6 +1180,7 @@ def _unexpected_action_arguments(
         key
         for key, value in {
             "message": message,
+            "title": title,
             "comment": comment,
             "comment_id": comment_id,
             "content": content,
@@ -1244,6 +1248,7 @@ async def manage_thread(
     fingerprint: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
+    title: str | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `manage_thread` tool."""
@@ -1256,6 +1261,7 @@ async def manage_thread(
     unexpected = _unexpected_action_arguments(
         action,
         message=message,
+        title=title,
         comment=comment,
         comment_id=comment_id,
         content=content,
@@ -1303,6 +1309,13 @@ async def manage_thread(
                 model_id=model_id,
                 effort=effort,
             )
+        if action == "rename":
+            try:
+                body = thread_routes.ThreadRenameBody(title=title or "")
+            except ValidationError:
+                return _failure(f"title must be between 1 and {_MAX_TITLE_CHARS} characters")
+            thread = await thread_routes.api_rename_thread(thread_id, body, session=actor.session)
+            return {"success": True, "thread": _list_item(thread)}
         if action == "cancel":
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "thread": _list_item(thread)}

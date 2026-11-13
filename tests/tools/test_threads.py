@@ -994,6 +994,28 @@ def test_admin_thread_actions_require_admin() -> None:
     assert "send_message" in admin_actions
 
 
+async def test_manage_thread_renames_with_dashboard_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = threads_tool._Actor(login="octocat", email=None, name="Octocat")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=actor))
+    summary = {"id": "thread-1", "title": "[TASK-1] Summary"}
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", AsyncMock(return_value=summary))
+    rename = AsyncMock(return_value=summary)
+    monkeypatch.setattr(threads_tool.thread_routes, "api_rename_thread", rename)
+    result = await threads_tool.manage_thread("thread-1", "rename", title="  [TASK-1] Summary  ")
+    assert result["success"] is True
+    assert result["thread"]["title"] == summary["title"]
+    rename.assert_awaited_once_with(
+        "thread-1",
+        threads_tool.thread_routes.ThreadRenameBody(title=summary["title"]),
+        session=actor.session,
+    )
+    rename.reset_mock()
+    assert not (await threads_tool.manage_thread("thread-1", "rename", title=" "))["success"]
+    rename.assert_not_awaited()
+
+
 async def test_manage_thread_uses_followup_sender_for_owner_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
