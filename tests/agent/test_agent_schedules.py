@@ -1011,12 +1011,12 @@ async def test_system_schedule_can_run_without_user_credentials(
         raise AssertionError("System execution must not use a user's credentials")
 
     monkeypatch.setattr(schedules, "get_valid_access_token", no_user_token)
-    monkeypatch.setattr(repo_access, "get_valid_access_token", no_user_token)
+    monkeypatch.setattr("openswe.dashboard.profiles.get_valid_access_token", no_user_token)
 
-    async def app_token() -> str | None:
+    async def app_token(**kwargs: object) -> str | None:
         return "workspace-app-token" if github_status is not None else None
 
-    monkeypatch.setattr(repo_access, "get_github_app_installation_token", app_token)
+    monkeypatch.setattr("openswe.github.app.get_github_app_installation_token", app_token)
 
     async def github(request: httpx2.Request) -> httpx2.Response:
         assert request.headers["Authorization"] == "Bearer workspace-app-token"
@@ -1024,8 +1024,7 @@ async def test_system_schedule_can_run_without_user_credentials(
         assert github_status is not None
         return httpx2.Response(github_status, json={})
 
-    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
-    monkeypatch.setattr(repo_access.httpx2, "AsyncClient", lambda **kwargs: http_client)
+    monkeypatch.setattr("openswe.github.http.GITHUB_TRANSPORT", httpx2.MockTransport(github))
     record = {
         "id": SCHED_SYSTEM,
         "prompt": "Triage new issues",

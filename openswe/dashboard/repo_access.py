@@ -6,9 +6,14 @@ import logging
 import httpx2
 from fastapi import HTTPException
 
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.app import get_github_app_installation_token
-from openswe.github.http import GitHubError, github_reauth_message
+from openswe.github.http import (
+    GitHubAppUnavailable,
+    GitHubClient,
+    GitHubError,
+    GitHubSignInRequired,
+    github_reauth_message,
+)
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
@@ -51,23 +56,28 @@ class RepoAccessResponse:
         if status_code != 200:
             raise HTTPException(502, f"github API error ({status_code})")
 
+    @classmethod
+    async def check(cls, github: GitHubClient, full_name: str) -> str:
+        owner, name = normalize_repo_full_name(full_name).split("/", 1)
+        try:
+            await github.repo(owner, name).info(retry_rate_limits=False)
+        except GitHubError as exc:
+            cls.require(exc.response)
+        except httpx2.TransportError as exc:
+            logger.warning(
+                "GitHub repository access check unavailable",
+                extra={"repo_full_name": full_name, "error_type": type(exc).__name__},
+            )
+            raise HTTPException(
+                503, "GitHub is temporarily unavailable. Try again shortly."
+            ) from exc
+        return github.http.headers["Authorization"].removeprefix("Bearer ")
+
 
 async def assert_repo_access(full_name: str, token: str) -> str:
     full_name = normalize_repo_full_name(full_name)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    owner, name = full_name.split("/", 1)
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
-    ) as client:
-        response = await client.get(
-            f"https://api.github.com/repos/{owner}/{name}",
-            headers=headers,
-        )
-        RepoAccessResponse.require(response)
+    async with GitHubClient.connect(token=token, timeout=DEFAULT_HTTP_TIMEOUT) as github:
+        await RepoAccessResponse.check(github, full_name)
     return full_name
 
 
@@ -96,24 +106,11 @@ class RepoAccessChecks:
 
     @staticmethod
     async def _confirm(login: str, full_name: str) -> str:
-        token = await get_valid_access_token(login)
-        if not token:
-            raise HTTPException(401, github_reauth_message(login))
         try:
-            await assert_repo_access(full_name, token)
-        except HTTPException as exc:
-            if exc.status_code != 401:
-                raise
-            token = await get_valid_access_token(login, force_refresh=True)
-            if not token:
-                raise HTTPException(401, github_reauth_message(login)) from exc
-            try:
-                await assert_repo_access(full_name, token)
-            except HTTPException as refreshed_exc:
-                if refreshed_exc.status_code == 401:
-                    raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
-                raise
-        return token
+            async with GitHubClient.as_user(login, timeout=DEFAULT_HTTP_TIMEOUT) as github:
+                return await RepoAccessResponse.check(github, full_name)
+        except GitHubSignInRequired as exc:
+            raise HTTPException(401, github_reauth_message(login)) from exc
 
 
 _ACCESS_CHECKS = RepoAccessChecks()
@@ -125,11 +122,11 @@ async def require_repo_access_for_user(login: str, full_name: str) -> str:
 
 
 async def require_repo_access_for_workspace(full_name: str) -> str:
-    token = await get_github_app_installation_token()
-    if not token:
-        raise HTTPException(503, "workspace GitHub App token unavailable")
     try:
-        await assert_repo_access(full_name, token)
+        async with GitHubClient.as_app(timeout=DEFAULT_HTTP_TIMEOUT) as github:
+            return await RepoAccessResponse.check(github, full_name)
+    except GitHubAppUnavailable as exc:
+        raise HTTPException(503, "workspace GitHub App token unavailable") from exc
     except HTTPException as exc:
         if exc.status_code == 401:
             raise HTTPException(502, "workspace GitHub App token rejected") from exc
@@ -138,7 +135,6 @@ async def require_repo_access_for_workspace(full_name: str) -> str:
                 exc.status_code, "repository unavailable to the workspace GitHub App"
             ) from exc
         raise
-    return token
 
 
 async def repo_config_for_user(login: str, full_name: str | None) -> dict[str, str] | None:

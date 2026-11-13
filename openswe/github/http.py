@@ -190,6 +190,7 @@ async def github_request(
     url: str,
     *,
     max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_rate_limits: bool = True,
     **kwargs: Any,
 ) -> httpx2.Response:
     """Execute a single GitHub API request with retries and rate-limit handling.
@@ -236,7 +237,12 @@ async def github_request(
                 continue
             raise
 
-        delay = _Retry.after_response(response, method, attempt)
+        delay = (
+            _Retry.after_response(response, method, attempt)
+            if retry_rate_limits
+            or not (response.status_code == 429 or _Retry.rate_limited(response))
+            else None
+        )
         if delay is not None:
             if attempt < max_retries:
                 logger.warning(
@@ -468,8 +474,12 @@ class GitHubClient:
             raise GitHubError(response)
         return response
 
-    async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
-        return (await self.request("GET", path, params=params)).json()
+    async def get(
+        self, path: str, params: Mapping[str, str] | None = None, *, retry_rate_limits: bool = True
+    ) -> object:
+        return (
+            await self.request("GET", path, params=params, retry_rate_limits=retry_rate_limits)
+        ).json()
 
     async def post(self, path: str, json: Mapping[str, object]) -> object:
         return _json_or_none(await self.request("POST", path, json=dict(json)))
@@ -783,9 +793,11 @@ class RepoClient:
             return payload[0]
         return None
 
-    async def info(self) -> dict[str, Any]:
+    async def info(self, *, retry_rate_limits: bool = True) -> dict[str, Any]:
         """The repository itself: default branch, merge settings, visibility."""
-        payload = await self.github.get(f"repos/{self.full_name}")
+        payload = await self.github.get(
+            f"repos/{self.full_name}", retry_rate_limits=retry_rate_limits
+        )
         if not isinstance(payload, dict):
             raise ValueError("GitHub answered the repository without an object")
         return payload

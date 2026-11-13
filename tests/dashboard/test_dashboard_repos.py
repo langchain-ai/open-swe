@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.dashboard import repo_access
-from openswe.github import dashboard_routes, repo_cache, repos
+from openswe.github import dashboard_routes, http, repo_cache, repos
 from openswe.github.http import GitHubClient
 from openswe.users import User
 from tests.support.github_sdk import mock_github_sdk
@@ -54,7 +54,6 @@ def test_missing_github_authorization_returns_direct_reconnect_without_clearing_
 ) -> None:
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example/prefix")
     monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value=None))
-    monkeypatch.setattr(repo_access, "get_valid_access_token", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "openswe.dashboard.profiles.get_valid_access_token", AsyncMock(return_value=None)
     )
@@ -126,6 +125,78 @@ def test_repo_access_distinguishes_rate_limits_from_permission_denials(
         assert response.json()["detail"] == "no access to this private repository"
 
 
+@pytest.mark.parametrize("recovers", [True, False])
+@pytest.mark.parametrize(
+    "error_type", [httpx2.RemoteProtocolError, httpx2.ReadTimeout, 502, 503, 504]
+)
+async def test_repo_access_retries_transport_failures_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, recovers: bool, error_type: type[httpx2.TransportError] | int
+) -> None:
+    attempts = 0
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        attempts += 1
+        assert request.method == "GET"
+        assert request.url.path == "/repos/acme/api"
+        assert request.headers["authorization"] == "Bearer token"
+        if recovers and attempts > 1:
+            return httpx2.Response(200, json={"full_name": "acme/api"})
+        if isinstance(error_type, int):
+            return httpx2.Response(error_type, json={"message": "Temporary server failure"})
+        raise error_type("Server disconnected without sending a response", request=request)
+
+    monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(handle))
+    monkeypatch.setattr(http.asyncio, "sleep", AsyncMock())
+    if recovers:
+        assert await repo_access.assert_repo_access("acme/api", "token") == "acme/api"
+        assert attempts == 2
+    else:
+        with pytest.raises(HTTPException) as excinfo:
+            await repo_access.assert_repo_access("acme/api", "token")
+        assert excinfo.value.status_code == (502 if isinstance(error_type, int) else 503)
+        assert attempts == http.DEFAULT_MAX_RETRIES + 1
+
+
+@pytest.mark.parametrize(
+    "status,message,headers",
+    [
+        (401, "Refused", {}),
+        (403, "Refused", {}),
+        (404, "Refused", {}),
+        (429, "Refused", {"Retry-After": "60"}),
+        (403, "Secondary rate limit", {"Retry-After": "60"}),
+        (403, "Refused", {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "60"}),
+    ],
+)
+async def test_repo_access_preserves_github_refusals(
+    monkeypatch: pytest.MonkeyPatch, status: int, message: str, headers: dict[str, str]
+) -> None:
+    attempts = 0
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx2.Response(
+            status,
+            json={"message": message},
+            headers=headers,
+        )
+
+    monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(handle))
+    sleep = AsyncMock()
+    monkeypatch.setattr(http.asyncio, "sleep", sleep)
+    monkeypatch.setattr(http.time, "time", lambda: 0)
+    with pytest.raises(HTTPException) as excinfo:
+        await repo_access.assert_repo_access("acme/api", "token")
+    rate_limited = status == 429 or "rate limit" in message.lower() or bool(headers)
+    assert excinfo.value.status_code == (429 if rate_limited else status)
+    assert attempts == 1
+    sleep.assert_not_awaited()
+    if "Retry-After" in headers:
+        assert excinfo.value.headers == {"Retry-After": "60"}
+
+
 async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -137,17 +208,18 @@ async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
             stored["token"] = "fresh"
         return stored["token"]
 
-    async def check(full_name: str, token: str) -> str:
-        checks.append(token)
-        await asyncio.sleep(0)
-        if token == "revoked":
-            raise HTTPException(404, "repository not found")
-        if token == "expired":
-            raise HTTPException(401, "GitHub credentials rejected")
-        return full_name
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        current = request.headers["authorization"].removeprefix("Bearer ")
+        checks.append(current)
+        if current == "revoked":
+            return httpx2.Response(404, json={"message": "Not found"})
+        if current == "expired":
+            return httpx2.Response(401, json={"message": "Bad credentials"})
+        return httpx2.Response(200, json={"full_name": "acme/api"})
 
-    monkeypatch.setattr(repo_access, "get_valid_access_token", token)
-    monkeypatch.setattr(repo_access, "assert_repo_access", check)
+    refresh = AsyncMock(side_effect=token)
+    monkeypatch.setattr("openswe.dashboard.profiles.get_valid_access_token", refresh)
+    monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(handle))
 
     tokens = await asyncio.gather(
         *(repo_access.require_repo_access_for_user("octocat", "acme/api") for _ in range(3))
@@ -155,11 +227,57 @@ async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
 
     assert tokens == ["fresh"] * 3
     assert checks == ["expired", "fresh"]
+    assert refresh.await_count == 2
+    refresh.assert_awaited_with("octocat", force_refresh=True)
 
     stored["token"] = "revoked"
     with pytest.raises(HTTPException) as excinfo:
         await repo_access.require_repo_access_for_user("octocat", "acme/api")
     assert excinfo.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("github_status", "expected", "detail"),
+    [
+        (None, 503, "workspace GitHub App token unavailable"),
+        (200, None, None),
+        (401, 502, "workspace GitHub App token rejected"),
+        (403, 403, "repository unavailable to the workspace GitHub App"),
+        (404, 404, "repository unavailable to the workspace GitHub App"),
+        (429, 429, "GitHub API rate limit reached"),
+    ],
+)
+async def test_workspace_access_uses_default_app_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    github_status: int | None,
+    expected: int | None,
+    detail: str | None,
+) -> None:
+    app_token = AsyncMock(return_value="workspace-token" if github_status else None)
+    monkeypatch.setattr("openswe.github.app.get_github_app_installation_token", app_token)
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token",
+        AsyncMock(side_effect=AssertionError("Workspace checks must not use OAuth")),
+    )
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        assert request.headers["authorization"] == "Bearer workspace-token"
+        assert request.url.path == "/repos/acme/api"
+        assert github_status is not None
+        return httpx2.Response(github_status, json={})
+
+    monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(handle))
+    if expected is None:
+        assert await repo_access.require_repo_access_for_workspace("acme/api") == "workspace-token"
+    else:
+        with pytest.raises(HTTPException) as excinfo:
+            await repo_access.require_repo_access_for_workspace("acme/api")
+        assert excinfo.value.status_code == expected
+        assert detail is not None
+        assert detail in excinfo.value.detail
+    app_token.assert_awaited_once_with(
+        installation_id=None, repositories=None, permissions=None, raise_errors=True
+    )
 
 
 async def test_list_repos_follows_installation_and_repository_next_links(

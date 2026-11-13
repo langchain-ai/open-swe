@@ -83,9 +83,11 @@ class _PullRequestActionBase(BaseModel):
         url: str,
         payload: dict[str, object] | None = None,
     ) -> tuple[httpx2.Response, dict[str, object]]:
-        body: dict[str, object] = {} if payload is None else {"json": payload}
         try:
-            response = await github_request(client, method, url, max_retries=0, **body)
+            if payload is None:
+                response = await github_request(client, method, url, max_retries=0)
+            else:
+                response = await github_request(client, method, url, max_retries=0, json=payload)
         except httpx2.HTTPError as exc:
             raise HTTPException(502, self.transport_failure) from exc
         try:

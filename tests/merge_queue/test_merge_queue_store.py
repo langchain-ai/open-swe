@@ -1270,11 +1270,16 @@ async def test_queue_dashboard_authorization(
         return httpx2.Response(200, json={"id": 42})
 
     @asynccontextmanager
-    async def as_user(login: str) -> AsyncIterator[GitHubClient]:
-        async with httpx2.AsyncClient(transport=httpx2.MockTransport(github_response)) as client:
+    async def as_user(
+        login: str, *, timeout: httpx2.Timeout | float | None = None
+    ) -> AsyncIterator[GitHubClient]:
+        async with httpx2.AsyncClient(
+            transport=httpx2.MockTransport(github_response),
+            headers={"Authorization": f"Bearer {await user_token(login)}"},
+            timeout=timeout,
+        ) as client:
             yield GitHubClient(client, login=login)
 
-    monkeypatch.setattr(repo_access, "get_valid_access_token", user_token)
     monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
     monkeypatch.setattr(
         repo_access, "pooled_transport", lambda: httpx2.MockTransport(github_response)
