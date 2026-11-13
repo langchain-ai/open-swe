@@ -57,6 +57,7 @@ from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
     BROWSER,
     FINISH_SCOUT_PLAN,
+    GATEWAY_CREDENTIAL,
     INBOX,
     INBOX_RECEIVED,
     MODEL_CHOICE,
@@ -78,6 +79,7 @@ from runtime_api.loop import (
     BrowserReport,
     ChosenModel,
     Done,
+    GatewayCredential,
     GitHubProxyRefreshed,
     Inbox,
     InboxItems,
@@ -165,6 +167,7 @@ from openswe.agent_api.tokens import RemoteRun
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.analytics.segment_activity import SegmentActivity
 from openswe.config import ENV
+from openswe.dashboard.langsmith_oauth import LangSmithModelAccess
 from openswe.github.proxy import proxy_token_set_since
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -693,6 +696,15 @@ class TokenRun:
         expires_at = await self._sandbox.refresh_github_proxy(force_refresh=request.force_refresh)
         return GitHubProxyRefreshed(expires_at=expires_at)
 
+    async def gateway_credential(self, _request: RunRequest) -> GatewayCredential:
+        """Who the run's model calls go through the LLM gateway as."""
+        credential = await LangSmithModelAccess.for_run(self.config).credential()
+        logger.info(
+            "Answered a run's gateway credential",
+            extra={"gateway_credential": credential.kind, "thread_id": self.run.thread_id},
+        )
+        return credential
+
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
         """The backend's part of the proxy config MDA writes on the run's sandbox."""
         cfg = RunConfig.from_config(self.config)
@@ -879,6 +891,7 @@ CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
+CALLS.serve(GATEWAY_CREDENTIAL, TokenRun.gateway_credential)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
 CALLS.serve(SLACK_MOVE, TokenRun.slack_move)

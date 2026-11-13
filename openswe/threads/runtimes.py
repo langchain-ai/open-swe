@@ -42,7 +42,7 @@ from openswe.agent_api.client import (
     mda_runtime_url,
     remote_run_context,
 )
-from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
@@ -60,13 +60,18 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
-# as, which decides whether its catalog names that person's connections.
+# as, which decides whether its catalog names that person's connections, and the person
+# whose message started it, whom its model calls bill to.
 _TOKEN_METADATA_KEYS: Final = (
     "event_match_ids",
     "ls_attribution_identifier",
     ACTING_USER_KEY,
+    SENDER_USER_KEY,
     *BILLING_FIELDS,
 )
+# Whom a run is for, which ``MdaRuntime.run_payload`` settles before signing its token and
+# writes the same into its config metadata, whatever its caller sent.
+_ATTRIBUTION_KEYS: Final = BILLING_FIELDS | {SENDER_USER_KEY}
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
@@ -560,8 +565,14 @@ class MdaRuntime:
                     run_metadata.update(user.billing_trace_metadata())
             except Exception:
                 logger.warning("Could not resolve acting user for trace metadata", exc_info=True)
-        if run_metadata.get("user_id") != run_metadata.get("billed_robin_user_id"):
+        billed = run_metadata.get("billed_robin_user_id")
+        if run_metadata.get("user_id") != billed:
             run_metadata.pop("user_id", None)
+        # Its model calls spend the sender's own LangSmith budget, so the token names a
+        # sender only when the run is billed to them and, if it acts as anyone, acts as them.
+        sender = run_metadata.get(SENDER_USER_KEY)
+        if sender is not None and (sender != billed or actor not in (None, sender)):
+            run_metadata.pop(SENDER_USER_KEY)
         owner_ls_user_id = await self._owner_ls_user_id(thread_id)
         run_metadata["owner_ls_user_id"] = owner_ls_user_id
         raw_config_metadata = config.get("metadata")
@@ -570,9 +581,9 @@ class MdaRuntime:
                 **{
                     key: value
                     for key, value in raw_config_metadata.items()
-                    if key not in BILLING_FIELDS and key != "billed_user_id"
+                    if key not in _ATTRIBUTION_KEYS and key != "billed_user_id"
                 },
-                **{key: run_metadata[key] for key in BILLING_FIELDS if key in run_metadata},
+                **{key: run_metadata[key] for key in _ATTRIBUTION_KEYS if key in run_metadata},
                 "owner_ls_user_id": owner_ls_user_id,
                 "created_by": None,
             }

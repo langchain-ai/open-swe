@@ -97,8 +97,11 @@ from runtime_api.catalog import (
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
+    GATEWAY_CREDENTIAL,
+    MODEL_RESULT,
     PREPARE,
     Done,
+    GatewayCredential,
     GitHubProxyRefreshed,
     Inbox,
     InboxItems,
@@ -106,6 +109,7 @@ from runtime_api.loop import (
     InboxReceipt,
     ModelCall,
     ModelFailed,
+    ModelResult,
     PhaseResult,
     Prepare,
     Prepared,
@@ -294,9 +298,9 @@ def _answering(monkeypatch: pytest.MonkeyPatch, backend: OpenSweBackend, answer:
     monkeypatch.setattr(backend, "post", post)
 
 
-def _models(model: ModelSpec) -> Catalog:
+def _models(model: ModelSpec, *, gateway: bool = False) -> Catalog:
     """A catalog that runs on ``model``."""
-    return Catalog(models=RunModels(model=model, subagent_model=model, use_gateway=False))
+    return Catalog(models=RunModels(model=model, subagent_model=model, use_gateway=gateway))
 
 
 def _preparing(**update: JsonValue) -> Answer:
@@ -1030,6 +1034,49 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
 
     assert result["messages"][-1].content == "done"
     assert fallback.sent
+
+
+async def test_a_run_whose_login_lapsed_answers_why_even_without_a_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The check runs on every planned call, not only on one a fallback guards: else the
+    request's own auth fails as a connection error and the run ends as an outage. The
+    answer reaches the backend's transcript, where a dashboard thread shows it."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    model = _RecordingAnthropic(model_name="claude-opus-5-5", api_key="test-key", sent=[])
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: model)
+    backend = _run_backend(
+        invocation_id="invocation-1",
+        catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}), gateway=True),
+    )
+    preparing = _preparing(rendered_system_prompt="You are Open SWE.")
+    replies: list[dict[str, JsonValue]] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == GATEWAY_CREDENTIAL.name:
+            return GatewayCredential(unavailable="Sign in to Robin again.")
+        if name == MODEL_RESULT.name:
+            replies.append(body)
+        return await preparing(name, body)
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr("rt.gateway.current_run", lambda: backend.run)
+    middleware = cast(
+        list[AgentMiddleware],
+        [BackendRunMiddleware(backend), *model_call_guards(timeout_seconds=1.0)],
+    )
+    graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+
+    result = await graph.ainvoke({"messages": [HumanMessage("hi")]})
+
+    assert result["messages"][-1].content == "Sign in to Robin again."
+    assert model.sent == []
+    reported = [ModelResult.model_validate(body).response for body in replies]
+    # The transcript records a reply under its id.
+    assert [(m.content, bool(m.id)) for r in reported for m in messages_from_dict(r)] == [
+        ("Sign in to Robin again.", True)
+    ]
 
 
 @pytest.mark.parametrize("selection", ["primary", "route", "vision", "fallback"])
@@ -2562,7 +2609,7 @@ async def test_a_model_call_paused_for_a_connection_reports_no_failure(
 async def test_a_lasting_provider_outage_ends_the_run_with_a_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.model_calls.BACKOFF_SCHEDULE", (0.0, 0.0))
@@ -2576,8 +2623,9 @@ async def test_a_lasting_provider_outage_ends_the_run_with_a_message(
         ModelRequest(model=model, messages=[], state=_planned_with_fallback()), handler
     )
 
-    assert isinstance(response, ModelResponse)
-    assert response.result[0].content == MODEL_OUTAGE_MESSAGE
+    # Its transcript report rides with it into the checkpoint, as a model's reply does.
+    assert isinstance(response, ExtendedModelResponse)
+    assert response.model_response.result[0].content == MODEL_OUTAGE_MESSAGE
     assert handler.await_count == 3
     assert reported == []
 

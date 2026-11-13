@@ -19,6 +19,7 @@ progress is checkpointed, so the person can start it again.
 import asyncio
 import logging
 import random
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -39,6 +40,7 @@ from langchain_openai import ChatOpenAI
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
 
+from rt.gateway import RUN_GATEWAY
 from rt.model_retries import ModelOutput, ModelRetriesMiddleware
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -238,6 +240,7 @@ async def call_with_fallback(
     attempting: Callable[[bool], None] = _ignore,
     backoff_schedule: Sequence[float] | None = None,
     budget: timedelta = MODEL_CALL_BUDGET,
+    use_gateway: bool = True,
 ) -> ModelResponse:
     """``request``, and again while it fails transiently, alternating with ``fallback``.
 
@@ -247,6 +250,8 @@ async def call_with_fallback(
     the model answers with why; any other error that is not transient raises at once.
     Once the attempts or ``budget`` run out, the outage message answers instead.
     """
+    if use_gateway and (unavailable := await RUN_GATEWAY.unavailable()) is not None:
+        return _failure_reply(unavailable, "model_access")
     if fallback is None:
         return await handler(request)
     schedule = tuple(BACKOFF_SCHEDULE if backoff_schedule is None else backoff_schedule)
@@ -307,10 +312,14 @@ async def call_with_fallback(
 
 
 def _failure_reply(text: str, kind: str) -> ModelResponse:
-    """The answer for a call that could not be made, marked so the loop posts it as it is."""
-    return ModelResponse(
-        result=[AIMessage(content=text, response_metadata={MODEL_FAILURE_REPLY_KEY: kind})]
+    """The answer for a call that could not be made, marked so the loop posts it as it is.
+
+    It has its id before it reaches state, as a model's own reply does, for the transcript.
+    """
+    reply = AIMessage(
+        content=text, id=str(uuid.uuid4()), response_metadata={MODEL_FAILURE_REPLY_KEY: kind}
     )
+    return ModelResponse(result=[reply])
 
 
 class _ModelCallGuard(AgentMiddleware):

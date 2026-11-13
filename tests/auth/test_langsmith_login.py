@@ -11,7 +11,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from langchain_core.runnables import RunnableConfig
+from runtime_api.loop import GatewayCredential
 
+from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
@@ -684,3 +687,41 @@ async def test_concurrent_org_discovery_reuses_one_lookup(
     else:
         assert results == [ALLOWED_ORG] * 10
     assert server.discoveries == 1
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+async def test_a_run_calls_models_as_the_person_who_started_it(
+    langsmith_client, revoked: bool
+) -> None:
+    """A run a person started goes through the gateway on their login, refreshed as it
+    nears expiry, and never falls back to the deployment's key once that login is gone.
+    One only attributed to them (a wakeup, an event match) bills the deployment."""
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    subject = oauth.decode_session(exchanged.json()["session"])["sub"]
+    await save_credential(
+        "langsmith_login",
+        subject,
+        encrypted_access_token=encrypt_token("expired"),
+        encrypted_refresh_token=encrypt_token("refresh"),
+        access_token_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+        client_id="test-client",
+        token_endpoint=ISSUER + "/oauth/token",
+        account_email="same@example.com",
+    )
+    server.revoked = revoked
+    user_id = subject.removeprefix("user:")
+    person: RunnableConfig = {"metadata": {"user_id": user_id, SENDER_USER_KEY: user_id}}
+    attributed: RunnableConfig = {"metadata": {"user_id": user_id}}
+
+    credential = await langsmith_oauth.LangSmithModelAccess.for_run(person).credential()
+
+    if revoked:
+        assert credential == GatewayCredential(
+            unavailable=langsmith_oauth.LangSmithModelAccess.SIGN_IN_AGAIN
+        )
+    else:
+        assert credential == GatewayCredential(token="access")
+    assert await langsmith_oauth.LangSmithModelAccess.for_run(attributed).credential() == (
+        GatewayCredential()
+    )

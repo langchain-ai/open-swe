@@ -52,7 +52,7 @@ from openswe.agent_api.client import (
     RUNTIME_METADATA_KEY,
     mda_graph_for,
 )
-from openswe.agent_api.connections import ACTING_USER_KEY, acting_user
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY, acting_user
 from openswe.api.agent_server_auth import backend_call
 from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.threads import index
@@ -178,7 +178,7 @@ def channel_run_metadata(metadata: Mapping[str, JsonValue]) -> dict[str, JsonVal
         for key, value in metadata.items()
         if _CHANNEL_METADATA_KEY.fullmatch(key)
         and not _CHANNEL_RESERVED_METADATA_KEY.fullmatch(key)
-        and key != ACTING_USER_KEY
+        and key not in (ACTING_USER_KEY, SENDER_USER_KEY)
     }
 
 

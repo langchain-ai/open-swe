@@ -11,7 +11,7 @@ from managed_deepagents._agent_auth import AgentAuthContext, ResolvePrincipalIde
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, proxy, router, runtimes, store
@@ -722,14 +722,19 @@ def agent_auth(monkeypatch: pytest.MonkeyPatch) -> Resolved:
     return resolved
 
 
-def _acts_as(harness: _Harness) -> str | None:
-    """The person the run token of the one run started says it acts as."""
+def _token_person(harness: _Harness, key: str) -> str | None:
+    """The person the run token of the one run started names under ``key``."""
     [(_, sent)] = harness.forwarded
     context = sent["context"]
     assert isinstance(context, dict) and isinstance(token := context["__run_token"], str)
-    acting = verify_runtime_token(token).metadata.get(ACTING_USER_KEY)
-    assert acting is None or isinstance(acting, str)
-    return acting
+    person = verify_runtime_token(token).metadata.get(key)
+    assert person is None or isinstance(person, str)
+    return person
+
+
+def _acts_as(harness: _Harness) -> str | None:
+    """The person the run token of the one run started says it acts as."""
+    return _token_person(harness, ACTING_USER_KEY)
 
 
 async def test_a_persons_run_on_a_channel_thread_acts_as_them(
@@ -825,7 +830,12 @@ async def test_without_their_principal_a_persons_run_is_the_channels_own(
     params: dict[str, JsonValue] = {
         "assistant_id": "agent",
         "input": {},
-        "metadata": {"user_id": USER_ID, ACTING_USER_KEY: USER_ID},
+        "metadata": {
+            "user_id": USER_ID,
+            "billed_robin_user_id": USER_ID,
+            ACTING_USER_KEY: USER_ID,
+            SENDER_USER_KEY: USER_ID,
+        },
     }
 
     if command:
@@ -840,6 +850,8 @@ async def test_without_their_principal_a_persons_run_is_the_channels_own(
     assert status == 200
     assert harness.acted_as == [AS_THE_CONVERSATION]
     assert _acts_as(harness) is None
+    # Their own message started it, so its model calls still bill them.
+    assert _token_person(harness, SENDER_USER_KEY) == USER_ID
 
 
 async def test_a_dashboard_command_on_a_channel_thread_is_its_senders(

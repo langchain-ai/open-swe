@@ -1,12 +1,21 @@
 from collections.abc import Iterator
 from typing import Any
 
+import anthropic
 import pytest
+import rt.gateway as gateway_module
 import runtime_api.models as shared
+from aiohttp import web
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from pydantic import JsonValue
+from rt.backend import Run, RunContext
+from rt.gateway import GATEWAY_BEARER
 from rt.models import _SDK_RETRY_DISABLE, _build, build_model
 from runtime_api.catalog import ModelSpec
+from runtime_api.gateway_auth import GatewayChatAnthropic
+from runtime_api.loop import GATEWAY_CREDENTIAL, GatewayCredential
 from runtime_api.models import SUPPORTED_MODELS, model_init_kwargs, provider_model_kwargs
 
 _ENV = (
@@ -57,15 +66,26 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
     monkeypatch.setattr(shared, "init_chat_model", init_chat_model)
     spec = _spec(option["id"], option["default_effort"])
 
-    build_model(spec, use_gateway=use_gateway)
+    model = build_model(spec, use_gateway=use_gateway)
 
     # The spec's kwargs crossed the wire as JSON, as the backend's never do.
     kwargs = provider_model_kwargs(option["id"], option["default_effort"], max_tokens=64_000)
     provider = option["id"].split(":", 1)[0]
     if provider in _SDK_RETRY_DISABLE:
         kwargs = {**kwargs, "max_retries": _SDK_RETRY_DISABLE[provider]}
-    expected = model_init_kwargs(option["id"], kwargs, use_gateway=use_gateway)
-    assert built == [expected]
+    if use_gateway and provider == "anthropic":
+        # Its every request asks the run's gateway credential, which init_chat_model can't.
+        assert built == []
+        assert isinstance(model, GatewayChatAnthropic)
+        return
+    expected_id, expected = model_init_kwargs(
+        option["id"], kwargs, use_gateway=use_gateway, gateway=GATEWAY_BEARER
+    )
+    # Clients that carry the run's credential are built anew for each model.
+    fresh = {"async_client", "client_args"}
+    assert [
+        (model_id, {k: v for k, v in sent.items() if k not in fresh}) for model_id, sent in built
+    ] == [(expected_id, {k: v for k, v in expected.items() if k not in fresh})]
 
 
 def test_an_openai_model_has_the_window_codex_serves_it_at() -> None:
@@ -110,3 +130,51 @@ def test_a_baseten_model_goes_to_baseten_with_its_key(monkeypatch: pytest.Monkey
     assert isinstance(model, ChatOpenAI)
     assert model.model_name == "moonshot/kimi"
     assert model.openai_api_base == "https://inference.baseten.co/v1"
+
+
+async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One model serves every run; each request carries its own run's credential, which
+    the backend is asked for once and the run keeps."""
+    seen: list[str | None] = []
+
+    async def gateway(request: web.Request) -> web.Response:
+        seen.append(request.headers.get("Authorization"))
+        return web.json_response({"error": {"message": "stop here"}}, status=401)
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "http://backend.invalid")
+    asked: list[str] = []
+
+    def run_for(credential: GatewayCredential) -> Run:
+        run = Run(RunContext.model_validate({"__run_token": "run-token"}))
+
+        async def post(path: str, body: dict[str, JsonValue], **_: object) -> JsonValue:
+            asked.append(path.rsplit("/", 1)[-1])
+            return credential.model_dump(mode="json")
+
+        monkeypatch.setattr(run.backend, "post", post)
+        return run
+
+    person = run_for(GatewayCredential(token="person-token"))
+    system = run_for(GatewayCredential())
+    app = web.Application()
+    app.router.add_route("*", "/{path:.*}", gateway)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    try:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2-deployment-key")
+        model = build_model(_spec("anthropic:claude-haiku-5-5", "medium"), use_gateway=True)
+        for run in (person, person, system):
+            monkeypatch.setattr(gateway_module, "current_run", lambda run=run: run)
+            with pytest.raises(anthropic.AuthenticationError):
+                await model.ainvoke([HumanMessage("hi")])
+    finally:
+        await runner.cleanup()
+
+    assert seen == ["Bearer person-token", "Bearer person-token", "Bearer lsv2-deployment-key"]
+    assert asked == [GATEWAY_CREDENTIAL.name, GATEWAY_CREDENTIAL.name]

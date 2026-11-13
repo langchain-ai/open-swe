@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from runtime_api import models as model
+from runtime_api.gateway_auth import GatewayBearer
 from runtime_api.models import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
@@ -285,3 +286,48 @@ def test_make_model_gateway_without_key_falls_back_direct(
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
     assert "api_key" not in captured
+
+
+@pytest.mark.parametrize(
+    ("model_id", "path_prefix"),
+    [
+        ("openai:gpt-6-astra", "/openai/v1/responses"),
+        ("anthropic:claude-haiku-5-5", "/anthropic/v1/messages"),
+        ("fireworks:accounts/fireworks/models/glm-5p2", "/fireworks/v1/chat/completions"),
+        ("google_genai:gemini-3.5-flash", "/gemini/v1beta/models/gemini-3.5-flash:"),
+    ],
+)
+async def test_gateway_bearer_sends_a_fresh_token_per_request(
+    monkeypatch: pytest.MonkeyPatch, model_id: str, path_prefix: str
+) -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        seen.append((request.path, {k.lower(): v for k, v in request.headers.items()}))
+        return web.json_response({"error": {"message": "stop here"}}, status=401)
+
+    tokens = iter(["person-token-1", "person-token-2"])
+
+    async def token() -> str:
+        return next(tokens)
+
+    async with _http_server(handler) as base_url:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
+        monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2_deployment_key")
+        chat = model.make_model(
+            model_id, use_gateway=True, gateway=GatewayBearer(token), max_retries=0
+        )
+        for _ in range(2):
+            with pytest.raises(Exception):  # noqa: B017 - each SDK raises its own 401 type
+                await chat.ainvoke([HumanMessage("hi")])
+
+    assert [path.startswith(path_prefix) for path, _ in seen] == [True, True]
+    assert [headers.get("authorization") for _, headers in seen] == [
+        "Bearer person-token-1",
+        "Bearer person-token-2",
+    ]
+    assert [headers.get(model.GATEWAY_SERVICE_HEADER.lower()) for _, headers in seen] == [
+        "robin",
+        "robin",
+    ]
+    assert not any("x-api-key" in h or "x-goog-api-key" in h for _, h in seen)

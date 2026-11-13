@@ -16,6 +16,7 @@ from langchain_core.messages.content import ImageContentBlock, create_image_bloc
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from runtime_api.provenance import Provenance
 
+from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.config import ENV
 from openswe.dashboard.options import (
@@ -652,8 +653,12 @@ async def start_run_with_tool_results(
     tool_results: Sequence[Mapping[str, str]],
     overrides: dict[str, Any],
     plugin_tools: bool = False,
+    as_sender: bool = False,
 ) -> str:
-    """Start a run with the results of tools its client ran: a sandbox program, or a plugin's frame."""
+    """Start a run with the results of tools its client ran: a sandbox program, or a plugin's frame.
+
+    ``as_sender`` when ``login`` ran them themselves, as in a plugin's frame.
+    """
     await _ensure_dashboard_github_token(login)
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
@@ -675,6 +680,7 @@ async def start_run_with_tool_results(
             thread_title=None,
             client=client,
             multitask_strategy="enqueue",
+            as_sender=as_sender,
         )
     else:
         run = await dispatch_agent_run(
@@ -685,6 +691,7 @@ async def start_run_with_tool_results(
             thread_title=None,
             client=client,
             multitask_strategy="enqueue",
+            as_sender=as_sender,
         )
     return str(run["run_id"])
 
@@ -1400,6 +1407,11 @@ async def _enrich_run_start_command(
     run_metadata.update(
         await _run_user_metadata({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
     )
+    # The person sent this message, so its model calls bill them (as
+    # ``dispatch.prepare_durable_run`` stamps a run they start); a relayed one is no one's.
+    sender = run_metadata.get("user_id")
+    if relayed_from is None and isinstance(sender, str):
+        run_metadata[SENDER_USER_KEY] = sender
     config_metadata = client_config.get("metadata")
     if not isinstance(config_metadata, dict):
         config_metadata = {}
@@ -1726,11 +1738,15 @@ async def dispatch_pending_follow_ups(
 
     A message steered into a run after its last model call is still waiting in
     the store; the new run's first model call picks it up. Returns the run id,
-    or ``None`` when nothing was waiting.
+    or ``None`` when nothing was waiting. The run answers, and acts as, the person
+    who sent the newest of them from the web; otherwise it is ``login``'s and acts
+    as no one.
     """
-    if not await QueuedMessage.for_thread(thread_id):
+    queued = await QueuedMessage.for_thread(thread_id)
+    if not queued:
         return None
-    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    sender = queued[-1].web_sender
+    configurable = await _build_dashboard_configurable(thread_id, sender or login, metadata)
     run = await dispatch_agent_run(
         thread_id,
         None,
@@ -1741,6 +1757,7 @@ async def dispatch_pending_follow_ups(
         metadata={"kind": FOLLOW_UP_PICKUP_KIND},
         client=client,
         multitask_strategy=multitask_strategy,
+        as_sender=sender is not None,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None
     return run_id if isinstance(run_id, str) else None

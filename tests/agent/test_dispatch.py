@@ -6,8 +6,9 @@ from uuid import uuid7
 from xml.etree import ElementTree
 
 import pytest
+from pydantic import JsonValue
 
-from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.github.pull_requests import PullRequest
 from openswe.slack import thinking as slack_thinking
 from openswe.threads import runtimes
@@ -162,8 +163,10 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         assert created["metadata"]["user_email"] == "mason@example.com"
         assert created["metadata"]["ls_repo_provider"] == "github"
         assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
-        # Attributed to the person, but a run the backend starts acts as no one.
+        # Attributed to the person, but a run the backend starts acts as no one, and bills
+        # no one.
         assert ACTING_USER_KEY not in created["metadata"]
+        assert SENDER_USER_KEY not in created["metadata"]
 
     # A follow-up the person sent themselves acts as them.
     await dispatch.create_durable_run(
@@ -179,6 +182,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     sent = client.runs.created[-1]
     assert sent["metadata"][ACTING_USER_KEY] == str(user_id)
     assert sent["config"]["metadata"][ACTING_USER_KEY] == str(user_id)
+    assert sent["config"]["metadata"][SENDER_USER_KEY] == str(user_id)
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -196,6 +200,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
             "billing_bucket": "user",
             "channel": "slack",
             ACTING_USER_KEY: str(user_id),
+            SENDER_USER_KEY: str(user_id),
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
             "ls_git_branch": "main",
@@ -211,6 +216,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     assert "billed_user_email" not in unknown
     # Only the backend says whom a run acts as, never its caller.
     assert ACTING_USER_KEY not in unknown
+    assert SENDER_USER_KEY not in unknown
     assert "ls_attribution_identifier" not in unknown
     assert "ls_git_repo" not in unknown
     assert "ls_git_branch" not in unknown
@@ -311,6 +317,52 @@ async def test_billing_survives_service_principal_and_failed_run(
     with pytest.raises(RuntimeError, match="catalog failed"):
         await runtime.run_payload("thread-1", rewritten, thread_metadata={})
     assert context.call_args.kwargs["metadata"]["user_id"] == str(actor_id)
+
+
+async def test_run_token_names_only_the_sender_the_run_is_billed_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    person, other = User(id=uuid7()), User(id=uuid7())
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=person))
+    context = AsyncMock(return_value={"graph": "agent"})
+    monkeypatch.setattr(runtimes, "remote_run_context", context)
+    runtime = runtimes.MdaRuntime("http://mda.test")
+
+    async def token_sender(assistant_id: str, metadata: dict[str, JsonValue]) -> JsonValue:
+        rewritten = await runtime.run_payload(
+            "thread-1",
+            {"assistant_id": assistant_id, "metadata": metadata, "config": {"metadata": metadata}},
+            thread_metadata={},
+        )
+        config, run_metadata = rewritten["config"], rewritten["metadata"]
+        assert isinstance(config, dict) and isinstance(config["metadata"], dict)
+        assert isinstance(run_metadata, dict)
+        # Neither the run nor its traces keep a sender the token drops.
+        assert config["metadata"].get(SENDER_USER_KEY) == run_metadata.get(SENDER_USER_KEY)
+        return context.call_args.kwargs["metadata"].get(SENDER_USER_KEY)
+
+    mine, theirs = str(person.id), str(other.id)
+    billed_to_me, billed_to_them = person.billing_trace_metadata(), other.billing_trace_metadata()
+    assert await token_sender("agent", {**billed_to_me, SENDER_USER_KEY: mine}) == mine
+    assert (
+        await token_sender("agent", {**billed_to_me, ACTING_USER_KEY: mine, SENDER_USER_KEY: mine})
+        == mine
+    )
+    # A caller naming someone else is never trusted to spend their budget.
+    assert await token_sender("agent", {**billed_to_me, SENDER_USER_KEY: theirs}) is None
+    assert await token_sender("agent", {SENDER_USER_KEY: theirs}) is None
+    assert (
+        await token_sender(
+            "agent", {**billed_to_them, ACTING_USER_KEY: mine, SENDER_USER_KEY: theirs}
+        )
+        is None
+    )
+    assert (
+        await token_sender(
+            "reviewer", {**billed_to_them, ACTING_USER_KEY: mine, SENDER_USER_KEY: theirs}
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout"])
