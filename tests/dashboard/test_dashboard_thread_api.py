@@ -31,6 +31,7 @@ from openswe.threads import listing as thread_listing
 from openswe.threads import proxy as thread_proxy
 from openswe.threads import routes as thread_routes
 from openswe.threads import runs as thread_runs
+from openswe.threads import store as thread_store
 from openswe.threads.runtimes import RUNTIMES, MdaRun
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
@@ -106,6 +107,7 @@ async def test_archive_cascades_only_to_readable_task_workers(
     client = SimpleNamespace(threads=SimpleNamespace(get=get, update=update))
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(handlers, "agent_thread_pr_state_lock", _unlocked)
+    monkeypatch.setattr(thread_store, "agent_thread_pr_state_lock", _unlocked)
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
     monkeypatch.setattr(emitter, "task_marked_complete", AsyncMock())
     monkeypatch.setattr(emitter, "task_accepted", AsyncMock())
@@ -116,7 +118,7 @@ async def test_archive_cascades_only_to_readable_task_workers(
         )
     }
     monkeypatch.setattr(
-        handlers,
+        thread_store,
         "sidebar_memberships",
         AsyncMock(
             return_value=memberships if thread_id == "parent" else {},

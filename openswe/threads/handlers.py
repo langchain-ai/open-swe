@@ -5,6 +5,7 @@ import logging
 import posixpath
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from functools import partial
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -22,7 +23,6 @@ from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
-from openswe.tasks.store import sidebar_memberships
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
@@ -645,23 +645,9 @@ async def resolve_dashboard_thread(
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
     if resolved:
-        try:
-            workers = await sidebar_memberships([thread_id], workers_of=True)
-        except Exception:
-            logger.exception(
-                "Could not list task workers during archive", extra={"thread_id": thread_id}
-            )
-            workers = {}
-        for worker_id in workers:
-            try:
-                async with agent_thread_pr_state_lock(worker_id):
-                    await _authorized_thread(worker_id, login, email=email)
-                    await THREADS.update(worker_id, metadata_update)
-            except Exception:
-                logger.exception(
-                    "Could not archive task worker",
-                    extra={"thread_id": worker_id, "coordinator_thread_id": thread_id},
-                )
+        await THREADS.archive_task_workers(
+            thread_id, metadata_update, check=partial(_authorized_thread, login=login, email=email)
+        )
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return await _thread_summary(thread, viewer_login=login)
 

@@ -7,6 +7,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 
 from openswe.github import pull_requests
+from openswe.tasks.store import SidebarTaskMembership
+from openswe.threads.store import THREADS
 from openswe.webhooks import common as webhook_common
 
 
@@ -65,22 +67,26 @@ async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> No
     fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
     fake_client.threads.get = AsyncMock(return_value=thread)
     fake_client.threads.update = AsyncMock()
+    worker_update = AsyncMock()
 
     with (
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.threads.store.agent_thread_pr_state_lock", _unlocked),
+        patch(
+            "openswe.threads.store.sidebar_memberships",
+            AsyncMock(return_value={"w1": SidebarTaskMembership("w1", "task", "worker", "t1")}),
+        ),
+        patch.object(THREADS, "update", worker_update),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
+    archive = {"resolved": True, "resolved_at_ms": ANY, "auto_resolved_by_prs": True}
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="t1",
-        metadata={
-            "pull_requests": [{**closing_pr, "state": "closed"}, merged_pr],
-            "resolved": True,
-            "resolved_at_ms": ANY,
-            "auto_resolved_by_prs": True,
-        },
+        metadata={"pull_requests": [{**closing_pr, "state": "closed"}, merged_pr], **archive},
     )
+    worker_update.assert_awaited_once_with("w1", {**archive, "auto_resolved_by_prs": False})
 
 
 @pytest.mark.asyncio

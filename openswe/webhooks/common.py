@@ -135,6 +135,7 @@ from openswe.slack.stop import process_agent_session_stopped
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
 from openswe.threads.identity import ThreadIdentity
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     SLACK_BOT_TRIGGER_KIND,
     TRIGGERING_BOT_KEY,
@@ -1486,9 +1487,10 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     threads are skipped.
 
     A thread auto-resolves only when every tracked PR is merged or closed and the
-    agent opened at least one of them with ``resolves_thread=True``. Without that
-    flag the thread is instead marked ``attention_reason="prs_closed"`` so a
-    person decides whether to resolve it; any PR reopening clears the mark.
+    agent opened at least one of them with ``resolves_thread=True``, archiving its
+    task workers with it. Without that flag the thread is instead marked
+    ``attention_reason="prs_closed"`` so a person decides whether to resolve it;
+    any PR reopening clears the mark.
     """
     event = PullRequestEvent.parse(payload)
     pull_request = event.to_pull_request() if event is not None else None
@@ -1512,6 +1514,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     for thread_id in thread_ids:
         metadata: dict[str, Any] | None = None
         newly_merged = False
+        archive: JsonObject | None = None
+        archived = False
         try:
             async with agent_thread_pr_state_lock(thread_id):
                 current = await langgraph_client.threads.get(thread_id)
@@ -1574,11 +1578,12 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if all_terminal:
                     if state_changed and metadata.get("resolved") is not True:
                         if resolves_thread:
-                            metadata_update["resolved"] = True
-                            metadata_update["resolved_at_ms"] = int(
-                                datetime.now(UTC).timestamp() * 1000
-                            )
-                            metadata_update["auto_resolved_by_prs"] = True
+                            archive = {
+                                "resolved": True,
+                                "resolved_at_ms": int(datetime.now(UTC).timestamp() * 1000),
+                                "auto_resolved_by_prs": True,
+                            }
+                            metadata_update.update(archive)
                         elif not needs_attention:
                             metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
                 else:
@@ -1607,6 +1612,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update
                     )
+                    archived = archive is not None
                 location = SourceContext.from_metadata(metadata).slack_location
                 if (
                     was_all_merged != all_merged
@@ -1623,6 +1629,12 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
+        finally:
+            if archived and archive is not None:
+                # Workers' own PRs must not reopen them, so they aren't marked as resolved by PRs.
+                await THREADS.archive_task_workers(
+                    thread_id, {**archive, "auto_resolved_by_prs": False}
+                )
         if new_state == "merged":
             from openswe.analytics.emitter import task_marked_complete
 

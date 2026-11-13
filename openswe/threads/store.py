@@ -12,7 +12,7 @@ reaches MDA through MDA's trusted-backend ingress.
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final, NamedTuple
 
 import httpx
@@ -25,10 +25,12 @@ from openswe.agent_api.client import (
     mda_graph_for,
 )
 from openswe.dispatch import channel_of
+from openswe.tasks.store import sidebar_memberships
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite
 from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +193,34 @@ class ThreadStore:
         if updated is not None and metadata:
             self.copies.start(updated, metadata)
         return updated
+
+    async def archive_task_workers(
+        self,
+        coordinator_thread_id: str,
+        metadata: Mapping[str, JsonValue],
+        *,
+        check: Callable[[str], Awaitable[object]] | None = None,
+    ) -> None:
+        """Apply a coordinator's archive ``metadata`` to its task workers that ``check`` allows."""
+        try:
+            workers = await sidebar_memberships([coordinator_thread_id], workers_of=True)
+        except Exception:
+            logger.exception(
+                "Could not list task workers during archive",
+                extra={"thread_id": coordinator_thread_id},
+            )
+            return
+        for worker_id in workers:
+            try:
+                async with agent_thread_pr_state_lock(worker_id):
+                    if check is not None:
+                        await check(worker_id)
+                    await self.update(worker_id, metadata)
+            except Exception:
+                logger.exception(
+                    "Could not archive task worker",
+                    extra={"thread_id": worker_id, "coordinator_thread_id": coordinator_thread_id},
+                )
 
     async def retitle(self, thread_id: str, title: str) -> None:
         """Give the thread a title of the system's choosing, unless a person renamed it."""
