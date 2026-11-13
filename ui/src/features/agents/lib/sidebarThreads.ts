@@ -192,7 +192,7 @@ export interface SidebarDayGroup {
   threads: Array<SidebarThreadItem>
 }
 
-/** Buckets threads by their local creation day, newest first, each day ordered by creation. */
+/** Buckets threads by their local activity day, newest first. */
 export function groupSidebarThreadsByDay(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
@@ -201,7 +201,7 @@ export function groupSidebarThreadsByDay(
   const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
   const days = new Map<number, Array<SidebarThreadItem>>()
   for (const thread of threads) {
-    const day = new Date(thread.createdAt).setHours(0, 0, 0, 0)
+    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
     const items = days.get(day) ?? []
     items.push(thread)
     days.set(day, items)
@@ -231,7 +231,7 @@ export function groupSidebarThreadsByDay(
                     ? undefined
                     : "numeric",
               }),
-      threads: items.sort(byCreation),
+      threads: items.sort(byRecency),
     }))
 }
 

@@ -1,5 +1,6 @@
 """Deployment initialization and schema regressions."""
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -16,10 +17,31 @@ from tests.analytics.conftest import initialize_database
 async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
     detector = BlockBuster()
     identities = []
+    migrations = postgres.load_migrations()
+    async with postgres.engine().begin() as conn:
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "3047efb4bf0d")
+        await conn.execute(text("CREATE INDEX thread_index_activity ON thread_index (updated_at)"))
+        await conn.execute(
+            text(
+                "INSERT INTO thread_index (id, thread_id, runtime, metadata, updated_at) VALUES "
+                "(:one, 'activity', 'mda', '{\"updated_at_ms\": 1788220800000}', '2026-10-01'), "
+                "(:two, 'fallback', 'mda', '{}', '2026-09-01')"
+            ),
+            {"one": uuid4(), "two": uuid4()},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO thread_index (id, thread_id, runtime, updated_at) "
+                "SELECT gen_random_uuid(), 'legacy-' || n, 'mda', '2026-09-01'::timestamptz "
+                "FROM generate_series(1, 2001) AS n"
+            )
+        )
     for _ in range(2):
         # asyncpg checks local password/SSL files when opening a new connection.
         async with postgres.engine().connect():
             pass
+        await asyncio.wait_for(asyncio.gather(postgres.migrate(), postgres.migrate()), 30)
         detector.activate()
         try:
             await initialize_database()
@@ -29,6 +51,26 @@ async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
             detector.deactivate()
         await postgres.close()
     assert identities[0] == identities[1]
+    async with postgres.connection() as conn:
+        assert await conn.scalar(text("SELECT to_regclass('thread_index_activity')")) is None
+        assert await conn.scalar(
+            text(
+                "SELECT indisvalid FROM pg_index WHERE indexrelid = 'thread_index_last_activity'::regclass"
+            )
+        )
+        assert (
+            list(
+                await conn.scalars(
+                    text("SELECT last_activity_at FROM thread_index ORDER BY thread_id")
+                )
+            )
+            == [datetime(2026, 9, 1, tzinfo=UTC)] * 2003
+        )
+        assert not await conn.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid())"
+            )
+        )
 
 
 @pytest.mark.parametrize("retained_only", [False, True])

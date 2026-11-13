@@ -207,10 +207,23 @@ async def migrate() -> None:
         extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
     )
     migrations = await asyncio.to_thread(load_migrations)
-    async with engine().begin() as conn:
-        await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
-        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
-        await conn.run_sync(upgrade, migrations)
+    async with engine().connect() as conn:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        while not await conn.scalar(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": MIGRATION_LOCK}
+        ):
+            await conn.commit()
+            await asyncio.sleep(0.1)
+        await conn.commit()
+        await conn.execution_options(isolation_level="READ COMMITTED")
+        try:
+            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
+            await conn.commit()
+            await conn.run_sync(upgrade, migrations)
+        finally:
+            await conn.rollback()
+            await conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATION_LOCK})
+            await conn.commit()
     logger.info(
         "Database initialized",
         extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
@@ -231,7 +244,12 @@ def upgrade(
     schema: str = SCHEMA,
     revision: str = "heads",
 ) -> None:
-    conn.exec_driver_sql(f"SET LOCAL search_path TO {schema}, public")
+    external_transaction = conn.in_transaction()
+    previous_path = conn.exec_driver_sql("SHOW search_path").scalar_one()
+    scope = "LOCAL " if external_transaction else ""
+    conn.exec_driver_sql(f"SET {scope}search_path TO {schema}, public")
+    if not external_transaction:
+        conn.commit()
     upgrade_revisions = attrgetter("_upgrade_revs")(migrations)
     context = MigrationContext.configure(
         connection=conn,
@@ -243,8 +261,18 @@ def upgrade(
     )
     if ENV.OPENSWE_ENV.optional() == "preview":
         drop_stale_revisions(conn, context, migrations, schema)
-    with Operations.context(context):
-        context.run_migrations()
+        if not external_transaction:
+            conn.commit()
+    try:
+        with Operations.context(context), context.begin_transaction():
+            context.run_migrations()
+    finally:
+        if not external_transaction:
+            conn.rollback()
+            conn.execute(
+                text("SELECT set_config('search_path', :path, false)"), {"path": previous_path}
+            )
+            conn.commit()
 
 
 def drop_stale_revisions(

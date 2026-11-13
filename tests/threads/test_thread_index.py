@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import text
 
 from openswe.threads import index
 from openswe.threads.creation import TITLE_LOCKED_KEY
@@ -35,6 +36,24 @@ async def test_a_thread_round_trips_in_the_agent_servers_shape() -> None:
     assert shape["metadata"] == {"title": "Fix it"}
     assert shape["status"] == "idle"
     assert created.as_langgraph(["thread_id", "status"]) == {"thread_id": "t1", "status": "idle"}
+
+
+async def test_activity_commits_invalidate_sidebar_lists() -> None:
+    from openswe.database import postgres
+    from openswe.ui_invalidations import Topic, outbox
+
+    topic = Topic.THREADS.keyed("public")
+    await index.create("t1", runtime="mda")
+    assert await outbox.invalidated_since({topic: 60}) == {topic}
+    async with postgres.transaction() as conn:
+        await conn.execute(text("DELETE FROM ui_invalidation"))
+    await index.update("t1", {"latest_run_status": "running"})
+    assert await outbox.invalidated_since({topic: 60}) == set()
+    for patch in [{"updated_at_ms": 123}, {"title": "Renamed"}, {"resolved": True}]:
+        async with postgres.transaction() as conn:
+            await conn.execute(text("DELETE FROM ui_invalidation"))
+        await index.update("t1", patch)
+        assert await outbox.invalidated_since({topic: 60}) == {topic}
 
 
 async def test_creating_an_indexed_thread_raises_or_returns_it() -> None:
@@ -197,3 +216,56 @@ async def test_numeric_search_does_not_match_nearby_pr_numbers() -> None:
     found = await ThreadSearch(text="59163").run()
     assert [thread.thread_id for thread in found] == ["wanted"]
     assert await ThreadSearch(text="59163").count() == 1
+
+
+@pytest.mark.parametrize(
+    "patch", [{"title": "Renamed"}, {"resolved": True}, {"latest_run_status": "running"}]
+)
+async def test_activity_pagination_ignores_non_activity_writes(
+    patch: dict[str, str | bool],
+) -> None:
+    for n in range(11):
+        at = _DAY + timedelta(hours=n)
+        await index.create(
+            f"t{n:02}",
+            runtime="mda",
+            metadata={"updated_at_ms": int(at.timestamp() * 1000)},
+            created_at=at,
+            updated_at=at,
+        )
+    await index.update("t00", patch)
+    await index.set_status("t00", "busy")
+    first = await ThreadSearch(sort_by="updated_at", activity_order=True, limit=10).run()
+    second = await ThreadSearch(sort_by="updated_at", activity_order=True, offset=10).run()
+    assert [thread.thread_id for thread in first] == [f"t{n:02}" for n in range(10, 0, -1)]
+    assert [thread.thread_id for thread in second] == ["t00"]
+    assert (await ThreadSearch(sort_by="updated_at", limit=1).run())[0].thread_id == "t00"
+    await index.update("t00", {"updated_at_ms": int((_DAY + timedelta(days=1)).timestamp() * 1000)})
+    assert (await ThreadSearch(sort_by="updated_at", activity_order=True, limit=1).run())[
+        0
+    ].thread_id == "t00"
+    await index.create(
+        "future",
+        runtime="mda",
+        metadata={"updated_at_ms": int((datetime.now(UTC) + timedelta(days=1)).timestamp() * 1000)},
+    )
+    await index.update("t00", {"updated_at_ms": None})
+    assert [
+        thread.thread_id
+        for thread in await ThreadSearch(sort_by="updated_at", activity_order=True, limit=2).run()
+    ] == ["future", "t00"]
+    await index.import_newer(
+        [
+            IndexedThread(
+                thread_id="t00",
+                runtime="mda",
+                metadata={},
+                status="idle",
+                created_at=_DAY,
+                updated_at=datetime.now(UTC) + timedelta(days=2),
+            )
+        ]
+    )
+    assert (await ThreadSearch(sort_by="updated_at", activity_order=True, limit=1).run())[
+        0
+    ].thread_id == "t00"

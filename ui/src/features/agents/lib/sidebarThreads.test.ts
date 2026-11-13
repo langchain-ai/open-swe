@@ -92,7 +92,7 @@ describe("sortSidebarThreads", () => {
 })
 
 describe("groupSidebarThreadsByDay", () => {
-  it("buckets by local creation day, even when an older thread is active today", () => {
+  it("buckets by local activity day when an older thread is active today", () => {
     const now = new Date(2026, 5, 10, 15)
     const at = (day: number, hour: number) =>
       new Date(2026, 5, day, hour).getTime()
@@ -123,11 +123,10 @@ describe("groupSidebarThreadsByDay", () => {
         group.threads.map((item) => item.id),
       ])
     ).toEqual([
-      ["today", "Today", ["fresh"]],
+      ["today", "Today", ["busy", "fresh"]],
       ["yesterday", "Yesterday", ["yesterday"]],
+      ["2026-06-04", label(4), ["older"]],
       ["2026-06-03", label(3), ["old"]],
-      ["2026-06-02", label(2), ["older"]],
-      ["2026-06-01", label(1), ["busy"]],
     ])
   })
 })

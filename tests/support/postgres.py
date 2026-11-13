@@ -37,8 +37,9 @@ class MigratedTemplate:
                 await conn.execute(text(f'CREATE DATABASE "{name}"'))
             engine = create_async_engine(cls.database_uri(uri, name), poolclass=NullPool)
             try:
-                async with engine.begin() as conn:
+                async with engine.connect() as conn:
                     await conn.execute(text(f"CREATE SCHEMA {TEST_SCHEMA}"))
+                    await conn.commit()
                     await conn.run_sync(postgres.upgrade, postgres.load_migrations(), TEST_SCHEMA)
             finally:
                 await engine.dispose()

@@ -279,7 +279,7 @@ export function AgentsSidebar({
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
     includeSlack: prefs.filters.includeSlack,
-    sort: "created",
+    sort: prefs.organize === "date" ? "updated" : "created",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -436,7 +436,10 @@ export function AgentsSidebar({
   )
   const recents = repoMode
     ? filteredRecents
-    : sortSidebarThreads(filteredRecents, "created")
+    : sortSidebarThreads(
+        filteredRecents,
+        prefs.organize === "date" ? "updated" : "created"
+      )
   // The folder each of this Mac's threads runs in, to file the ones without a
   // repository under their folder rather than under "No project".
   const macFolderOf = new Map(

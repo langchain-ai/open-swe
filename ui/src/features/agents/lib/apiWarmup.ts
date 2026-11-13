@@ -60,7 +60,7 @@ function warmApiRequests(
     if (owned) search.set("owned", "true")
     if (!includeClaudeCode) search.append("exclude_source", "claude_code")
     if (!includeSlack) search.append("exclude_source", "slack")
-    search.set("sort_by", "created_at")
+    search.set("sort_by", repoMode ? "created_at" : "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }
 

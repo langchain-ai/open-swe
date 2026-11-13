@@ -11,9 +11,10 @@ import asyncio
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from openswe.github.pull_request_key import PullRequestKey
@@ -112,6 +113,8 @@ class Topic(BaseTopic):
     """Keyed: one pull request's check runs, check suites and workflow runs. A CI
     run changes them many times a second, so a stream sends this at most every 15s."""
 
+    THREADS: ClassVar[ThreadListsTopic]
+
     THREAD_QUEUES: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
 
@@ -208,6 +211,28 @@ class KeyedTopic[K: str](BaseTopic):
         return (keys & {""}) | await self._authorize_keys(session, records)
 
 
+class ThreadListsTopic(KeyedTopic[str]):
+    async def activity(self, conn: Connection, metadata: Mapping[str, JsonValue]) -> None:
+        from openswe.threads.identity import ThreadIdentity
+        from openswe.threads.summary import thread_is_private
+
+        topics = [] if thread_is_private(metadata) else [self.keyed("public")]
+        if isinstance(owner := metadata.get("owner_login"), str) and owner:
+            user = await ThreadIdentity(owner).user()
+            if user is not None:
+                topics.append(self.keyed(str(user.id)))
+        if topics:
+            await self._publish(conn, *topics)
+
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        from openswe.dashboard.oauth import session_user_id
+
+        allowed = {"public"} if session.get("provider", "github") == "github" else set()
+        if (user_id := session_user_id(session)) is not None:
+            allowed.add(str(user_id))
+        return keys & allowed
+
+
 async def _readable_required_checks(session: Session, keys: set[str]) -> set[str]:
     from openswe.github.repos import accessible_repo_full_names
 
@@ -287,6 +312,7 @@ Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
+Topic.THREADS = ThreadListsTopic("threads")
 Topic.PULL_REQUEST_CHECKS = KeyedTopic(
     "pull-request-checks",
     authorize_keys=_readable_pull_requests,

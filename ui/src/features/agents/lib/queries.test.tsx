@@ -8,6 +8,7 @@ import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 
 import { agentsApi } from "./api"
+import { cloudSidebarThread, groupSidebarThreadsByDay } from "./sidebarThreads"
 import {
   SIDEBAR_PAGE_SIZE,
   agentScheduleKeys,
@@ -49,6 +50,12 @@ import type {
   WorkflowPushApproval,
   WorkflowPushApprovalsResponse,
 } from "./types"
+
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({
+    data: { user_id: "alice-id", auth_provider: "github" },
+  }),
+}))
 
 const params: ThreadsPageParams = {
   limit: 100,
@@ -1495,6 +1502,69 @@ describe("thread read state", () => {
           ?.viewed
       ).toBe(true)
     )
+  })
+})
+
+describe("sidebar activity invalidation", () => {
+  it.each([true, false])(
+    "only subscribes shared lists to public activity (owned: %s)",
+    async (owned) => {
+      vi.spyOn(agentsApi, "listThreadsPage").mockResolvedValue(page)
+      const client = testClient()
+      renderHook(() => useSidebarRecents({ repoMode: false, owned }), {
+        wrapper: wrapperFor(client),
+      })
+      await waitFor(() =>
+        expect(
+          client
+            .getQueryCache()
+            .getAll()
+            .some((query) => query.state.status === "success")
+        ).toBe(true)
+      )
+      const topics = client.getQueryCache().getAll().flatMap(queryTopics)
+      expect(topics).toContain(invalidationTopic("threads", "alice-id"))
+      expect(topics.includes(invalidationTopic("threads", "public"))).toBe(
+        !owned
+      )
+    }
+  )
+
+  it("moves yesterday's idle thread to Today when activity is invalidated, without polling", async () => {
+    const now = new Date(2026, 5, 10, 15)
+    const yesterday = new Date(2026, 5, 9, 12).getTime()
+    let updatedAt = yesterday
+    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({
+      ...page,
+      items: [
+        {
+          ...optimisticThread("old-thread", { prompt: "Continue" }),
+          createdAt: yesterday,
+          updatedAt,
+          status: "idle",
+        },
+      ],
+    }))
+    const client = testClient()
+    const { result } = renderHook(
+      () =>
+        groupSidebarThreadsByDay(
+          useSidebarRecents({ repoMode: false, sort: "updated" }).items.map(
+            cloudSidebarThread
+          ),
+          now
+        ),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() => expect(result.current[0]?.label).toBe("Yesterday"))
+    updatedAt = now.getTime()
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) =>
+          queryTopics(query).includes(invalidationTopic("threads", "alice-id")),
+      })
+    )
+    await waitFor(() => expect(result.current[0]?.label).toBe("Today"))
   })
 })
 

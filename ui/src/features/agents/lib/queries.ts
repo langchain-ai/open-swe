@@ -43,6 +43,7 @@ import type { ChatSort } from "./sidebarPrefs"
 import type { SessionUser, Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
+import { useSession } from "@/lib/session"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
 import { useThreadListLoad } from "@/lib/perf/threadListLoad"
@@ -749,6 +750,7 @@ export function useSidebarRepos({
   includeSlack?: boolean
   enabled?: boolean
 }) {
+  const { data: user } = useSession()
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   const query = useQuery({
@@ -757,6 +759,14 @@ export function useSidebarRepos({
       includeClaudeCode,
       includeSlack,
     }),
+    meta: {
+      invalidatedBy: [
+        ...(user?.user_id ? [invalidationTopic("threads", user.user_id)] : []),
+        ...(!owned && user && user.auth_provider !== "langsmith"
+          ? [invalidationTopic("threads", "public")]
+          : []),
+      ],
+    },
     queryFn: () =>
       agentsApi.listThreadRepos({
         ...params,
@@ -1813,18 +1823,24 @@ export function useInfiniteThreadsPages(
   } = {}
 ) {
   const queryClient = useQueryClient()
+  const { data: user } = useSession()
   const queryKey = agentThreadKeys.infinitePages(params)
   const pagesQuery = useInfiniteQuery({
     queryKey,
     queryFn: ({ pageParam }) =>
       agentsApi.listThreadsPage({ ...params, offset: pageParam }),
     meta: {
-      invalidatedBy: (data) =>
-        taskWorkerTopics(
+      invalidatedBy: (data) => [
+        ...(user?.user_id ? [invalidationTopic("threads", user.user_id)] : []),
+        ...(!params.owned && user && user.auth_provider !== "langsmith"
+          ? [invalidationTopic("threads", "public")]
+          : []),
+        ...taskWorkerTopics(
           (data as InfiniteData<ThreadsPage> | undefined)?.pages.flatMap(
             (page) => page.items
           )
         ),
+      ],
     },
     initialPageParam: 0,
     getNextPageParam: (page) =>

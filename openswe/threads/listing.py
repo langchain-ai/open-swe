@@ -251,7 +251,12 @@ async def _search_threads_batch(
             thread.as_langgraph()
             for thread in await THREADS.search(
                 index.ThreadSearch(
-                    metadata=metadata, limit=limit, offset=offset, sort_by=sort_by, text=text
+                    metadata=metadata,
+                    limit=limit,
+                    offset=offset,
+                    sort_by=sort_by,
+                    activity_order=sort_by == "updated_at",
+                    text=text,
                 )
             )
         ]

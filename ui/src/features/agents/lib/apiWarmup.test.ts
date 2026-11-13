@@ -38,7 +38,7 @@ async function recordedSidebarUrl({
   includeSlack = true,
   owned = true,
   repoMode = false,
-  sort = "created",
+  sort = repoMode ? "created" : "updated",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
@@ -151,8 +151,8 @@ describe("apiWarmupScript", () => {
   it.each([
     { name: "defaults", expected: {}, prefs: undefined },
     {
-      name: "date mode pages by creation",
-      expected: { sort: "created" as ChatSort },
+      name: "date mode pages by last activity",
+      expected: { sort: "updated" as ChatSort },
       prefs: { organize: "date" },
     },
     {

@@ -49,8 +49,10 @@ async def test_upgrade_supports_current_transcript_writes(
     engine, schema = migration_schema
     if legacy:
         await install_legacy(engine, schema)
-    async with engine.begin() as conn:
+    async with engine.connect() as conn:
         await conn.run_sync(postgres.upgrade, postgres.load_migrations(), schema)
+    async with engine.begin() as conn:
+        await conn.execute(text(f"SET LOCAL search_path TO {schema}, public"))
         await conn.execute(text("INSERT INTO thread (thread_id) VALUES ('a'), ('b')"))
         for thread in ("a", "b"):
             params = {"thread": thread, "turn": uuid4()}
@@ -101,7 +103,6 @@ async def test_upgrade_supports_current_transcript_writes(
                 params,
             )
         assert (await conn.execute(text("SELECT count(*) FROM thread_message"))).scalar_one() == 2
-        await conn.run_sync(postgres.upgrade, postgres.load_migrations(), schema)
         assert (
             await conn.execute(text("SELECT count(*) FROM thread_tool_output"))
         ).scalar_one() == 2

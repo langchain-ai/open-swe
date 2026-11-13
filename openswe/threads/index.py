@@ -19,6 +19,7 @@ from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
 from openswe.thread_ids import mda_successor_thread_id
 from openswe.threads.creation import TITLE_LOCKED_KEY
+from openswe.ui_invalidations import Topic
 
 Runtime = Literal["local", "mda"]
 ThreadStatus = Literal["idle", "busy", "interrupted", "error"]
@@ -204,6 +205,7 @@ class ThreadSearch(BaseModel):
     status: ThreadStatus | None = None
     sort_by: SortBy = "created_at"
     sort_order: Literal["asc", "desc"] = "desc"
+    activity_order: bool = False
     limit: int = Field(default=10, ge=0)
     offset: int = Field(default=0, ge=0)
     select: list[SelectField] | None = None
@@ -229,6 +231,9 @@ class ThreadSearch(BaseModel):
     async def run(self) -> list[IndexedThread]:
         where, params = self._where()
         order = "ASC" if self.sort_order == "asc" else "DESC"
+        ordering = self.sort_by
+        if self.activity_order and self.sort_by == "updated_at":
+            ordering = "last_activity_at"
         columns, ranking = _COLUMNS, ""
         if self.text:
             columns, ranking = f"{_COLUMNS}, {_RANK} AS rank", "rank DESC, "
@@ -237,7 +242,7 @@ class ThreadSearch(BaseModel):
                 await conn.execute(
                     text(
                         f"SELECT {columns} FROM thread_index WHERE {where} "
-                        f"ORDER BY {ranking}{self.sort_by} {order}, thread_id {order} "
+                        f"ORDER BY {ranking}{ordering} {order}, thread_id {order} "
                         "LIMIT :limit OFFSET :offset"
                     ),
                     {**params, "limit": self.limit, "offset": self.offset},
@@ -294,6 +299,8 @@ async def create(
             .mappings()
             .first()
         )
+        if row is not None:
+            await Topic.THREADS.activity(conn, IndexedThread.from_row(row).metadata)
     if row is not None:
         return IndexedThread.from_row(row)
     if if_exists == "raise":
@@ -431,6 +438,8 @@ async def update(
             .mappings()
             .first()
         )
+        if row is not None and metadata.keys() & {"updated_at_ms", "title", "resolved"}:
+            await Topic.THREADS.activity(conn, IndexedThread.from_row(row).metadata)
     return None if row is None else IndexedThread.from_row(row)
 
 
@@ -448,11 +457,21 @@ async def set_status(thread_id: str, status: ThreadStatus) -> None:
 
 async def delete(thread_id: str) -> bool:
     async with transaction() as conn:
-        result = await conn.execute(
-            text("DELETE FROM thread_index WHERE thread_id = :thread_id"),
-            {"thread_id": thread_id},
+        row = (
+            (
+                await conn.execute(
+                    text(
+                        f"DELETE FROM thread_index WHERE thread_id = :thread_id RETURNING {_COLUMNS}"
+                    ),
+                    {"thread_id": thread_id},
+                )
+            )
+            .mappings()
+            .first()
         )
-    return bool(result.rowcount)
+        if row is not None:
+            await Topic.THREADS.activity(conn, IndexedThread.from_row(row).metadata)
+    return row is not None
 
 
 async def busy_since(before: datetime, *, limit: int = 200) -> list[IndexedThread]:

@@ -114,6 +114,33 @@ async def test_only_readers_of_a_private_thread_hear_its_queue(
     assert await Topic.audible({"sub": "bob"}, topics) == {"thread-queues/t-shared"}
 
 
+@pytest.mark.parametrize("visibility", ["private", "public"])
+async def test_private_activity_only_reaches_its_owner(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, visibility: str
+) -> None:
+    owner, other = uuid7(), uuid7()
+
+    async def user(self: object) -> SimpleNamespace:
+        return SimpleNamespace(id=owner)
+
+    monkeypatch.setattr("openswe.threads.identity.ThreadIdentity.user", user)
+    async with postgres.transaction() as conn:
+        await Topic.THREADS.activity(conn, {"visibility": visibility, "owner_login": "alice"})
+    topics = {Topic.THREADS.name, Topic.THREADS.keyed("public"), Topic.THREADS.keyed(str(owner))}
+    assert await outbox.invalidated_since(dict.fromkeys(topics, 60)) == {
+        Topic.THREADS.keyed(str(owner))
+    } | ({Topic.THREADS.keyed("public")} if visibility == "public" else set())
+    assert await Topic.audible({"sub": "bob", "user_id": str(other)}, topics) == {
+        Topic.THREADS.keyed("public")
+    }
+    assert await Topic.audible({"sub": "alice", "user_id": str(owner)}, topics) == topics - {
+        Topic.THREADS.name
+    }
+    assert await Topic.audible(
+        {"sub": "alice", "user_id": str(owner), "provider": "langsmith"}, topics
+    ) == {Topic.THREADS.keyed(str(owner))}
+
+
 async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> None:
     await HUB.start()
     LISTENER.start()
