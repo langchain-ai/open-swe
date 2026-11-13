@@ -89,7 +89,7 @@ def _option_payload() -> dict[str, Any]:
                 {"type": "actions", "elements": [action]},
                 {
                     "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": "Open in Web"}],
+                    "elements": [{"type": "mrkdwn", "text": "Open in Robin"}],
                 },
             ],
         },
@@ -121,7 +121,7 @@ async def test_selected_option_updates_original_message(monkeypatch: pytest.Monk
             },
             {
                 "type": "context",
-                "elements": [{"type": "mrkdwn", "text": "Open in Web"}],
+                "elements": [{"type": "mrkdwn", "text": "Open in Robin"}],
             },
         ],
     )

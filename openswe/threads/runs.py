@@ -1814,7 +1814,7 @@ class _SlackWebHandoff:
         blocks = message.get("blocks")
         if not isinstance(blocks, list):
             return False
-        old_link = f"<{url}|Open in Web>"
+        old_links = (f"<{url}|Open in Robin>", f"<{url}|Open in Web>")
         new_link = f"<{url}|Continued in Web>"
         updated_blocks = copy.deepcopy(blocks)
         changed = False
@@ -1828,16 +1828,20 @@ class _SlackWebHandoff:
                 text = element.get("text")
                 if isinstance(text, str) and new_link in text:
                     return True
-                if isinstance(text, str) and old_link in text:
-                    element["text"] = text.replace(old_link, new_link)
-                    changed = True
+                for old_link in old_links:
+                    if isinstance(text, str) and old_link in text:
+                        element["text"] = text.replace(old_link, new_link)
+                        changed = True
         if not changed or self.location is None:
             return False
         text = message.get("text")
+        updated_text = text if isinstance(text, str) else ""
+        for old_link in old_links:
+            updated_text = updated_text.replace(old_link, new_link)
         await update_slack_message(
             self.location[0],
             message_ts,
-            text.replace(old_link, new_link) if isinstance(text, str) else "",
+            updated_text,
             blocks=updated_blocks,
             unfurl_links=False,
             unfurl_media=False,

@@ -281,12 +281,13 @@ async def test_web_handoff_posts_a_quiet_link_without_a_trace_message(
 
 
 @pytest.mark.parametrize("author", ["UBOT", "UHUMAN", "UOTHERBOT"])
+@pytest.mark.parametrize("label", ["Open in Robin", "Open in Web"])
 async def test_web_handoff_updates_only_our_latest_reply_footer(
-    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, author: str
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, author: str, label: str
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
-    link = "<https://dashboard.example/agents/t1|Open in Web>"
+    link = f"<https://dashboard.example/agents/t1|{label}>"
     footer = f"{link} • model • $0.02"
     blocks = [
         section("Answer"),
@@ -316,13 +317,13 @@ async def test_web_handoff_updates_only_our_latest_reply_footer(
     assert not posts
     [updated] = updates
     assert updated["ts"] == "2.0"
-    assert updated["text"] == f"Answer {footer.replace('|Open in Web>', '|Continued in Web>')}"
+    assert updated["text"] == f"Answer {footer.replace(f'|{label}>', '|Continued in Web>')}"
     assert updated["blocks"] == [
         blocks[0],
         {
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": footer.replace("|Open in Web>", "|Continued in Web>")}
+                {"type": "mrkdwn", "text": footer.replace(f"|{label}>", "|Continued in Web>")}
             ],
         },
     ]

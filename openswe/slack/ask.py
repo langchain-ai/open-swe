@@ -2,7 +2,7 @@
 
 Each invocation gets an agent thread of its own, private to the asker and stamped
 ``unlisted`` so one-off questions never fill anyone's thread list. "Explain This"
-answers ephemerally with the usual `Open in Web` link, and continuing it on the web
+answers ephemerally with the usual `Open in Robin` link, and continuing it on the web
 clears that stamp. `/btw` answers in the Slack thread for everyone, without a link, and
 never touches the agent thread that Slack thread already maps to.
 """

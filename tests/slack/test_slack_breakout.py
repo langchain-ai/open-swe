@@ -168,7 +168,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         expected,
         "200.0",
         "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE> "
-        "<https://dashboard.example/agents/new-thread|Open in Web>",
+        "<https://dashboard.example/agents/new-thread|Open in Robin>",
         blocks=ANY,
         unfurl_links=False,
         unfurl_media=False,
@@ -183,7 +183,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": "<https://dashboard.example/agents/new-thread|Open in Web>",
+                    "text": "<https://dashboard.example/agents/new-thread|Open in Robin>",
                 }
             ],
         },

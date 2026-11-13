@@ -575,7 +575,7 @@ async def test_slack_breakout_thread_success(
         "*Repository:* `langchain-ai/open-swe`\n\n"
         "*Instructions for the new thread:*\n"
         "Use the same repo and investigate the follow-up aspect in detail. "
-        f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>"
+        f"<https://dashboard.example/agents/{expected_thread_id}|Open in Robin>"
     )
     assert captured["top_level_post"]["blocks"] == [
         {
@@ -613,7 +613,7 @@ async def test_slack_breakout_thread_success(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>",
+                    "text": f"<https://dashboard.example/agents/{expected_thread_id}|Open in Robin>",
                 }
             ],
         },

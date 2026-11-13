@@ -199,7 +199,7 @@ async def test_generated_title_updates_only_manual_breakout_roots(
             "C1",
             "200.0",
             f"`/breakout`: Review thread title generation{suffix} "
-            "<https://openswe.langchain.dev/agents/thread-123|Open in Web>",
+            "<https://openswe.langchain.dev/agents/thread-123|Open in Robin>",
             blocks=[
                 {
                     "type": "section",
@@ -213,7 +213,7 @@ async def test_generated_title_updates_only_manual_breakout_roots(
                     "elements": [
                         {
                             "type": "mrkdwn",
-                            "text": "<https://openswe.langchain.dev/agents/thread-123|Open in Web>",
+                            "text": "<https://openswe.langchain.dev/agents/thread-123|Open in Robin>",
                         }
                     ],
                 },

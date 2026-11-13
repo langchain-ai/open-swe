@@ -507,7 +507,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     assert pending_kwargs["inherited_from"] is None
     assert pending_kwargs["approval_url"] == payload["approval_url"]
     assert posted["channel_id"] == "C123"
-    assert "Open in Web" in posted["message"]
+    assert "Open in Robin" in posted["message"]
     assert "Why confirmation is required" in posted["message"]
     assert posted["blocks"][1]["elements"][0]["text"]["text"] == "Approve & continue push"
     assert posted["blocks"][1]["elements"][1]["text"]["text"] == "Cancel push"

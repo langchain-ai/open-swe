@@ -19,9 +19,9 @@ test.describe("Slack run usage footer", () => {
       .locator(".msg.bot")
       .filter({ hasText: "Add greet() helper" });
     await expect(reply).toBeVisible();
-    await expect(reply.getByRole("link", { name: "Open in Web" })).toHaveCount(
-      1,
-    );
+    await expect(
+      reply.getByRole("link", { name: "Open in Robin" }),
+    ).toHaveCount(1);
     await expect(reply).not.toContainText("fake-scripted-model");
     await expect(reply).not.toContainText("calculating cost");
     await expect(reply).not.toContainText("$");

@@ -485,7 +485,7 @@ def render_review_body(
         parts.append(f"React 👍 or 👎{feedback_link}.")
     links = []
     if ui_url:
-        links.append(f"[Open in Web]({ui_url})")
+        links.append(f"[Open in Robin]({ui_url})")
     if trace_url:
         links.append(f"[View Robin trace]({trace_url})")
     if links:
@@ -508,14 +508,14 @@ def render_status_comment(
     """Compose the transient "review in progress" comment.
 
     Posted when a review starts so the PR shows activity and a clickable
-    "Open in Web" link while the run is live; deleted once ``publish_review``
+    "Open in Robin" link while the run is live; deleted once ``publish_review``
     posts the review (which carries the same link).
     """
     parts = ["## 🔍 Robin Review: in progress\n\nRobin is reviewing this PR…"]
     links = []
     ui_url = dashboard_thread_url(thread_id) if thread_id else None
     if ui_url:
-        links.append(f"[Open in Web]({ui_url})")
+        links.append(f"[Open in Robin]({ui_url})")
     if trace_url:
         links.append(f"[View Robin trace]({trace_url})")
     if links:
@@ -536,7 +536,7 @@ def render_failed_status_comment(*, pr_number: int, thread_id: str, reason: str)
         "Push a commit or re-request a review from Robin to run it again."
     ]
     if ui_url := dashboard_thread_url(thread_id):
-        parts.append(f"[Open in Web]({ui_url})")
+        parts.append(f"[Open in Robin]({ui_url})")
     parts.append(status_comment_marker(pr_number))
     return "\n\n".join(parts)
 

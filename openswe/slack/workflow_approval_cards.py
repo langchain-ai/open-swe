@@ -36,7 +36,7 @@ def workflow_approval_message(thread_id: str, record: Mapping[str, object]) -> s
     stats = stats if isinstance(stats, Mapping) else {}
     fingerprint = str(record.get("fingerprint") or "")
     url = dashboard_workflow_approval_url(thread_id, fingerprint)
-    review = f"\n\n*Review diff:* <{url}|Open in Web>" if url else ""
+    review = f"\n\n*Review diff:* <{url}|Open in Robin>" if url else ""
     inherited = record.get("inherited_from")
     if inherited:
         headline = "*Confirm workflow changes inherited from the base branch*"

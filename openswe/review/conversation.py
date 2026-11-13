@@ -29,7 +29,7 @@ _OPEN_SWE_MARKER_RE = re.compile(r"<!--\s*open-swe-review(?:er|-comment)\b")
 _OPEN_SWE_FOOTER_RES = (
     re.compile(r"-{3,}\s*\n\*Your feedback helps (?:Robin|Open SWE) learn\.[^\n]*\*"),
     re.compile(r"^React 👍 or 👎.*$", re.MULTILINE),
-    re.compile(r"\[Open in Web\]\([^)]*\)(?:\s*•\s*)?"),
+    re.compile(r"\[Open in (?:Robin|Web)\]\([^)]*\)(?:\s*•\s*)?"),
 )
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
 

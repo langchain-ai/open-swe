@@ -1,4 +1,4 @@
-"""Shared builders for dashboard ("Open in Web") URLs."""
+"""Shared builders for dashboard ("Open in Robin") URLs."""
 
 from collections.abc import Generator
 from contextlib import contextmanager

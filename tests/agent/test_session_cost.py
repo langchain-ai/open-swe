@@ -157,7 +157,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost...",
+                    "text": "<https://app/agents/t1|Open in Robin> • model-a • calculating cost...",
                 }
             ],
         },
@@ -180,7 +180,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(
             return_value={
-                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost...",
+                "text": "Done <https://app/agents/t1|Open in Robin> • model-a • calculating cost...",
                 "blocks": blocks,
             }
         ),

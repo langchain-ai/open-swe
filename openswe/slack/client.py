@@ -49,7 +49,7 @@ SANDBOX_UNREACHABLE_NOTICE = "sandbox_unreachable"
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
-SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
+SLACK_WEB_LINK_FOOTER_LABEL = "Open in Robin"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
@@ -1913,7 +1913,7 @@ async def resolve_slack_links_in_context(
 
 
 TRACE_REPLY_WEB_HANDOFF_NOTICE = (
-    "Conversation moved to Web — use the `Open in Web` link above for follow-ups."
+    "Conversation moved to Web — use the `Open in Robin` link above for follow-ups."
 )
 
 
@@ -1925,7 +1925,7 @@ def _format_trace_reply(
     if trace_url:
         links.append(f"<{trace_url}|View trace>")
     if dashboard_url:
-        links.append(f"<{dashboard_url}|Open in Web>")
+        links.append(f"<{dashboard_url}|Open in Robin>")
     head = f"{' • '.join(links)}\n" if links else ""
     if moved_to_web:
         return f"{head}_{TRACE_REPLY_WEB_HANDOFF_NOTICE}_"

@@ -13,7 +13,7 @@ from openswe.utils.dashboard_links import dashboard_thread_id
             "b8d7d0b0-c1e3-5ded-bcc3-ef8254a34f2b",
         ),
         (
-            "<https://dev.open-swe.langchain.dev/agents/thread-1|Open in Web>",
+            "<https://dev.open-swe.langchain.dev/agents/thread-1|Open in Robin>",
             "thread-1",
         ),
         ("https://openswe.example/agents/thread%20one/plan?comment=1#section", "thread one"),

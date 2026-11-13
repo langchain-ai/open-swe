@@ -1539,7 +1539,7 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
 def test_slack_footer_shows_neither_model_nor_cost() -> None:
     url = "https://app.example/agents/t1"
     usage = RunUsageSummary(models=("model-a",), total_tokens=123, session_cost_usd=0.42)
-    footer = f"<{url}|Open in Web>"
+    footer = f"<{url}|Open in Robin>"
     blocks = slack_utils._with_slack_web_link_context_block(
         "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
     )
