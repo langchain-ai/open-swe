@@ -50,6 +50,7 @@ import type {
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
+import { SidebarGroupHeading } from "@/features/agents/components/SidebarGroupHeading"
 import { ThreadDragDrop } from "@/features/agents/components/ThreadDragDrop"
 import { SortableThreadList } from "@/features/agents/components/SortableThreadList"
 import {
@@ -103,7 +104,7 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByDay,
+  groupSidebarThreadsByDate,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -161,40 +162,6 @@ function cloudRepoAliases(
   )
 }
 
-/**
- * Tracks whether the scroll container has content hidden above or below, so
- * the sidebar can show an edge hairline + fade only where there is more to
- * reach. Measured after every render because the thread list polls, and on
- * container resize.
- */
-function useScrollEdges() {
-  const viewport = useRef<HTMLDivElement>(null)
-  const [edges, setEdges] = useState({ top: false, bottom: false })
-
-  const measure = useCallback(() => {
-    const el = viewport.current
-    if (!el) return
-    const top = el.scrollTop > 0
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 1
-    // Returning the previous object when nothing moved lets React bail out —
-    // without it the dependency-free effect below would re-render forever.
-    setEdges((prev) =>
-      prev.top === top && prev.bottom === bottom ? prev : { top, bottom }
-    )
-  }, [])
-
-  useEffect(measure)
-  useEffect(() => {
-    const el = viewport.current
-    if (!el || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [measure])
-
-  return { viewport, edges, measure }
-}
-
 export function AgentsSidebar({
   user,
   activeThreadId,
@@ -211,11 +178,7 @@ export function AgentsSidebar({
     enabled: !!profile.data?.concierge_mode,
     refetchInterval: 30_000,
   })
-  const {
-    viewport: scrollViewport,
-    edges: scrollEdges,
-    measure: measureScrollEdges,
-  } = useScrollEdges()
+  const scrollViewport = useRef<HTMLDivElement>(null)
   const { openPalette } = useAppCommandControls()
   const queryClient = useQueryClient()
   const openThread = useCallback(
@@ -260,6 +223,7 @@ export function AgentsSidebar({
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
   const workspaceOrganize = prefs.organize === "workspace"
+  const sortByActivity = prefs.organize === "date"
   // "workspace" mode groups the same repo folders as "repo" mode; it
   // only changes how the unpinned ones are laid out (nested under a workspace
   // header instead of a flat list), so every other repo-mode query and
@@ -279,7 +243,7 @@ export function AgentsSidebar({
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
     includeSlack: prefs.filters.includeSlack,
-    sort: prefs.organize === "date" ? "updated" : "created",
+    sort: sortByActivity ? "updated" : "created",
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -438,7 +402,7 @@ export function AgentsSidebar({
     ? filteredRecents
     : sortSidebarThreads(
         filteredRecents,
-        prefs.organize === "date" ? "updated" : "created"
+        sortByActivity ? "updated" : "created"
       )
   // The folder each of this Mac's threads runs in, to file the ones without a
   // repository under their folder rather than under "No project".
@@ -667,10 +631,10 @@ export function AgentsSidebar({
     </>
   )
 
-  const dayGroups =
-    prefs.organize === "date" ? groupSidebarThreadsByDay(recents) : []
-  const recentGroups = dayGroups.length
-    ? dayGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
+  const threadGroups =
+    prefs.organize === "date" ? groupSidebarThreadsByDate(recents) : []
+  const recentGroups = threadGroups.length
+    ? threadGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
 
   const macFolders = new Set(
@@ -747,6 +711,67 @@ export function AgentsSidebar({
     filteredPinnedItems.length === 0 &&
     repoGroups.length === 0 &&
     recents.length === 0
+
+  const recentSections = (() => {
+    if (repoMode || skeleton) return []
+    return recentGroups.map((group, index) => ({
+      key: group.key,
+      content: (
+        <section
+          key={group.key}
+          className={cn(
+            group.key === "recents:status:running"
+              ? "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2 py-space-2"
+              : "mb-space-3",
+            navPending && "invisible"
+          )}
+        >
+          <SidebarSectionHeader
+            label={group.label}
+            collapsed={sectionCollapsed(group.key)}
+            onToggleCollapsed={() => toggleSectionCollapsed(group.key)}
+            menu={
+              index === 0 && (
+                <SidebarSectionMenu label="Recents options">
+                  {viewMenuItems}
+                </SidebarSectionMenu>
+              )
+            }
+            action={
+              index === 0 && (
+                <SidebarSectionAction
+                  label="New thread"
+                  icon={PlusIcon}
+                  onClick={() => {
+                    layout.closeOnMobile()
+                    void navigate({ to: "/agents" })
+                  }}
+                />
+              )
+            }
+          />
+
+          {!sectionCollapsed(group.key) && (
+            <>
+              {group.threads.map((item) => (
+                <SidebarThreadRow key={item.key} {...rowProps(item)} />
+              ))}
+              {index === recentGroups.length - 1 &&
+                prefs.organize !== "date" &&
+                recentsQuery.hasMore && (
+                  <LoadMoreThreadsOnScroll
+                    label="Load more threads"
+                    root={scrollViewport}
+                    loading={recentsQuery.isFetchingNextPage}
+                    onLoadMore={recentsQuery.fetchNextPage}
+                  />
+                )}
+            </>
+          )}
+        </section>
+      ),
+    }))
+  })()
 
   return (
     <SidebarFrame
@@ -859,25 +884,12 @@ export function AgentsSidebar({
             }
           }}
         >
-          {scrollEdges.top && (
-            <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-muted" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-sticky-header h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
-            </>
-          )}
-          {scrollEdges.bottom && (
-            <>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-muted" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-sticky-header h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
-            </>
-          )}
           <div
             ref={scrollViewport}
             className={cn(
-              "min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
+              "scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
               navPending && "invisible"
             )}
-            onScroll={measureScrollEdges}
           >
             <SidebarNav
               className={isDesktop ? "pb-space-3" : "pb-space-4"}
@@ -983,52 +995,20 @@ export function AgentsSidebar({
               </section>
             )}
 
+            {recentSections
+              .filter((section) => section.key !== "recents:status:running")
+              .map((section) => section.content)}
             {!repoMode &&
               !skeleton &&
-              recentGroups.map((group, index) => (
-                <section key={group.key} className="mb-space-3">
-                  <SidebarSectionHeader
-                    label={group.label}
-                    collapsed={sectionCollapsed(group.key)}
-                    onToggleCollapsed={() => toggleSectionCollapsed(group.key)}
-                    menu={
-                      index === 0 && (
-                        <SidebarSectionMenu label="Recents options">
-                          {viewMenuItems}
-                        </SidebarSectionMenu>
-                      )
-                    }
-                    action={
-                      index === 0 && (
-                        <SidebarSectionAction
-                          label="New thread"
-                          icon={PlusIcon}
-                          onClick={() => {
-                            layout.closeOnMobile()
-                            void navigate({ to: "/agents" })
-                          }}
-                        />
-                      )
-                    }
-                  />
-                  {!sectionCollapsed(group.key) && (
-                    <>
-                      {group.threads.map((item) => (
-                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                      ))}
-                      {index === recentGroups.length - 1 &&
-                        recentsQuery.hasMore && (
-                          <LoadMoreThreadsOnScroll
-                            label="Load more threads"
-                            root={scrollViewport}
-                            loading={recentsQuery.isFetchingNextPage}
-                            onLoadMore={recentsQuery.fetchNextPage}
-                          />
-                        )}
-                    </>
-                  )}
-                </section>
-              ))}
+              prefs.organize === "date" &&
+              recentsQuery.hasMore && (
+                <LoadMoreThreadsOnScroll
+                  label="Load more threads"
+                  root={scrollViewport}
+                  loading={recentsQuery.isFetchingNextPage}
+                  onLoadMore={recentsQuery.fetchNextPage}
+                />
+              )}
             {isEmpty && !cloudError && (
               <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
                 {hasActiveFilters(prefs.filters)
@@ -1037,6 +1017,11 @@ export function AgentsSidebar({
               </p>
             )}
           </div>
+          {
+            recentSections.find(
+              (section) => section.key === "recents:status:running"
+            )?.content
+          }
         </ThreadDragDrop>
       </SidebarThreadSelection>
       <div className="flex items-center gap-space-2 p-space-2">
@@ -1110,7 +1095,7 @@ function WorkspaceGroupSection({
           className={GROUP_ROW_CLASS}
         >
           <StackRegularIcon size={16} className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+          <SidebarGroupHeading label={workspace.name} className="flex-1" />
           <Caret
             weight="regular"
             className={cn(
@@ -1250,7 +1235,7 @@ function RepoGroup({
           className={GROUP_ROW_CLASS}
         >
           <Folder size={16} weight="regular" className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{group.label}</span>
+          <SidebarGroupHeading label={group.label} className="flex-1" />
           <Caret
             weight="regular"
             className={cn(

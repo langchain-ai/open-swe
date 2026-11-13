@@ -18,6 +18,40 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@property --scroll-mask-t-from {
+    syntax: "<length-percentage>";
+    inherits: false;
+    initial-value: 100%;
+}
+
+@property --scroll-mask-b-from {
+    syntax: "<length-percentage>";
+    inherits: false;
+    initial-value: 100%;
+}
+
+@keyframes scroll-mask-y-scroll {
+    0% { --scroll-mask-t-from: 100%; }
+    10%, 100% { --scroll-mask-t-from: var(--scroll-mask-fade-from-t, 100%); }
+    0%, 90% { --scroll-mask-b-from: var(--scroll-mask-fade-from-b, 100%); }
+    100% { --scroll-mask-b-from: 100%; }
+}
+
+@supports (animation-timeline: scroll()) {
+    :where(.scroll-mask-t, .scroll-mask-b) {
+        mask-image:
+            linear-gradient(to top, black, black var(--scroll-mask-t-from), transparent),
+            linear-gradient(to bottom, black, black var(--scroll-mask-b-from), transparent);
+        mask-composite: intersect;
+        -webkit-mask-composite: source-in;
+        animation: scroll-mask-y-scroll linear;
+        animation-timeline: scroll(self block);
+    }
+}
+
+.scroll-mask-t { --scroll-mask-fade-from-t: calc(100% - 1rem); }
+.scroll-mask-b { --scroll-mask-fade-from-b: calc(100% - 1rem); }
+
 /* A passage being replied to keeps its selection look after focus moves to the
    reply field (SelectionReply). */
 ::highlight(selection-reply) {

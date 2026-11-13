@@ -8,7 +8,7 @@ import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 
 import { agentsApi } from "./api"
-import { cloudSidebarThread, groupSidebarThreadsByDay } from "./sidebarThreads"
+import { cloudSidebarThread, groupSidebarThreadsByDate } from "./sidebarThreads"
 import {
   SIDEBAR_PAGE_SIZE,
   agentScheduleKeys,
@@ -1530,7 +1530,7 @@ describe("sidebar activity invalidation", () => {
     }
   )
 
-  it("moves yesterday's idle thread to Today when activity is invalidated, without polling", async () => {
+  it("moves yesterday's idle thread to Last 12 hours when activity is invalidated, without polling", async () => {
     const now = new Date(2026, 5, 10, 15)
     const yesterday = new Date(2026, 5, 9, 12).getTime()
     let updatedAt = yesterday
@@ -1548,7 +1548,7 @@ describe("sidebar activity invalidation", () => {
     const client = testClient()
     const { result } = renderHook(
       () =>
-        groupSidebarThreadsByDay(
+        groupSidebarThreadsByDate(
           useSidebarRecents({ repoMode: false, sort: "updated" }).items.map(
             cloudSidebarThread
           ),
@@ -1564,7 +1564,7 @@ describe("sidebar activity invalidation", () => {
           queryTopics(query).includes(invalidationTopic("threads", "alice-id")),
       })
     )
-    await waitFor(() => expect(result.current[0]?.label).toBe("Today"))
+    await waitFor(() => expect(result.current[0]?.label).toBe("Last 12 hours"))
   })
 })
 

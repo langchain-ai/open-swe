@@ -625,12 +625,20 @@ test.describe("threads workspace", () => {
       name: "Show more",
       exact: true,
     });
-    await showMore.click();
-    await showMore.click();
-    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 03");
-    await showMore.click();
-    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
-    await expect(sidebar).toContainText(TITLES.done);
+    const overflowIds = resolvedOverflowThreads().map((thread) => thread.id);
+    const alphaThreads = alphaGroup.locator("a[data-selectable-thread]");
+    // Activity invalidations can refetch the list while a page is loading.
+    // Keep paging until the fixture rows are present, rather than assuming
+    // each click permanently increases the number of loaded rows.
+    await expect
+      .poll(async () => {
+        if (await showMore.isVisible()) await showMore.click();
+        return alphaThreads.evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-selectable-thread")),
+        );
+      })
+      .toEqual(expect.arrayContaining(overflowIds));
+    await expect(alphaGroup).toContainText(TITLES.done);
     await expect(showMore).toHaveCount(0);
 
     const screenshotPath = testInfo.outputPath("unified-thread-sidebar.png");

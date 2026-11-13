@@ -13,6 +13,7 @@ import { FunnelSimpleIcon } from "@phosphor-icons/react/dist/ssr/FunnelSimple"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+import { SidebarGroupHeading } from "@/features/agents/components/SidebarGroupHeading"
 
 const SECTION_CONTROL =
   "text-tertiary opacity-0 transition-opacity group-hover/section:opacity-100 hover:text-primary focus-visible:opacity-100"
@@ -51,7 +52,7 @@ export function SidebarSectionHeader({
           headingClassName
         )}
       >
-        <span className="min-w-0 truncate">{label}</span>
+        <SidebarGroupHeading label={label} />
         <Caret
           size={14}
           weight="regular"
