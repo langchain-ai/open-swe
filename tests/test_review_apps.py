@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,8 +15,11 @@ from runtime_api.connections import ConnectionRef
 
 from openswe import reviewer
 from openswe.agent_api.reviewer import ReviewerKind
+from openswe.dashboard import workspace_settings as workspace_settings_module
 from openswe.dashboard import workspace_settings_cache
 from openswe.dashboard.workspace_settings import WorkspaceSettings, WorkspaceSettingsUpdate
+from openswe.github import webhook as github_webhook
+from openswe.github.http import GitHubClient
 from openswe.github.webhook import PreviewReady
 from openswe.jobs import queue as job_queue
 from openswe.jobs.queue import Job
@@ -38,6 +41,7 @@ from openswe.threads import succession as thread_succession
 from openswe.tools import review_apps as review_app_tools
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
+from openswe.workspaces.store import WORKSPACES
 from tests.agent.test_agent_assembly_context import _base_config
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
@@ -410,19 +414,26 @@ class _Preview:
         apps: bool = True,
         browses: bool = True,
         auto_review: bool = True,
+        allowed: bool = True,
         reviewed: bool = True,
         **pull: object,
     ) -> None:
         pinned = [{"app": str(uuid4()), "release": str(uuid4())}] if apps else []
-        settings = WorkspaceSettings(
+        # None while the settings can't be read, when the cached read answers the defaults.
+        self.settings: WorkspaceSettings | None = WorkspaceSettings(
             {"review_apps": pinned, "review_app_preview_checks": list(checks)}
         )
         monkeypatch.setattr(
             workspace_settings_cache,
             "cached_workspace_settings",
-            AsyncMock(return_value=settings),
+            AsyncMock(side_effect=lambda _workspace: self.settings or WorkspaceSettings({})),
         )
-        monkeypatch.setattr(webhook_common, "is_repo_allowed", lambda _repo: True)
+        monkeypatch.setattr(
+            workspace_settings_module, "load_workspace_settings", AsyncMock(side_effect=self._load)
+        )
+        monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="w"))
+        monkeypatch.setattr(webhook_common, "is_repo_allowed", lambda _repo: allowed)
+        monkeypatch.setattr(github_webhook, "repo_is_routable", AsyncMock(return_value=True))
         monkeypatch.setattr(
             webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=auto_review)
         )
@@ -463,6 +474,33 @@ class _Preview:
         monkeypatch.setattr(webhook_common, "dispatch_agent_run", self.dispatch)
         self.jobs: dict[str | None, Job] = {}
         monkeypatch.setattr(job_queue, "schedule", self._schedule)
+        # The clock the jobs read, which moves on to each job as it runs.
+        self.now = datetime.now(UTC)
+        clock = Mock(wraps=datetime)
+        clock.now.side_effect = lambda _tz: self.now
+        monkeypatch.setattr(github_webhook, "datetime", clock)
+        # The checks GitHub lists on the head, for the watch.
+        self.repository = Mock(check_runs=AsyncMock(return_value=[]))
+        self.repository.pull_request.return_value.pull = AsyncMock(side_effect=lambda: self.pull)
+        github = MagicMock()
+        github.__aenter__.return_value = Mock(repo=Mock(return_value=self.repository))
+        monkeypatch.setattr(GitHubClient, "as_app", Mock(return_value=github))
+
+    async def open(self) -> None:
+        """The pull request opens, so Robin watches its head."""
+        repository = _check_passed()["repository"]
+        await PreviewReady.run(
+            {
+                "action": "opened",
+                "repository": repository,
+                "pull_request": {"number": 7, **self.pull},
+            }
+        )
+
+    async def _load(self, _workspace: str) -> WorkspaceSettings:
+        if self.settings is None:
+            raise RuntimeError("The settings can't be read")
+        return self.settings
 
     async def _thread(self, thread_id: str) -> Mock | None:
         return Mock(runtime="mda") if self.reviewed else None
@@ -497,9 +535,12 @@ class _Preview:
         *,
         due_at: datetime | None = None,
         key: str | None = None,
+        replace: bool = True,
     ) -> Job:
         # One job per key, as the queue keeps them.
-        now = datetime.now(UTC)
+        if not replace and key in self.jobs:
+            return self.jobs[key]
+        now = self.now
         job = Job(
             id=uuid4(),
             kind=kind,
@@ -516,8 +557,13 @@ class _Preview:
         return job
 
     async def work(self) -> None:
-        """Run the job queued longest, as the worker does when it's due."""
-        await PreviewReady.start_job(self.jobs.pop(next(iter(self.jobs))))
+        """Run the job due first, as the worker does."""
+        job = self.jobs.pop(min(self.jobs, key=lambda key: self.jobs[key].due_at))
+        self.now = max(self.now, job.due_at)
+        run = (
+            PreviewReady.reconcile if job.kind == PreviewReady.RECONCILE else PreviewReady.start_job
+        )
+        await run(job)
 
     async def drain(self) -> None:
         """Run jobs until none is queued, as a worker would over the following hours."""
@@ -564,6 +610,7 @@ async def test_a_deployed_preview_has_the_review_do_its_apps_work_once_per_commi
         pytest.param({}, {"apps": False}, id="no-apps"),
         pytest.param({}, {"browses": False}, id="no-app-browses"),
         pytest.param({}, {"auto_review": False}, id="auto-review-off"),
+        pytest.param({}, {"allowed": False}, id="outside-the-allowlist"),
         pytest.param({}, {"reviewed": False}, id="never-reviewed"),
         pytest.param({}, {"head": {"sha": "c" * 40, "ref": "feature"}}, id="pushed-since"),
         pytest.param({}, {"state": "closed"}, id="closed"),
@@ -579,6 +626,60 @@ async def test_a_preview_that_isnt_the_pull_requests_current_one_starts_nothing(
     await preview.drain()
 
     preview.dispatch.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_watching_the_head_finds_a_preview_whose_completion_never_came(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    # The settings can't be read as the pull request opens, nor at the watch's first look.
+    configured, preview.settings = preview.settings, None
+    await preview.open()
+    await preview.work()
+    preview.settings = configured
+    checks = preview.repository.check_runs
+    checks.side_effect = RuntimeError("GitHub is down")
+    await preview.work()
+    checks.side_effect = None
+    checks.return_value = [{"name": _PREVIEW_CHECK, "conclusion": "success"}]
+    await preview.work()
+    # The queue gives up on the job the watch queued, so the watch queues it again.
+    preview.jobs = {key: job for key, job in preview.jobs.items() if job.kind != PreviewReady.JOB}
+    await preview.work()
+    await preview.work()
+    preview.dispatch.assert_awaited_once()
+
+    preview.settle("success")
+    await preview.drain()
+
+    assert not preview.jobs
+    preview.dispatch.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+@pytest.mark.parametrize("change", [{"state": "closed"}, {"head": {"sha": "c" * 40}}])
+async def test_the_watch_stops_once_the_pull_request_moves_on(
+    monkeypatch: pytest.MonkeyPatch, change: dict[str, object]
+) -> None:
+    preview = _Preview(monkeypatch)
+    await preview.open()
+    preview.pull.update(change)
+
+    await preview.work()
+
+    assert not preview.jobs
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_a_workspace_without_preview_checks_starts_no_watch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch, checks=())
+
+    await preview.open()
+
+    assert not preview.jobs
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")

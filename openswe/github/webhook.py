@@ -65,6 +65,7 @@ from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
 from openswe.webhooks import common
+from openswe.workspaces.routing import repo_is_routable
 
 
 async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
@@ -978,9 +979,15 @@ class PreviewReady:
     running one, so the run starts again, up to ``MOST_RUNS`` times, until one finishes.
     A preview can deploy before Robin has reviewed the pull request, or while it's a
     draft, so the job looks again every ``WAIT``, up to ``MOST_WAITS`` times.
+
+    GitHub doesn't send a missed completion again, so in a workspace that names preview
+    checks, a pull request opening or changing also starts a watch on its head
+    (``RECONCILE``): every ``WAIT`` until ``WINDOW`` after,
+    it queues the job of each configured check that passed there, unless that commit's work
+    for it is done (``CLAIMS``).
     """
 
-    CLAIMS: Final = "review_apps_on_preview"
+    CLAIMS: Final = "review_apps_preview_done"
     JOB: Final = "review_apps_on_preview"
     # The run metadata naming the commit and check a run is for.
     MARK: Final = "review_apps_preview"
@@ -989,16 +996,87 @@ class PreviewReady:
     MOST_RUNS: Final = 3
     WAIT: Final = timedelta(minutes=5)
     MOST_WAITS: Final = 12
+    RECONCILE: Final = "review_apps_preview_reconcile"
+    WINDOW: Final = timedelta(hours=1)
 
     @staticmethod
-    async def run(payload: Mapping[str, Any]) -> None:
-        """A check finished: when it's one that means previews are deployed, queue the job
-        for each pull request whose head it checked, once per commit."""
+    async def checks(repo_config: dict[str, str], *, named: str | None = None) -> frozenset[str]:
+        """The repository's preview checks, or just ``named``, while its reviews work for
+        apps and run automatically. The name is matched on cached settings before the
+        database lookups, since most CI deliveries name another check."""
         from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 
-        check = payload.get("check_run")
+        if not common.is_repo_allowed(repo_config):
+            return frozenset()
+        settings = await cached_workspace_settings(
+            await common.workspace_for_repo_config(repo_config)
+        )
+        checks = settings.review_app_preview_checks if settings.review_app_releases else frozenset()
+        if named is not None:
+            checks &= {named}
+        if (
+            not checks
+            or not await repo_is_routable(repo_config["owner"], repo_config["name"])
+            or not await common.is_repo_auto_review_enabled(repo_config)
+        ):
+            return frozenset()
+        return checks
+
+    @staticmethod
+    async def _watched(repo_config: dict[str, str]) -> bool:
+        """Whether the repository's workspace names preview checks for its apps, read so a
+        failure raises instead of reading as none; true when it can't be read."""
+        from openswe.dashboard.workspace_settings import load_workspace_settings
+        from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+
+        try:
+            owner = await WORKSPACES.owner_of_repo(f"{repo_config['owner']}/{repo_config['name']}")
+            settings = await load_workspace_settings(owner or DEFAULT_WORKSPACE_SLUG)
+        except Exception:
+            common.logger.warning("Reading preview checks failed; watching anyway", exc_info=True)
+            return True
+        return bool(settings.review_app_releases and settings.review_app_preview_checks)
+
+    @classmethod
+    async def run(cls, payload: Mapping[str, Any]) -> None:
+        """A check finished: when it's one that means previews are deployed, queue the job
+        for each pull request whose head it checked. A pull request opened or changed:
+        watch its head (``reconcile``)."""
         repo = payload.get("repository")
-        if not isinstance(check, dict) or not isinstance(repo, dict):
+        # Only reviews of private repositories work for apps (``ReviewApps.of``).
+        if not isinstance(repo, dict) or repo.get("private") is not True:
+            return
+        owner = (repo.get("owner") or {}).get("login", "")
+        name = repo.get("name", "")
+        if not owner or not name:
+            return
+        repo_config = {"owner": owner, "name": name}
+        repo_id = common.repo_id_from_payload(dict(payload))
+        pull = payload.get("pull_request")
+        if isinstance(pull, dict):
+            number, head_sha = pull.get("number"), (pull.get("head") or {}).get("sha")
+            if (
+                isinstance(number, int)
+                and isinstance(head_sha, str)
+                and await cls._watched(repo_config)
+            ):
+                await queue.schedule(
+                    cls.RECONCILE,
+                    {
+                        "owner": owner,
+                        "repo": name,
+                        "number": number,
+                        "head_sha": head_sha,
+                        "repo_id": repo_id,
+                        "deadline": (datetime.now(UTC) + cls.WINDOW).isoformat(),
+                    },
+                    due_at=datetime.now(UTC) + cls.WAIT,
+                    key=f"{cls.RECONCILE}:{owner}/{name}#{number}@{head_sha}".lower(),
+                    replace=False,
+                )
+            return
+        check = payload.get("check_run")
+        if not isinstance(check, dict):
             return
         head_sha = check.get("head_sha")
         numbers = [
@@ -1012,47 +1090,90 @@ class PreviewReady:
             or not isinstance(check_name, str)
             or not isinstance(head_sha, str)
             or not numbers
-            # Only reviews of private repositories work for apps (``ReviewApps.of``).
-            or repo.get("private") is not True
-        ):
-            return
-        owner = (repo.get("owner") or {}).get("login", "")
-        name = repo.get("name", "")
-        if not owner or not name:
-            return
-        repo_config = {"owner": owner, "name": name}
-        if not common.is_repo_allowed(repo_config):
-            return
-        settings = await cached_workspace_settings(
-            await common.workspace_for_repo_config(repo_config)
-        )
-        if (
-            not settings.review_app_releases
-            or check_name not in settings.review_app_preview_checks
-            or not await common.is_repo_auto_review_enabled(repo_config)
+            or not await cls.checks(repo_config, named=check_name)
         ):
             return
         for number in numbers:
-            key = f"{owner}/{name}#{number}@{head_sha}:{check_name}".lower()
-            if not await event_claims.claim(PreviewReady.CLAIMS, key, ttl=timedelta(days=7)):
-                continue
-            try:
-                await queue.schedule(
-                    PreviewReady.JOB,
-                    {
-                        "owner": owner,
-                        "repo": name,
-                        "number": number,
-                        "head_sha": head_sha,
-                        "check": check_name,
-                        "repo_private": common.repo_private_from_payload(dict(payload)),
-                        "repo_id": common.repo_id_from_payload(dict(payload)),
-                    },
-                    key=f"{PreviewReady.JOB}:{key}",
-                )
-            except BaseException:
-                await event_claims.release(PreviewReady.CLAIMS, key)
-                raise
+            await cls.enqueue(owner, name, number, head_sha, check_name, repo_id)
+
+    @staticmethod
+    def _key(owner: str, repo: str, number: int, head_sha: str, check: str) -> str:
+        return f"{owner}/{repo}#{number}@{head_sha}:{check}".lower()
+
+    @classmethod
+    async def enqueue(
+        cls, owner: str, repo: str, number: int, head_sha: str, check: str, repo_id: JsonValue
+    ) -> bool:
+        """Queue the commit's job for ``check`` unless its work is done, keeping one already
+        queued; whether the work is still to do."""
+        key = cls._key(owner, repo, number, head_sha, check)
+        if await event_claims.held(cls.CLAIMS, key):
+            return False
+        await queue.schedule(
+            cls.JOB,
+            {
+                "owner": owner,
+                "repo": repo,
+                "number": number,
+                "head_sha": head_sha,
+                "check": check,
+                "repo_private": True,
+                "repo_id": repo_id,
+            },
+            key=f"{cls.JOB}:{key}",
+            replace=False,
+        )
+        return True
+
+    @classmethod
+    async def reconcile(cls, job: Job) -> None:
+        """The watch on a pull request's head. A look that fails waits for the next one
+        instead of raising: the queue's retries would give up well inside ``WINDOW``."""
+        owner, repo, number, head_sha, deadline = (
+            job.payload.get(field) for field in ("owner", "repo", "number", "head_sha", "deadline")
+        )
+        if not (
+            isinstance(owner, str)
+            and isinstance(repo, str)
+            and isinstance(number, int)
+            and isinstance(head_sha, str)
+            and isinstance(deadline, str)
+        ):
+            return
+        again = True
+        try:
+            # None also while the settings can't be read, so the watch goes on.
+            checks = await cls.checks({"owner": owner, "name": repo})
+            if checks:
+                async with GitHubClient.as_app(owner, repo) as github:
+                    repository = github.repo(owner, repo)
+                    pr = await repository.pull_request(number).pull()
+                    if pr.get("state") != "open" or (pr.get("head") or {}).get("sha") != head_sha:
+                        return
+                    passed: set[str] = set()
+                    for check in checks:
+                        # By name, as a head has hundreds of checks; a rerun that replaced a
+                        # success is what counts (``check_runs``).
+                        runs = await repository.check_runs(head_sha, name=check)
+                        if any(
+                            run.get("name") == check and run.get("conclusion") == "success"
+                            for run in runs
+                        ):
+                            passed.add(check)
+                again = passed != checks
+                for check in passed:
+                    again |= await cls.enqueue(
+                        owner, repo, number, head_sha, check, job.payload.get("repo_id")
+                    )
+        except Exception:
+            common.logger.warning(
+                "Looking for a pull request's deployed previews failed",
+                extra={"repository": f"{owner}/{repo}", "pr_number": number},
+                exc_info=True,
+            )
+        due = datetime.now(UTC) + cls.WAIT
+        if again and due < datetime.fromisoformat(deadline):
+            await queue.schedule(cls.RECONCILE, job.payload, due_at=due, key=job.key)
 
     @staticmethod
     async def stop_on_close(payload: Mapping[str, Any]) -> None:
@@ -1136,14 +1257,19 @@ class PreviewReady:
         if any(run.get("status") in ("pending", "running") for run in started):
             await cls._again(job, payload, cls.FOLLOW_UP)
             return
+        # Recorded once the commit's work is over, so the watch doesn't queue it again.
+        done = cls._key(owner, repo, number, head_sha, check)
         if any(run.get("status") == "success" for run in started) or len(started) >= (
             cls.MOST_RUNS
         ):
+            await event_claims.claim(cls.CLAIMS, done, ttl=timedelta(days=7))
             return
         queued = await cls._start(
             thread_id, repo_config, number, pr, mark=mark, repo_private=repo_private
         )
         if queued is None:
+            # No app the review works for browses.
+            await event_claims.claim(cls.CLAIMS, done, ttl=timedelta(days=7))
             return
         latest = await common.fetch_github_pr_metadata(pr_ref, token=app_token)
         if latest is not None and latest.get("state") != "open":

@@ -220,6 +220,11 @@ async def _approval_evaluate(job: Job) -> None:
     await PullRequestApproval.evaluate_job(job)
 
 
+@WORKER.register(PreviewReady.RECONCILE)
+async def _review_apps_preview_reconcile(job: Job) -> None:
+    await PreviewReady.reconcile(job)
+
+
 @WORKER.register(PreviewReady.JOB)
 async def _review_apps_on_preview(job: Job) -> None:
     await PreviewReady.start_job(job)

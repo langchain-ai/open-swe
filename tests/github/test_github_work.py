@@ -77,6 +77,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             (
                 "wake_merge_queue",
                 "walkthrough_pull_request",
+                "review_apps_on_preview",
                 "track_pull_request_state",
                 "track_pull_request_usage",
                 "evaluate_approval_policy",

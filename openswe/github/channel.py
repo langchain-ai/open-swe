@@ -286,6 +286,11 @@ async def take_forwarded_delivery(call: ChannelCall, delivery: GitHubDelivery) -
     body = json.dumps(delivery.payload).encode()
     refs = EventRefs.github(body)
     if not _allowed(delivery, refs):
+        if delivery.event == "check_run":
+            # A dropped CI delivery can still say a preview is deployed (``PreviewReady``).
+            call.background.add_task(
+                _run, "review_apps_on_preview", _tasks(delivery)["review_apps_on_preview"], delivery
+            )
         return
     await EventLog.record_once(
         call.request,
@@ -300,7 +305,7 @@ async def take_forwarded_delivery(call: ChannelCall, delivery: GitHubDelivery) -
 
 async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> None:
     """Pick the backend's work for a forwarded delivery and run it, in order, once per
-    delivery.
+    delivery; preview work, whose jobs are keyed, runs each time, so a redelivery retries it.
 
     A lookup that fails runs nothing and leaves the work unclaimed, with a log line, so
     the delivery redelivered from the App's settings runs it; GitHub doesn't send a
@@ -317,6 +322,11 @@ async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> Non
     try:
         facts = await _repository_facts(delivery)
         work = delivery_work(delivery.event, delivery.payload, facts)
+        if "review_apps_on_preview" in work:
+            await _run(
+                "review_apps_on_preview", _tasks(delivery)["review_apps_on_preview"], delivery
+            )
+            work = tuple(name for name in work if name != "review_apps_on_preview")
         if not work or (
             not await event_claims.claim(_WORK_CLAIMS, delivery.delivery_id, ttl=_WORK_CLAIM_TTL)
         ):

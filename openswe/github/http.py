@@ -1014,13 +1014,17 @@ class RepoClient:
         await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(
-        self, sha: str, *, include_superseded: bool = False
+        self, sha: str, *, include_superseded: bool = False, name: str | None = None
     ) -> list[dict[str, Any]]:
-        """Current checks on ``sha``, or their history with ``include_superseded``."""
+        """Current checks on ``sha``, or their history with ``include_superseded``; with
+        ``name``, only the checks of that name."""
+        params = {"filter": "all" if include_superseded else "latest"}
+        if name is not None:
+            params["check_name"] = name
         runs = await self.pages(
             f"commits/{quote(self.inside(sha), safe='/')}/check-runs",
             key="check_runs",
-            params={"filter": "all" if include_superseded else "latest"},
+            params=params,
         )
         if include_superseded:
             return runs

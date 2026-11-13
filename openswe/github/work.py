@@ -78,6 +78,8 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts) -> list[GitHubWorkNam
     work: list[GitHubWorkName] = []
     if action in PR_WALKTHROUGH_ACTIONS:
         work.append("walkthrough_pull_request")
+        if facts.auto_review:
+            work.append("review_apps_on_preview")
     if action in {"opened", "edited"} or action in GH_PR_AGENT_STATE_ACTIONS:
         work.append("track_pull_request_state")
     if action == "synchronize":

@@ -1,6 +1,7 @@
 """MDA's GitHub channel calls the backend's typed channel API, and only it can."""
 
 import uuid
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -377,6 +378,26 @@ async def test_work_runs_once_per_delivery(
     process.assert_awaited_once()
 
 
+async def test_preview_work_runs_again_when_its_delivery_comes_again(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=True))
+    tasks: defaultdict[str, AsyncMock] = defaultdict(AsyncMock)
+    monkeypatch.setattr(channel, "_tasks", lambda _delivery: tasks)
+    payload: dict[str, JsonValue] = {
+        "action": "opened",
+        "pull_request": {"number": 7},
+        "repository": {"name": "api", "owner": {"login": "acme"}},
+    }
+
+    # Redelivered after its watch failed to queue: its jobs are keyed, the rest isn't.
+    for _ in range(2):
+        await _deliver(app, "pull_request", payload)
+
+    assert tasks["review_apps_on_preview"].await_count == 2
+    tasks["walkthrough_pull_request"].assert_awaited_once()
+
+
 @pytest.mark.parametrize("action", ["added", "removed"])
 async def test_an_installation_change_drops_the_cached_repository_listings(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, action: str
@@ -662,6 +683,8 @@ async def test_dropped_events_skip_the_event_log(
     monkeypatch.setattr(channel.EventLog, "record_once", record)
     work = AsyncMock()
     monkeypatch.setattr(channel, "_work_after_answer", work)
+    preview = AsyncMock()
+    monkeypatch.setattr(github_webhooks.PreviewReady, "run", preview)
     payload = {"repository": {"owner": {"login": "acme"}, "name": "repo"}}
 
     delivered = await deliver_as_mda(app, event, payload, secret=SERVICE_SECRET)
@@ -669,3 +692,5 @@ async def test_dropped_events_skip_the_event_log(
     assert delivered.work == ()
     record.assert_not_awaited()
     work.assert_not_awaited()
+    # A check finishing can still mean a preview is deployed.
+    assert preview.await_count == (event == "check_run")

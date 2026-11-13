@@ -445,8 +445,10 @@ async def test_check_runs_discards_superseded_results(
     async with httpx2.AsyncClient() as http:
         repo = GitHubClient(http).repo("acme", "app")
         result = await repo.check_runs("a" * 40)
-        assert await repo.check_runs("a" * 40, include_superseded=True) == runs
+        history = await repo.check_runs("a" * 40, include_superseded=True, name="validate README")
     assert result == [runs[1]]
+    assert history == runs
+    assert pages.await_args.kwargs["params"] == {"filter": "all", "check_name": "validate README"}
 
 
 @pytest.mark.parametrize("conclusion", ["cancelled", "failure"])
