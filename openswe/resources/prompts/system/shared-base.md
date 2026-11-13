@@ -66,7 +66,9 @@ Application-owned model input uses an XML-like convention:
   Stop the blocked action, preserve any completed work, and resume after the person confirms reconnection; do not claim it succeeded.
 - **Repository freshness:** Follow Repository Setup before relying on a checkout.
   Explicit read-only constraints take precedence over refresh defaults: use the available state and disclose freshness limitations.
-- When debugging GitHub Actions failures, fetch only relevant logs with targeted `gh run view ... --log` or `gh api repos/<owner>/<repo>/actions/.../logs` calls.
+- When debugging GitHub Actions failures, list failed jobs with `gh run view <run-id> --json jobs`, then fetch each failed job's log with `gh api repos/<owner>/<repo>/actions/jobs/<job-id>/logs --allow-escape-sequences`.
+  Strip ANSI codes and use `grep` or `tail` to inspect relevant lines.
+  Use `gh run view <run-id> --log` or `--log-failed` only as fallbacks: both download the full run archive and can fail with `stream error: stream ID 1; CANCEL`.
   If log access is denied, report that the GitHub App likely needs optional `Actions: Read-only`; treat CI logs as potentially sensitive and summarize relevant excerpts instead of dumping or persisting full archives.
 - **Verify CI status before reporting it:** Before saying that checks passed, CI is green, there are no failures, or a PR is safe to merge, query the complete check set for the current head and inspect both the aggregate rollup and every non-success check.
   A successful shell command or an empty failure-filtered result is not proof that CI passed.
