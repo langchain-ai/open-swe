@@ -692,7 +692,7 @@ def test_kit_access_failure_guidance(monkeypatch, tenant, status, expected):
         assert "LMT_TENANT_ID" in str(error)
 
 
-@pytest.mark.parametrize("status", [-32601, 404, 503])
+@pytest.mark.parametrize("status", [-32601, 401, 403, 404, 503])
 async def test_managed_discovery_backoff_isolated_and_reported(monkeypatch, status):
     import httpx2
     from mcp.shared.exceptions import MCPError
@@ -736,7 +736,7 @@ async def test_managed_discovery_backoff_isolated_and_reported(monkeypatch, stat
 
     if status != 503:
         now = runtime.time()
-        monkeypatch.setattr(runtime, "time", lambda: now + 61)
+        monkeypatch.setattr(runtime, "time", lambda: now + (901 if status in (401, 403) else 61))
     recovered = await runtime.load_mcp_tools(source)
     assert [tool.metadata["mcp_tool_name"] for tool in recovered] == ["search"]
     assert recovered.catalog_note == ""

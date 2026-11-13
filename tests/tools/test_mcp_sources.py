@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -266,3 +267,62 @@ async def test_a_server_read_through_an_mda_connection_is_the_mda_runs_by_tier_p
             "https://personal.example/mcp"
         ]
         assert loaded.runtime_servers == []
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 503])
+async def test_workspace_discovery_authentication_backoff(monkeypatch, caplog, status):
+    import httpx2
+
+    caplog.set_level(logging.INFO, logger=runtime.__name__)
+    attempts = 0
+    now = 1000.0
+
+    async def discover(record, namespace):
+        nonlocal attempts
+        attempts += 1
+        try:
+            raise httpx2.HTTPStatusError(
+                "Authorization: Bearer secret-token",
+                request=httpx2.Request("GET", "https://example.com/?token=secret-token"),
+                response=httpx2.Response(status),
+            )
+        except httpx2.HTTPStatusError as exc:
+            raise RuntimeError("secret-token") from ExceptionGroup("secret-token", [exc])
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    monkeypatch.setattr(runtime, "time", lambda: now)
+    records = {"linear": record()}
+    workspace = source(("workspace_mcps", "first"), records)
+    assert await runtime.load_mcp_tools(workspace) == []
+    assert await runtime.load_mcp_tools(workspace) == []
+    with pytest.raises(ValueError):
+        await runtime.refresh_mcp_catalog(workspace, "linear")
+    assert attempts == (1 if status in (401, 403) else 3)
+    assert "secret-token" not in caplog.text
+    warnings = [
+        log
+        for log in caplog.records
+        if log.name == runtime.__name__
+        and log.levelno == logging.WARNING
+        and log.getMessage() == "MCP discovery failed"
+    ]
+    assert warnings
+    assert all(f"HTTP {status}" in log.mcp_reason for log in warnings)
+    assert all("secret-token" not in log.mcp_reason for log in warnings)
+    assert all(log.exc_info is None for log in caplog.records)
+
+    if status in (401, 403):
+        now += 61
+        assert await runtime.load_mcp_tools(workspace) == []
+        assert attempts == 1
+        now += 840
+        assert await runtime.load_mcp_tools(workspace) == []
+        assert attempts == 2
+        for namespace, connection in [
+            (("workspace_mcps", "second"), records["linear"]),
+            (workspace.namespace, record("other")),
+            (workspace.namespace, record(revision="rotated")),
+        ]:
+            with pytest.raises(ValueError, match="authentication failed"):
+                await runtime.discover_tools(connection, namespace)
+        assert attempts == 5
