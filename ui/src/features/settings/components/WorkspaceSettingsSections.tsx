@@ -5,7 +5,6 @@ import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@langchain/macaw-components/Button"
 import { Select } from "@langchain/macaw-components/Select"
-import { Switch } from "@langchain/macaw-components/Switch"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
   useScopedSettings,
@@ -239,22 +238,6 @@ export function ModelDefaultsSection({
       }
     >
       <div className="divide-y divide-default">
-        <TierRow
-          settings={settings}
-          fields={["model_routing_enabled"]}
-          label="Adaptive model routing"
-          description="Automatically choose a model for each turn. Users can still override this in their personal settings."
-          control={
-            <Switch
-              aria-label="Adaptive model routing"
-              checked={settings.data?.model_routing_enabled ?? false}
-              onChange={(next) =>
-                settings.save({ model_routing_enabled: next })
-              }
-              disabled={!settings.data}
-            />
-          }
-        />
         <ModelRow
           settings={settings}
           models={models}
@@ -270,30 +253,6 @@ export function ModelDefaultsSection({
           description="Model used by delegated main-agent tasks."
           modelField="default_agent_subagent_model"
           effortField="default_agent_subagent_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Agent routing: fast"
-          description="Model used for straightforward agent turns."
-          modelField="default_agent_routing_fast_model"
-          effortField="default_agent_routing_fast_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Agent routing: balanced"
-          description="Model used for ordinary implementation and investigation turns."
-          modelField="default_agent_routing_balanced_model"
-          effortField="default_agent_routing_balanced_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Agent routing: performance"
-          description="Model used for complex reasoning."
-          modelField="default_agent_routing_performance_model"
-          effortField="default_agent_routing_performance_reasoning_effort"
         />
         <ModelRow
           settings={settings}
@@ -425,5 +384,85 @@ export function ModelPairControl({
         triggerClassName="w-28"
       />
     </div>
+  )
+}
+
+type RoutingMode = "off" | "adaptive" | "split"
+
+const ROUTING_MODES = [
+  { value: "off", label: "Off" },
+  { value: "adaptive", label: "Adaptive" },
+  { value: "split", label: "50/50 split (v2)" },
+] satisfies Array<{ value: RoutingMode; label: string }>
+
+function routingMode(settings: WorkspaceSettings | undefined): RoutingMode {
+  if (!(settings?.model_routing_enabled ?? true)) return "off"
+  return settings?.model_routing_split ? "split" : "adaptive"
+}
+
+const ROUTING_PATCHES: Record<RoutingMode, Partial<WorkspaceSettings>> = {
+  off: { model_routing_enabled: false },
+  adaptive: { model_routing_enabled: true, model_routing_split: false },
+  split: { model_routing_enabled: true, model_routing_split: true },
+}
+
+export function ModelRoutingSection({
+  scope,
+  models,
+}: {
+  scope: SettingsScope
+  models: Array<ModelOption>
+}) {
+  const settings = useScopedSettings(scope)
+  return (
+    <SettingsSection
+      title="Model Routing"
+      description="How a thread on Auto picks its model. A model someone picks in the composer, or asks for in a message, always wins, and automations, API clients and Slack bots run the Robin Agent model."
+    >
+      <div className="divide-y divide-default">
+        <TierRow
+          settings={settings}
+          fields={["model_routing_enabled", "model_routing_split"]}
+          label="Routing"
+          description="Off runs the Robin Agent model. Adaptive has the classifier pick a tier for each thread. The 50/50 split runs half of threads on Balanced and half on Performance, by thread."
+          control={
+            <Select
+              aria-label="Routing"
+              options={ROUTING_MODES}
+              value={routingMode(settings.data)}
+              onChange={(next) => {
+                if (next) settings.save(ROUTING_PATCHES[next])
+              }}
+              disabled={!settings.data}
+              triggerClassName="w-48"
+            />
+          }
+        />
+        <ModelRow
+          settings={settings}
+          models={models}
+          label="Agent routing: fast"
+          description="Model used for straightforward agent turns."
+          modelField="default_agent_routing_fast_model"
+          effortField="default_agent_routing_fast_reasoning_effort"
+        />
+        <ModelRow
+          settings={settings}
+          models={models}
+          label="Agent routing: balanced"
+          description="Model used for ordinary implementation and investigation turns."
+          modelField="default_agent_routing_balanced_model"
+          effortField="default_agent_routing_balanced_reasoning_effort"
+        />
+        <ModelRow
+          settings={settings}
+          models={models}
+          label="Agent routing: performance"
+          description="Model used for complex reasoning."
+          modelField="default_agent_routing_performance_model"
+          effortField="default_agent_routing_performance_reasoning_effort"
+        />
+      </div>
+    </SettingsSection>
   )
 }

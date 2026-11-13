@@ -36,7 +36,6 @@ from openswe.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.model_routing import RoutingArm
 from openswe.prompts import prompt
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
@@ -1594,14 +1593,8 @@ async def _process_slack_mention_impl(
         common.run_id_for_logging(run),
         thread_id,
     )
-    # A routed thread ignores the pick (the run still records it), so nothing switched.
     # An image the performance model cannot read runs on a vision model instead.
-    if (
-        performance_command
-        and thread_model_choice
-        and not image_model_override
-        and not await RoutingArm.routes(thread_id, thread_workspace)
-    ):
+    if performance_command and thread_model_choice and not image_model_override:
         await slack_utils.post_slack_ephemeral_message(
             channel_id,
             user_id,

@@ -510,7 +510,7 @@ async def test_a_thread_that_kept_default_before_routing_is_classified(
     assert backend.run.route == "performance"
 
 
-async def test_the_control_arm_classifies_its_first_request_for_the_trace_alone(
+async def test_the_thread_classifies_its_first_request_for_the_trace_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     classified: list[str] = []
@@ -559,11 +559,19 @@ async def test_a_failed_shadow_classification_leaves_the_run_alone(
     assert backend.run.classified == {}
 
 
-async def test_the_control_arm_classifies_again_after_jev_gives_no_answer(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "first",
+    [
+        # What the classifier returns when Jev is unavailable: no task type.
+        Route("default", persist=False),
+        # A message that asks for nothing yet, such as a greeting.
+        Route("balanced", task_type="no_task"),
+    ],
+)
+async def test_the_thread_is_classified_again_until_it_asks_for_something(
+    first: Route, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The first is what the classifier returns when Jev is unavailable: no task type.
-    answers = iter([Route("default", persist=False), Route("balanced", task_type="lookup")])
+    answers = iter([first, Route("balanced", task_type="lookup")])
 
     async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
         return next(answers)
@@ -577,7 +585,7 @@ async def test_the_control_arm_classifies_again_after_jev_gives_no_answer(
 
     # The thread is not marked shadowed, so its next turn asks again and labels the trace.
     assert unanswered == {"model_route": "default"}
-    assert backend.run.classified == {}
+    assert backend.run.classified == first.trace_metadata
     later = _state(human, **unanswered)
     held = later[STATE_KEY]
     assert isinstance(held, dict)

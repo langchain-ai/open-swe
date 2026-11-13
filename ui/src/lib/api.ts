@@ -472,6 +472,8 @@ export interface WorkspaceSettings {
   review_browser_session_tool?: string | null
   /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
+  /** Routing v2: split Auto threads 50/50 between Balanced and Performance instead of classifying. */
+  model_routing_split?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean

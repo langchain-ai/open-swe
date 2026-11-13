@@ -11073,6 +11073,18 @@
             ],
             "title": "Model Routing Enabled"
           },
+          "model_routing_split": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Split"
+          },
           "org_guidelines": {
             "anyOf": [
               {

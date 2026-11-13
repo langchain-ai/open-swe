@@ -1,1 +1,1 @@
-A quick question: find a file, PR, owner, link, or setting; check a status, CI run, deploy, or data point; ask about Robin itself; or a short conversational follow-up.
+A quick question or retrieval: find a file, PR, owner, link, setting, or document; read linked content; check a status, CI run, deploy, or data point; or ask about Robin and its capabilities.

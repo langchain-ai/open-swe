@@ -36,15 +36,18 @@ class TaskRoute:
 
     TASK_TYPES: Final = (
         "design",
-        "feature",
-        "investigation",
-        "bugfix",
         "explain",
+        "feature",
+        "bugfix",
+        "investigation",
+        "writing",
+        "ops",
         "lookup",
         "pr_maintenance",
-        "ops_docs_refactor",
-        "other",
+        "no_task",
     )
+    # A message that asks for nothing yet, which a later one in the thread may.
+    NO_TASK: Final = "no_task"
     COMPLEXITIES: Final = ("routine", "involved", "open_ended")
     # Design (judgment calls included) and questions that need understanding code always
     # run on Performance; building or fixing does only when the approach is still open.

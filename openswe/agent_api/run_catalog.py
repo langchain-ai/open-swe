@@ -51,8 +51,7 @@ from openswe.server import (
 from openswe.threads.access import agent_version_metadata
 from openswe.utils.thread_reads import shared_thread_reads
 
-# The model a person picked, which the planner records on the run's config, so a trace
-# compares it with the model routing chose.
+# The model a person picked, which the planner records on the run's config.
 _ROUTING_TRACE_KEYS: Final = ("user_model_choice", "user_effort_choice")
 # MDA's own deep agent runs subagents and code.
 _SYNC_SUBAGENT_TOOL: Final = "task"
@@ -255,8 +254,13 @@ class RunCatalog:
                     **trace_actor(self.config),
                     **agent_version_metadata(),
                     **{key: metadata[key] for key in _ROUTING_TRACE_KEYS if key in metadata},
-                    # The tag's value again, so traces group by it too.
+                    # The tags' values again, so traces group by them too.
                     "model_routing": catalog.loop.routing_arm,
+                    **(
+                        {"model_experiment": catalog.loop.model_experiment}
+                        if catalog.loop.model_experiment
+                        else {}
+                    ),
                 },
                 "trace_tags": catalog.loop.trace_tags,
                 "sandbox": spec,

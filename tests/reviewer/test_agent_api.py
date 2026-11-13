@@ -1136,6 +1136,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain_core.tools import StructuredTool
+    from runtime_api.catalog import LoopRules, RoutingRules
 
     from openswe.agent_api.run_catalog import RunCatalog
     from openswe.mcp.models import MCPToolProvenance
@@ -1154,8 +1155,6 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             config["configurable"]["draft_prs"] = False
             config["metadata"] = {
                 **config.get("metadata", {}),
-                "model_routing_applied": True,
-                "model_routing_mode": "auto",
                 "user_model_choice": "anthropic:claude-opus-5-5",
                 "user_effort_choice": "high",
             }
@@ -1185,6 +1184,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]
             choice = ModelChoice("openai:gpt-6.1-sol", {})
             surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+            surface.loop = LoopRules(
+                routing=RoutingRules(shadow=True), model_experiment="performance"
+            )
 
     parts = Coordinator()
     started = await (await RunCatalog.of(parts, RUN)).start()
@@ -1194,14 +1196,13 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     metadata = catalog["trace_metadata"]
     assert isinstance(metadata, dict)
     assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
-    # The trace records the model its person picked, and nothing routing already tags.
-    assert "model_routing_mode" not in metadata
+    # The trace records the model its person picked, and the experiment's tier.
     assert (metadata["user_model_choice"], metadata["user_effort_choice"]) == (
         "anthropic:claude-opus-5-5",
         "high",
     )
-    assert catalog["trace_tags"] == ["model_routing:inactive"]
-    assert metadata["model_routing"] == "inactive"
+    assert catalog["trace_tags"] == ["model_routing:inactive", "model_experiment:performance"]
+    assert (metadata["model_routing"], metadata["model_experiment"]) == ("inactive", "performance")
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}

@@ -66,6 +66,7 @@ from runtime_api.model_errors import is_model_failure_reply
 from runtime_api.models import model_for
 from runtime_api.operations import RunRequest
 from runtime_api.provenance import Provenance
+from runtime_api.route_questions import TaskRoute
 
 from rt.backend import (
     OpenSweBackend,
@@ -84,8 +85,7 @@ _SUMMARIZATION_EVENT: Final = "_summarization_event"
 # Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
-# Held state: the routing experiment's control arm already classified the thread's first
-# request for its trace.
+# Held state: the classifier already labeled the thread's first request for its trace.
 _SHADOWED: Final = "jev_shadowed"
 # A token is replaced this long before it expires. The backend never hands out one with
 # less left, so a replacement is not due again at once.
@@ -472,7 +472,7 @@ class RunLoop:
         )
 
     def _shadows(self, held: Mapping[str, object]) -> bool:
-        """Whether the turn classifies a control-arm thread's request for its trace alone."""
+        """Whether the turn classifies the thread's request for its trace alone."""
         rules = self.rules.routing
         return (
             rules is not None and rules.shadow and rules.mode != "auto" and not held.get(_SHADOWED)
@@ -515,16 +515,16 @@ class RunLoop:
     async def _shadowed(
         self, messages: Sequence[BaseMessage], classifying: asyncio.Task[Route] | None
     ) -> dict[str, JsonValue]:
-        """What the classifier would have said about a control-arm thread's first request,
-        for the trace; the run's model is untouched. A failure, or no task type from Jev,
-        leaves it for a later turn."""
+        """What the classifier says about the thread's first request, for the trace; the
+        run's model is untouched. A failure, no task type from Jev, or a message that asks
+        for nothing leaves it for a later turn."""
         try:
             classified = await (classifying or self._classifier.classify(messages))
         except Exception:
-            logger.warning("Could not classify the control-arm thread's request", exc_info=True)
+            logger.warning("Could not classify the thread's request", exc_info=True)
             return {}
         self._backend.run.classified = classified.trace_metadata
-        return {_SHADOWED: True} if classified.task_type is not None else {}
+        return {_SHADOWED: True} if classified.task_type not in (None, TaskRoute.NO_TASK) else {}
 
     @staticmethod
     def _kept(route: Route) -> dict[str, JsonValue]:

@@ -303,6 +303,7 @@ async def _agent_catalog(
                     "default_agent_routing_balanced_reasoning_effort": "medium",
                     "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
                     "default_agent_routing_performance_reasoning_effort": "high",
+                    "model_routing_split": True,
                 }
             ),
         ),
@@ -359,20 +360,64 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
 
 
 @pytest.mark.asyncio
-async def test_routed_default_route_uses_balanced_tier_not_profile_default(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("tier", "expected_model"),
+    [("balanced", "openai:gpt-6.1-sol"), ("performance", "anthropic:claude-opus-5-5")],
+)
+async def test_an_auto_thread_runs_on_its_experiment_tier_not_profile_default(
+    tier: str, expected_model: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
+    monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: tier)
     config = _base_config()
     config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
-    profile = {
-        "default_model": "anthropic:claude-opus-5-5",
-        "reasoning_effort": "high",
-        "model_routing_enabled": True,
-    }
+    profile = {"default_model": "fireworks:accounts/fireworks/models/kimi-k3"}
     agent = await _agent_catalog(config, profile=profile)
 
+    assert _main_model(agent).model_id == expected_model
+    loop = cast(ToolSurface, agent["surface"]).loop
+    # The split needs no classifier; the task-type evaluator labels the traces.
+    assert loop.routing is not None and loop.routing.mode is None and not loop.routing.shadow
+    assert loop.trace_tags == ["model_routing:inactive", f"model_experiment:{tier}"]
+
+
+async def test_adaptive_routing_sends_every_auto_thread_through_the_classifier() -> None:
+    config = _base_config()
+    config["configurable"].update(source="dashboard", model_selection="auto")
+    agent = await _agent_catalog(
+        config,
+        workspace_settings=WorkspaceSettings({**_MODEL_DEFAULTS, "model_routing_split": False}),
+    )
+
+    loop = cast(ToolSurface, agent["surface"]).loop
+    assert loop.routing is not None and loop.routing.mode == "auto"
+    assert loop.model_experiment is None
+    assert loop.trace_tags == ["model_routing:active"]
+    assert cast(dict[str, object], config["metadata"])["model_routing_mode"] == "auto"
+
+
+@pytest.mark.parametrize(
+    "configurable",
+    [
+        {"source": "schedule", "schedule_id": "schedule-1"},
+        {"source": "api"},
+        {"source": "slack", "slack_thread": {"channel_id": "C1", "triggering_bot_id": "B1"}},
+    ],
+)
+async def test_an_automated_thread_is_left_out_of_the_experiment(
+    configurable: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "performance")
+    config = _base_config()
+    config["configurable"].update(configurable)
+    with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
+        agent = await _agent_catalog(config)
+
     assert _main_model(agent).model_id == "openai:gpt-6.1-sol"
+    loop = cast(ToolSurface, agent["surface"]).loop
+    assert loop.model_experiment is None
+    assert loop.routing is not None and not loop.routing.shadow
+    # A person who follows up later stays out of it too.
+    assert cast(dict[str, object], store.call_args.args[2])["model_routing_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -752,9 +797,8 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 
 @pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
 async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
-    route: Literal["fast", "balanced", "performance"], monkeypatch: pytest.MonkeyPatch
+    route: Literal["fast", "balanced", "performance"],
 ) -> None:
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
@@ -789,7 +833,7 @@ async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
         ),
     ],
 )
-async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups(
+async def test_explicit_auto_selection_clears_pin_and_keeps_its_tier_on_followups(
     profile: dict[str, object] | None,
     expected_model: str,
     expected_effort: str,
@@ -798,7 +842,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 ) -> None:
     from openswe.server import PrepareAgentRunMiddleware
 
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
+    monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "balanced")
     config = _base_config()
     config["configurable"].update(
         source="dashboard", model_selection="auto", model_selection_changed=True
@@ -818,8 +862,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     followup["configurable"].update(source="dashboard", model_selection="auto")
     followup_agent = await _agent_catalog(followup, thread_settings=snapshot)
     for agent in (captured, followup_agent):
-        routing = cast(ToolSurface, agent["surface"]).loop.routing
-        assert routing is not None and routing.mode == "auto"
+        assert cast(ToolSurface, agent["surface"]).loop.model_experiment == "balanced"
         assert _main_model(agent).model_id == expected_model
         prepare = PrepareAgentRunMiddleware(
             _base_config(), cast(AgentTurnSettings, agent["turn"]), repo_instructions=None
@@ -827,62 +870,46 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         assert prepare._requested_models is None
 
 
-async def test_a_concierge_dm_is_routed_in_the_routed_arm(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("tier", ["balanced", "performance"])
+@pytest.mark.parametrize("concierge", [True, False])
+async def test_a_picked_model_is_run_and_recorded(
+    tier: str, concierge: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
-    monkeypatch.setattr("openswe.server._slack_concierge_run", lambda _cfg: True)
+    monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: tier)
+    monkeypatch.setattr("openswe.server._slack_concierge_run", lambda _cfg: concierge)
     config = _base_config()
     config["configurable"].update(
         model_selection="explicit",
-        agent_model_id="anthropic:claude-opus-5-5",
+        agent_model_id="fireworks:accounts/fireworks/models/kimi-k3",
         agent_effort="high",
     )
-    captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
+    with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
+        captured = await _agent_catalog(config)
 
-    # A DM is in the experiment like any other message: the route decides, not the pick.
-    assert _main_model(captured).model_id == "openai:gpt-6.1-sol"
-    routing = cast(ToolSurface, captured["surface"]).loop.routing
-    assert routing is not None and routing.mode == "auto"
-
-
-@pytest.mark.parametrize("routed", [True, False])
-async def test_routing_ignores_a_picked_model_but_records_it(
-    routed: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto" if routed else None)
-    config = _base_config()
-    config["configurable"].update(
-        source="dashboard",
-        model_selection="explicit",
-        agent_model_id="anthropic:claude-opus-5-5",
-        agent_effort="high",
-    )
-    captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
-
-    routing = cast(ToolSurface, captured["surface"]).loop.routing
-    if routed:
-        # The routed arm starts on Balanced and leaves the model to the route.
-        assert _main_model(captured).model_id == "openai:gpt-6.1-sol"
-        assert routing is not None and routing.mode == "auto"
-    else:
-        # The other arm runs the model the person picked.
-        assert _main_model(captured).model_id == "anthropic:claude-opus-5-5"
-        assert routing is None or routing.mode is None
+    assert _main_model(captured).model_id == "fireworks:accounts/fireworks/models/kimi-k3"
+    loop = cast(ToolSurface, captured["surface"]).loop
+    assert loop.model_experiment is None
+    assert loop.routing is not None and loop.routing.mode is None
     metadata = cast(dict[str, object], config["metadata"])
-    assert metadata["user_model_choice"] == "anthropic:claude-opus-5-5"
+    assert metadata["user_model_choice"] == "fireworks:accounts/fireworks/models/kimi-k3"
     assert metadata["user_effort_choice"] == "high"
+    # Later runs on the thread keep the pick until the person goes back to Auto.
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    followup = _base_config()
+    followup["configurable"].update(source="dashboard", model_selection="auto")
+    followup_agent = await _agent_catalog(followup, thread_settings=snapshot)
+    assert _main_model(followup_agent).model_id == "fireworks:accounts/fireworks/models/kimi-k3"
 
 
 @pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
-async def test_slack_question_is_routed_after_dashboard_handoff(
+async def test_slack_question_joins_the_experiment_after_dashboard_handoff(
     monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, langsmith_users
 ) -> None:
     langsmith_users.add("octocat")
     from openswe.threads.runs import _build_dashboard_configurable
 
     monkeypatch.setattr("openswe.threads.runs.resolve_run_email", AsyncMock(return_value=None))
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
+    monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "performance")
     source_context = {
         "slack_ask": True,
         "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
@@ -899,10 +926,8 @@ async def test_slack_question_is_routed_after_dashboard_handoff(
             )
         )
         captured = await _agent_catalog(config, profile={"model_routing_enabled": True})
-        routing = cast(ToolSurface, captured["surface"]).loop.routing
-        # A Slack question is routed like any other message.
-        assert routing is not None
-        assert routing.mode == "auto"
+        # A Slack question is in the experiment like any other message.
+        assert cast(ToolSurface, captured["surface"]).loop.model_experiment == "performance"
 
 
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
@@ -935,7 +960,7 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 async def test_historical_personal_models_and_routing_do_not_override_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
+    monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "balanced")
     captured = await _agent_catalog(
         profile={
             "default_model": "anthropic:claude-opus-5-5",

@@ -38,6 +38,7 @@ import {
   DefaultRepoSection,
   LLMGatewaySection,
   ModelDefaultsSection,
+  ModelRoutingSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -287,6 +288,12 @@ export function WorkspaceSettingsPanel({
         onSaved={onSaved}
       />
       <ModelDefaultsSection
+        scope={scope}
+        models={(modelOptions.data?.models ?? []).filter(
+          (model) => model.can_be_default !== false
+        )}
+      />
+      <ModelRoutingSection
         scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
           (model) => model.can_be_default !== false

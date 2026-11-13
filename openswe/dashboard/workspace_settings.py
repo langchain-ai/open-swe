@@ -117,6 +117,11 @@ class WorkspaceSettingsUpdate(BaseModel):
     model_routing_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    # Routing v2: with routing on, threads split 50/50 between the Balanced and
+    # Performance models by thread instead of going through the classifier.
+    model_routing_split: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     gateway_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -380,6 +385,7 @@ def _default_settings() -> dict[str, Any]:
         "featured_apps": [],
         # On by default; the settings show it on until an admin turns it off.
         "model_routing_enabled": True,
+        "model_routing_split": False,
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
@@ -838,6 +844,10 @@ class WorkspaceSettings(Mapping[str, Any]):
     def model_routing_enabled(self) -> bool:
         value = self.get("model_routing_enabled")
         return value if isinstance(value, bool) else True
+
+    @property
+    def model_routing_split(self) -> bool:
+        return self.get("model_routing_split") is True
 
     @property
     def gateway_enabled(self) -> bool | None:
