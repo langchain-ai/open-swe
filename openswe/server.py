@@ -165,6 +165,7 @@ from openswe.thread_title import (
     schedule_thread_title_generation,
 )
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
+from openswe.threads.index import ThreadSearch
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -2306,6 +2307,18 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         route for route in files.routes if route not in skill_stores.sources
     )
     surface.code_mode = True
+    owned_threads = await THREADS.search(
+        ThreadSearch(ids=[thread_id], metadata={"owner_type": "user"}, limit=1)
+    )
+    if owned_threads:
+        try:
+            owner = await ThreadMetadata.model_validate(owned_threads[0].metadata).owner()
+        except PermissionError:
+            logger.warning(
+                "Could not resolve code-mode experiment owner", extra={"agent_thread_id": thread_id}
+            )
+        else:
+            surface.force_code_mode = owner.typed_preferences.experimental_force_code_mode
     surface.always_offered = {
         _registered_tool_name(tool): tool
         for tool in apply_tool_descriptions(ALWAYS_OFFERED_TOOLS, _tool_description_values())

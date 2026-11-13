@@ -46,6 +46,29 @@ def saved_thread_scope(monkeypatch):
     return metadata
 
 
+@pytest.mark.parametrize(
+    "owner_type, enabled", [("user", True), ("user", False), ("system", True), (None, True)]
+)
+async def test_force_code_mode_follows_thread_owner(
+    owner_type: str | None, enabled: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    from openswe.threads import index
+    from openswe.users import User
+
+    owner = User(preferences={"experimental_force_code_mode": enabled})
+    await index.create(
+        "thread-ctx",
+        runtime="mda",
+        metadata={"owner_type": owner_type, "owner_user_id": str(owner.id)},
+    )
+    with patch.object(User, "get", new_callable=AsyncMock, return_value=owner):
+        captured = await _agent_catalog()
+    surface = captured["surface"]
+    assert isinstance(surface, ToolSurface)
+    assert surface.force_code_mode is (owner_type == "user" and enabled)
+    assert "Could not resolve code-mode experiment owner" not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scope):
     saved_thread_scope["visibility"] = "public"

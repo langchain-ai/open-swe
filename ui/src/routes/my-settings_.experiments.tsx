@@ -33,6 +33,11 @@ function ExperimentsPage() {
           description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
         />
         <ProfileSwitchRow
+          field="experimental_force_code_mode"
+          label="Force code mode"
+          description="In threads you create, call every code-compatible tool through eval, including file, shell, and search tools. Synchronous subagents are excluded. Replies, browser, and state-changing controls stay direct. Off by default."
+        />
+        <ProfileSwitchRow
           field="experimental_local_auto_mode"
           label="Auto mode on This Mac"
           description="In threads that run on your Mac, a classifier reviews each command and file change before it runs. Routine work inside the project goes ahead; anything that touches credentials, sends data away, deletes outside the project or sets up background jobs is blocked, and Robin carries on without it."

@@ -130,7 +130,7 @@ class RunTools:
             else frozenset()
         )
         self.offered = [tool for tool in self.by_name.values() if tool.name not in code_only]
-        in_code = [tool for tool in tools if tool.name in code_only - self.disabled]
+        in_code = [tool for tool in self.by_name.values() if tool.name in code_only - self.disabled]
         # A move from code goes through MDA too, as the model's own call of it does.
         moves = SlackMoveMiddleware(self._backend)
         self.from_code = [
@@ -145,7 +145,7 @@ class RunTools:
                     and t not in in_code
                 ),
             ]
-        ] + self._files.code_tools(catalog.also_from_code)
+        ] + self._files.code_tools([*catalog.also_from_code, *catalog.code_only])
         self.hidden = self.excluded | code_only
 
     async def connect(self) -> None:

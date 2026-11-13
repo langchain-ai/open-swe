@@ -396,6 +396,7 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   experimental_classify?: boolean
+  experimental_force_code_mode?: boolean
   experimental_local_auto_mode?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -414,6 +415,7 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   experimental_classify?: boolean
+  experimental_force_code_mode?: boolean
   experimental_local_auto_mode?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

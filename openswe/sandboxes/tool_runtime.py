@@ -143,6 +143,7 @@ class ToolSurface:
     auto_review: bool = False
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
+    force_code_mode: bool = False
     # How the run reads what is sent to its thread while it runs, before each model call.
     inbox: InboxSpec | None = None
     # What MDA's middleware does around each model call.

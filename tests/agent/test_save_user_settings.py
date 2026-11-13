@@ -233,30 +233,33 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     assert user_records.items == before
 
 
+@pytest.mark.parametrize("flag", ["experimental_classify", "experimental_force_code_mode"])
 async def test_feature_flag_requires_user_and_validates_before_writing(
-    user_records: FakeUserRecords, requester: dict[str, object], saved_scope: dict[str, object]
+    user_records: FakeUserRecords,
+    requester: dict[str, object],
+    saved_scope: dict[str, object],
+    flag: str,
 ) -> None:
     from openswe.users import User, UserPreferences
 
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        assert (await save_user_settings({"experimental_classify": True, "auto_fix_ci": False}))[
-            "ok"
-        ] is False
+        assert (await save_user_settings({flag: True, "auto_fix_ci": False}))["ok"] is False
         save.assert_awaited_once()
     assert not user_records.items
     with patch.object(
         User,
         "update_preferences",
         new_callable=AsyncMock,
-        return_value=UserPreferences(experimental_classify=True),
+        return_value=UserPreferences.model_validate({flag: True}),
     ) as save:
-        assert (await save_user_settings({"experimental_classify": True, "auto_fix_ci": False}))[
-            "updated"
-        ] == {"experimental_classify": True, "auto_fix_ci": False}
+        assert (await save_user_settings({flag: True, "auto_fix_ci": False}))["updated"] == {
+            flag: True,
+            "auto_fix_ci": False,
+        }
         assert save.await_args.args[0] == "Alice"
-        assert save.await_args.args[1].experimental_classify is True
+        assert getattr(save.await_args.args[1], flag) is True
     assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
 
 
@@ -316,6 +319,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "concierge_mode": False,
                 "personal_kitchen_channel_id": "",
                 "experimental_classify": False,
+                "experimental_force_code_mode": False,
                 "experimental_local_auto_mode": False,
             },
             "preferences": {

@@ -1420,6 +1420,53 @@ async def test_code_tools_list_each_runs_schema_in_a_message_not_the_system_prom
     assert systems[0] == systems[1]
 
 
+async def test_code_only_search_and_files_are_hidden_but_callable(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    offered: list[set[str]] = []
+    outputs: list[str] = []
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[BaseTool], **kwargs: object
+    ) -> GenericFakeChatModel:
+        offered.append({tool.name for tool in tools})
+        return model
+
+    original = GenericFakeChatModel._agenerate
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        outputs.extend(message.text for message in messages if isinstance(message, ToolMessage))
+        return await original(model, messages)
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(
+        agent,
+        "_DEFAULT_MODEL",
+        _calling(
+            ToolCall(
+                name="eval",
+                args={
+                    "code": 'console.log(await tools.searchTools({query: "lookup"})); console.log(await tools.ls({path: "/"}));'
+                },
+                id="code",
+            )
+        ),
+    )
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={"code_only": ["lookup", "search_tools", "ls"], "search_tools": True}
+    )
+    await _run(InMemoryStore(), "forced", _context("agent", "forced", catalog))
+    assert offered and all(not names & {"lookup", "search_tools", "ls"} for names in offered)
+    assert all("eval" in names for names in offered)
+    assert any(hook == "search_tools" for hook, _, _ in backend_calls)
+    assert outputs and not any(
+        "TypeError" in output or "ReferenceError" in output for output in outputs
+    )
+
+
 async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
