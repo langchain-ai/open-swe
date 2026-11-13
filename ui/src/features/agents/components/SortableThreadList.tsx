@@ -1,6 +1,7 @@
 import { useId, useState } from "react"
 import type { ReactNode } from "react"
 
+import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { cn } from "@/lib/utils"
 
@@ -19,6 +20,7 @@ export function SortableThreadList({
   renderRow: (item: SidebarThreadItem) => ReactNode
   label?: string
 }) {
+  const selection = useSidebarThreadSelection()
   const helpId = useId()
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [target, setTarget] = useState<{ id: string; after: boolean } | null>(
@@ -64,6 +66,14 @@ export function SortableThreadList({
                     event.currentTarget.querySelector("a")))
             ) {
               event.preventDefault()
+              return
+            }
+
+            if (
+              selection &&
+              selection.selected.size > 1 &&
+              selection.selected.has(item.id)
+            ) {
               return
             }
             event.dataTransfer.effectAllowed = "move"

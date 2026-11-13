@@ -50,6 +50,7 @@ import type {
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
+import { ThreadDragDrop } from "@/features/agents/components/ThreadDragDrop"
 import { SortableThreadList } from "@/features/agents/components/SortableThreadList"
 import {
   SidebarThreadHoverProvider,
@@ -199,6 +200,7 @@ export function AgentsSidebar({
   activeThreadId,
   layout,
 }: AgentsSidebarProps) {
+  const pinnedSectionRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
   const profile = useProfile()
   const plugins = usePlugins()
@@ -824,7 +826,36 @@ export function AgentsSidebar({
       </div>
 
       <SidebarThreadSelection>
-        <div className="relative flex min-h-0 flex-1 flex-col">
+        <ThreadDragDrop
+          pinnedSectionRef={pinnedSectionRef}
+          onAction={(actions) => {
+            const validActions = actions.filter((item) => {
+              const isThread = (vars: { threadId: string }) =>
+                vars.threadId === item.threadId
+
+              if (item.action === "pin" || item.action === "unpin") {
+                return !pendingPins.some(isThread)
+              } else if (
+                item.action === "archive" ||
+                item.action === "unarchive"
+              ) {
+                return !pendingResolves.some(isThread)
+              }
+
+              return false
+            })
+
+            for (const { threadId, action } of validActions) {
+              if (action === "pin" || action === "unpin") {
+                const pinned = action === "pin"
+                pinThread.mutate({ threadId, pinned })
+              } else {
+                const resolved = action === "archive"
+                resolveThread.mutate({ threadId, resolved })
+              }
+            }
+          }}
+        >
           {scrollEdges.top && (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-muted" />
@@ -870,7 +901,7 @@ export function AgentsSidebar({
             {(filteredPinnedItems.length > 0 ||
               pinnedGroups.length > 0 ||
               (repoMode && noRepoPinned && noRepoAvailable)) && (
-              <section className="mb-space-3">
+              <section ref={pinnedSectionRef} className="mb-space-3">
                 <SidebarSectionHeader
                   label="Pinned"
                   collapsed={sectionCollapsed("pinned")}
@@ -1003,7 +1034,7 @@ export function AgentsSidebar({
               </p>
             )}
           </div>
-        </div>
+        </ThreadDragDrop>
       </SidebarThreadSelection>
       <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">

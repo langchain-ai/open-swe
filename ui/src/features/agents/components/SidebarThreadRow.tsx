@@ -1,4 +1,9 @@
 import {
+  ThreadDragCountContext,
+  useThreadDragPreviewContent,
+  useThreadDragging,
+} from "@/features/agents/components/ThreadDragDrop.utils"
+import {
   CaretDownIcon,
   CaretRightIcon,
   LaptopRegularIcon,
@@ -37,6 +42,7 @@ import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -132,7 +138,15 @@ function openContextMenuFromKeyboard(
 }
 
 function SidebarRowTitle({ title }: { title: string }) {
-  return <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+  const moreCount = useContext(ThreadDragCountContext)
+  return moreCount > 0 ? (
+    <span className="flex min-w-0 flex-1 items-center gap-space-1 text-sm">
+      <span className="truncate">{title}</span>
+      <span className="shrink-0">(+ {moreCount} more)</span>
+    </span>
+  ) : (
+    <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+  )
 }
 
 function SidebarRowTitleInput({
@@ -546,6 +560,22 @@ export function SidebarThreadRow({
     depth: 0,
   })
 
+  useThreadDragPreviewContent(
+    item.id,
+    <div
+      {...rowProps}
+      className={cn(
+        rowProps.className,
+        "group-data-[selected=true]/drag-preview:bg-selected-hover",
+        selected || rowIsActive
+          ? "bg-selected-hover"
+          : "bg-surface-level-2-hover"
+      )}
+    >
+      {rowContent}
+    </div>
+  )
+
   const review = item.reviewPage
   const link =
     titleDraft !== null ? (
@@ -559,8 +589,11 @@ export function SidebarThreadRow({
         }}
         onKeyDown={openContextMenuFromKeyboard}
         {...rowProps}
+        draggable
         data-selectable-thread={item.id}
         data-thread-title={item.title}
+        data-thread-pinned={pinned}
+        data-thread-archived={archived}
         aria-label={selected ? `${item.title}, selected` : item.title}
       >
         {rowContent}
@@ -572,8 +605,11 @@ export function SidebarThreadRow({
         onClick={handleNavigate}
         onKeyDown={openContextMenuFromKeyboard}
         {...rowProps}
+        draggable
         data-selectable-thread={item.id}
         data-thread-title={item.title}
+        data-thread-pinned={pinned}
+        data-thread-archived={archived}
         aria-label={selected ? `${item.title}, selected` : item.title}
       >
         {rowContent}
@@ -605,6 +641,7 @@ export function SidebarThreadRow({
       <ContextMenu onOpenChange={setContextMenuOpen}>
         <ContextMenuTrigger asChild>
           <div
+            data-sidebar-thread-row
             className={cn(
               "group/row relative mb-0.5 select-none [-webkit-touch-callout:none]",
               isDeleting && "opacity-50"
@@ -818,9 +855,11 @@ function SidebarSubagentRow({
 
 const RowHoverCardContext = createContext<{
   activeCardId: string | null
+  dragging: boolean
   onOpenChange: (id: string, open: boolean) => void
 }>({
   activeCardId: null,
+  dragging: false,
   onOpenChange: (_id: string, _open: boolean) => {},
 })
 
@@ -828,13 +867,22 @@ export function SidebarThreadHoverProvider(props: {
   children: React.ReactNode
 }) {
   const [value, onChange] = useState<string | null>(null)
+  const dragging = useThreadDragging(() => onChange(null))
+  const onOpenChange = useCallback(
+    (id: string, open: boolean) => {
+      onChange((current) =>
+        open && !dragging ? id : current === id ? null : current
+      )
+    },
+    [dragging]
+  )
   const hoverContext = useMemo(
     () => ({
-      activeCardId: value,
-      onOpenChange: (id: string, open: boolean) =>
-        onChange((current) => (open ? id : current === id ? null : current)),
+      activeCardId: dragging ? null : value,
+      dragging,
+      onOpenChange,
     }),
-    [value]
+    [value, dragging, onOpenChange]
   )
 
   return (
@@ -855,7 +903,8 @@ function RowHoverCard({
   children?: React.ReactNode
 }) {
   const id = useId()
-  const { activeCardId, onOpenChange } = useContext(RowHoverCardContext)
+  const { activeCardId, dragging, onOpenChange } =
+    useContext(RowHoverCardContext)
   const cardRef = useRef<HTMLDivElement>(null)
   const safeAreaRef = useRef<SVGSVGElement>(null)
   const triangleRef = useRef<SVGPolygonElement>(null)
@@ -905,7 +954,7 @@ function RowHoverCard({
 
   return (
     <HoverCard
-      open={activeCardId === id}
+      open={!dragging && activeCardId === id}
       openDelay={activeCardId === null ? 500 : 0}
       closeDelay={100}
       onOpenChange={(open) => onOpenChange(id, open)}
