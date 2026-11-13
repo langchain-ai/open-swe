@@ -1273,6 +1273,7 @@ async def _process_slack_mention_impl(
                     content_blocks.append(cast(dict[str, Any], image_block))
 
     slack_thread_context: dict[str, Any] = {
+        "team_id": request.team_id,
         "channel_id": channel_id,
         "channel_context": channel_context.dump(),
         "thread_ts": thread_ts,

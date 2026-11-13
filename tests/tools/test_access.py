@@ -174,6 +174,9 @@ async def test_unreadable_slack_history_is_not_sole(
         ({}, {"source": "dashboard"}),
         ({}, {"slack_thread": {**_SLACK, "triggering_bot_id": "OTHER"}}),
         ({}, {"slack_thread": {**_SLACK, "channel_id": "C2", "triggering_bot_id": "B1"}}),
+        ({}, {"slack_thread": {**_SLACK, "thread_ts": "2.0"}, "github_login": "alice"}),
+        ({}, {"slack_thread": {**_SLACK, "team_id": "OTHER"}, "github_login": "alice"}),
+        ({}, {"slack_thread": _SLACK}),
     ],
 )
 async def test_bot_channel_history_requires_matching_system_thread_context(
@@ -187,16 +190,24 @@ async def test_bot_channel_history_requires_matching_system_thread_context(
     assert resolved.mode(Policy(trusted="channel_history")) is None
 
 
+@pytest.mark.parametrize("sender", ["bot", "github", "langsmith"])
 async def test_bot_channel_history_is_scoped_and_revocable(
     metadata: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
     slack_api: SlackAPI,
+    sender: str,
 ) -> None:
     from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
 
     slack = {**_SLACK, "triggering_bot_id": "B1", "team_id": "T1"}
     metadata.update(owner_type="system", source_context={"slack_thread": slack})
-    cfg = _cfg(source="slack", slack_thread=slack, github_login=None)
+    cfg = _cfg(
+        source="slack",
+        slack_thread=slack if sender == "bot" else {**slack, "triggering_bot_id": ""},
+        github_login="alice" if sender == "github" else None,
+        user_id="00000000-0000-4000-8000-000000000001" if sender == "langsmith" else None,
+        github_linked=sender != "langsmith",
+    )
     monkeypatch.setattr(tool_access, "configurable", lambda: cfg)
     resolved = await resolve_access(cfg)
     assert not resolved.private

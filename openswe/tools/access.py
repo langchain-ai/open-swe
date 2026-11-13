@@ -278,7 +278,10 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
             and slack.triggering_bot_id
             and current_slack is not None
             and current_slack.location == slack.location
-            and current_slack.triggering_bot_id == slack.triggering_bot_id
+            and (
+                current_slack.triggering_bot_id == slack.triggering_bot_id
+                or (not current_slack.triggering_bot_id and bool(cfg.user_id or login))
+            )
             and current_slack.team_id == slack.team_id
         )
         else None

@@ -763,6 +763,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
                 thread_ts="1700000000.000100",
                 event_ts="1700000000.000300",
                 user_id="U456",
+                team_id="T123",
                 text="<@UBOT> create the PR" if explicitly_tagged else "create the PR",
                 bot_user_id="UBOT",
                 kitchen_channel=kitchen_channel,
@@ -786,6 +787,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
         f"@{webhook_common.SLACK_BOT_USERNAME} create the PR" in str(kwargs["input"])
     ) == explicitly_tagged
     run_config = kwargs["config"]
+    assert run_config["configurable"]["slack_thread"]["team_id"] == "T123"
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
 
