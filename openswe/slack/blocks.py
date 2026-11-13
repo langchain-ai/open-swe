@@ -48,6 +48,14 @@ class SectionBlock(TypedDict):
     expand: NotRequired[bool]
 
 
+class ContainerBlock(TypedDict):
+    type: Literal["container"]
+    title: PlainText
+    is_collapsible: bool
+    default_collapsed: bool
+    child_blocks: list[SectionBlock]
+
+
 class MarkdownBlock(TypedDict):
     type: Literal["markdown"]
     text: str
@@ -153,6 +161,7 @@ class InputBlock(TypedDict):
 
 type Block = (
     SectionBlock
+    | ContainerBlock
     | MarkdownBlock
     | ContextBlock
     | DividerBlock

@@ -1,6 +1,6 @@
 """Cross-links between a Slack thread and the breakout thread started from it."""
 
-from openswe.slack.blocks import Block, context, section
+from openswe.slack.blocks import Block, context, plain_text, section
 from openswe.slack.client import (
     SlackNotice,
     format_slack_web_link_footer,
@@ -17,7 +17,15 @@ def breakout_root_blocks(
 ) -> list[Block]:
     blocks: list[Block] = [section(text)]
     if details:
-        blocks.append({**section(details), "expand": False})
+        blocks.append(
+            {
+                "type": "container",
+                "title": plain_text("Instructions for the new thread"),
+                "is_collapsible": True,
+                "default_collapsed": True,
+                "child_blocks": [section(details)],
+            }
+        )
     footer = format_slack_web_link_footer(dashboard_url)
     if footer:
         blocks.append(context(footer))

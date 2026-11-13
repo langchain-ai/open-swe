@@ -580,16 +580,27 @@ async def test_slack_breakout_thread_success(
             },
         },
         {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    "*Repository:* `langchain-ai/open-swe`\n\n"
-                    "*Instructions for the new thread:*\n"
-                    "Use the same repo and investigate the follow-up aspect in detail."
-                ),
+            "type": "container",
+            "title": {
+                "type": "plain_text",
+                "text": "Instructions for the new thread",
+                "emoji": True,
             },
-            "expand": False,
+            "is_collapsible": True,
+            "default_collapsed": True,
+            "child_blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            "*Repository:* `langchain-ai/open-swe`\n\n"
+                            "*Instructions for the new thread:*\n"
+                            "Use the same repo and investigate the follow-up aspect in detail."
+                        ),
+                    },
+                }
+            ],
         },
         {
             "type": "context",
