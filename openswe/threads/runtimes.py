@@ -180,9 +180,12 @@ class _SdkThreads:
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
 
-    async def state(self, thread_id: str) -> dict[str, JsonValue]:
-        """The thread's current state here."""
-        return _object.validate_python(dict(await self.client.threads.get_state(thread_id)))
+    async def state(
+        self, thread_id: str, *, select: list[str] | None = None
+    ) -> dict[str, JsonValue]:
+        """The thread's current state here, only its ``select`` fields when given."""
+        state = await self.client.threads.get_state(thread_id, select=select)
+        return _object.validate_python(dict(state))
 
     async def has_active_run(self, thread_id: str) -> bool:
         """Whether a run on the thread here is still pending or running."""
@@ -727,8 +730,12 @@ class _MdaThreads(_SdkThreads):
             runs = _runs.validate_python(response.json()) or runs
         return runs[0] if runs else None
 
-    async def state(self, thread_id: str) -> dict[str, JsonValue]:
-        response = await self.reads.get(f"/threads/{thread_id}/state")
+    async def state(
+        self, thread_id: str, *, select: list[str] | None = None
+    ) -> dict[str, JsonValue]:
+        response = await self.reads.get(
+            f"/threads/{thread_id}/state", params={"select": select} if select else None
+        )
         response.raise_for_status()
         return _object.validate_python(response.json())
 

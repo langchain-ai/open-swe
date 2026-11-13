@@ -74,7 +74,9 @@ class _Threads:
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         return self.threads.get(thread_id)
 
-    async def state(self, thread_id: str) -> dict[str, JsonValue]:
+    async def state(
+        self, thread_id: str, *, select: list[str] | None = None
+    ) -> dict[str, JsonValue]:
         thread = self.threads.get(thread_id)
         if thread is None:
             request = httpx.Request("GET", f"http://runtime.test/threads/{thread_id}/state")

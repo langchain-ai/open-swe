@@ -731,9 +731,11 @@ async def get_dashboard_thread_state(
     thread_id: str,
     login: str,
     *,
+    select: list[str] | None = None,
     email: str | None = None,
     timings: dict[str, float] | None = None,
 ) -> dict[str, JsonValue]:
+    """The thread's state, narrowed by its runtime to the ``select`` fields when given."""
     record = timings if timings is not None else {}
     with phase(record, "thread_get"):
         thread = await THREADS.get(thread_id)
@@ -747,7 +749,7 @@ async def get_dashboard_thread_state(
 
     async def state() -> dict[str, JsonValue]:
         with phase(record, "get_state"):
-            return await THREADS.state_of(thread)
+            return await THREADS.state_of(thread, select=select)
 
     current, result = await asyncio.gather(latest_run(), state())
     run_status = current.metadata.get("latest_run_status")

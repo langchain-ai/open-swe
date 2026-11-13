@@ -27206,6 +27206,25 @@
               "title": "Thread Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "select",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Select"
+            }
           }
         ],
         "responses": {

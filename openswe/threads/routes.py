@@ -6,6 +6,7 @@ import posixpath
 from time import perf_counter
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -750,13 +751,24 @@ async def api_delete_thread(
 @router.get("/threads/{thread_id}/state")
 async def api_get_thread_state(
     thread_id: str,
+    select: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     timings: dict[str, float] = {}
     started = perf_counter()
-    payload = await get_dashboard_thread_state(
-        thread_id, session["sub"], email=session.get("email"), timings=timings
-    )
+    try:
+        payload = await get_dashboard_thread_state(
+            thread_id, session["sub"], select=select, email=session.get("email"), timings=timings
+        )
+    except httpx.HTTPStatusError as exc:
+        # The runtime validates the read, `select` included; what it refuses goes back as it said.
+        if exc.response.status_code != httpx.codes.UNPROCESSABLE_ENTITY:
+            raise
+        return Response(
+            content=exc.response.content,
+            status_code=exc.response.status_code,
+            media_type=exc.response.headers.get("content-type"),
+        )
     timings["total"] = (perf_counter() - started) * 1000
     header = server_timing_header(timings)
     logger.info("thread state timings thread_id=%s %s", thread_id, header)

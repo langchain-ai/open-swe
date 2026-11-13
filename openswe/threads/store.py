@@ -259,11 +259,17 @@ class ThreadStore:
             return None
         return await self.state_of(thread)
 
-    async def state_of(self, thread: IndexedThread) -> dict[str, JsonValue]:
-        """The state of a thread already read from the index, as its runtime keeps it."""
+    async def state_of(
+        self, thread: IndexedThread, *, select: list[str] | None = None
+    ) -> dict[str, JsonValue]:
+        """The state of a thread already read from the index, as its runtime keeps it.
+
+        ``select`` names the fields to return, as the Agent Server takes them; the runtime
+        validates them.
+        """
         runtime = RUNTIMES.runs_on(thread.runtime)
         try:
-            return await runtime.state(thread.thread_id)
+            return await runtime.state(thread.thread_id, select=select)
         except httpx.HTTPStatusError as error:
             # Indexed with no copy on MDA: creating it there failed, or MDA swept it. A
             # channel makes its own threads there, so the backend makes only its own again.
@@ -277,7 +283,7 @@ class ThreadStore:
                 "Making an indexed thread MDA has no copy of", extra={"thread_id": thread.thread_id}
             )
         await runtime.create(thread.thread_id, for_mda(thread.metadata))
-        return await runtime.state(thread.thread_id)
+        return await runtime.state(thread.thread_id, select=select)
 
     async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
         """The thread with its latest run's id and status in its metadata, as its runtime reports them.

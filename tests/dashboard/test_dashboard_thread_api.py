@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -10,12 +11,13 @@ from uuid import UUID, uuid7
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from langgraph_sdk.errors import APIStatusError
 
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, profiles
+from openswe.dashboard.oauth import require_session
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
@@ -26,12 +28,14 @@ from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads import diffs as thread_diffs
-from openswe.threads import handlers
+from openswe.threads import handlers, runtimes
+from openswe.threads import index as thread_index
 from openswe.threads import listing as thread_listing
 from openswe.threads import proxy as thread_proxy
 from openswe.threads import routes as thread_routes
 from openswe.threads import runs as thread_runs
 from openswe.threads import store as thread_store
+from openswe.threads.index import Runtime
 from openswe.threads.runtimes import RUNTIMES, MdaRun
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
@@ -1356,6 +1360,77 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
     state = await handlers.get_dashboard_thread_state("tid", "owner")
 
     assert "next" not in state
+
+
+async def _read_thread_state(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: Runtime,
+    agent_server: Callable[[httpx.Request], httpx.Response],
+    *,
+    select: list[str],
+) -> httpx.Response:
+    """Read a thread's state through the dashboard, from a runtime whose Agent Server is faked."""
+    transport = httpx.MockTransport(agent_server)
+    if runtime == "mda":
+        threads = runtimes._MdaThreads(runtimes.MdaRuntime("http://mda.test"))
+        threads.reads = httpx.AsyncClient(base_url="http://mda.test", transport=transport)
+    else:
+        threads = RUNTIMES.local
+        monkeypatch.setattr(
+            threads.client.http,
+            "client",
+            httpx.AsyncClient(base_url="http://agent-server.test", transport=transport),
+        )
+    monkeypatch.setattr(RUNTIMES, "runs_on", lambda _runtime: threads)
+    patch_thread_module(monkeypatch, "THREADS", thread_store.THREADS)
+    thread_id = "00000000-0000-4000-8000-0000000000a1"
+    await thread_index.create(
+        thread_id, runtime=runtime, metadata={"source": "dashboard", "github_login": "owner"}
+    )
+    app = FastAPI()
+    app.include_router(thread_routes.router, prefix="/dashboard/api")
+    app.dependency_overrides[require_session] = lambda: {"sub": "owner"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.get(
+            f"/dashboard/api/threads/{thread_id}/state",
+            params=[("select", field) for field in select],
+        )
+
+
+@pytest.mark.parametrize("runtime", ["mda", "local"])
+@pytest.mark.parametrize("select", [[], ["values.messages", "next"]])
+async def test_thread_state_sends_select_to_the_threads_runtime_as_given(
+    monkeypatch, runtime: Runtime, select: list[str]
+) -> None:
+    sent: list[list[str]] = []
+
+    def agent_server(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/state"):
+            sent.append(request.url.params.get_list("select"))
+            return httpx.Response(200, json={"values": {"messages": []}, "next": []})
+        return httpx.Response(200, json=[])
+
+    response = await _read_thread_state(monkeypatch, runtime, agent_server, select=select)
+
+    assert response.status_code == 200
+    assert sent == [select]
+
+
+@pytest.mark.parametrize("runtime", ["mda", "local"])
+async def test_thread_state_refuses_a_select_the_threads_runtime_refuses(
+    monkeypatch, runtime: Runtime
+) -> None:
+    def agent_server(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/state"):
+            return httpx.Response(422, json={"detail": "Invalid select columns: ['bogus']"})
+        return httpx.Response(200, json=[])
+
+    response = await _read_thread_state(monkeypatch, runtime, agent_server, select=["bogus"])
+
+    assert response.status_code == 422
+    assert "Invalid select columns: ['bogus']" in response.text
 
 
 async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
