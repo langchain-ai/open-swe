@@ -100,11 +100,13 @@ describe("AgentThreadHeader", () => {
       visibility: "private",
     } as AgentThread
     const { rerender } = render(
-      <AgentThreadHeader
-        target="Cloud"
-        panelCollapsed={false}
-        thread={thread}
-      />
+      <TooltipProvider>
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={false}
+          thread={thread}
+        />
+      </TooltipProvider>
     )
     fireEvent.keyDown(
       screen.getByRole("button", { name: "Thread visibility" }),
@@ -117,11 +119,13 @@ describe("AgentThreadHeader", () => {
       screen.queryByRole("menuitem", { name: "Copy thread link" })
     ).toBeNull()
     rerender(
-      <AgentThreadHeader
-        target="Cloud"
-        panelCollapsed={false}
-        thread={{ ...thread, visibility: "public" }}
-      />
+      <TooltipProvider>
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={false}
+          thread={{ ...thread, visibility: "public" }}
+        />
+      </TooltipProvider>
     )
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Copy thread link" })
@@ -143,12 +147,14 @@ describe("AgentThreadHeader", () => {
   it("saves a trimmed title once on Enter then blur", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined)
     render(
-      <AgentThreadHeader
-        title={title}
-        target="Cloud"
-        panelCollapsed={false}
-        onRename={onRename}
-      />
+      <TooltipProvider>
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={false}
+          thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
+          onRename={onRename}
+        />
+      </TooltipProvider>
     )
     fireEvent.click(screen.getByRole("button", { name: "Rename thread" }))
     const input = screen.getByRole("textbox") as HTMLInputElement
@@ -180,7 +186,6 @@ describe("AgentThreadHeader", () => {
     render(
       <TooltipProvider>
         <AgentThreadHeader
-          title={title}
           target="Cloud"
           panelCollapsed={false}
           thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
@@ -221,12 +226,14 @@ describe("AgentThreadHeader", () => {
   it("discards edits on Escape", () => {
     const onRename = vi.fn()
     render(
-      <AgentThreadHeader
-        title={title}
-        target="Cloud"
-        panelCollapsed={false}
-        onRename={onRename}
-      />
+      <TooltipProvider>
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={false}
+          thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
+          onRename={onRename}
+        />
+      </TooltipProvider>
     )
     fireEvent.click(screen.getByRole("button", { name: "Rename thread" }))
     const input = screen.getByRole("textbox")

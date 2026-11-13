@@ -58,8 +58,12 @@ export function visiblePendingMessages(
       author: "user",
       ...(senderName ? { structuredSenderName: senderName } : {}),
       timestamp: new Date(message.createdAt).toISOString(),
-      timestampIsFallback: true,
-      ...(message.status !== "sent" ? { deliveryStatus: message.status } : {}),
+      // A sent message shows when it was sent, so its row keeps its height
+      // when the transcript's own row takes over; until then the delivery
+      // status holds that line.
+      ...(message.status !== "sent"
+        ? { timestampIsFallback: true, deliveryStatus: message.status }
+        : {}),
       deliveryError: message.error,
       optimistic: true,
       ...(message.replies ? { replies: message.replies } : {}),

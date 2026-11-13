@@ -50,6 +50,10 @@ import {
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { agentsApi } from "@/features/agents/lib/api"
+import {
+  pendingSenderName,
+  visiblePendingMessages,
+} from "@/features/agents/lib/queuedMessages"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { runStartCommand, startRun } from "@/features/agents/lib/transcript/api"
 import {
@@ -706,12 +710,28 @@ export function AgentsHome({
     runTarget === "local"
       ? localRepos.find((checkout) => checkout.cwd === localRepoPath)
       : undefined
-  const optimisticDraftThread = submitted
+  const startingThread = submitted
     ? optimisticThread("pending", submitted.draft, {
         owner: session.data,
         sentAt: submitted.sentAt,
       })
     : null
+  // What the thread's page shows on arrival, so the handover moves nothing:
+  // the prompt as its pending message, and a run target only where that page
+  // offers moving the thread (a private thread in the desktop app).
+  const startingMessages = visiblePendingMessages(
+    startingThread?.pendingMessages,
+    [],
+    pendingSenderName(
+      [],
+      session.data?.login,
+      session.data?.display_name || undefined
+    )
+  )
+  const composerRunTarget =
+    startingThread && !(isDesktop && startingThread.visibility === "private")
+      ? undefined
+      : runTarget
   const traceFlight = useTraceFlight()
 
   return (
@@ -719,7 +739,7 @@ export function AgentsHome({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
         <AgentThreadHeader
-          title={optimisticDraftThread?.title}
+          startingThread={startingThread ?? undefined}
           target={runTarget === "local" ? "This Mac" : "Cloud"}
           panelCollapsed={panelCollapsed}
           visibility={
@@ -736,13 +756,12 @@ export function AgentsHome({
             inert={traceFlight.playing}
             className={cn(
               "flex min-h-0 flex-1 flex-col",
-              !optimisticDraftThread &&
-                "justify-center overflow-y-auto py-space-6"
+              !startingThread && "justify-center overflow-y-auto py-space-6"
             )}
           >
-            {optimisticDraftThread ? (
+            {startingThread ? (
               <Messages
-                messages={optimisticDraftThread.messages}
+                messages={startingMessages}
                 isStreaming
                 contentWidthClass="max-w-3xl"
               />
@@ -762,7 +781,7 @@ export function AgentsHome({
                     : undefined
                 }
                 activeRun={
-                  optimisticDraftThread
+                  startingThread
                     ? { threadId: pendingThreadId ?? "", running: true }
                     : undefined
                 }
@@ -770,9 +789,9 @@ export function AgentsHome({
                 compact
                 placeholder="Describe a task or ask a question…"
                 onSubmit={handleSubmit}
-                onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
+                onStop={startingThread ? stopPendingSubmit : undefined}
                 disabled={Boolean(submittedDraft)}
-                busy={Boolean(optimisticDraftThread)}
+                busy={Boolean(startingThread)}
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
@@ -786,11 +805,11 @@ export function AgentsHome({
                   profileQuery.isLoading ||
                   reposQuery.isLoading
                 }
-                onRepoChange={optimisticDraftThread ? undefined : selectRepo}
+                onRepoChange={startingThread ? undefined : selectRepo}
                 gitHubLinkUser={gitHubLinkUser}
-                runTarget={runTarget}
+                runTarget={composerRunTarget}
                 onRunTargetChange={
-                  !optimisticDraftThread && isDesktop && cloudEnabled
+                  !startingThread && isDesktop && cloudEnabled
                     ? handleRunTargetChange
                     : undefined
                 }
@@ -800,7 +819,7 @@ export function AgentsHome({
                 localRepoBranches={localRepoBranches}
                 onSelectLocalRepo={handleSelectLocalRepo}
                 onClearLocalRepo={
-                  !optimisticDraftThread && taskWorkspaces
+                  !startingThread && taskWorkspaces
                     ? () => {
                         window.localStorage.removeItem(LAST_LOCAL_REPO_KEY)
                         window.localStorage.removeItem(
@@ -827,15 +846,13 @@ export function AgentsHome({
                 projects={projects}
                 selectedProjectId={selectedProject?.id ?? null}
                 onProjectChange={
-                  !optimisticDraftThread && cloudEnabled
-                    ? selectProject
-                    : undefined
+                  !startingThread && cloudEnabled ? selectProject : undefined
                 }
                 onCreateProject={setCreatingProject}
                 workspaceOptions={workspaces}
                 selectedWorkspace={selectedWorkspace}
                 onWorkspaceChange={
-                  !optimisticDraftThread && runTarget === "cloud"
+                  !startingThread && runTarget === "cloud"
                     ? selectWorkspace
                     : undefined
                 }

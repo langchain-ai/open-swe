@@ -861,7 +861,6 @@ export function AgentThreadView({
         {!embedded && (
           <AgentThreadHeader
             key={thread.id}
-            title={thread.title}
             onRename={(title) =>
               renameThread.mutateAsync({ threadId: thread.id, title })
             }
