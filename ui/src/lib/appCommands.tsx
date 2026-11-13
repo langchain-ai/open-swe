@@ -12,6 +12,7 @@ import type { DesktopCommandId } from "@/desktop"
 
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
+import { copyPageLink } from "@/lib/copyText"
 import { useSession } from "@/lib/session"
 import {
   eventMatchesShortcut,
@@ -136,6 +137,16 @@ export function AppCommandProvider({
         aliases: ["pull requests", "prs"],
         group: "Navigation",
         run: () => void navigate({ to: "/agents/reviews" }),
+      },
+      {
+        id: "copy-page-link",
+        label: "Copy link to this page",
+        aliases: ["share", "url", "permalink", "web link"],
+        shortcuts: ["mod+shift+l"],
+        group: "General",
+        run: copyPageLink,
+        desktopId: "copy-page-link",
+        desktopShortcuts: ["mod+shift+l"],
       },
       {
         id: "toggle-theme",

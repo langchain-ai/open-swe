@@ -4,7 +4,7 @@ import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import type { ReviewFinding } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { copyText } from "@/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"

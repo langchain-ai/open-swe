@@ -12,6 +12,7 @@ export type DesktopCommandId =
   | "open-settings"
   | "show-keyboard-shortcuts"
   | "toggle-sidebar"
+  | "copy-page-link"
 
 export interface DesktopProject {
   cwd: string

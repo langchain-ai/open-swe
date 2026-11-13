@@ -5,6 +5,7 @@ const desktopCommandIds = new Set([
   "open-settings",
   "show-keyboard-shortcuts",
   "toggle-sidebar",
+  "copy-page-link",
 ]);
 
 function isDesktopCommandId(value) {
