@@ -196,9 +196,6 @@ describe("PlanReview", () => {
   it("keeps selection comments separate and dismisses them on Cancel, Escape, or an outside click", async () => {
     mocks.getPlanComments.mockResolvedValue([comment])
     render(<PlanReview plan={plan} embedded />)
-    expect(
-      screen.getByRole("heading", { name: "Viewing as Alice" })
-    ).toBeTruthy()
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Comments (1)" })).toBeTruthy()
     )

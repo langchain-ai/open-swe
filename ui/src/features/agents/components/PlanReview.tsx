@@ -427,26 +427,15 @@ export function PlanReview({
           )}
         >
           <div data-testid="plan-summary" className="min-w-0">
-            {embedded ? (
-              <Text as="h1" variant="sm" color="primary" className="truncate">
-                Viewing as {plan.user.name}
-              </Text>
-            ) : (
-              <>
-                <Text
-                  as="h1"
-                  variant="sm"
-                  weight="semibold"
-                  color="primary"
-                  className="truncate"
-                >
-                  Artifact
-                </Text>
-                <p className="text-xs text-tertiary">
-                  Viewing as {plan.user.name}
-                </p>
-              </>
-            )}
+            <Text
+              as="h1"
+              variant="sm"
+              weight={embedded ? undefined : "semibold"}
+              color="primary"
+              className="truncate"
+            >
+              Artifact
+            </Text>
           </div>
           <div
             data-testid="plan-actions"
