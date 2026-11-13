@@ -7,6 +7,7 @@ from typing import Any, Final, Literal, Self
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
+import httpx2
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -42,12 +43,11 @@ _SECRET_QUERY_SUFFIXES = (
 
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}")
 
-type MCPScope = Literal["instance", "workspace", "user", "managed"]
+type MCPScope = Literal["workspace", "user", "managed"]
 
 # Whose credential a tier's server reads from its MDA connection: the deployment's for
 # the servers every run gets, the person's own for theirs.
 CONNECTION_OWNERS: Final[Mapping[MCPScope, Literal["agent", "user"]]] = {
-    "instance": "agent",
     "workspace": "agent",
     "user": "user",
 }
@@ -229,6 +229,14 @@ class MCPConnection(MCPConnectionPublic):
     def allows_tool(self, name: str) -> bool:
         return name in self.allowed_tools
 
+    async def check_response(self, response: httpx2.Response) -> None:
+        """Raise for a response the MCP transport would reduce to a bare protocol error."""
+        return
+
+    def unusable_tools(self, meta: object) -> set[str]:
+        """Tools a listing names but marks, in its ``_meta``, as unusable for the caller."""
+        return set()
+
     @property
     def offers_tools(self) -> bool:
         return bool(self.allowed_tools)
@@ -267,7 +275,15 @@ def _connection_backed(
 async def prepare_connection(
     update: MCPConnectionUpdate, previous: MCPConnection | None = None, *, scope: MCPScope
 ) -> MCPConnection:
-    """Resolve a draft's credentials using only the previous record in the same scope."""
+    """Resolve a draft's credentials using only the previous record in the same scope.
+
+    With LangSmith Managed Tools configured, a person adds new servers of their own there;
+    Robin keeps only the personal connections it already stores, until they move to LMT.
+    """
+    from openswe.dashboard.langsmith_oauth import langsmith_oauth_configured
+
+    if previous is None and scope == "user" and langsmith_oauth_configured():
+        raise ValueError("Add new MCP servers of your own in LangSmith Managed Tools")
     if previous and previous.name != update.name:
         raise ValueError("Connection name cannot change while reusing saved credentials")
     fields = update.model_fields_set

@@ -253,7 +253,7 @@ describe("product analytics", () => {
         projectsApi.setMember("private-project", "private email", "member")
       ).rejects.toMatchObject({ status: 403 })
       await expect(
-        api.disconnectManagedTool("private-gateway", "private-service")
+        api.disconnectManagedTool("private-service")
       ).rejects.toMatchObject({ status: 0 })
       await agentsApi.triggerSchedule("private-automation")
       expect(client.track.mock.calls).toHaveLength(8)

@@ -52,7 +52,7 @@ function editableValues(connection?: MCPConnectionUpdate): string {
   ])
 }
 
-export type MCPScope = "instance" | "workspace" | "user"
+export type MCPScope = "workspace" | "user"
 
 type MCPScopeConfig = {
   description: string
@@ -66,19 +66,9 @@ type MCPScopeConfig = {
 
 function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
   const scopes: Record<MCPScope, MCPScopeConfig> = {
-    instance: {
-      description:
-        "Connect remote MCP servers that every environment inherits. An environment or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-      queryKey: ["instanceMCPs"],
-      list: api.getInstanceMCPs,
-      save: api.saveInstanceMCP,
-      remove: api.deleteInstanceMCP,
-      revealHeaders: api.revealInstanceMCPHeaders,
-      discover: api.discoverInstanceMCP,
-    },
     workspace: {
       description:
-        "Connect remote MCP servers for this environment's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers for this environment's runs. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["workspaceMCPs", workspace],
       list: () => api.getWorkspaceMCPs(workspace),
       save: (body) => api.saveWorkspaceMCP(workspace, body),
@@ -103,21 +93,18 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
 export function MCPConnectionsSection({
   scope,
   workspace = DEFAULT_WORKSPACE_SLUG,
+  addInLangSmith = false,
 }: {
   scope: MCPScope
   /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
   workspace?: string
+  /** New servers are added through LangSmith Managed Tools, so only stored ones show here. */
+  addInLangSmith?: boolean
 }) {
   const { description, queryKey, ...client } = scopeConfig(scope, workspace)
+  const lmtOnly = addInLangSmith
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
-  // What this workspace inherits; shown so an admin can see what a same-named
-  // connection here would replace.
-  const inherited = useQuery({
-    queryKey: ["instanceMCPs"],
-    queryFn: api.getInstanceMCPs,
-    enabled: scope === "workspace",
-  })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [headers, setHeaders] = useState<Header[]>([])
   const [replaceHeaders, setReplaceHeaders] = useState(false)
@@ -706,8 +693,18 @@ export function MCPConnectionsSection({
     </form>
   ) : null
 
+  if (lmtOnly && connections.isSuccess && connections.data.length === 0) {
+    return null
+  }
   return (
-    <SettingsSection title="MCP Servers" description={description}>
+    <SettingsSection
+      title="MCP Servers"
+      description={
+        lmtOnly
+          ? "MCP servers Robin stored for you before Managed Tools. They still load in your private threads; add new servers under Managed Tools."
+          : description
+      }
+    >
       <div className="space-y-space-4 p-space-4">
         {connections.isLoading && (
           <p className="text-sm text-secondary">Loading connections…</p>
@@ -717,49 +714,6 @@ export function MCPConnectionsSection({
             {connections.error.message}
           </p>
         )}
-        {scope === "workspace" &&
-          inherited.data &&
-          inherited.data.length > 0 && (
-            <section
-              aria-label="Inherited instance MCP connections"
-              className="rounded-md border border-dashed border-default"
-            >
-              <p className="px-space-3 pt-space-3 text-xs font-medium text-secondary">
-                Inherited from the instance
-              </p>
-              <ul className="divide-y divide-default">
-                {inherited.data.map((connection) => {
-                  const replaced = connections.data?.some(
-                    (own) => own.name === connection.name
-                  )
-                  return (
-                    <li
-                      key={connection.name}
-                      className="flex flex-wrap items-center justify-between gap-space-3 p-space-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm text-primary">
-                          {connection.name}{" "}
-                          <span className="text-secondary">
-                            · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
-                            {connection.allowed_tools.length} tools
-                          </span>
-                        </p>
-                        <p className="text-xs break-all text-secondary">
-                          {connection.url}
-                        </p>
-                      </div>
-                      <span className="text-xs text-secondary">
-                        {replaced
-                          ? "Replaced by this environment's connection"
-                          : "Edit under Admin"}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-            </section>
-          )}
         {connections.data?.map((connection) => {
           const isEditing = draft?.existing && draft.name === connection.name
           return (
@@ -870,7 +824,7 @@ export function MCPConnectionsSection({
             }}
             onCancel={() => setImporting(false)}
           />
-        ) : !draft ? (
+        ) : lmtOnly && !draft ? null : !draft ? (
           <div className="flex gap-space-2">
             <Button
               size="xs"

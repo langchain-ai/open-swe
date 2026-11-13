@@ -195,6 +195,24 @@ def test_login_hands_every_sign_in_to_langsmith(monkeypatch) -> None:
     assert parse_qs(location.query) == {key: [value] for key, value in params.items()}
 
 
+@pytest.mark.parametrize("langsmith", [True, False])
+def test_local_dev_signs_in_as_the_gh_user_only_without_langsmith(monkeypatch, langsmith) -> None:
+    """Signing in as the gh CLI's user where LangSmith works would replace a person's
+    LangSmith session with a different person, sending them back to sign in again."""
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("LANGSMITH_LANGGRAPH_API_VARIANT", "local_dev")
+    monkeypatch.setattr(auth_routes, "langsmith_oauth_configured", lambda: langsmith)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        response = client.get("/dashboard/api/auth/login", follow_redirects=False)
+
+    assert urlparse(response.headers["location"]).path == (
+        "/dashboard/api/auth/langsmith/login" if langsmith else "/dashboard/api/auth/dev-login"
+    )
+
+
 _VERIFIER = "desktop-verifier"
 _CHALLENGE = (
     base64.urlsafe_b64encode(hashlib.sha256(_VERIFIER.encode()).digest()).decode().rstrip("=")

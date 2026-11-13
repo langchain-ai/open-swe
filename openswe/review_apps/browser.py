@@ -3,8 +3,8 @@
 It opens pages the pull request's author controls, so MDA keeps it off the review's
 sandbox and installs sign-in sessions only for the instance's review browser domains. When
 the instance names a session tool, as ``<connection>/<tool>``, the review gets that single
-tool of that instance or workspace MCP connection to mint those sessions; never a personal
-connection, or any other tool of that server.
+tool of that workspace MCP connection to mint those sessions; never a personal connection,
+or any other tool of that server.
 
 Both are instance settings an instance admin sets under Defaults, which no workspace
 overrides: they decide where reviews sign in, and as whom.
@@ -17,7 +17,6 @@ from runtime_api.catalog import BrowserSpec, McpServerSpec
 
 from openswe.dashboard.workspace_settings_cache import cached_instance_settings
 from openswe.mcp import load_mcp_tools
-from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -40,7 +39,7 @@ class ReviewBrowser:
 
     @classmethod
     async def sign_in(cls, workspace: str | None) -> tuple[list[BaseTool], list[McpServerSpec]]:
-        """The session tool alone, from its instance or workspace connection.
+        """The session tool alone, from the workspace's connection.
 
         A tool the backend serves comes back as a tool; one on a server the run connects to
         itself, as that server narrowed to the tool.
@@ -50,9 +49,7 @@ class ReviewBrowser:
             return [], []
         connection, tool = named
         loaded = await load_mcp_tools(
-            instance_mcp_source(),
-            workspace_mcp_source(workspace or DEFAULT_WORKSPACE_SLUG),
-            connection_name=connection,
+            workspace_mcp_source(workspace or DEFAULT_WORKSPACE_SLUG), connection_name=connection
         )
         tools = [found for found in loaded if (found.metadata or {}).get("mcp_tool_name") == tool]
         return tools, cls._narrowed(loaded.runtime_servers, tool)

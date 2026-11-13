@@ -1,4 +1,4 @@
-"""Dashboard API for instance-wide, workspace, and per-user MCP connections."""
+"""Dashboard API for workspace and per-user MCP connections, and managed tools."""
 
 import logging
 from typing import Any
@@ -11,23 +11,11 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.oauth import frontend_base_url
 from openswe.mcp.cards import ConnectCard, connect_service
-from openswe.mcp.instance import (
-    delete_instance_mcp,
-    discover_instance_mcp,
-    get_instance_mcp,
-    list_instance_mcps,
-    save_instance_mcp,
-)
 from openswe.mcp.managed import (
-    Gateway,
-    GatewayStatus,
     LangSmithNotConnected,
+    ManagedServer,
     ManagedToolsError,
-    disconnect_service,
-    gateway_id,
-    gateway_status,
-    instance_gateway,
-    list_gateways,
+    PersonalTools,
     managed_tools_configured,
 )
 from openswe.mcp.models import (
@@ -72,51 +60,6 @@ def _normalized_workspace(raw: str) -> str:
         return slugify(raw)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-
-
-instance_mcp_router = APIRouter(route_class=MCPRoute)
-
-
-@instance_mcp_router.get("/mcps", response_model=list[MCPConnectionPublic])
-async def api_list_instance_mcps(_admin: dict[str, Any] = ADMIN_DEP) -> list[dict[str, Any]]:
-    return await list_instance_mcps()
-
-
-@instance_mcp_router.put("/mcps/{name}", response_model=MCPConnectionPublic)
-@audit_endpoint
-async def api_save_instance_mcp(
-    name: str, update: MCPConnectionUpdate, _admin: dict[str, Any] = ADMIN_DEP
-) -> dict[str, Any]:
-    try:
-        return await save_instance_mcp(name, update)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-
-
-@instance_mcp_router.delete("/mcps/{name}", status_code=204)
-@audit_endpoint
-async def api_delete_instance_mcp(name: str, _admin: dict[str, Any] = ADMIN_DEP) -> None:
-    await delete_instance_mcp(name)
-
-
-@instance_mcp_router.post("/mcps/{name}/headers/reveal")
-@audit_endpoint
-async def api_reveal_instance_mcp_headers(
-    name: str, _admin: dict[str, Any] = ADMIN_DEP
-) -> JSONResponse:
-    return _reveal_mcp_headers(await get_instance_mcp(name))
-
-
-@instance_mcp_router.post("/mcps/{name}/discover", response_model=list[MCPToolDescription])
-async def api_discover_instance_mcp(
-    name: str,
-    update: MCPConnectionUpdate | None = None,
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> list[dict[str, str]]:
-    try:
-        return await discover_instance_mcp(name, update)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
 
 
 workspace_mcp_router = APIRouter(route_class=MCPRoute)
@@ -225,11 +168,11 @@ async def api_discover_my_mcp(
 
 
 class ManagedToolsView(BaseModel):
-    """The instance's managed tools gateway (none or one), and what the caller still needs."""
+    """The caller's own LMT services: those they connected, and those they could."""
 
     configured: bool
     langsmith_connected: bool = False
-    gateways: list[GatewayStatus]
+    servers: list[ManagedServer] = []
 
 
 class ManagedConnectResponse(BaseModel):
@@ -240,59 +183,41 @@ class ManagedConnectResponse(BaseModel):
 managed_mcp_router = APIRouter(route_class=MCPRoute)
 
 
-@managed_mcp_router.get("/managed-tools/gateways", response_model=list[Gateway])
-async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> list[Gateway]:
-    """Gateways an admin can pick for the instance, read with the admin's own LangSmith login."""
-    try:
-        return await list_gateways(admin["sub"])
-    except LangSmithNotConnected as exc:
-        raise HTTPException(409, str(exc)) from None
-    except ManagedToolsError as exc:
-        raise HTTPException(502, str(exc)) from None
+def _managed_error(exc: ManagedToolsError) -> HTTPException:
+    return HTTPException(409 if isinstance(exc, LangSmithNotConnected) else 502, str(exc))
 
 
 @managed_mcp_router.get("/my-managed-tools", response_model=ManagedToolsView)
 async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> ManagedToolsView:
     if not managed_tools_configured():
-        return ManagedToolsView(configured=False, gateways=[])
-    statuses: list[GatewayStatus] = []
-    if gateway := await instance_gateway():
-        try:
-            statuses.append(await gateway_status(session["sub"], gateway, with_connected=True))
-        except LangSmithNotConnected:
-            return ManagedToolsView(configured=True, gateways=[])
-        except ManagedToolsError:
-            logger.warning(
-                "Managed tools gateway status unavailable",
-                extra={"gateway": gateway},
-                exc_info=True,
-            )
-    return ManagedToolsView(configured=True, langsmith_connected=True, gateways=statuses)
+        return ManagedToolsView(configured=False)
+    try:
+        servers = await PersonalTools(session["sub"]).kit_servers()
+    except LangSmithNotConnected:
+        return ManagedToolsView(configured=True)
+    except ManagedToolsError as exc:
+        raise _managed_error(exc) from None
+    return ManagedToolsView(
+        configured=True,
+        langsmith_connected=True,
+        servers=[server for server in servers if server.enabled],
+    )
 
 
-async def _instance_gateway(gateway: str) -> str:
-    """``gateway``, refused unless it is the tool kit this instance uses."""
-    configured = await instance_gateway()
-    if configured is None or gateway_id(gateway) != gateway_id(configured):
-        raise HTTPException(404, "This Robin instance does not use this tool kit")
-    return gateway
-
-
-async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
+async def _card(thread_id: str, card_id: str, login: str) -> ConnectCard:
     """The connect card the agent offered this person in their thread."""
-    card = await ConnectCard.load(thread_id, card_id, login, gateway)
+    card = await ConnectCard.load(thread_id, card_id, login)
     if card is None:
         raise HTTPException(404, "Unknown connect card")
     return card
 
 
 @managed_mcp_router.post(
-    "/my-managed-tools/{gateway}/connect/{slug}", response_model=ManagedConnectResponse
+    "/my-managed-tools/connect/{server}", response_model=ManagedConnectResponse
 )
 @audit_endpoint
 async def api_connect_managed_tool(
-    gateway: str,
-    slug: str,
+    server: str,
     thread_id: str | None = None,
     card: str | None = None,
     session: dict[str, Any] = SESSION_DEP,
@@ -300,47 +225,54 @@ async def api_connect_managed_tool(
     """A consent link for one service; from a thread's card, the thread resumes once connected."""
     try:
         if thread_id and card:
-            link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
+            link = await (await _card(thread_id, card, session["sub"])).connect(server)
         else:
-            link = await connect_service(session["sub"], await _instance_gateway(gateway), slug)
+            link = await connect_service(session["sub"], server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
 
 
-@managed_mcp_router.delete("/my-managed-tools/{gateway}/services/{service}", status_code=204)
+@managed_mcp_router.delete("/my-managed-tools/services/{server}", status_code=204)
 @audit_endpoint
-async def api_disconnect_managed_tool(
-    gateway: str, service: str, session: dict[str, Any] = SESSION_DEP
-) -> None:
-    """Remove the caller's own LangSmith connection to one service in the tool kit."""
+async def api_disconnect_managed_tool(server: str, session: dict[str, Any] = SESSION_DEP) -> None:
+    """Remove the caller's own LangSmith connection to one service."""
     try:
-        await disconnect_service(session["sub"], await _instance_gateway(gateway), service)
+        await PersonalTools(session["sub"]).disconnect(server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
 
 
-@managed_mcp_router.get("/my-managed-tools/{gateway}/connect/{slug}")
+@managed_mcp_router.get("/my-managed-tools/connect/{server}")
 async def connect_managed_tool_from_card(
-    gateway: str,
-    slug: str,
-    thread_id: str,
-    card: str,
+    server: str,
+    thread_id: str | None = None,
+    card: str | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> RedirectResponse:
-    """A Slack card button: mint the consent link here, for the signed-in owner only."""
+    """A Connect link, from a thread's card (on the web or in Slack) or from Settings: mint
+    the consent link here, for the signed-in person only, and send them on to it. A plain
+    link works in every browser, unlike a script steering a tab it opened."""
     try:
-        offered = await _card(thread_id, card, session["sub"], gateway)
-        link = await offered.connect(slug)
+        if thread_id and card:
+            offered = await _card(thread_id, card, session["sub"])
+            link = await offered.connect(server)
+        else:
+            offered = None
+            link = await connect_service(session["sub"], server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
-    # Built from the stored card, so no request value chooses where this redirects.
-    target = link.url if link else dashboard_thread_url(offered.thread_id) or frontend_base_url()
+    # Built from stored state, so no request value chooses where this redirects.
+    if link is not None:
+        target = link.url
+    elif offered is not None:
+        target = dashboard_thread_url(offered.thread_id) or frontend_base_url()
+    else:
+        target = frontend_base_url() + "/my-settings/connections"
     return RedirectResponse(target, status_code=302)
 
 
 router = APIRouter()
-router.include_router(instance_mcp_router)
 router.include_router(workspace_mcp_router)
 router.include_router(user_mcp_router)
 router.include_router(managed_mcp_router)

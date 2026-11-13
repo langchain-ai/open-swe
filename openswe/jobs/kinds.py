@@ -48,6 +48,8 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER, JobWorker
+from openswe.mcp.cards import CONSENT_JOB as MANAGED_TOOLS_CONSENT
+from openswe.mcp.cards import ConsentWait
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
@@ -108,6 +110,7 @@ WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
 WORKER.register(INCIDENT_JOIN)(IncidentChannel.join)
 WORKER.register(INCIDENT_INVESTIGATE)(IncidentChannel.investigate)
+WORKER.register(MANAGED_TOOLS_CONSENT)(ConsentWait.run)
 
 
 def _text(job: Job, key: str) -> str | None:

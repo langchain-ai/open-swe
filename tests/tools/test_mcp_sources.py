@@ -33,7 +33,6 @@ def source(namespace, records):
         return records.get(name)
 
     scopes: dict[str, MCPScope] = {
-        "instance_mcps": "instance",
         "workspace_mcps": "workspace",
         "user_mcps": "user",
     }
@@ -82,13 +81,9 @@ async def test_sources_combine_distinct_connections_and_replace_matching_names(r
 async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before(
     remote, personal_override
 ):
-    instance = source(
-        ("instance_mcps",),
-        {"linear": record(), "docs": record("docs"), "incident": record("incident")},
-    )
     workspace = source(
         ("workspace_mcps", "oss"),
-        {"linear": record(url="https://oss-linear.example/mcp")},
+        {"linear": record(), "docs": record("docs"), "incident": record("incident")},
     )
     user = source(
         ("user_mcps", "alice"),
@@ -101,24 +96,24 @@ async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before
             ),
         },
     )
-    tools = await runtime.load_mcp_tools(instance, workspace, user)
+    tools = await runtime.load_mcp_tools(workspace, user)
     assert sorted([(await tool.ainvoke({}))[0]["text"] for tool in tools]) == sorted(
         [
             "https://personal-docs.example/mcp",
             "https://incident.example/mcp",
             "https://personal-linear.example/mcp"
             if personal_override
-            else "https://oss-linear.example/mcp",
+            else "https://linear.example/mcp",
         ]
     )
     catalog = ToolSurface(tools={tool.name: tool for tool in tools}).catalog()
     assert [entry.model_dump()["mcp_provenance"] for entry in catalog] == [
-        {"connection_name": "docs", "scope": "user", "overridden_scopes": ["instance"]},
-        {"connection_name": "incident", "scope": "instance", "overridden_scopes": []},
+        {"connection_name": "docs", "scope": "user", "overridden_scopes": ["workspace"]},
+        {"connection_name": "incident", "scope": "workspace", "overridden_scopes": []},
         {
             "connection_name": "linear",
             "scope": "user" if personal_override else "workspace",
-            "overridden_scopes": ["instance", "workspace"] if personal_override else ["instance"],
+            "overridden_scopes": ["workspace"] if personal_override else [],
         },
     ]
 

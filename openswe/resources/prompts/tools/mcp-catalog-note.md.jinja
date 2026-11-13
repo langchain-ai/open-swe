@@ -1,3 +1,7 @@
-Managed tool catalog unavailable; discovery failed (this is not an empty catalog):
+{% if failures %}Managed tool catalog unavailable; discovery failed (this is not an empty catalog):
 {% for reason in failures %}- {{ reason }}
-{% endfor %}
+{% endfor %}{% endif %}{% if connectable %}{% if failures %}
+{% endif %}LangSmith Managed Tools services the requester has not connected yet: {{ connectable | join(", ") }}.
+Their tools may be missing from `search_tools`, and those listed fail until connected.
+When the requester asks for one of these services, call `connect_managed_tools` with its name instead of saying you lack access.
+{% endif %}

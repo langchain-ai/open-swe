@@ -1162,7 +1162,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             search = integration("mcp_search")
             search.metadata = {
                 "mcp_provenance": MCPToolProvenance(
-                    connection_name="lmt", scope="managed", overridden_scopes=["instance", "user"]
+                    connection_name="lmt", scope="managed", overridden_scopes=["workspace", "user"]
                 ),
                 "headers": {"Authorization": "private-token"},
                 "namespace": ["managed_tools", "private-owner", "private-gateway"],
@@ -1269,7 +1269,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     expected = {
         "connection_name": "lmt",
         "scope": "managed",
-        "overridden_scopes": ["instance", "user"],
+        "overridden_scopes": ["workspace", "user"],
     }
     assert json.dumps(expected, separators=(",", ":")) in match.description
     looked_up = ResolvedTool.model_validate(

@@ -71,6 +71,8 @@ class AgentTurnSettings(BaseModel):
     bridge_client: BridgeClient | None = None
     # Why managed tool discovery failed while planning, which the prompt says.
     tool_discovery_failures: list[str] = []
+    # Managed tools services a private thread's owner has yet to connect, which the prompt names.
+    connectable_managed_services: list[str] = []
     # A task worker's coordinator, whose sandbox the worker may use only once the backend has
     # checked it may, and whose GitHub token its runs keep fresh.
     coordinator_thread_id: str | None = None

@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { SettingsPage } from "@/components/AppShell"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { FeaturedAppsSection } from "@/features/settings/components/FeaturedAppsSettings"
-import { ManagedToolsGatewaySection } from "@/features/settings/components/ManagedToolsGatewaySection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import { ShadowReviewSection } from "@/features/settings/components/ShadowReviewSection"
 import {
@@ -55,7 +54,6 @@ function AdminDefaultsPage() {
           (model) => model.can_be_default !== false
         )}
       />
-      <ManagedToolsGatewaySection />
       <FeaturedAppsSection />
     </SettingsPage>
   )

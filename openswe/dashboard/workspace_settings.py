@@ -139,9 +139,6 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
-    # The LangSmith Managed Tools gateway private threads load with the owner's own
-    # LangSmith connection; unset means none. Only the instance record's value is read.
-    managed_tools_gateway_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -236,16 +233,6 @@ class WorkspaceSettingsUpdate(BaseModel):
         if not _SESSION_TOOL.fullmatch(tool):
             raise ValueError("the session tool is <connection>/<tool>, such as homebase/sign_in")
         return tool
-
-    @field_validator("managed_tools_gateway_id", mode="before")
-    @classmethod
-    def _gateway_id(cls, v: object) -> str | None:
-        if v is None or (isinstance(v, str) and not v.strip()):
-            return None
-        try:
-            return str(UUID(str(v).strip()))
-        except ValueError:
-            raise ValueError("managed tools gateway must be a gateway id") from None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -396,7 +383,6 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
         "slack_follow_up_suggestions": False,
-        "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -885,12 +871,6 @@ class WorkspaceSettings(Mapping[str, Any]):
     def human_review_auto_assign_minutes(self) -> int:
         value = self.get("human_review_auto_assign_minutes")
         return value if type(value) is int and value > 0 else 120
-
-    @property
-    def managed_tools_gateway_id(self) -> str | None:
-        """The LangSmith Managed Tools gateway this workspace's private threads load."""
-        value = self.get("managed_tools_gateway_id")
-        return value if isinstance(value, str) and value else None
 
     @property
     def review_browser_domains(self) -> list[str]:

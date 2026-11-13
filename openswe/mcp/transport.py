@@ -12,6 +12,15 @@ class MCPDiscoveryError(ValueError):
     """A failure whose message we wrote, so it is safe to show the person configuring the MCP."""
 
 
+class MCPCredentialMissing(Exception):
+    """A managed tools route refused a call for a credential its caller has not connected;
+    ``admin_only`` when only a workspace admin can connect it (the caller is a profile)."""
+
+    def __init__(self, *, admin_only: bool) -> None:
+        super().__init__("Managed tools credential missing")
+        self.admin_only = admin_only
+
+
 class MCPTransport(httpx2.AsyncBaseTransport):
     def __init__(self, url: str) -> None:
         parsed = urlsplit(url)

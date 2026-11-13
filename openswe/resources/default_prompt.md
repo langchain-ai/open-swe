@@ -29,7 +29,7 @@ An instance admin adds a listed app to everyone's sidebar under **Apps for every
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
-- **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, managed tools, and personal MCP servers.
+- **Settings → Connections** (`/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack and LangSmith accounts, the person's accounts for the services in Robin's personal LangSmith Managed Tools kit (connect or disconnect; used in their private threads; other threads use Robin's bot kit, with accounts a LangSmith workspace admin connected for the bot; services are added to either kit in LangSmith), and the personal MCP servers Robin stored before, which stay editable.
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.

@@ -323,14 +323,10 @@ export class ProductAnalytics {
         ["PATCH", /^\/schedules\/[^/]+$/, "automation_update"],
         ["DELETE", /^\/schedules\/[^/]+$/, "automation_delete"],
         ["POST", /^\/schedules\/[^/]+\/trigger$/, "automation_run"],
-        [
-          "POST",
-          /^\/my-managed-tools\/[^/]+\/connect\/[^/]+$/,
-          "integration_connect",
-        ],
+        ["POST", /^\/my-managed-tools\/connect\/[^/]+$/, "integration_connect"],
         [
           "DELETE",
-          /^\/my-managed-tools\/[^/]+\/services\/[^/]+$/,
+          /^\/my-managed-tools\/services\/[^/]+$/,
           "integration_disconnect",
         ],
         ["PUT", /^\/(?:my-mcps|mcps)\/[^/]+$/, "mcp_save"],

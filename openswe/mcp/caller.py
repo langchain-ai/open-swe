@@ -104,7 +104,6 @@ class ToolCaller:
         }
 
     async def tools(self) -> dict[str, tuple[BaseTool, Access]]:
-        from openswe.mcp.instance import instance_mcp_source
         from openswe.mcp.runtime import load_mcp_tools
         from openswe.mcp.user import user_mcp_source
         from openswe.mcp.workspace import workspace_mcp_source
@@ -117,7 +116,6 @@ class ToolCaller:
             if access == "session" or admin
         }
         sources = (
-            instance_mcp_source(),
             workspace_mcp_source(DEFAULT_WORKSPACE_SLUG),
             user_mcp_source(self.login),
         )

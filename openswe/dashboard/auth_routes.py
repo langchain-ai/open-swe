@@ -18,6 +18,7 @@ from openswe.dashboard.langsmith_login import (
     LANGSMITH_STATE_COOKIE_PATH,
     LangSmithLogin,
 )
+from openswe.dashboard.langsmith_oauth import langsmith_oauth_configured
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
     GITHUB_CALLBACK_PATH,
@@ -76,7 +77,11 @@ GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 @router.get("/auth/login")
 async def auth_login(request: Request, redirect_to: str | None = None) -> RedirectResponse:
     """Everyone signs in with LangSmith; locally without it, as the `gh` CLI's user."""
-    if dev_login_enabled() and not request.query_params.get("desktop"):
+    if (
+        dev_login_enabled()
+        and not langsmith_oauth_configured()
+        and not request.query_params.get("desktop")
+    ):
         return RedirectResponse(
             "/dashboard/api/auth/dev-login?"
             + urlencode({"redirect_to": sanitize_redirect_to(redirect_to)}),

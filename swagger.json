@@ -1966,35 +1966,6 @@
         "title": "CommitBody",
         "type": "object"
       },
-      "ConnectedService": {
-        "description": "A service in the gateway this person has connected.",
-        "properties": {
-          "disconnectable": {
-            "default": false,
-            "title": "Disconnectable",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "tool_count": {
-            "title": "Tool Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "tool_count"
-        ],
-        "title": "ConnectedService",
-        "type": "object"
-      },
       "ConnectionRef": {
         "description": "A connection's slug, and whose credential under it the run reads.",
         "properties": {
@@ -2292,6 +2263,7 @@
       },
       "CredentialKind": {
         "enum": [
+          "none",
           "oauth",
           "secret"
         ],
@@ -3082,77 +3054,6 @@
           "intent"
         ],
         "title": "FixUpIntent",
-        "type": "object"
-      },
-      "Gateway": {
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "tool_count": {
-            "title": "Tool Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "tool_count"
-        ],
-        "title": "Gateway",
-        "type": "object"
-      },
-      "GatewayStatus": {
-        "description": "What one person sees for a gateway: every service connected, or what is left.",
-        "properties": {
-          "all_required": {
-            "default": false,
-            "title": "All Required",
-            "type": "boolean"
-          },
-          "connected": {
-            "items": {
-              "$ref": "#/components/schemas/ConnectedService"
-            },
-            "title": "Connected",
-            "type": "array"
-          },
-          "gateway": {
-            "$ref": "#/components/schemas/Gateway"
-          },
-          "missing": {
-            "items": {
-              "$ref": "#/components/schemas/MissingCredential"
-            },
-            "title": "Missing",
-            "type": "array"
-          },
-          "ready": {
-            "title": "Ready",
-            "type": "boolean"
-          },
-          "tool_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Count"
-          }
-        },
-        "required": [
-          "gateway",
-          "ready"
-        ],
-        "title": "GatewayStatus",
         "type": "object"
       },
       "GitHubEndpointActor": {
@@ -3965,29 +3866,72 @@
         "title": "ManagedConnectResponse",
         "type": "object"
       },
+      "ManagedServer": {
+        "description": "One LMT server, as one caller sees it.",
+        "properties": {
+          "connected": {
+            "default": false,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "default": false,
+            "title": "Has Credential",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind",
+            "default": "none"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "personal": {
+            "default": false,
+            "title": "Personal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ManagedServer",
+        "type": "object"
+      },
       "ManagedToolsView": {
-        "description": "The instance's managed tools gateway (none or one), and what the caller still needs.",
+        "description": "The caller's own LMT services: those they connected, and those they could.",
         "properties": {
           "configured": {
             "title": "Configured",
             "type": "boolean"
           },
-          "gateways": {
-            "items": {
-              "$ref": "#/components/schemas/GatewayStatus"
-            },
-            "title": "Gateways",
-            "type": "array"
-          },
           "langsmith_connected": {
             "default": false,
             "title": "Langsmith Connected",
             "type": "boolean"
+          },
+          "servers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ManagedServer"
+            },
+            "title": "Servers",
+            "type": "array"
           }
         },
         "required": [
-          "configured",
-          "gateways"
+          "configured"
         ],
         "title": "ManagedToolsView",
         "type": "object"
@@ -4397,29 +4341,6 @@
           "settings"
         ],
         "title": "MintedSyncToken",
-        "type": "object"
-      },
-      "MissingCredential": {
-        "description": "A service in the gateway this person has not connected yet.",
-        "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/CredentialKind"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "slug",
-          "display_name",
-          "kind"
-        ],
-        "title": "MissingCredential",
         "type": "object"
       },
       "MonitorState": {
@@ -11082,17 +11003,6 @@
             ],
             "title": "Implementation Walkthrough Enabled"
           },
-          "managed_tools_gateway_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Managed Tools Gateway Id"
-          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -14098,275 +14008,6 @@
         ]
       }
     },
-    "/dashboard/api/managed-tools/gateways": {
-      "get": {
-        "description": "Gateways an admin can pick for the instance, read with the admin's own LangSmith login.",
-        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Gateway"
-                  },
-                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Managed Tools Gateways",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps": {
-      "get": {
-        "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MCPConnectionPublic"
-                  },
-                  "title": "Response Api List Instance Mcps Dashboard Api Mcps Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Instance Mcps",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps/{name}": {
-      "delete": {
-        "operationId": "api_delete_instance_mcp_dashboard_api_mcps__name__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Delete Instance Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "api_save_instance_mcp_dashboard_api_mcps__name__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MCPConnectionUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MCPConnectionPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Save Instance Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps/{name}/discover": {
-      "post": {
-        "operationId": "api_discover_instance_mcp_dashboard_api_mcps__name__discover_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/MCPConnectionUpdate"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Update"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MCPToolDescription"
-                  },
-                  "title": "Response Api Discover Instance Mcp Dashboard Api Mcps  Name  Discover Post",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Discover Instance Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/mcps/{name}/headers/reveal": {
-      "post": {
-        "operationId": "api_reveal_instance_mcp_headers_dashboard_api_mcps__name__headers_reveal_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Reveal Instance Mcp Headers",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
     "/dashboard/api/me": {
       "get": {
         "operationId": "me_dashboard_api_me_get",
@@ -14959,45 +14600,50 @@
         ]
       }
     },
-    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+    "/dashboard/api/my-managed-tools/connect/{server}": {
       "get": {
-        "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
-        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "description": "A Connect link, from a thread's card (on the web or in Slack) or from Settings: mint\nthe consent link here, for the signed-in person only, and send them on to it. A plain\nlink works in every browser, unlike a script steering a tab it opened.",
+        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools_connect__server__get",
         "parameters": [
           {
             "in": "path",
-            "name": "gateway",
+            "name": "server",
             "required": true,
             "schema": {
-              "title": "Gateway",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
+              "title": "Server",
               "type": "string"
             }
           },
           {
             "in": "query",
             "name": "thread_id",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "Thread Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Id"
             }
           },
           {
             "in": "query",
             "name": "card",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "Card",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Card"
             }
           }
         ],
@@ -15033,23 +14679,14 @@
       },
       "post": {
         "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
-        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools_connect__server__post",
         "parameters": [
           {
             "in": "path",
-            "name": "gateway",
+            "name": "server",
             "required": true,
             "schema": {
-              "title": "Gateway",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
+              "title": "Server",
               "type": "string"
             }
           },
@@ -15119,26 +14756,17 @@
         ]
       }
     },
-    "/dashboard/api/my-managed-tools/{gateway}/services/{service}": {
+    "/dashboard/api/my-managed-tools/services/{server}": {
       "delete": {
-        "description": "Remove the caller's own LangSmith connection to one service in the tool kit.",
-        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools__gateway__services__service__delete",
+        "description": "Remove the caller's own LangSmith connection to one service.",
+        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools_services__server__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "gateway",
+            "name": "server",
             "required": true,
             "schema": {
-              "title": "Gateway",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "service",
-            "required": true,
-            "schema": {
-              "title": "Service",
+              "title": "Server",
               "type": "string"
             }
           }

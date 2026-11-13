@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from mcp.types import CallToolResult, Tool
+from mcp.types import CallToolResult, ListToolsResult, Tool
 from pydantic import JsonValue
 
 from openswe.mcp import runtime
@@ -37,6 +37,9 @@ def fake_mcp_server(
         async def list_tools(self, **_: object) -> list[Tool]:
             assert tools is not None
             return await tools(self.transport)
+
+        async def list_tools_mcp(self, **_: object) -> ListToolsResult:
+            return ListToolsResult(tools=await self.list_tools())
 
         async def call_tool(
             self, name: str, arguments: dict[str, JsonValue], **_: object

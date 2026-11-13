@@ -63,12 +63,12 @@ async def test_invoke_validates_python_parameters(monkeypatch: pytest.MonkeyPatc
 async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    instance = {
+    shared = {
         "linear": MCPConnection(
             name="linear",
-            url="https://instance.example/mcp",
+            url="https://workspace.example/mcp",
             allowed_tools=["search"],
-            revision="instance-revision",
+            revision="workspace-revision",
             updated_at="2026-09-09T00:00:00Z",
         )
     }
@@ -94,12 +94,8 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
         return runtime.MCPSource(namespace, list_connections, get_connection, scope=scope)
 
     monkeypatch.setattr(
-        "openswe.mcp.instance.instance_mcp_source",
-        lambda: source("instance", ("instance_mcps",), instance),
-    )
-    monkeypatch.setattr(
         "openswe.mcp.workspace.workspace_mcp_source",
-        lambda workspace: source("workspace", ("workspace_mcps", workspace), {}),
+        lambda workspace: source("workspace", ("workspace_mcps", workspace), shared),
     )
     monkeypatch.setattr(
         "openswe.mcp.user.user_mcp_source",
@@ -122,7 +118,7 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
     assert name in await bob.tools()
     assert "alice.example" in str((await alice.invoke(name, {})).content)
-    assert "instance.example" in str((await bob.invoke(name, {})).content)
+    assert "workspace.example" in str((await bob.invoke(name, {})).content)
     personal["linear"] = personal["linear"].model_copy(update={"allowed_tools": []})
     with pytest.raises(UnknownTool):
         await alice.invoke(name, {})

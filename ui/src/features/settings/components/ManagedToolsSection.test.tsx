@@ -14,11 +14,17 @@ function setup() {
     defaultOptions: { mutations: { retry: false } },
   })
   const invalidate = vi.spyOn(client, "invalidateQueries")
-  const hook = renderHook(() => useConnectPopup(), {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    ),
-  })
+  const hook = renderHook(
+    () =>
+      useConnectPopup(MANAGED_TOOLS_KEY, (serverId) =>
+        api.connectManagedTool(serverId)
+      ),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    }
+  )
   return { ...hook, invalidate }
 }
 
@@ -37,11 +43,11 @@ it("opens desktop consent in the system browser and refreshes on return", async 
     .mockResolvedValue({ connected: false, url })
   const { result, invalidate } = setup()
 
-  act(() => result.current.start("gateway", "service"))
+  act(() => result.current.start("service"))
   await waitFor(() => expect(openExternal).toHaveBeenCalledWith(url))
-  expect(connect).toHaveBeenCalledWith("gateway", "service", undefined)
+  expect(connect).toHaveBeenCalledWith("service")
   expect(popup).not.toHaveBeenCalled()
-  expect(result.current.connecting).toBe("gateway:service")
+  expect(result.current.connecting).toBe("service")
 
   act(() => window.dispatchEvent(new Event("focus")))
   expect(result.current.connecting).toBeNull()
@@ -63,7 +69,7 @@ it.each([false, new Error("Browser unavailable")])(
     })
     const { result, invalidate } = setup()
 
-    act(() => result.current.start("gateway", "service"))
+    act(() => result.current.start("service"))
     await waitFor(() => expect(openExternal).toHaveBeenCalledWith(url))
     await waitFor(() => expect(result.current.connecting).toBeNull())
     act(() => window.dispatchEvent(new Event("focus")))
@@ -71,18 +77,19 @@ it.each([false, new Error("Browser unavailable")])(
   }
 )
 
-it("keeps the synchronous popup for web consent", async () => {
-  const replace = vi.fn()
-  const popup = { location: { replace }, close: vi.fn(), opener: window }
-  vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window)
-  vi.spyOn(api, "connectManagedTool").mockResolvedValue({
-    connected: false,
-    url,
-  })
-  const { result } = setup()
+it("leaves web consent to the button's link and refreshes on return", () => {
+  // Some browsers lose a tab a script opened before it is sent on, so the web never
+  // opens one: the Connect link itself goes to Robin's connect route.
+  const popup = vi.spyOn(window, "open")
+  const connect = vi.spyOn(api, "connectManagedTool")
+  const { result, invalidate } = setup()
 
-  act(() => result.current.start("gateway", "service"))
-  expect(window.open).toHaveBeenCalledWith("about:blank", "_blank")
-  expect(popup.opener).toBeNull()
-  await waitFor(() => expect(replace).toHaveBeenCalledWith(url))
+  act(() => result.current.start("service"))
+  expect(popup).not.toHaveBeenCalled()
+  expect(connect).not.toHaveBeenCalled()
+  expect(result.current.connecting).toBe("service")
+
+  act(() => window.dispatchEvent(new Event("focus")))
+  expect(result.current.connecting).toBeNull()
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: MANAGED_TOOLS_KEY })
 })

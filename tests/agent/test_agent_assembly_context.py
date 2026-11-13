@@ -69,7 +69,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
             "read_user_settings",
         }
     )
-    mcps.assert_awaited_once_with(None, ANY, None)
+    mcps.assert_awaited_once_with(None, ANY)
 
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,7 +243,7 @@ async def test_a_personal_mda_mcp_server_goes_only_to_a_run_that_acts_for_its_ow
     ) as mcps:
         captured = await _agent_catalog(config)
     # The private thread's owner started it, so the personal tier loads either way.
-    mcps.assert_awaited_once_with("octocat", ANY, ANY)
+    mcps.assert_awaited_once_with("octocat", ANY)
     surface = cast(ToolSurface, captured["surface"])
     expected = ["shared", "own"] if personal else ["shared"]
     assert [server.name for server in surface.mcp_servers] == expected

@@ -10,7 +10,6 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
-from functools import partial
 from time import time
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
@@ -28,7 +27,7 @@ from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
 from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
-from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
+from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
 from openswe.utils.startup_trace import asubphase
 
@@ -44,6 +43,7 @@ _DISCOVERY_SLOTS: weakref.WeakValueDictionary[asyncio.AbstractEventLoop, asyncio
 
 type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
+_MAX_TOOL_PAGES = 50
 _CATALOG_TTL = timedelta(minutes=10)
 _CATALOG_MAX_AGE = timedelta(hours=24)
 _MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
@@ -57,12 +57,14 @@ class MCPTools(list[BaseTool]):
     ) -> None:
         super().__init__(tools)
         self.failures: list[str] = []
+        # Managed tools services the private thread's owner could connect, which the prompt names.
+        self.connectable: list[str] = []
         # Servers whose credential is an MDA connection, which the run reads and connects with.
         self.runtime_servers = list(runtime_servers)
 
     @property
     def catalog_note(self) -> str:
-        return catalog_note(self.failures)
+        return catalog_note(self.failures, self.connectable)
 
     def without(self, tool_name: str) -> MCPTools:
         """These tools less every one named ``tool_name`` on its server, wherever it runs."""
@@ -76,15 +78,19 @@ class MCPTools(list[BaseTool]):
             ),
         )
         kept.failures = list(self.failures)
+        kept.connectable = list(self.connectable)
         return kept
 
 
-def catalog_note(failures: Sequence[str]) -> str:
-    """What the system prompt says of managed tool discovery that ``failures`` broke."""
-    return (
-        "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(failures)))
-        if failures
-        else ""
+def catalog_note(failures: Sequence[str], connectable: Sequence[str] = ()) -> str:
+    """What the system prompt says of managed tool discovery that ``failures`` broke, and of
+    the ``connectable`` services the requester has yet to connect."""
+    if not failures and not connectable:
+        return ""
+    return "\n\n" + prompt(
+        "tools/mcp-catalog-note",
+        failures=list(dict.fromkeys(failures)),
+        connectable=list(dict.fromkeys(connectable)),
     )
 
 
@@ -140,7 +146,17 @@ def _client(
 ) -> Client[SSETransport | StreamableHttpTransport]:
     headers = record.connection_headers()
     auth = connection_auth(record, namespace)
-    factory = partial(mcp_http_client, record.url)
+
+    def factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+        follow_redirects: bool = False,
+    ) -> httpx2.AsyncClient:
+        client = mcp_http_client(record.url, headers, timeout, auth, follow_redirects)
+        client.event_hooks["response"].append(record.check_response)
+        return client
+
     transport: SSETransport | StreamableHttpTransport
     if record.transport == "sse":
         transport = SSETransport(
@@ -158,8 +174,19 @@ def _client(
 
 
 async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+    tools: list[Tool] = []
+    unusable: set[str] = set()
     async with _client(record, namespace) as client:
-        tools = await client.list_tools(cache_mode="bypass")
+        cursor: str | None = None
+        for _ in range(_MAX_TOOL_PAGES):
+            page = await client.list_tools_mcp(cursor=cursor, cache_mode="bypass")
+            tools.extend(page.tools)
+            unusable |= record.unusable_tools(page.meta)
+            if (cursor := page.next_cursor) is None:
+                break
+        else:
+            raise MCPDiscoveryError("MCP server returned too many pages of tools")
+    tools = [tool for tool in tools if tool.name not in unusable]
     if len({tool.name for tool in tools}) != len(tools):
         raise MCPDiscoveryError("MCP server returned duplicate tool names")
     return tools
@@ -196,6 +223,22 @@ def _discovery_error(error: Exception) -> str:
         else:
             unknown.append(type(current).__name__)
     return f"Could not discover MCP tools ({unknown[0]}); check the URL and authentication headers"
+
+
+def _call_failure(error: BaseException) -> str:
+    """What the model should do about a failed call, from the HTTP status inside it."""
+    pending: list[BaseException] = [error]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+        elif isinstance(current, MCPCredentialMissing):
+            if current.admin_only:
+                return prompt("tools/managed-tools-bot-not-connected")
+            return prompt("tools/managed-tools-requester-not-connected")
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+    return "MCP call failed; check its connection and credentials"
 
 
 def _discovery_slots() -> asyncio.Semaphore:
@@ -307,10 +350,10 @@ def _wrap_tool(
         except ToolException:
             is_error = True
             raise
-        except Exception:
+        except Exception as exc:
             is_error = True
             logger.warning("MCP call failed", extra={"mcp_name": name})
-            raise ToolException("MCP call failed; check its connection and credentials") from None
+            raise ToolException(_call_failure(exc)) from None
         finally:
             await record_mcp_tool(definition.name, is_error)
 
