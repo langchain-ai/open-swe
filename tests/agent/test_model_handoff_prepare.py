@@ -70,7 +70,6 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_thread_participant_identities", AsyncMock(return_value=[]))
-    monkeypatch.setattr(server.THREADS, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(
         server, "construct_system_prompt", lambda *args, **kw: SystemPrompt("system prompt", "")
     )

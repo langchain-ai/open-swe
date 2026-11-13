@@ -306,13 +306,11 @@ test("records every message the model is handed as people come and go", async ({
     given: "Bob has a linked account too, but is not a workspace admin",
     when: "Bob replies: make it return bytes",
     outcome:
-      "the run adds his block and a reminder that he is not the owner; Alice's is not re-sent, and dispatch does not describe her either",
+      "the run adds his block; Alice's is not re-sent, and dispatch does not describe her either",
     ran: true,
   });
   expect(third.dispatch).toHaveLength(1);
-  expect(third.run).toHaveLength(2);
-  expect(third.run[1]).toContain('sender="system:reminder"');
-  expect(third.run[1]).toContain("not from this thread's owner, `user:");
+  expect(third.run).toHaveLength(1);
   expect(third.run[0]).toContain("display_name: Bob");
   expect(third.run[0]).toContain("workspace_admin: no");
 
@@ -347,12 +345,10 @@ test("records every message the model is handed as people come and go", async ({
     title: "Turn 5: Bob sets standing instructions, then asks for the PR",
     given: "Bob saved personal instructions between turns",
     when: "Bob replies: open the PR",
-    outcome:
-      "only Bob's block is re-sent, now carrying his instructions, followed by the non-owner reminder",
+    outcome: "only Bob's block is re-sent, now carrying his instructions",
     ran: true,
   });
-  expect(fifth.run).toHaveLength(2);
-  expect(fifth.run[1]).toContain('sender="system:reminder"');
+  expect(fifth.run).toHaveLength(1);
   expect(fifth.run[0]).toContain("display_name: Bob");
   expect(fifth.run[0]).toContain("standing_instructions:");
   expect(fifth.run[0]).toContain("Never use ripgrep.");

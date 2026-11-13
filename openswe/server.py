@@ -88,10 +88,8 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspac
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
-    RunMessage,
     dynamic_context_hash,
     person_introduction,
-    system_input,
     visible_dynamic_context_hashes,
 )
 from openswe.mcp import load_mcp_tools
@@ -1257,30 +1255,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             None,
         )
 
-    async def _non_owner_reminder(self, state: PrepareRunState) -> list[RunMessage]:
-        """A reminder after this run's input when someone other than the thread's owner wrote it."""
-        messages = state.get("messages") or []
-        latest = messages[-1] if messages else None
-        provenance = Provenance.of(latest) if isinstance(latest, HumanMessage) else None
-        if provenance is None or not provenance.human:
-            return []
-        indexed = await THREADS.get(self._thread_id)
-        owner = (
-            await ThreadMetadata.model_validate(indexed.metadata).owner_if_any()
-            if indexed is not None
-            else None
-        )
-        if owner is None or provenance.sender == f"user:{owner.id}":
-            return []
-        return [
-            system_input(
-                prompt(
-                    "runs/non-owner-reminder", sender=provenance.sender, owner=f"user:{owner.id}"
-                ),
-                {"sender_id": "system:reminder", "surface": "automation", "kind": "system"},
-            )
-        ]
-
     @staticmethod
     def _participants_messages(
         state: PrepareRunState, participants: Sequence[ThreadParticipant]
@@ -1561,8 +1535,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
-                if not bot_id:
-                    sender_messages.extend(await self._non_owner_reminder(state))
         defaults = await workspace_settings
         turn = TurnContext(
             working_dir=work_dir,

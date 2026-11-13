@@ -342,7 +342,6 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "client", MagicMock(threads=MagicMock(update=updated)))
-    monkeypatch.setattr(server.THREADS, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "record_agent_invocation_usage", usage)
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
     monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
