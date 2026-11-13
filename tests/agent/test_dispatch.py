@@ -204,6 +204,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
             "ls_git_branch": "main",
+            "open_swe_git_commits": [{"repo": "wrong/default", "commit": "a" * 40}],
         },
         client=client,
     )
@@ -220,6 +221,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     assert "ls_attribution_identifier" not in unknown
     assert "ls_git_repo" not in unknown
     assert "ls_git_branch" not in unknown
+    assert "open_swe_git_commits" not in unknown
 
     await dispatch.create_durable_run(
         "thread-1",

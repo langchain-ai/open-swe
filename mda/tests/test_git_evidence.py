@@ -10,8 +10,8 @@ from rt.sandbox_script import SandboxScript, SandboxScriptError
 from runtime_api.operations import PullRequestHead
 
 
-def _git(*args: str) -> None:
-    subprocess.run(["git", *args], check=True, capture_output=True)
+def _git(*args: str) -> str:
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 def _checkout(root: Path, name: str, remote: str, branch: str = "work") -> Path:
@@ -50,11 +50,31 @@ async def test_the_work_order_names_the_turns_repository_and_a_pull_request_its_
     _git("-C", str(later), "checkout", "-b", "later")
     git.changed(20)
     git.found_pull_requests([PullRequestHead(repo="org/actual", branch="Exact/PR-head")], 30)
+    await git.metadata()
+    first_head = _git("-C", str(later), "rev-parse", "HEAD")
+    await git.changing()
+    (later / "file").write_text("committed")
+    _git("-C", str(later), "add", "file")
+    _git("-C", str(later), "commit", "-m", "next revision")
+    git.changed(40)
 
     assert await git.metadata() == {
         "open_swe_git_targets": [
             {"repo": "org/actual", "branch": "Exact/PR-head"},
             {"repo": "org/later", "branch": "later"},
+        ],
+        "open_swe_git_commits": [
+            {
+                "repo": "org/actual",
+                "branch": "local",
+                "commit": _git("-C", str(actual), "rev-parse", "HEAD"),
+            },
+            {"repo": "org/later", "branch": "later", "commit": first_head},
+            {
+                "repo": "org/later",
+                "branch": "later",
+                "commit": _git("-C", str(later), "rev-parse", "HEAD"),
+            },
         ],
         "ls_git_repo": "org/actual",
         "ls_git_branch": "Exact/PR-head",

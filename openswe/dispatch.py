@@ -79,6 +79,7 @@ TURN_ATTRIBUTION_FIELDS = frozenset(
         "ls_git_repo",
         "ls_git_branch",
         "open_swe_git_targets",
+        "open_swe_git_commits",
     }
 )
 

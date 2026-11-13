@@ -9,8 +9,9 @@ branch a repository's work went to.
 
 Once the run has ended, the targets are reconciled in the order the work happened
 (``TurnTrace.end``): the first is the trace's ``ls_git_repo`` and ``ls_git_branch``,
-a pull request's head branch preferred for its repository. Nothing waits for a
-fingerprint but a tool that may change a checkout, and only for the first.
+a pull request's head branch preferred for its repository. ``open_swe_git_commits``
+retains each observed checkout HEAD under its actual branch, before that preference.
+Nothing waits for a fingerprint but a tool that may change a checkout, and only for the first.
 """
 
 import asyncio
@@ -39,10 +40,10 @@ class GitTarget(BaseModel):
 
     repo: str
     branch: str
+    head: str = ""
 
 
 class GitCheckout(GitTarget):
-    head: str = ""
     dirty: str = ""
 
 
@@ -54,7 +55,7 @@ class GitSnapshot(BaseModel):
     def changes_since(self, before: Self) -> list[GitTarget]:
         # A checkout skipped before is unknown then, so finding it now is no change.
         return [
-            GitTarget(repo=checkout.repo, branch=checkout.branch)
+            GitTarget(repo=checkout.repo, branch=checkout.branch, head=checkout.head)
             for path, checkout in self.repos.items()
             if path not in before.skipped and checkout != before.repos.get(path)
         ]
@@ -140,8 +141,14 @@ class TurnGit:
         if not targets:
             return {}
         repo, branch = next(iter(targets))
+        commits: list[JsonValue] = [
+            {"repo": target.repo, "branch": target.branch, "commit": target.head}
+            for target in dict.fromkeys(observed)
+            if target.head
+        ]
         return {
             "open_swe_git_targets": [{"repo": repo, "branch": branch} for repo, branch in targets],
+            **({"open_swe_git_commits": commits} if commits else {}),
             "ls_git_repo": repo,
             **({"ls_git_branch": branch} if branch else {}),
         }
