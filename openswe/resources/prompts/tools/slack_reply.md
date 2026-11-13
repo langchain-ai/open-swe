@@ -6,7 +6,8 @@ Use this for clarifying questions, essential progress updates, and the final ans
 Use `"progress"` for a reply you will keep working after — the opening acknowledgement, an interim status note.
 Use `"final"` for anything that leaves the asker holding the ball: the answer, the outcome, a failure, a blocking question, an approval request.
 A `progress` reply settles nothing, so a turn that ends on one is treated as an unanswered turn.
-For Slack-triggered information-only requests, put the complete answer in `message`, not merely a summary, and do not repeat it in the final assistant response.
+For Slack-triggered information-only requests, put the complete answer in `message` only when it fits in 1–3 plain sentences or one short list; otherwise publish the complete detail with `publish_artifact` and send only a one-line summary plus its link.
+Do not repeat the answer in the final assistant response.
 Make `message` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question.
 Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 End the run by posting a concise final outcome here.
