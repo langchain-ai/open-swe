@@ -126,12 +126,12 @@ pub(crate) const LANGGRAPH_API_VERSION_ENV: &str = "MDA_LANGGRAPH_API_VERSION";
 
 /// Default langgraph-api version stem forced into compiled `langgraph.json`
 /// image pins. Override with [`LANGGRAPH_API_VERSION_ENV`].
-pub(crate) const LANGGRAPH_API_VERSION: &str = "0.18.0rc5";
+pub(crate) const LANGGRAPH_API_VERSION: &str = "0.19.0rc1";
 
 /// In-memory runtime `mda dev` pairs with [`LANGGRAPH_API_VERSION`]. A pre-release
 /// Agent Server pulls a pre-release runtime, which uv only accepts when pinned
 /// explicitly, so this moves together with the version above.
-pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.38.0rc5";
+pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.39.0rc1";
 
 /// Resolve the langgraph-api version stem for `_INTERNAL_docker_tag`.
 ///
@@ -1509,8 +1509,8 @@ mod api_version_tests {
     use super::*;
 
     #[test]
-    fn default_is_0_18_0rc5() {
-        assert_eq!(LANGGRAPH_API_VERSION, "0.18.0rc5");
+    fn default_is_0_19_0rc1() {
+        assert_eq!(LANGGRAPH_API_VERSION, "0.19.0rc1");
     }
 
     #[test]

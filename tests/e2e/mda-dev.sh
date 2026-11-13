@@ -36,6 +36,6 @@ exec env MDA_LOCAL_DEV=1 \
   OPEN_SWE_BACKEND_URL="${E2E_BASE:-http://127.0.0.1:${E2E_PORT:-2024}}" \
   LANGSMITH_TRACING=false \
   uv run --project "$ROOT/mda" --locked \
-  --with "langgraph-cli[inmem]" --with "langgraph-api==${API_VERSION}" \
+  --with "langgraph-cli[inmem]" --with "langgraph-api[inmem]==${API_VERSION}" \
   langgraph dev --config langgraph.e2e.json --port "$PORT" \
   --no-browser --no-reload --allow-blocking

@@ -2387,7 +2387,8 @@ fn python_dev_server_requirement() -> String {
 }
 
 /// Pin the Agent Server to the deploy release. Explicit pins keep the staged
-/// project resolution and `uv.lock` untouched, even for pre-releases.
+/// project resolution and `uv.lock` untouched, even for pre-releases. The `inmem`
+/// extra brings the Go core that `langgraph dev` runs on from 0.19.
 fn python_dev_server_args() -> Result<Vec<String>> {
     let version = crate::compile::resolved_langgraph_api_version()?;
     Ok(vec![
@@ -2395,7 +2396,7 @@ fn python_dev_server_args() -> Result<Vec<String>> {
         "--with".to_string(),
         python_dev_server_requirement(),
         "--with".to_string(),
-        format!("langgraph-api=={version}"),
+        format!("langgraph-api[inmem]=={version}"),
         "--with".to_string(),
         format!(
             "langgraph-runtime-inmem=={}",
@@ -4476,7 +4477,7 @@ mod tests {
                 "langgraph-cli[inmem]>=0.4.36",
                 "--with",
                 &format!(
-                    "langgraph-api=={}",
+                    "langgraph-api[inmem]=={}",
                     crate::compile::resolved_langgraph_api_version().unwrap()
                 ),
                 "--with",
