@@ -675,6 +675,7 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
     assert len(line) <= SUMMARY_MAX_CHARS
     assert description.startswith(kept)
     assert description[len(kept)] in {" ", ","}
+    assert summary_line(description, limit=None) == description.strip()
 
 
 @pytest.mark.parametrize(

@@ -191,12 +191,12 @@ def _failure(error: str) -> RequestResult:
     return RequestResult(success=False, error=error)
 
 
-def summary_line(text: str) -> str:
-    """``text`` on one line, cut at a word boundary to fit the card."""
+def summary_line(text: str, *, limit: int | None = SUMMARY_MAX_CHARS) -> str:
+    """``text`` on one line, optionally cut at a word boundary."""
     flat = " ".join(_HTML_COMMENT.sub("", text).split())
-    if len(flat) <= SUMMARY_MAX_CHARS:
+    if limit is None or len(flat) <= limit:
         return flat
-    return flat[: SUMMARY_MAX_CHARS - 1].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
+    return flat[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
 
 
 def request_blockers(snapshot: PullRequestSnapshot | PullRequestPayload) -> list[str]:

@@ -319,8 +319,7 @@ test.describe("Expedited Slack review", () => {
     ).toHaveCount(0);
     const diff = card(page).locator("img.block-image");
     await expect(diff).toBeVisible();
-    await expect(diff).toHaveAttribute("alt", /config\.py.*greet\.py/);
-    await expect(diff).not.toHaveAttribute("alt", /CHANGELOG/);
+    await expect(diff).toHaveAttribute("alt", "Diff of 2 files");
     await expect(card(page)).toContainText(
       /Robin judged these auto-approvable/,
     );

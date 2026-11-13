@@ -396,7 +396,9 @@ class ExpeditedReviewNomination:
             kind="expedited",
             diff_fingerprint=verdict.fingerprint,
             excluded_hunks=exclusions,
-            tldr=summary_line(payload.body or "" if inline_summary is None else inline_summary),
+            tldr=summary_line(
+                payload.body or "" if inline_summary is None else inline_summary, limit=None
+            ),
             slack_channel_choices=broadcast_choice,
             awaiting_ready=payload.draft,
             slack_channel_id=channel_id,

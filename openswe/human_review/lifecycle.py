@@ -43,12 +43,20 @@ from openswe.human_review.requests import (
 from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
-from openswe.slack.blocks import Block, block_payload, context, escape, section
+from openswe.slack.blocks import (
+    MESSAGE_MAX_BLOCKS,
+    Block,
+    block_payload,
+    context,
+    escape,
+    section,
+)
 from openswe.slack.cards import origin_footer, repost_thread_card
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     add_slack_reaction,
     delete_slack_message,
+    format_slack_web_link_footer,
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
@@ -59,6 +67,7 @@ from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
@@ -132,6 +141,8 @@ class ReviewCard:
         approval.slack_diff_file_id = await self._diff_image_id(files) or ""
         if not approval.slack_channel_choices:
             approval.slack_channel_choices = await channel_choices(approval)
+        warning, prefix = await self._warn_target(("", []))
+        footer = self._thread_footer()
         text, blocks = expedited_card.open_card(
             approval,
             title=title,
@@ -140,8 +151,9 @@ class ReviewCard:
             files=files,
             diff_image_id=approval.slack_diff_file_id or None,
             choices=await self._channel_choices(),
+            max_blocks=MESSAGE_MAX_BLOCKS - len(prefix) - len(footer),
         )
-        text, blocks = await self._warn_target((text, blocks))
+        text, blocks = text + warning, [*prefix, *blocks, *footer]
         if not approval.slack_thread_ts:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
@@ -178,24 +190,21 @@ class ReviewCard:
             return "Could not read the diff for the author-only card; try again."
         approval.slack_diff_file_id = await self._diff_image_id(files) or ""
         await approval.save()
+        warning, prefix = await self._warn_target(("", []))
+        origin = approval.dm_origin
+        footer = await origin_footer(approval.thread_id, origin.location if origin else None)
         text, blocks = expedited_card.readiness_prompt(
             approval,
             title=pr.title,
             author=await approval.author_mention(),
             files=files,
             diff_image_id=approval.slack_diff_file_id or None,
+            max_blocks=MESSAGE_MAX_BLOCKS - len(prefix) - len(footer),
         )
-        text, blocks = await self._warn_target((text, blocks))
-        origin = approval.dm_origin
         dm_location = await send_dm_with_location(
             author.slack_user_id,
-            text,
-            blocks=block_payload(
-                [
-                    *blocks,
-                    *await origin_footer(approval.thread_id, origin.location if origin else None),
-                ]
-            ),
+            text + warning,
+            blocks=block_payload([*prefix, *blocks, *footer]),
             origin=origin,
         )
         if dm_location is None:
@@ -342,17 +351,32 @@ class ReviewCard:
             files=await self._files(),
         )
 
+    def _thread_footer(self) -> list[Block]:
+        request = self.request
+        if not request.slack_location or request.slack_thread_ts == "0":
+            return []
+        url = dashboard_thread_url(request.thread_id)
+        return [context(format_slack_web_link_footer(url))] if url else []
+
     async def render(
         self, outcome: str | None, *, copy: bool = False, dm: bool = False
     ) -> tuple[str, list[Block]]:
         """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
-        text, blocks = await self._warn_target(await self._render_card(outcome, copy=copy))
+        warning, prefix = await self._warn_target(("", []))
+        footer: list[Block] = []
         if copy or dm or self.request.kind == "standard":
             source = RunConfig.parse(self.request.run_config).slack_thread
-            blocks.extend(await origin_footer(self.request.thread_id, fallback=source))
-        return text, blocks
+            footer = await origin_footer(self.request.thread_id, fallback=source)
+        elif self.request.slack_message_ts != self.request.slack_thread_ts:
+            footer = self._thread_footer()
+        text, blocks = await self._render_card(
+            outcome, copy=copy, max_blocks=MESSAGE_MAX_BLOCKS - len(prefix) - len(footer)
+        )
+        return text + warning, [*prefix, *blocks, *footer]
 
-    async def _render_card(self, outcome: str | None, *, copy: bool) -> tuple[str, list[Block]]:
+    async def _render_card(
+        self, outcome: str | None, *, copy: bool, max_blocks: int
+    ) -> tuple[str, list[Block]]:
         request = self.request
         pr = request.pull_request
         if request.kind == "standard":
@@ -368,6 +392,7 @@ class ReviewCard:
                 author_login=await request.author_login(),
                 files=files,
                 diff_image_id=diff_image_id,
+                max_blocks=max_blocks,
                 choices=[] if copy else await self._channel_choices(),
                 thread_url=(
                     await get_slack_permalink(request.slack_channel_id, request.slack_thread_ts)
@@ -384,6 +409,7 @@ class ReviewCard:
             files=files,
             outcome=outcome,
             diff_image_id=diff_image_id,
+            max_blocks=max_blocks,
         )
 
     async def refresh_author_dm(self, outcome: str | None) -> bool:
