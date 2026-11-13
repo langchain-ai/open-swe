@@ -315,7 +315,7 @@ describe("AutomationEditor", () => {
     }
   })
 
-  it("saves a GitHub trigger with its own repository beside the schedule", () => {
+  it("saves a GitHub trigger with its own repository and branch filters beside the schedule", () => {
     signInAsAdmin()
     render(
       <AutomationEditor
@@ -338,8 +338,16 @@ describe("AutomationEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
     fireEvent.click(screen.getByRole("button", { name: "Choose repository" }))
+    // Branch filters are for pull requests, so they show once a PR event is picked.
+    expect(screen.queryByLabelText("Base branches")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "PR merged" }))
     fireEvent.click(screen.getByRole("button", { name: "PR closed" }))
+    fireEvent.change(screen.getByLabelText("Skip head branches"), {
+      target: { value: "actions/*\n bot/backend-*-bump-* \n\n" },
+    })
+    fireEvent.change(screen.getByLabelText("Base branches"), {
+      target: { value: "main" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
 
     expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
@@ -348,8 +356,103 @@ describe("AutomationEditor", () => {
         kind: "github",
         repo: "acme/oss",
         events: ["pull_request.closed", "pull_request.merged"],
+        head_branches_exclude: ["actions/*", "bot/backend-*-bump-*"],
+        base_branches: ["main"],
       },
     ])
+  })
+
+  it("keeps a saved GitHub trigger's branch filters when its events change", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Docs",
+          prompt: "Update the docs",
+          schedule: null,
+          triggers: [
+            {
+              id: "trigger_1",
+              kind: "github",
+              repo: "acme/oss",
+              events: ["pull_request.merged"],
+              head_branches_exclude: ["actions/*", "release-[1,2]"],
+              base_branches: ["main"],
+            },
+          ],
+          scope: "workspace",
+          workspace: "default",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />,
+      { wrapper: TooltipProvider }
+    )
+
+    expect(
+      (screen.getByLabelText("Skip head branches") as HTMLTextAreaElement).value
+    ).toBe("actions/*\nrelease-[1,2]")
+    fireEvent.click(screen.getByRole("button", { name: "PR opened" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
+      {
+        kind: "github",
+        repo: "acme/oss",
+        events: ["pull_request.opened", "pull_request.merged"],
+        head_branches_exclude: ["actions/*", "release-[1,2]"],
+        base_branches: ["main"],
+      },
+    ])
+  })
+
+  it("refuses to save more branch patterns than the server takes", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Docs",
+          prompt: "Update the docs",
+          schedule: null,
+          triggers: [
+            {
+              id: "trigger_1",
+              kind: "github",
+              repo: "acme/oss",
+              events: ["pull_request.merged"],
+            },
+          ],
+          scope: "workspace",
+          workspace: "default",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />,
+      { wrapper: TooltipProvider }
+    )
+
+    fireEvent.change(screen.getByLabelText("Base branches"), {
+      target: {
+        value: Array.from({ length: 21 }, (_, i) => `release-${i}`).join("\n"),
+      },
+    })
+
+    expect(
+      screen.getByText("Base branches takes at most 20 patterns.")
+    ).toBeTruthy()
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save changes",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
   })
 
   it("saves a Linear trigger with its team and filters", () => {

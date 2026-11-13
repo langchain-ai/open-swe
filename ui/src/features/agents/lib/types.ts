@@ -284,7 +284,15 @@ export type LinearTriggerEvent = "issue.created" | "issue.labeled"
 /** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
   | { kind: "schedule"; cron: string }
-  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+  | {
+      kind: "github"
+      repo: string
+      events: Array<GitHubTriggerEvent>
+      /** Globs on a pull request's head branch that skip it, e.g. `actions/*`. */
+      head_branches_exclude?: Array<string>
+      /** Globs the pull request's base branch must match, when any are listed. */
+      base_branches?: Array<string>
+    }
   | {
       kind: "slack"
       channel: string

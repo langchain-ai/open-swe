@@ -124,7 +124,9 @@ async def _automations(delivery: GitHubDelivery, repository: str) -> list[FiredG
     try:
         rules = await ask_backend(
             GITHUB_AUTOMATION_RULES,
-            GitHubAutomationRulesRequest(repository=repository, author=subject.author[:64]),
+            GitHubAutomationRulesRequest(
+                repository=repository, author=subject.author[:64], branches=subject.branches
+            ),
             msg_id=f"msg_{delivery.delivery_id}_automations",
         )
         return subject.fired(rules)

@@ -44,6 +44,7 @@ from runtime_api.github import (
     GitHubThreadRun,
     GitHubTriggerEvent,
     PlannedGitHubIssueRun,
+    PullRequestBranches,
 )
 from standardwebhooks import Webhook
 from starlette.types import ASGIApp
@@ -272,6 +273,7 @@ async def _fired(
         GitHubAutomationRulesRequest(
             repository=full_name,
             author=str(_fields(subject.get("user")).get("login") or ""),
+            branches=None if event_type == "issues" else PullRequestBranches.of(subject),
         ),
         f"msg_{delivery_id}_automations",
         secret,

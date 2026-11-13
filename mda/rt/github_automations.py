@@ -21,6 +21,7 @@ from runtime_api.github import (
     GitHubAutomation,
     GitHubAutomationRules,
     GitHubTriggerEvent,
+    PullRequestBranches,
 )
 
 from rt.prompts import prompt
@@ -72,6 +73,11 @@ class SubjectEvent:
     def author(self) -> str:
         """Who opened the issue or pull request."""
         return str(_fields(self.subject.get("user")).get("login") or "")
+
+    @property
+    def branches(self) -> PullRequestBranches | None:
+        """The pull request's branches, which a trigger may filter on; ``None`` for an issue."""
+        return None if self.event_type == "issues" else PullRequestBranches.of(self.subject)
 
     def firing(self, automation: GitHubAutomation) -> GitHubTriggerEvent | None:
         """The event an automation fires on, if any: a merge over a plain close."""

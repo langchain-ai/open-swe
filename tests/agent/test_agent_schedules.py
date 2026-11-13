@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
-from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun
+from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun, PullRequestBranches
 from runtime_api.linear import LinearAutomationRun, LinearTriggerEvent, PlanLinearAutomation
 from sqlalchemy import text
 
@@ -46,9 +46,14 @@ async def _fired(event_type: str, payload: dict[str, Any]) -> list[FiredGitHubAu
     repository = payload.get("repository") or {}
     full_name = f"{repository.get('owner', {}).get('login')}/{repository.get('name')}".lower()
     events = schedules._github_events(event_type, payload)
+    branches = (
+        PullRequestBranches.of(payload.get("pull_request"))
+        if event_type == "pull_request"
+        else None
+    )
     fired: list[FiredGitHubAutomation] = []
     for record in await schedules.github_automation_rules(full_name):
-        matched = sorted(events & set(schedules.github_trigger_events(record, full_name)))
+        matched = sorted(events & set(schedules.github_trigger_events(record, full_name, branches)))
         if matched:
             event = "pull_request.merged" if "pull_request.merged" in matched else matched[0]
             fired.append(
@@ -659,6 +664,96 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
         (on_close["id"], "pull_request.closed"),
         (on_merge["id"], "pull_request.merged"),
     }
+
+
+async def test_pull_request_triggers_skip_the_branches_they_filter_out(
+    fake_client: _FakeClient, auth: None, planning: _Planning
+) -> None:
+    docs = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Update the docs",
+            triggers=[
+                GitHubTrigger(
+                    repo="langchain-ai/open-swe",
+                    events=["pull_request.merged", "issues.opened"],
+                    head_branches_exclude=[" actions/* ", "bot/backend-*-bump-*"],
+                    base_branches=["main"],
+                )
+            ],
+        ),
+    )
+    unfiltered = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Backport",
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.merged"])],
+        ),
+    )
+    repository = {"owner": {"login": "langchain-ai"}, "name": "open-swe", "private": True}
+
+    def merged(head: str, base: str = "main") -> dict[str, Any]:
+        return {
+            "action": "closed",
+            "repository": repository,
+            "pull_request": {
+                "number": 7,
+                "merged": True,
+                "head": {"ref": head},
+                "base": {"ref": base},
+            },
+        }
+
+    async def fires(event_type: str, payload: dict[str, Any], delivery: str) -> set[str]:
+        runs = await _plan_github(event_type, payload, delivery)
+        return {planning.adopted[str(run.thread_id)]["schedule_id"] for run in runs}
+
+    saved = (await schedules.get_agent_schedule(docs["id"]) or {})["triggers"][0]["config"]
+    assert saved["head_branches_exclude"] == ["actions/*", "bot/backend-*-bump-*"]
+    assert saved["base_branches"] == ["main"]
+    both = {docs["id"], unfiltered["id"]}
+    assert await fires("pull_request", merged("feature/triggers"), "d-1") == both
+    # The same bot's content changes come from branches the filters keep.
+    assert await fires("pull_request", merged("auto/update-smithdb-protos"), "d-2") == both
+    assert await fires("pull_request", merged("actions/deploy-gtm-agent-abc123"), "d-3") == {
+        unfiltered["id"]
+    }
+    assert await fires("pull_request", merged("bot/backend-rc-bump-0.13.2"), "d-4") == {
+        unfiltered["id"]
+    }
+    assert await fires("pull_request", merged("fix/cve", base="release-0.12"), "d-5") == {
+        unfiltered["id"]
+    }
+    # An issue has no branches to filter.
+    issue = {"action": "opened", "repository": repository, "issue": {"number": 8}}
+    assert await fires("issues", issue, "d-6") == {docs["id"]}
+    # The backend checks the branches itself, whatever the channel matched.
+    stale = FiredGitHubAutomation(
+        automation_id=docs["id"], event="pull_request.merged", prompt="Update the docs"
+    )
+    assert (
+        await schedules.plan_github_automations(
+            "pull_request", merged("actions/open-swe-dashboard-abc123"), "d-7", [stale]
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"head_branches_exclude": [" "]},
+        {"base_branches": ["release-" + "x" * 200]},
+        {"base_branches": [f"release-{n}" for n in range(21)]},
+    ],
+)
+def test_a_github_trigger_refuses_unusable_branch_patterns(filters: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        GitHubTrigger.model_validate(
+            {"repo": "langchain-ai/open-swe", "events": ["pull_request.merged"], **filters}
+        )
 
 
 async def test_github_automations_isolate_claim_failures(

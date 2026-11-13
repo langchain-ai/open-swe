@@ -3098,6 +3098,16 @@
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
+          "base_branches": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Base Branches",
+            "type": "array"
+          },
           "events": {
             "items": {
               "enum": [
@@ -3110,6 +3120,16 @@
             },
             "minItems": 1,
             "title": "Events",
+            "type": "array"
+          },
+          "head_branches_exclude": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Head Branches Exclude",
             "type": "array"
           },
           "kind": {

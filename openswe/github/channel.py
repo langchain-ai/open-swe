@@ -454,21 +454,19 @@ async def github_issue_facts(
 async def github_automation_rules(
     _call: ChannelCall, request: GitHubAutomationRulesRequest
 ) -> GitHubAutomationRules:
-    """The repository's enabled GitHub automations, for the channel to match a delivery to."""
+    """The repository's enabled GitHub automations that take the pull request's branches,
+    for the channel to match a delivery to."""
     repository = request.repository.lower()
-    records = await schedules.github_automation_rules(repository)
-    if not records:
+    automations = [
+        GitHubAutomation(id=str(record["id"]), prompt=str(record["prompt"]), events=events)
+        for record in await schedules.github_automation_rules(repository)
+        if (events := schedules.github_trigger_events(record, repository, request.branches))
+    ]
+    if not automations:
         return GitHubAutomationRules(automations=[])
     return GitHubAutomationRules(
         author_registered=bool(request.author and await User.known_logins([request.author])),
-        automations=[
-            GitHubAutomation(
-                id=str(record["id"]),
-                prompt=str(record["prompt"]),
-                events=schedules.github_trigger_events(record, repository),
-            )
-            for record in records
-        ],
+        automations=automations,
     )
 
 

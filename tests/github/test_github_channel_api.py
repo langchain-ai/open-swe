@@ -20,6 +20,7 @@ from runtime_api.github import (
     GitHubDelivery,
     GitHubIssueFactsRequest,
     GitHubIssueRunRequest,
+    PullRequestBranches,
 )
 from standardwebhooks import Webhook
 
@@ -638,14 +639,33 @@ async def test_automation_rules_name_each_automations_events_on_the_repository(
             {"kind": "linear", "config": {"team": "ENG", "events": ["issue.created"]}},
         ],
     }
-    rules = AsyncMock(return_value=[record])
+    # Skips the pull request's head branch, so the channel never matches it.
+    skipping = {
+        "id": "00000000-0000-4000-8000-0000000000a2",
+        "prompt": "Update the docs",
+        "triggers": [
+            {
+                "kind": "github",
+                "config": {
+                    "repo": "acme/api",
+                    "events": ["pull_request.opened"],
+                    "head_branches_exclude": ["actions/*"],
+                },
+            }
+        ],
+    }
+    rules = AsyncMock(return_value=[record, skipping])
     monkeypatch.setattr(channel.schedules, "github_automation_rules", rules)
     register_github_logins(monkeypatch, "bob")
 
     answer = await call_as_mda(
         app,
         GITHUB_AUTOMATION_RULES,
-        GitHubAutomationRulesRequest(repository="Acme/API", author="Bob"),
+        GitHubAutomationRulesRequest(
+            repository="Acme/API",
+            author="Bob",
+            branches=PullRequestBranches(head="actions/update-dev-docker-image-1a2b", base="main"),
+        ),
         secret=SERVICE_SECRET,
     )
 

@@ -26,6 +26,8 @@ export type TriggerDraft =
       kind: "github"
       repo: string | null
       events: Array<GitHubTriggerEvent>
+      headBranchesExclude: BranchPatterns
+      baseBranches: BranchPatterns
     }
   | {
       key: string
@@ -46,6 +48,31 @@ export type TriggerDraft =
       maxRunsPerHour: string
     }
 
+/** A GitHub trigger's branch globs as edited, one per line, so a glob like `release-[1,2]` keeps its comma. */
+export class BranchPatterns {
+  constructor(readonly text = "") {}
+
+  static of(patterns: Array<string> = []): BranchPatterns {
+    return new BranchPatterns(patterns.join("\n"))
+  }
+
+  get entries(): Array<string> {
+    return this.text
+      .split("\n")
+      .map((pattern) => pattern.trim())
+      .filter(Boolean)
+  }
+
+  /** Why the server would refuse these globs, naming the field they fill. */
+  problem(field: string): string | null {
+    const entries = this.entries
+    if (entries.length > 20) return `${field} takes at most 20 patterns.`
+    return entries.some((pattern) => pattern.length > 200)
+      ? `${field} patterns must be 200 characters or fewer.`
+      : null
+  }
+}
+
 let nextKey = 0
 const draftKey = () => `trigger-${++nextKey}`
 
@@ -59,10 +86,16 @@ export function scheduleDraft(cron: string) {
 }
 
 export function githubDraft(
-  repo: string | null = null,
-  events: Array<GitHubTriggerEvent> = []
+  trigger?: Extract<AutomationTriggerConfig, { kind: "github" }>
 ) {
-  return { key: draftKey(), kind: "github" as const, repo, events }
+  return {
+    key: draftKey(),
+    kind: "github" as const,
+    repo: trigger?.repo ?? null,
+    events: trigger?.events ?? ([] as Array<GitHubTriggerEvent>),
+    headBranchesExclude: BranchPatterns.of(trigger?.head_branches_exclude),
+    baseBranches: BranchPatterns.of(trigger?.base_branches),
+  }
 }
 
 export function slackDraft(
@@ -103,7 +136,7 @@ export function draftsFor(
       case "schedule":
         return scheduleDraft(trigger.cron)
       case "github":
-        return githubDraft(trigger.repo, trigger.events)
+        return githubDraft(trigger)
       case "slack":
         return slackDraft(trigger)
       case "linear":
@@ -123,7 +156,11 @@ export function draftProblem(draft: TriggerDraft): string | null {
       return draft.cron.trim() ? null : "Enter a cron schedule."
     case "github":
       if (!draft.repo) return "Pick the repository whose events run this."
-      return draft.events.length === 0 ? "Pick at least one event." : null
+      if (draft.events.length === 0) return "Pick at least one event."
+      return (
+        draft.headBranchesExclude.problem("Skip head branches") ??
+        draft.baseBranches.problem("Base branches")
+      )
     case "slack":
     case "linear": {
       if (draft.kind === "slack" && !draft.channel) {
@@ -155,7 +192,15 @@ export function toTriggers(
         return [{ kind: "schedule", cron: draft.cron.trim() }]
       case "github":
         return draft.repo
-          ? [{ kind: "github", repo: draft.repo, events: draft.events }]
+          ? [
+              {
+                kind: "github",
+                repo: draft.repo,
+                events: draft.events,
+                head_branches_exclude: draft.headBranchesExclude.entries,
+                base_branches: draft.baseBranches.entries,
+              },
+            ]
           : []
       case "slack":
         return draft.channel

@@ -12,8 +12,9 @@ GitHub App or its signing key:
   (``forward_to``, served at ``/mda/github/deliveries``), and logs it and runs its
   own work there.
 - ``github_automation_rules``: the automations with a GitHub trigger on the
-  delivery's repository, and whether the issue's or pull request's author is an
-  Open SWE user; the channel matches them and writes each match's prompt.
+  delivery's repository that takes a pull request's branches, and whether the
+  issue's or pull request's author is an Open SWE user; the channel matches them
+  and writes each match's prompt.
 - ``github_issue_facts``: for an ``@openswe`` mention on an issue, which of the
   people its prompt quotes are Open SWE users, whether the sender's email is known,
   whether a run already took the issue in, and the thread's workspace; the channel
@@ -30,6 +31,7 @@ and a call or three more when it mentions Open SWE or fires automations.
 """
 
 import json
+from collections.abc import Mapping
 from typing import Annotated, Final, Literal, Self
 from uuid import UUID
 
@@ -129,12 +131,32 @@ GitHubTriggerEvent = Literal[
 type _Login = Annotated[str, Field(pattern=LOGIN_PATTERN)]
 
 
+class PullRequestBranches(BaseModel):
+    """A pull request's head and base branches, which a GitHub trigger can filter on."""
+
+    head: str
+    base: str
+
+    @classmethod
+    def of(cls, pull_request: object) -> Self:
+        """The branches a delivery's ``pull_request`` names; ``""`` for one it doesn't."""
+        return cls(head=cls._ref(pull_request, "head"), base=cls._ref(pull_request, "base"))
+
+    @staticmethod
+    def _ref(pull_request: object, side: str) -> str:
+        branch = pull_request.get(side) if isinstance(pull_request, Mapping) else None
+        ref = branch.get("ref") if isinstance(branch, Mapping) else None
+        return ref if isinstance(ref, str) else ""
+
+
 class GitHubAutomationRulesRequest(BaseModel):
     """The automations an issue or pull request event on ``repository`` may fire."""
 
     repository: str = Field(pattern=REPOSITORY_PATTERN)
     # Who opened the issue or pull request, whose words the prompt quotes.
     author: str = Field(default="", max_length=64)
+    # A pull request's branches: the backend leaves out automations whose triggers skip them.
+    branches: PullRequestBranches | None = None
 
 
 class GitHubAutomation(BaseModel):

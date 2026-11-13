@@ -10,6 +10,7 @@ import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { Switch } from "@langchain/macaw-components/Switch"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
@@ -39,6 +40,7 @@ import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
+  BranchPatterns,
   draftProblem,
   draftsFor,
   githubDraft,
@@ -559,6 +561,28 @@ export function AutomationEditor({
                     onToggle={(event) => toggleEvent(draft.key, event)}
                     disabled={!canManage}
                   />
+                  {draft.events.some((event) =>
+                    event.startsWith("pull_request.")
+                  ) && (
+                    <div className="mt-space-2 grid gap-space-2 sm:grid-cols-2">
+                      <BranchPatternsInput
+                        label="Skip head branches"
+                        patterns={draft.headBranchesExclude}
+                        onChange={(headBranchesExclude) =>
+                          set({ headBranchesExclude })
+                        }
+                        placeholder={"None; one per line, e.g.\nactions/*"}
+                        disabled={!canManage}
+                      />
+                      <BranchPatternsInput
+                        label="Base branches"
+                        patterns={draft.baseBranches}
+                        onChange={(baseBranches) => set({ baseBranches })}
+                        placeholder={"Any; one per line, e.g.\nmain"}
+                        disabled={!canManage}
+                      />
+                    </div>
+                  )}
                   {hint(
                     draft.events.includes("pull_request.closed")
                       ? "PR closed also fires when a pull request is merged."
@@ -844,6 +868,35 @@ function FilterInput({
       onChange={onChange}
       placeholder={placeholder}
       inputMode={inputMode}
+      disabled={disabled}
+    />
+  )
+}
+
+function BranchPatternsInput({
+  label,
+  patterns,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  label: string
+  patterns: BranchPatterns
+  onChange: (patterns: BranchPatterns) => void
+  placeholder: string
+  disabled: boolean
+}) {
+  return (
+    <Textarea
+      size="sm"
+      label={label}
+      value={patterns.text}
+      onChange={(text) => onChange(new BranchPatterns(text))}
+      placeholder={placeholder}
+      rows={2}
+      autoResize
+      maxHeight={160}
+      isError={patterns.problem(label) !== null}
       disabled={disabled}
     />
   )

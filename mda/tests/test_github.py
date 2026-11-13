@@ -36,6 +36,7 @@ from runtime_api.github import (
     GitHubIssueRun,
     GitHubThreadRun,
     PlannedGitHubIssueRun,
+    PullRequestBranches,
 )
 
 _THREAD = GitHubChannelThread(id=str(uuid.uuid4()), channel=ChannelName(name="github"))
@@ -638,10 +639,17 @@ async def test_automations_start_while_the_issues_thread_waits(backend: _Backend
 async def test_a_pull_request_opened_starts_only_its_automations(backend: _Backend) -> None:
     backend.rules = _rules(["pull_request.opened"])
     backend.automations = [_automation("Summarize")]
+    opened = {
+        "action": "opened",
+        "pull_request": {"head": {"ref": "actions/bump-1a2b"}, "base": {"ref": "main"}},
+    }
 
-    started = _runs(await github.on_event(_event("pull_request", {"action": "opened"}), _THREAD))
+    started = _runs(await github.on_event(_event("pull_request", opened), _THREAD))
 
     assert len(started) == 1
+    # The backend leaves out automations whose triggers skip the pull request's branches.
+    [rules] = backend.called(GITHUB_AUTOMATION_RULES)
+    assert rules.branches == PullRequestBranches(head="actions/bump-1a2b", base="main")
     # The backend runs its own work as it records the delivery; this call only signs runs.
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
     assert not act.work

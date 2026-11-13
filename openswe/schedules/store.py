@@ -13,12 +13,25 @@ import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from fnmatch import fnmatchcase
 from typing import Annotated, Any, Literal, cast, get_args
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, Field, JsonValue, TypeAdapter, field_validator
-from runtime_api.github import FiredGitHubAutomation, GitHubThreadRun, GitHubTriggerEvent
+from pydantic import (
+    BaseModel,
+    Field,
+    JsonValue,
+    StringConstraints,
+    TypeAdapter,
+    field_validator,
+)
+from runtime_api.github import (
+    FiredGitHubAutomation,
+    GitHubThreadRun,
+    GitHubTriggerEvent,
+    PullRequestBranches,
+)
 from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -71,6 +84,9 @@ SLACK_EVENT_DESCRIPTIONS: dict[SlackTriggerEvent, str] = {
 SlackSenders = Literal["anyone", "people", "bots"]
 _SLACK_TRIGGER_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 _SLACK_MESSAGE_MAX_CHARS = 8_000
+_BranchPattern = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
 LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
 _LINEAR_TEAM_KEY_RE = re.compile(TEAM_KEY_PATTERN)
 # Each automation run a Linear delivery starts gets a thread of its own, named by both.
@@ -96,7 +112,29 @@ class ScheduleTrigger(BaseModel):
         return normalize_cron_schedule(value)
 
 
-class GitHubTrigger(BaseModel):
+class GitHubBranchFilters(BaseModel):
+    """A GitHub trigger's globs (``fnmatch``, case-sensitive) on a pull request's branches.
+
+    A head branch matching any of ``head_branches_exclude`` fires nothing, and when
+    ``base_branches`` lists any, the base branch must match one. Issue events ignore them.
+    """
+
+    head_branches_exclude: list[_BranchPattern] = Field(default_factory=list, max_length=20)
+    base_branches: list[_BranchPattern] = Field(default_factory=list, max_length=20)
+
+    def takes(self, branches: PullRequestBranches | None) -> bool:
+        """Whether the trigger fires for a pull request between ``branches``; an event
+        that names none, such as an issue's, always passes."""
+        if branches is None:
+            return True
+        if any(fnmatchcase(branches.head, glob) for glob in self.head_branches_exclude):
+            return False
+        return not self.base_branches or any(
+            fnmatchcase(branches.base, glob) for glob in self.base_branches
+        )
+
+
+class GitHubTrigger(GitHubBranchFilters):
     """Fires on events in one repository; its runs work in that repository."""
 
     kind: Literal["github"] = "github"
@@ -1241,8 +1279,11 @@ async def github_automation_rules(repo_full_name: str) -> list[dict[str, Any]]:
         )
 
 
-def github_trigger_events(record: dict[str, Any], repo_full_name: str) -> list[GitHubEvent]:
-    """The events the automation's GitHub triggers on ``repo_full_name`` fire on.
+def github_trigger_events(
+    record: dict[str, Any], repo_full_name: str, branches: PullRequestBranches | None = None
+) -> list[GitHubEvent]:
+    """The events the automation's GitHub triggers on ``repo_full_name`` fire on, for a
+    pull request between ``branches`` when given.
 
     Only this repository's triggers: another GitHub trigger on the same automation
     configures events for its own repository.
@@ -1252,23 +1293,27 @@ def github_trigger_events(record: dict[str, Any], repo_full_name: str) -> list[G
         for trigger in record.get("triggers") or []
         if trigger.get("kind") == "github"
         and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
+        and GitHubBranchFilters.model_validate(trigger.get("config") or {}).takes(branches)
         for event in (trigger.get("config") or {}).get("events") or []
     }
     return sorted(configured & set(get_args(GitHubTriggerEvent)))
 
 
 async def _fired_github_automation(
-    fired: FiredGitHubAutomation, repo_full_name: str
+    fired: FiredGitHubAutomation, repo_full_name: str, branches: PullRequestBranches | None
 ) -> dict[str, Any] | None:
     """The automation the channel matched, when it is enabled and fires on ``fired.event``
-    in the repository, so a call can't start another automation."""
+    in the repository for the pull request's ``branches``, so a call can't start another
+    automation or one whose trigger skips them."""
     try:
         automation_id = uuid.UUID(fired.automation_id)
     except ValueError:
         return None
     async with transaction() as conn:
         records = await _load_records(conn, "WHERE a.enabled AND a.id = :id", {"id": automation_id})
-    if not records or fired.event not in github_trigger_events(records[0], repo_full_name):
+    if not records or fired.event not in github_trigger_events(
+        records[0], repo_full_name, branches
+    ):
         return None
     return records[0]
 
@@ -1282,7 +1327,8 @@ async def plan_github_automations(
     """The run of every automation MDA's channel matched a GitHub delivery to.
 
     The channel matches and writes each run's prompt; each automation must be
-    enabled and fire on the event in the delivery's repository. Each is claimed once
+    enabled and fire on the event in the delivery's repository, and for a pull
+    request, have a trigger that takes its branches. Each is claimed once
     per delivery, and its run planned on a thread of its own for that delivery. A
     call sent again for a delivery plans the runs it already claimed again, on the
     same threads, where the channel starts each delivery's run once.
@@ -1326,8 +1372,17 @@ async def plan_github_automations(
         return []
     runs: list[GitHubThreadRun] = []
     private = repo_private_from_payload(payload)
+    branches = (
+        PullRequestBranches.of(payload.get("pull_request"))
+        if event_type == "pull_request"
+        else None
+    )
     for each in fired:
-        record = await _fired_github_automation(each, full_name) if each.event in events else None
+        record = (
+            await _fired_github_automation(each, full_name, branches)
+            if each.event in events
+            else None
+        )
         if record is None:
             logger.warning(
                 "GitHub automation the channel matched doesn't fire on the delivery",

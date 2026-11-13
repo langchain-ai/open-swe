@@ -16,6 +16,7 @@ Args:
   - ``{"kind": "schedule", "cron": "0 9 * * 1"}`` runs on a five-field UTC cron.
     Name any repository the run should work in in ``prompt``.
   - ``{"kind": "github", "repo": "owner/repo", "events": [...]}`` runs on events in that repository, passed to the run as untrusted context: "issues.opened", "pull_request.opened", "pull_request.closed" (merged or not), and "pull_request.merged".
+    Optional pull request filters, as case-sensitive globs such as ``"actions/*"``: ``head_branches_exclude`` (a pull request whose head branch matches any is skipped) and ``base_branches`` (when listed, the base branch must match one); issue events ignore them.
   - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}`` runs on new top-level messages in a Slack channel Robin is a member of, passed to the run as untrusted context.
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
   - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).
