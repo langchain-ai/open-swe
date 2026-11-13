@@ -581,6 +581,28 @@ class PullRequestClient:
     async def commits(self) -> list[dict[str, Any]]:
         return await self.repo.pages(f"pulls/{self.number}/commits")
 
+    async def contribution_commits(self, base_sha: str) -> list[dict[str, object]]:
+        """PR commits excluding merges whose incoming parents are already on the base."""
+        if not base_sha:
+            raise ValueError("Missing base SHA for contributor evaluation")
+        contributions: list[dict[str, object]] = []
+        for commit in await self.commits():
+            parents = commit.get("parents")
+            if isinstance(parents, list) and len(parents) > 1:
+                incoming: list[str] = []
+                for parent in parents[1:]:
+                    sha = parent.get("sha") if isinstance(parent, dict) else None
+                    if not isinstance(sha, str) or not sha:
+                        raise ValueError("Missing merge parent SHA for contributor evaluation")
+                    incoming.append(sha)
+                for sha in incoming:
+                    if await self.repo.merge_base(sha, base_sha) != sha:
+                        break
+                else:
+                    continue
+            contributions.append(commit)
+        return contributions
+
     async def add_review_comment(self, comment: Mapping[str, object]) -> object:
         """Post one inline comment now, outside any review."""
         return await self.repo.post(f"pulls/{self.number}/comments", comment)

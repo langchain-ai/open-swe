@@ -45,6 +45,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.report_platform_issue",
     "openswe.tools.upload_session",
     "openswe.slack.tools.request_pr_review",
+    "openswe.tools.recheck_pr_approval",
     "openswe.tools.request_human_review",
     "openswe.tools.expedite_pr_approval",
     "openswe.tools.read_user_settings",

@@ -1,13 +1,13 @@
 """The ``Robin Approves`` check: Robin's one gate on whether a pull request may merge yet.
 
-A repository's rulesets require this check, and Robin posts it on every pull request
-head, so anything Robin decides should hold back a merge goes through it, whoever has
-approved. Its first rule closes a gap in GitHub's own: GitHub never lets a pull
-request's author approve it, but when Robin authors a pull request as itself (an Ask
-channel) the person who asked for it is not the author. Such a pull request passes
+Robin posts this check only where the target branch requires it, so anything Robin
+decides should hold back a merge goes through it, whoever has approved. Its first
+rule closes a gap in GitHub's own: GitHub never lets a pull request's author approve
+it, but when Robin authors a pull request as itself (an Ask channel) the person who
+asked for it is not the author. Such a pull request passes
 once someone approved its current head who neither asked for the change nor pushed
 to it, or once Robin's auto-approval approved that head. Pull requests a person
-authored pass, leaving them to the repository's review rules.
+or another bot authored pass, leaving them to the repository's review rules.
 
 Hard CODEOWNERS review and rules repositories configure themselves are meant to
 become further reasons this same check fails.
@@ -25,8 +25,10 @@ from typing import Any, Self
 
 from openswe.config import ENV
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
+from openswe.github.repositories import Repository
 from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.users import User
@@ -75,9 +77,13 @@ class PullRequestApproval:
         return isinstance(user, Mapping) and user.get("type") == "Bot"
 
     @classmethod
+    def _is_robin(cls, user: object) -> bool:
+        return cls._is_bot(user) and cls._login(user) in OPEN_SWE_GITHUB_LOGINS
+
+    @classmethod
     async def read(cls, pull: PullRequestClient, payload: Mapping[str, Any]) -> Self:
         author, head_sha = payload.get("user") or {}, (payload.get("head") or {}).get("sha", "")
-        if not cls._is_bot(author):
+        if not cls._is_robin(author):
             return cls(author=author, head_sha=head_sha)
         reviews = await pull.reviews()
         stored = await PullRequest.get(pull.repo.owner, pull.repo.name, pull.number)
@@ -101,12 +107,12 @@ class PullRequestApproval:
             and stored.auto_approved_head_sha == head_sha,
             requester_unknown=stored is not None and stored.requester_unknown,
             reviews=reviews,
-            commits=await pull.commits(),
+            commits=await pull.contribution_commits((payload.get("base") or {}).get("sha", "")),
         )
 
     @property
     def excluded(self) -> set[str]:
-        """The requesters and everyone who authored or committed a commit on the branch."""
+        """The requesters and contributors, excluding merges of the PR's base branch."""
         logins = {
             self._login(commit.get(role))
             for commit in self.commits
@@ -153,8 +159,11 @@ class PullRequestApproval:
 
     def verdict(self) -> tuple[bool, str]:
         """Whether the pull request may merge, and why, in words for the people waiting on it."""
-        if not self._is_bot(self.author):
-            return True, "A person authored this pull request; the repository's review rules apply."
+        if not self._is_robin(self.author):
+            return (
+                True,
+                "Robin did not author this pull request; the repository's review rules apply.",
+            )
         if self.auto_approved:
             return True, "Robin's auto-approval approved the current head."
         if self.requester_unknown:
@@ -184,13 +193,24 @@ class PullRequestApproval:
         return False, "\n\n".join(lines)
 
     @classmethod
-    async def evaluate(cls, owner: str, repo: str, number: int) -> None:
-        """Post ``Robin Approves`` on an open pull request's head unless publishing is disabled."""
+    async def evaluate(
+        cls, owner: str, repo: str, number: int, *, force_publish: bool = False
+    ) -> tuple[bool, str] | None:
+        """Post the approval verdict when enabled and required or explicitly requested."""
         if ENV.DISABLE_ROBIN_APPROVES.get_bool():
             return
         async with PullRequestClient.as_app(owner, repo, number) as pull:
             payload = await pull.pull()
             if payload.get("state") != "open":
+                return
+            base = (payload.get("base") or {}).get("ref")
+            if not base or (
+                not force_publish
+                and await Repository.requires_approval_check(
+                    owner, repo, base, include_any_source=True
+                )
+                is not True
+            ):
                 return
             approval = await cls.read(pull, payload)
             if not approval.head_sha:
@@ -212,6 +232,7 @@ class PullRequestApproval:
                 }
             )
             await cls._update_note(pull, passed, summary)
+            return passed, summary
 
     @staticmethod
     async def _update_note(pull: PullRequestClient, passed: bool, summary: str) -> None:
@@ -221,9 +242,9 @@ class PullRequestApproval:
         """
         body = (
             f"{_NOTE_MARKER}\n**`{APPROVAL_CHECK_RUN_NAME}` "
-            f"{'passes' if passed else 'is blocking this merge'}.**\n\n{summary}\n\n"
-            f"_`{APPROVAL_CHECK_RUN_NAME}` is Robin's check on whether a pull request may "
-            "merge yet; this note says what it is waiting for._"
+            f"{'passes' if passed else 'does not pass'}.**\n\n{summary}\n\n"
+            f"_`{APPROVAL_CHECK_RUN_NAME}` reports the latest evaluation of Robin's approval policy. "
+            "Repository rules determine whether this check is required to merge._"
         )
         try:
             note = next(

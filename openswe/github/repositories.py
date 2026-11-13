@@ -8,6 +8,7 @@ case-insensitively. ``full_name`` keeps the casing GitHub reported for display.
 import logging
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Self
 from uuid import UUID, uuid7
 
@@ -97,12 +98,32 @@ class Repository(Base):
         return ""
 
     @classmethod
-    async def requires_approval_check(cls, owner: str, name: str, branch: str) -> bool | None:
-        """Whether ``branch`` requires ``Robin Approves`` from Robin's App; ``None`` if unknown.
+    async def requires_approval_check(
+        cls, owner: str, name: str, branch: str, *, include_any_source: bool = False
+    ) -> bool | None:
+        """Whether Robin's check is required, with separate caches for publishing and creation."""
+        if include_any_source:
+            from langgraph_api.cache import swr
 
-        The default branch's answer is cached on the row for an hour, and a stale answer
-        stands in while GitHub can't be read.
-        """
+            key = (
+                f"approval-check-publishing:{owner.lower()}/{name.lower()}:"
+                f"{ENV.GITHUB_APP_ID.get()}:{branch}"
+            )
+            try:
+                result = await swr(
+                    key,
+                    partial(cls._read_approval_check, owner, name, branch, include_any_source=True),
+                    fresh_for=_APPROVAL_CHECK_TTL,
+                    max_age=timedelta(hours=24),
+                )
+                return result.value
+            except GitHubAppUnavailable, httpx2.HTTPError, ValueError:
+                logger.warning(
+                    "Could not read the branch's required checks",
+                    extra={"repo_full_name": f"{owner}/{name}", "branch": branch},
+                    exc_info=True,
+                )
+                return None
         full_name = f"{owner}/{name}"
         cacheable = branch == await cls.resolve_default_branch(owner, name)
         row = await cls.get(full_name) if cacheable else None
@@ -114,23 +135,14 @@ class Repository(Base):
         ):
             return row.approval_check_required
         try:
-            async with GitHubClient.as_app(owner, name) as github:
-                checks = await RequiredCheck.for_branch(
-                    github.repo(owner, name), branch, include_review_checks=True
-                )
-        except GitHubAppUnavailable, httpx2.HTTPError:
+            required = await cls._read_approval_check(owner, name, branch)
+        except GitHubAppUnavailable, httpx2.HTTPError, ValueError:
             logger.warning(
                 "Could not read the branch's required checks",
                 extra={"repo_full_name": full_name, "branch": branch},
                 exc_info=True,
             )
-            checks = None
-        if checks is None:
             return row.approval_check_required if row is not None else None
-        app_id = int(ENV.GITHUB_APP_ID.get() or 0)
-        required = any(
-            check.name == APPROVAL_CHECK_RUN_NAME and check.app_id == app_id for check in checks
-        )
         if cacheable:
             async with postgres.session() as session:
                 repository_id = await cls.ensure_id(session, full_name)
@@ -143,6 +155,23 @@ class Repository(Base):
                     )
                 )
         return required
+
+    @classmethod
+    async def _read_approval_check(
+        cls, owner: str, name: str, branch: str, *, include_any_source: bool = False
+    ) -> bool:
+        async with GitHubClient.as_app(owner, name) as github:
+            checks = await RequiredCheck.for_branch(
+                github.repo(owner, name), branch, include_review_checks=True
+            )
+        if checks is None:
+            raise ValueError("Could not determine required checks")
+        app_id = int(ENV.GITHUB_APP_ID.get() or 0)
+        return any(
+            check.name == APPROVAL_CHECK_RUN_NAME
+            and (check.app_id == app_id or (include_any_source and check.app_id is None))
+            for check in checks
+        )
 
     @classmethod
     async def all(cls) -> list[Self]:

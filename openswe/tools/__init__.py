@@ -59,6 +59,7 @@ _TOOL_MODULES = {
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
     "request_rollout_check": ".request_rollout_check",
+    "recheck_pr_approval": ".recheck_pr_approval",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -148,6 +149,7 @@ __all__ = [
     "request_human_review",
     "request_pr_review",
     "request_rollout_check",
+    "recheck_pr_approval",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -249,6 +251,7 @@ if TYPE_CHECKING:
     from openswe.tools.publish_review import publish_review
     from openswe.tools.read_only_sql import read_only_sql
     from openswe.tools.read_user_settings import read_user_settings
+    from openswe.tools.recheck_pr_approval import recheck_pr_approval
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
     from openswe.tools.repair_data import execute_database_sql, write_database_rows
