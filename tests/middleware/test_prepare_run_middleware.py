@@ -17,7 +17,12 @@ from openswe.server import PrepareAgentRunMiddleware, _thread_participants
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.users import UserPreferences
 from openswe.utils import ttl_cache
-from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
+from openswe.utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
+    CollaboratorIdentity,
+    ThreadParticipant,
+)
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -109,6 +114,45 @@ async def test_sender_is_matched_by_login_and_others_get_their_slack_timezone(
         (sender_login, "America/New_York"),
         ("bob", "Europe/Paris"),
     ]
+
+    assert participants[0].identity.display_name == "alice"
+    assert participants[0].identity.commit_name == "alice"
+    assert participants[0].identity.commit_email == f"{sender_login}@users.noreply.github.com"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("person_id", "commit_name", "commit_email"),
+    [
+        ("system:slack-bot-B123", OPEN_SWE_BOT_NAME, OPEN_SWE_BOT_EMAIL),
+        ("slack:U123", "", ""),
+    ],
+)
+async def test_unlinked_sender_commit_identity(
+    person_id: str, commit_name: str, commit_email: str
+) -> None:
+    with patch.multiple(
+        "openswe.server",
+        _thread_participant_identities=AsyncMock(return_value=[]),
+        _participant_user=AsyncMock(return_value=None),
+    ):
+        participants = await _thread_participants(
+            "thread-id",
+            {},
+            None,
+            sender_person_id=person_id,
+            sender_display_name="Requester",
+        )
+
+    assert len(participants) == 1
+    person = participants[0].as_person()
+    assert person["id"] == person_id
+    assert person["display_name"] == "Requester"
+    assert person["open_swe_account"] == "unlinked"
+    assert participants[0].identity.commit_name == commit_name
+    assert participants[0].identity.commit_email == commit_email
+    assert person.get("commit_name", "") == commit_name
+    assert person.get("commit_email", "") == commit_email
 
 
 @pytest.mark.asyncio

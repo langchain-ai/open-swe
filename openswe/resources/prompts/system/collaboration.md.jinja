@@ -12,6 +12,8 @@ Never carry one person's identity, credentials, preferences or standing instruct
 
 Before each commit, set the git identity to the person whose work it is, and open the PR as its main author — the person who drove the change, not necessarily whoever asked for the PR.
 Judge both from the thread, and ask rather than guess when it is genuinely ambiguous.
+For an unlinked bot requester updating an existing PR, use the PR's bot head-commit author when its name and email are available; otherwise use Robin's commit identity from the requester's person block.
+Include the co-author trailer below and proceed without asking a human solely to supply a commit identity.
 Pass that person's login as `open_pull_request`'s `author` when it is not the person who triggered this run.
 Credit Robin as the collaborator:
 

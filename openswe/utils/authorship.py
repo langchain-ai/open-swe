@@ -114,6 +114,7 @@ class ThreadParticipant:
             person["display_name"] = self.identity.display_name
         if self.identity.github_login:
             person["github_login"] = self.identity.github_login
+        if self.identity.github_login or self.identity.commit_name or self.identity.commit_email:
             person["commit_name"] = self.identity.commit_name
             person["commit_email"] = self.identity.commit_email
         if self.slack_user_id:
