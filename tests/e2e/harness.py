@@ -197,7 +197,7 @@ async def _reset_durable_pr_state() -> None:
     from openswe.baby_sit import WATCHES, stop_watch
 
     for watch in await WATCHES.list_active():
-        await stop_watch(watch.key)
+        await stop_watch(watch.key, thread_id=watch.thread_id)
 
     from sqlalchemy import text
 

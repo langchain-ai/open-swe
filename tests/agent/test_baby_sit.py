@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid7
@@ -8,7 +9,7 @@ import pytest
 
 from openswe import baby_sit
 from openswe.github import app as github_app
-from openswe.github.ci import RequiredCheck
+from openswe.github.ci import CheckFailure, RequiredCheck
 from openswe.github.http import GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
@@ -35,6 +36,29 @@ async def _start_watch() -> baby_sit.BabySitWatch:
             {"slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}}
         ),
     )
+
+
+def _check_run(run_id: int, name: str, conclusion: str | None) -> dict[str, object]:
+    return {
+        "id": run_id,
+        "name": name,
+        "status": "completed" if conclusion else "in_progress",
+        "conclusion": conclusion,
+        "details_url": f"https://github.com/Acme/Repo/actions/runs/{run_id}",
+    }
+
+
+def _failure(name: str, run_id: int | None = None) -> CheckFailure:
+    return CheckFailure(name=name, conclusion="failure", url="", run_id=run_id)
+
+
+_A_RUN = _failure("a", 1)
+_A_RERUN = _failure("a", 4)
+_B_RUN = _failure("b", 2)
+_C_RUN = _failure("c", 3)
+_DEPLOY_STATUS = _failure("deploy")
+
+_Step = tuple[str, list[CheckFailure], bool, list[str]]
 
 
 @pytest.mark.parametrize(
@@ -140,7 +164,7 @@ async def test_github_read_failures_only_end_watches_when_persistent(
         ) in message
 
 
-async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
+async def test_a_dispatch_error_is_retried_with_only_unsent_failures(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch()
@@ -152,42 +176,66 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
         "pull",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
     )
-    checks = [
-        {
-            "id": 11,
-            "name": "tests",
-            "status": "completed",
-            "conclusion": "failure",
-            "details_url": "https://github.com/Acme/Repo/actions/runs/1",
-            "completed_at": "2026-01-01T00:00:00Z",
-        }
-    ]
-    list_checks = AsyncMock(return_value=checks)
-    monkeypatch.setattr(RepoClient, "check_runs", list_checks)
+    checks = [_check_run(1, "approval", "failure"), _check_run(2, "tests", None)]
+    monkeypatch.setattr(RepoClient, "check_runs", AsyncMock(return_value=checks))
     monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
-    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    dispatch = AsyncMock(
+        side_effect=[RuntimeError("Agent service unavailable"), *[{"run_id": "run-1"}] * 2]
+    )
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "error"
     assert await baby_sit.evaluate_watch("acme/repo#7") == "dispatched"
     assert dispatch.await_args is not None
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+
+    checks[1] = _check_run(2, "tests", "failure")
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "dispatched"
+    assert "- tests (failure)" in dispatch.await_args.args[1]
+    assert "- approval (failure)" not in dispatch.await_args.args[1]
+
+
+async def test_spent_rerun_budget_stops_the_watch_only_on_a_new_failure(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _start_watch()
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+    )
+    checks = [_check_run(1, "approval", "failure"), _check_run(2, "tests", None)]
+    monkeypatch.setattr(RepoClient, "check_runs", AsyncMock(return_value=checks))
+    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
+
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "dispatched"
+    for _ in range(3):
+        await baby_sit.record_retry(
+            "acme/repo#7",
+            thread_id="thread-1",
+            head_sha="head-1",
+            check_name="tests",
+            evidence="runner timeout",
+        )
+    await _start_watch()
+    checks[1] = _check_run(3, "tests", "success")
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
+    watch = await baby_sit.WATCHES.get("acme/repo#7")
+    assert watch is not None
+    assert watch.active
     assert dispatch.await_count == 1
 
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
-    await baby_sit.record_retry(
-        "acme/repo#7",
-        thread_id="thread-1",
-        head_sha="head-1",
-        check_name="tests",
-        evidence="runner timeout",
-    )
-    checks[0] = {**checks[0], "id": 12, "completed_at": "2026-01-01T00:10:00Z"}
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "dispatched"
-    assert dispatch.await_count == 2
+    checks[1] = _check_run(4, "tests", "failure")
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
 
 
-async def test_concurrent_failure_evaluations_dispatch_once(
+async def test_an_in_flight_failure_dispatch_holds_off_every_other_watch_writer(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch()
@@ -223,11 +271,23 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     first = asyncio.create_task(baby_sit.evaluate_watch("acme/repo#7"))
     await dispatch_started.wait()
     assert await baby_sit.evaluate_watch("acme/repo#7") == "busy"
+    monkeypatch.setattr(baby_sit, "WATCH_LOCK_WAIT", timedelta(milliseconds=100))
+    with pytest.raises(baby_sit.WatchBusy):
+        await baby_sit.stop_watch("acme/repo#7", thread_id="thread-1")
+    with pytest.raises(baby_sit.WatchBusy):
+        await _start_watch()
+    with pytest.raises(baby_sit.WatchBusy):
+        await baby_sit.adopt_agent_server_cron("acme/repo#7")
+    monkeypatch.setattr(baby_sit, "WATCH_LOCK_WAIT", timedelta(seconds=60))
+    stop = asyncio.create_task(baby_sit.stop_watch("acme/repo#7", thread_id="thread-1"))
+    await asyncio.sleep(0.3)
+    assert not stop.done()
     release_dispatch.set()
 
     assert await first == "dispatched"
     dispatch.assert_awaited_once()
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
+    assert await stop
+    assert await baby_sit.WATCHES.get("acme/repo#7") is None
 
 
 @pytest.mark.parametrize("card_state", ["none", "ready", "draft", "other_thread"])
@@ -452,14 +512,14 @@ async def test_record_retry_caps_attempts_and_deduplicates_flake_alert(
         assert result["success"] is True
         assert result["retry_count"] == expected
 
-    blocked = await baby_sit.record_retry(
-        "acme/repo#7",
-        thread_id="thread-1",
-        head_sha="head-1",
-        check_name="tests",
-        evidence="runner timeout",
-    )
-    assert blocked == {"success": False, "error": "Flaky rerun limit reached"}
+    with pytest.raises(baby_sit.BabySitError, match="Flaky rerun limit reached"):
+        await baby_sit.record_retry(
+            "acme/repo#7",
+            thread_id="thread-1",
+            head_sha="head-1",
+            check_name="tests",
+            evidence="runner timeout",
+        )
     assert notify.await_count == 1
 
 
@@ -498,7 +558,7 @@ async def test_new_head_resets_retry_budget(
     assert watch.retry_count == 0
 
 
-async def test_only_the_watching_task_can_take_over_or_record_retries(
+async def test_only_the_watching_task_can_take_over_stop_or_record_retries(
     registry_db: None,
 ) -> None:
     watch = await _start_watch()
@@ -506,7 +566,7 @@ async def test_only_the_watching_task_can_take_over_or_record_retries(
     task = await Task.for_thread("thread-1", title="", workspace="default")
     assert watch.task_id == task.id
 
-    with pytest.raises(ValueError, match="another task"):
+    with pytest.raises(baby_sit.WatchOwnedElsewhere):
         await baby_sit.start_watch(
             pr_ref=GitHubPrRef("Acme", "Repo", 7, "https://github.com/Acme/Repo/pull/7"),
             title="Fix the build",
@@ -517,10 +577,151 @@ async def test_only_the_watching_task_can_take_over_or_record_retries(
             run_config={"thread_id": "thread-2"},
             source_context=SourceContext(),
         )
-    assert await baby_sit.record_retry(
-        "acme/repo#7",
-        thread_id="thread-2",
-        head_sha="head-1",
-        check_name="tests",
-        evidence="runner timeout",
-    ) == {"success": False, "error": "This watch belongs to another task"}
+    with pytest.raises(baby_sit.WatchOwnedElsewhere):
+        await baby_sit.record_retry(
+            "acme/repo#7",
+            thread_id="thread-2",
+            head_sha="head-1",
+            check_name="tests",
+            evidence="runner timeout",
+        )
+    with pytest.raises(baby_sit.WatchOwnedElsewhere):
+        await baby_sit.stop_watch("acme/repo#7", thread_id="thread-2")
+    assert await baby_sit.WATCHES.get("acme/repo#7") is not None
+
+
+async def test_a_failing_watch_lock_claim_skips_only_that_watch_on_a_ci_webhook(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _start_watch()
+    monkeypatch.setattr(
+        baby_sit.event_claims, "claim", AsyncMock(side_effect=RuntimeError("database unavailable"))
+    )
+    payload = {
+        "repository": {"owner": {"login": "acme"}, "name": "repo"},
+        "check_run": {"status": "completed", "conclusion": "failure", "head_sha": "head-1"},
+    }
+
+    assert await baby_sit.handle_ci_webhook(payload, "check_run") == {
+        "matched": 1,
+        "dispatched": 0,
+    }
+
+
+async def test_a_failing_watch_lock_claim_is_raised_not_waited_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = AsyncMock(side_effect=RuntimeError("database unavailable"))
+    monkeypatch.setattr(baby_sit.event_claims, "claim", claim)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await baby_sit.stop_watch("acme/repo#7", thread_id="thread-1")
+
+    claim.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param([("h1", [], True, [])], id="no failures"),
+        pytest.param([("h1", [_A_RUN], True, ["a"])], id="first failure while ci runs"),
+        pytest.param([("h1", [_A_RUN], False, ["a"])], id="first failure after ci settles"),
+        pytest.param(
+            [
+                ("h1", [_A_RUN], True, ["a"]),
+                ("h1", [_A_RUN], True, []),
+                ("h1", [_A_RUN], False, []),
+            ],
+            id="sent failure seen again",
+        ),
+        pytest.param(
+            [
+                ("h1", [_A_RUN], True, ["a"]),
+                ("h1", [_A_RUN, _B_RUN], True, []),
+                ("h1", [_A_RUN, _B_RUN], False, ["b"]),
+            ],
+            id="new failure waits for ci to settle",
+        ),
+        pytest.param(
+            [
+                ("h1", [_A_RUN], True, ["a"]),
+                ("h1", [_A_RUN, _B_RUN], True, []),
+                ("h1", [_A_RUN, _B_RUN, _C_RUN], True, []),
+                ("h1", [_A_RUN, _B_RUN, _C_RUN], False, ["b", "c"]),
+            ],
+            id="failures one by one wake once at settle",
+        ),
+        pytest.param(
+            [("h1", [_A_RUN, _B_RUN], False, ["a", "b"]), ("h1", [_A_RUN], False, [])],
+            id="shrinking set",
+        ),
+        pytest.param(
+            [
+                ("h1", [_A_RUN], True, ["a"]),
+                ("h1", [], True, []),
+                ("h1", [_B_RUN], True, []),
+                ("h1", [_B_RUN], False, ["b"]),
+            ],
+            id="recovered failure still waits for ci to settle",
+        ),
+        pytest.param(
+            [
+                ("h1", [_A_RUN], False, ["a"]),
+                ("h1", [], True, []),
+                ("h1", [_A_RERUN], False, ["a"]),
+            ],
+            id="rerun fails again",
+        ),
+        pytest.param(
+            [("h1", [_A_RUN], False, ["a"]), ("h1", [], True, []), ("h1", [], False, [])],
+            id="rerun passes",
+        ),
+        pytest.param(
+            [("h1", [_DEPLOY_STATUS], False, ["deploy"]), ("h1", [_DEPLOY_STATUS], False, [])],
+            id="status reposted",
+        ),
+        pytest.param(
+            [
+                ("h1", [_DEPLOY_STATUS], False, ["deploy"]),
+                ("h1", [], False, []),
+                ("h1", [_DEPLOY_STATUS], False, ["deploy"]),
+            ],
+            id="status recovers and fails again",
+        ),
+        pytest.param(
+            [("h1", [_A_RUN], False, ["a"]), ("h1", [_A_RERUN], False, ["a"])],
+            id="still red check rerun",
+        ),
+        pytest.param(
+            [
+                ("h1", [_DEPLOY_STATUS], False, ["deploy"]),
+                ("h2", [_DEPLOY_STATUS], True, ["deploy"]),
+            ],
+            id="new commit",
+        ),
+        pytest.param(
+            [
+                ("h1", [_A_RUN], False, ["a"]),
+                ("h1", [], False, []),
+                ("h1", [_A_RERUN], True, []),
+                ("h1", [_A_RERUN], False, ["a"]),
+            ],
+            id="rerun fails after a failure wake and green",
+        ),
+        pytest.param(
+            [("h1", [], False, []), ("h1", [_A_RERUN], True, ["a"])],
+            id="rerun fails after a green-only commit",
+        ),
+    ],
+)
+def test_failures_to_send(steps: list[_Step]) -> None:
+    watch = baby_sit.BabySitWatch(key="acme/repo#7")
+
+    for head_sha, failures, has_pending, expected in steps:
+        watch.head_sha = head_sha
+        watch.forget_recovered(failures)
+        to_send = watch.failures_to_send(failures, has_pending=has_pending)
+        if to_send:
+            watch.record_sent(to_send)
+
+        assert [failure.name for failure in to_send] == expected

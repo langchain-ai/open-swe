@@ -8,6 +8,7 @@ import pytest
 from openswe.github import ci as github_ci
 from openswe.github import http as github_http
 from openswe.github.http import GitHubClient, RepoClient
+from openswe.skill_store.run_skills import BUNDLED_SKILLS_DIR
 
 
 def _repo() -> RepoClient:
@@ -134,3 +135,28 @@ async def test_write_permission_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
 
     assert not await _repo().can_write("bob")
     assert not await _repo().can_write("")
+
+
+def test_baby_sit_skill_names_every_robin_check() -> None:
+    skill = (BUNDLED_SKILLS_DIR / "baby-sit" / "SKILL.md").read_text()
+
+    assert [name for name in github_ci.OPEN_SWE_CHECK_NAMES if f"`{name}`" not in skill] == []
+
+
+def test_commit_check_failures_are_the_failing_runs_and_statuses() -> None:
+    checks = github_ci.CommitChecks(
+        runs=[
+            {"id": 1, "name": "lint", "status": "completed", "conclusion": "failure"},
+            {"id": 2, "name": "tests", "status": "completed", "conclusion": "success"},
+            {"id": 3, "name": "e2e", "status": "in_progress", "conclusion": None},
+        ],
+        statuses=[
+            {"id": 4, "context": "deploy", "state": "error"},
+            {"id": 5, "context": "docs", "state": "success"},
+        ],
+    )
+
+    assert checks.failures == [
+        github_ci.CheckFailure(name="lint", conclusion="failure", url="", run_id=1),
+        github_ci.CheckFailure(name="deploy", conclusion="error", url="", run_id=None),
+    ]

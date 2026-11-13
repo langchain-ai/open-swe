@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
-from openswe.baby_sit import record_retry, start_watch, stop_watch, watch_key
+from openswe.baby_sit import BabySitError, record_retry, start_watch, stop_watch, watch_key
 from openswe.github.app import get_github_app_installation_id_for_repo
 from openswe.github.http import GitHubClient, read_result
 from openswe.github.token import resolve_github_token
@@ -78,12 +78,10 @@ async def manage_baby_sit(
         return {"success": False, "error": "No executable agent thread is available"}
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if action == "stop":
-        from openswe.baby_sit import WATCHES
-
-        watch = await WATCHES.get(key)
-        if watch and not await watch.belongs_to(thread_id):
-            return {"success": False, "error": "This watch belongs to another task"}
-        stopped = await stop_watch(key)
+        try:
+            stopped = await stop_watch(key, thread_id=thread_id)
+        except BabySitError as exc:
+            return {"success": False, "error": str(exc), "watch_key": key}
         return {"success": True, "stopped": stopped, "watch_key": key}
 
     if action == "record_retry":
@@ -92,14 +90,17 @@ async def manage_baby_sit(
                 "success": False,
                 "error": "head_sha, check_name, and evidence are required when recording a flaky rerun",
             }
-        return await record_retry(
-            key,
-            thread_id=thread_id,
-            head_sha=head_sha.strip(),
-            check_name=check_name,
-            evidence=evidence,
-            details_url=details_url,
-        )
+        try:
+            return await record_retry(
+                key,
+                thread_id=thread_id,
+                head_sha=head_sha.strip(),
+                check_name=check_name,
+                evidence=evidence,
+                details_url=details_url,
+            )
+        except BabySitError as exc:
+            return {"success": False, "error": str(exc)}
 
     try:
         token, _ = await resolve_github_token(config, thread_id)

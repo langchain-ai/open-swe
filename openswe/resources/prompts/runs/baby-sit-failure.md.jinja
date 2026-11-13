@@ -6,6 +6,7 @@ Verify the PR head and complete check set yourself before acting.
 Inspect only the relevant failed-job logs.
 Rerun failed GitHub Actions jobs only when the evidence supports a transient or flaky diagnosis; never treat one unexplained failure as flaky.
 After a successful rerun, call `manage_baby_sit` with action `record_retry`, the check name, concise evidence, and check URL.
+A check whose logs or description show it waits for a person's approval is not a CI failure; report it once and keep the watch.
 {% if expedited %}
 This PR has an open expedited review card, which is the request to land it.
 When the failure comes from the branch's own changes, fix it on the PR branch, push a new commit, and leave the watch running; it follows the new head.

@@ -1,7 +1,9 @@
 """Durable, opt-in PR CI watches for the `/baby-sit` skill."""
 
+import asyncio
 import hashlib
 import logging
+import random
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -17,7 +19,7 @@ from openswe.database import postgres
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.ci import (
-    FAILING_CONCLUSIONS,
+    CheckFailure,
     CommitChecks,
     RequiredCheck,
     branch_from_check_payload,
@@ -46,26 +48,47 @@ WATCH_CRON_KIND = "baby_sit_watch"
 WATCH_JOB_KIND = "baby_sit"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
-MAX_DISPATCH_KEYS = 30
 MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
 WATCH_LOCK_TTL = timedelta(minutes=5)
+WATCH_LOCK_WAIT = timedelta(seconds=60)
+_WATCH_LOCK_RETRY_BASE_SECONDS = 0.1
+_WATCH_LOCK_RETRY_MAX_SECONDS = 2.0
 _WATCH_LOCK_SCOPE = "baby_sit_watch"
 
 
+class BabySitError(Exception):
+    """A baby-sit request that cannot be carried out; the message is for the caller."""
+
+
+class WatchBusy(BabySitError):
+    """Another update kept this watch's lock for longer than the caller waits."""
+
+    def __init__(self) -> None:
+        super().__init__("A baby-sit update is already in progress")
+
+
+class WatchOwnedElsewhere(BabySitError):
+    """The watch belongs to another task."""
+
+    def __init__(self) -> None:
+        super().__init__("This watch belongs to another task")
+
+
 @asynccontextmanager
-async def _watch_lock(key: str) -> AsyncIterator[bool]:
+async def _watch_lock(key: str, *, wait: timedelta = timedelta(0)) -> AsyncIterator[None]:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wait.total_seconds()
+    attempt = 0
+    while not await event_claims.claim(_WATCH_LOCK_SCOPE, key, ttl=WATCH_LOCK_TTL):
+        if loop.time() >= deadline:
+            raise WatchBusy
+        ceiling = min(_WATCH_LOCK_RETRY_MAX_SECONDS, _WATCH_LOCK_RETRY_BASE_SECONDS * 2**attempt)
+        await asyncio.sleep(ceiling / 2 + random.uniform(0, ceiling / 2))
+        attempt += 1
     try:
-        acquired = await event_claims.claim(_WATCH_LOCK_SCOPE, key, ttl=WATCH_LOCK_TTL)
-    except Exception:
-        logger.warning("Failed to acquire baby-sit lock for %s", key, exc_info=True)
-        acquired = False
-    if not acquired:
-        yield False
-        return
-    try:
-        yield True
+        yield
     finally:
         try:
             await event_claims.release(_WATCH_LOCK_SCOPE, key)
@@ -82,12 +105,13 @@ class BabySitState(BaseModel):
     head_sha: str = ""
     head_ref: str = ""
     ready_head_sha: str = ""
+    sent_head_sha: str = ""
     ready_dispatch_errors: int = 0
     installation_id: int | None = None
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: SourceContext = Field(default_factory=SourceContext)
     retry_count: int = 0
-    dispatch_keys: list[str] = Field(default_factory=list)
+    sent_failures: set[str] = Field(default_factory=set)
     delivery_ids: list[str] = Field(default_factory=list)
     alert_keys: list[str] = Field(default_factory=list)
     evaluation_errors: int = 0
@@ -126,6 +150,18 @@ class BabySitWatch(BabySitState):
         context = await TaskMembership.context_for_thread(thread_id)
         return context is not None and context.task.id == self.task_id
 
+    async def stop(self) -> None:
+        try:
+            await queue.cancel_key(_watch_job_key(self.key))
+        except Exception:
+            logger.warning(
+                "Failed to delete baby-sit job", extra={"watch_key": self.key}, exc_info=True
+            )
+            self.active = False
+            await WATCHES.save(self)
+            return
+        await WATCHES.delete(self.key)
+
     def dispatch_config(self) -> dict[str, Any]:
         configurable = dict(self.run_config)
         configurable.update(
@@ -139,12 +175,30 @@ class BabySitWatch(BabySitState):
         )
         return configurable
 
-    def failure_prompt(self, failures: list[dict[str, Any]], *, expedited: bool) -> str:
+    def forget_recovered(self, failures: list[CheckFailure]) -> None:
+        if self.sent_head_sha != self.head_sha:
+            self.sent_failures = set()
+        self.sent_failures &= {failure.occurrence for failure in failures}
+
+    def failures_to_send(
+        self, failures: list[CheckFailure], *, has_pending: bool
+    ) -> list[CheckFailure]:
+        failing = {failure.occurrence: failure for failure in failures}
+        new = failing.keys() - self.sent_failures
+        if not new or (self.sent_head_sha == self.head_sha and has_pending):
+            return []
+        return [failing[occurrence] for occurrence in sorted(new)]
+
+    def record_sent(self, failures: list[CheckFailure]) -> None:
+        self.sent_failures |= {failure.occurrence for failure in failures}
+        self.sent_head_sha = self.head_sha
+
+    def failure_prompt(self, failures: list[CheckFailure], *, expedited: bool) -> str:
         lines = []
         for failure in failures:
-            name = _prompt_scalar(failure.get("name") or "check", 200)
-            conclusion = _prompt_scalar(failure.get("conclusion") or "failure", 50)
-            url = _prompt_scalar(failure.get("url") or "", 500)
+            name = _prompt_scalar(failure.name, 200)
+            conclusion = _prompt_scalar(failure.conclusion, 50)
+            url = _prompt_scalar(failure.url, 500)
             lines.append(f"- {name} ({conclusion})" + (f" — {url}" if url else ""))
         return prompt(
             "runs/baby-sit-failure",
@@ -276,12 +330,13 @@ async def _ensure_watch_job(key: str) -> str:
 
 async def adopt_agent_server_cron(key: str) -> bool:
     """Move an active watch's Agent Server cron onto a job; ``False`` once it has stopped."""
-    watch = await WATCHES.get(key)
-    if watch is None or not watch.active:
-        return False
-    watch.cron_id = await _ensure_watch_job(key)
-    await WATCHES.save(watch)
-    return True
+    async with _watch_lock(key, wait=WATCH_LOCK_WAIT):
+        watch = await WATCHES.get(key)
+        if watch is None or not watch.active:
+            return False
+        watch.cron_id = await _ensure_watch_job(key)
+        await WATCHES.save(watch)
+        return True
 
 
 async def start_watch(
@@ -296,64 +351,64 @@ async def start_watch(
     source_context: SourceContext,
 ) -> BabySitWatch:
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    existing = await WATCHES.get(key)
-    if existing and existing.active and not await existing.belongs_to(thread_id):
-        raise ValueError("This pull request is already monitored by another task")
+    async with _watch_lock(key, wait=WATCH_LOCK_WAIT):
+        existing = await WATCHES.get(key)
+        if existing and existing.active and not await existing.belongs_to(thread_id):
+            raise WatchOwnedElsewhere
 
-    now = now_iso()
-    carried = existing if existing is not None and existing.head_sha == head_sha else None
-    watch = BabySitWatch(
-        key=key,
-        active=True,
-        thread_id=thread_id,
-        owner=pr_ref.owner.lower(),
-        repo=pr_ref.repo.lower(),
-        pr_number=pr_ref.number,
-        pr_url=pr_ref.url,
-        head_sha=head_sha,
-        head_ref=head_ref,
-        installation_id=installation_id,
-        run_config=run_config,
-        source_context=source_context,
-        ready_head_sha=carried.ready_head_sha if carried else "",
-        ready_dispatch_errors=carried.ready_dispatch_errors if carried else 0,
-        retry_count=carried.retry_count if carried else 0,
-        dispatch_keys=list(carried.dispatch_keys) if carried else [],
-        delivery_ids=list(carried.delivery_ids) if carried else [],
-        alert_keys=list(carried.alert_keys) if carried else [],
-        evaluation_errors=0,
-        cron_id=existing.cron_id if existing else None,
-        created_at=existing.created_at if existing else now,
-        updated_at=now,
-    )
-    await watch.join_task(title=title)
-    watch = await WATCHES.save(watch)
-    try:
-        watch.cron_id = await _ensure_watch_job(key)
-        return await WATCHES.save(watch)
-    except Exception:
-        if existing is None:
-            try:
-                await queue.cancel_key(_watch_job_key(key))
-            except Exception:
-                logger.warning("Failed to roll back baby-sit job %s", key, exc_info=True)
-            await WATCHES.delete(key)
-        raise
+        now = now_iso()
+        carried = existing if existing is not None and existing.head_sha == head_sha else None
+        watch = BabySitWatch(
+            key=key,
+            active=True,
+            thread_id=thread_id,
+            owner=pr_ref.owner.lower(),
+            repo=pr_ref.repo.lower(),
+            pr_number=pr_ref.number,
+            pr_url=pr_ref.url,
+            head_sha=head_sha,
+            head_ref=head_ref,
+            installation_id=installation_id,
+            run_config=run_config,
+            source_context=source_context,
+            ready_head_sha=carried.ready_head_sha if carried else "",
+            sent_head_sha=carried.sent_head_sha if carried else "",
+            ready_dispatch_errors=carried.ready_dispatch_errors if carried else 0,
+            retry_count=carried.retry_count if carried else 0,
+            sent_failures=set(carried.sent_failures) if carried else set(),
+            delivery_ids=list(carried.delivery_ids) if carried else [],
+            alert_keys=list(carried.alert_keys) if carried else [],
+            evaluation_errors=0,
+            cron_id=existing.cron_id if existing else None,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        await watch.join_task(title=title)
+        watch = await WATCHES.save(watch)
+        try:
+            watch.cron_id = await _ensure_watch_job(key)
+            return await WATCHES.save(watch)
+        except Exception:
+            if existing is None:
+                try:
+                    await queue.cancel_key(_watch_job_key(key))
+                except Exception:
+                    logger.warning(
+                        "Failed to roll back baby-sit job", extra={"watch_key": key}, exc_info=True
+                    )
+                await WATCHES.delete(key)
+            raise
 
 
-async def stop_watch(key: str) -> bool:
-    watch = await WATCHES.get(key)
-    if not watch:
-        return False
-    try:
-        await queue.cancel_key(_watch_job_key(key))
-    except Exception:
-        logger.warning("Failed to delete baby-sit job %s", key, exc_info=True)
-        watch.active = False
-        await WATCHES.save(watch)
+async def stop_watch(key: str, *, thread_id: str) -> bool:
+    async with _watch_lock(key, wait=WATCH_LOCK_WAIT):
+        watch = await WATCHES.get(key)
+        if not watch:
+            return False
+        if not await watch.belongs_to(thread_id):
+            raise WatchOwnedElsewhere
+        await watch.stop()
         return True
-    await WATCHES.delete(key)
-    return True
 
 
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
@@ -418,7 +473,7 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
             )
         except Exception:
             logger.warning("Failed to dispatch terminal baby-sit update for %s", watch.key)
-    await stop_watch(watch.key)
+    await watch.stop()
     return "stopped"
 
 
@@ -473,56 +528,6 @@ async def _finish_ready(watch: BabySitWatch) -> str:
     return "watching"
 
 
-def _failure_signals(
-    check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    failures = [
-        {
-            "name": run.get("name") or "check",
-            "conclusion": run.get("conclusion") or "failure",
-            "url": run.get("details_url") or run.get("html_url") or "",
-        }
-        for run in check_runs
-        if run.get("status") == "completed" and run.get("conclusion") in FAILING_CONCLUSIONS
-    ]
-    failures.extend(
-        {
-            "name": status.get("context") or "status",
-            "conclusion": status.get("state") or "failure",
-            "url": status.get("target_url") or "",
-        }
-        for status in statuses
-        if status.get("state") in {"failure", "error"}
-    )
-    return failures
-
-
-def _failure_key(head_sha: str, retry_count: int) -> str:
-    return hashlib.sha256(f"{head_sha}|retry:{retry_count}".encode()).hexdigest()
-
-
-def aggregate_check_state(
-    check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
-) -> tuple[str, list[dict[str, Any]]]:
-    """``(pending | success | blocked | failure, failing signals)`` for one check set."""
-    failures = _failure_signals(check_runs, statuses)
-    if failures:
-        return "failure", failures
-    if any(run.get("status") != "completed" for run in check_runs) or any(
-        status.get("state") == "pending" for status in statuses
-    ):
-        return "pending", []
-    if not check_runs and not statuses:
-        return "pending", []
-    blocked_checks = [
-        run for run in check_runs if run.get("conclusion") not in {"success", "neutral", "skipped"}
-    ]
-    blocked_statuses = [status for status in statuses if status.get("state") not in {"success"}]
-    if blocked_checks or blocked_statuses:
-        return "blocked", []
-    return "success", []
-
-
 def _prompt_scalar(value: Any, limit: int) -> str:
     return " ".join(str(value).split())[:limit]
 
@@ -546,10 +551,11 @@ async def _record_evaluation_error(
 
 
 async def evaluate_watch(key: str) -> str:
-    async with _watch_lock(key) as acquired:
-        if not acquired:
-            return "busy"
-        return await _evaluate_watch(key)
+    try:
+        async with _watch_lock(key):
+            return await _evaluate_watch(key)
+    except WatchBusy:
+        return "busy"
 
 
 async def _evaluate_watch(key: str) -> str:
@@ -557,7 +563,7 @@ async def _evaluate_watch(key: str) -> str:
     if not watch:
         return "missing"
     if not watch.active:
-        await stop_watch(key)
+        await watch.stop()
         return "stopped"
     if watch.installation_id is None:
         return await _record_evaluation_error(watch, "GitHub token unavailable")
@@ -582,7 +588,7 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         return await _record_evaluation_error(watch, detail, retryable=result.status == "transient")
     # A merged or closed PR already says so where people look; the watch just ends.
     if pr.get("state") != "open":
-        await stop_watch(key)
+        await watch.stop()
         return "stopped"
 
     head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
@@ -597,7 +603,6 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         watch.ready_head_sha = ""
         watch.ready_dispatch_errors = 0
         watch.retry_count = 0
-        watch.dispatch_keys = []
         watch.alert_keys = []
 
     check_result = await CommitChecks.read_result(pull.repo, head_sha)
@@ -610,7 +615,8 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         )
 
     watch.evaluation_errors = 0
-    state, failures = aggregate_check_state(checks.runs, checks.statuses)
+    state = checks.state
+    watch.forget_recovered(checks.failures)
     if state == "pending":
         await WATCHES.save(watch)
         return state
@@ -631,25 +637,22 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
             f"*`/baby-sit` needs owner triage:* {watch.pr_url} has terminal checks that "
             "are neither successful nor rerunnable failures.",
         )
+
+    to_send = watch.failures_to_send(checks.failures, has_pending=checks.has_pending)
+    if not to_send:
+        await WATCHES.save(watch)
+        return "duplicate"
     if watch.retry_count >= MAX_RETRIES_PER_HEAD:
         return await _finish_watch(
             watch,
             f"*`/baby-sit` stopped:* {watch.pr_url} is still failing after "
             f"{MAX_RETRIES_PER_HEAD} flaky reruns for `{head_sha[:12]}`.",
         )
-
-    fingerprint = _failure_key(head_sha, watch.retry_count)
-    dispatch_keys = list(watch.dispatch_keys)
-    if fingerprint in dispatch_keys:
-        await WATCHES.save(watch)
-        return "duplicate"
-    watch.dispatch_keys = [*dispatch_keys, fingerprint][-MAX_DISPATCH_KEYS:]
-    watch = await WATCHES.save(watch)
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures, expedited=await _review_card(watch) is not None),
+            watch.failure_prompt(to_send, expedited=await _review_card(watch) is not None),
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,
@@ -657,11 +660,11 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
             multitask_strategy="enqueue",
         )
     except Exception:
-        latest = await WATCHES.get(key) or watch
-        latest.dispatch_keys = [item for item in latest.dispatch_keys if item != fingerprint]
-        await WATCHES.save(latest)
+        await WATCHES.save(watch)
         logger.warning("Failed to dispatch baby-sit failure for %s", key, exc_info=True)
         return "error"
+    watch.record_sent(to_send)
+    await WATCHES.save(watch)
     return "dispatched"
 
 
@@ -697,22 +700,29 @@ async def handle_ci_webhook(
     installation_id = installation.get("id") if isinstance(installation, dict) else None
     dispatched = 0
     for watch in watches:
-        async with _watch_lock(watch.key) as acquired:
-            if not acquired:
-                continue
-            current = await WATCHES.get(watch.key)
-            if not current or not current.active:
-                continue
-            if isinstance(installation_id, int) and installation_id != current.installation_id:
-                current.installation_id = installation_id
-            if delivery_id:
-                delivery_ids = list(current.delivery_ids)
-                if delivery_id in delivery_ids:
+        try:
+            async with _watch_lock(watch.key):
+                current = await WATCHES.get(watch.key)
+                if not current or not current.active:
                     continue
-                current.delivery_ids = [*delivery_ids, delivery_id][-MAX_DELIVERY_IDS:]
-            await WATCHES.save(current)
-            if await _evaluate_watch(current.key) == "dispatched":
-                dispatched += 1
+                if isinstance(installation_id, int) and installation_id != current.installation_id:
+                    current.installation_id = installation_id
+                if delivery_id:
+                    delivery_ids = list(current.delivery_ids)
+                    if delivery_id in delivery_ids:
+                        continue
+                    current.delivery_ids = [*delivery_ids, delivery_id][-MAX_DELIVERY_IDS:]
+                await WATCHES.save(current)
+                if await _evaluate_watch(current.key) == "dispatched":
+                    dispatched += 1
+        except WatchBusy:
+            continue
+        except Exception:
+            logger.warning(
+                "Failed to evaluate a baby-sit watch for a CI webhook",
+                extra={"watch_key": watch.key},
+                exc_info=True,
+            )
     return {"matched": len(watches), "dispatched": dispatched}
 
 
@@ -732,63 +742,39 @@ async def record_retry(
     check_name: str,
     evidence: str,
     details_url: str = "",
-) -> dict[str, Any]:
-    async with _watch_lock(key) as acquired:
-        if not acquired:
-            return {"success": False, "error": "A baby-sit update is already in progress"}
-        return await _record_retry(
-            key,
-            thread_id=thread_id,
-            head_sha=head_sha,
-            check_name=check_name,
-            evidence=evidence,
-            details_url=details_url,
-        )
+) -> dict[str, bool | int]:
+    async with _watch_lock(key, wait=WATCH_LOCK_WAIT):
+        watch = await WATCHES.get(key)
+        if not watch or not watch.active:
+            raise BabySitError("No active baby-sit watch for this pull request")
+        if not await watch.belongs_to(thread_id):
+            raise WatchOwnedElsewhere
+        if watch.head_sha != head_sha:
+            raise BabySitError("Pull request head changed before the rerun was recorded")
+        retries = watch.retry_count
+        if retries >= MAX_RETRIES_PER_HEAD:
+            raise BabySitError("Flaky rerun limit reached")
 
+        retries += 1
+        clean_name = check_name.strip()[:200] or "CI check"
+        clean_evidence = " ".join(evidence.strip().split())[:500] or "transient failure evidence"
+        safe_url = _safe_check_link(details_url.strip())
+        alert_key = hashlib.sha256(f"{watch.head_sha}|{clean_name}|{safe_url}".encode()).hexdigest()
+        alert_keys = list(watch.alert_keys)
+        first_alert = alert_key not in alert_keys
+        watch.retry_count = retries
+        if first_alert:
+            watch.alert_keys = [*alert_keys, alert_key][-MAX_ALERT_KEYS:]
+        await WATCHES.save(watch)
 
-async def _record_retry(
-    key: str,
-    *,
-    thread_id: str,
-    head_sha: str,
-    check_name: str,
-    evidence: str,
-    details_url: str = "",
-) -> dict[str, Any]:
-    watch = await WATCHES.get(key)
-    if not watch or not watch.active:
-        return {"success": False, "error": "No active baby-sit watch for this pull request"}
-    if not await watch.belongs_to(thread_id):
-        return {"success": False, "error": "This watch belongs to another task"}
-    if watch.head_sha != head_sha:
-        return {
-            "success": False,
-            "error": "Pull request head changed before the rerun was recorded",
-        }
-    retries = watch.retry_count
-    if retries >= MAX_RETRIES_PER_HEAD:
-        return {"success": False, "error": "Flaky rerun limit reached"}
-
-    retries += 1
-    clean_name = check_name.strip()[:200] or "CI check"
-    clean_evidence = " ".join(evidence.strip().split())[:500] or "transient failure evidence"
-    safe_url = _safe_check_link(details_url.strip())
-    alert_key = hashlib.sha256(f"{watch.head_sha}|{clean_name}|{safe_url}".encode()).hexdigest()
-    alert_keys = list(watch.alert_keys)
-    first_alert = alert_key not in alert_keys
-    watch.retry_count = retries
-    if first_alert:
-        watch.alert_keys = [*alert_keys, alert_key][-MAX_ALERT_KEYS:]
-    await WATCHES.save(watch)
-
-    if first_alert:
-        check_text = f"<{safe_url}|check details>" if safe_url else "check details unavailable"
-        await _notify_watch(
-            watch,
-            f"*Flaky CI detected:* `{_escape_slack(clean_name)}`\n"
-            f"• PR: <{watch.pr_url}|{watch.owner}/{watch.repo}#{watch.pr_number}>\n"
-            f"• Evidence: {_escape_slack(clean_evidence)}\n"
-            f"• Rerun: {retries}/{MAX_RETRIES_PER_HEAD}\n"
-            f"• {check_text}",
-        )
-    return {"success": True, "retry_count": retries, "alerted": first_alert}
+        if first_alert:
+            check_text = f"<{safe_url}|check details>" if safe_url else "check details unavailable"
+            await _notify_watch(
+                watch,
+                f"*Flaky CI detected:* `{_escape_slack(clean_name)}`\n"
+                f"• PR: <{watch.pr_url}|{watch.owner}/{watch.repo}#{watch.pr_number}>\n"
+                f"• Evidence: {_escape_slack(clean_evidence)}\n"
+                f"• Rerun: {retries}/{MAX_RETRIES_PER_HEAD}\n"
+                f"• {check_text}",
+            )
+        return {"success": True, "retry_count": retries, "alerted": first_alert}
