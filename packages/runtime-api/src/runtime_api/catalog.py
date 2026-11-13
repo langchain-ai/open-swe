@@ -14,6 +14,7 @@ from pydantic import BaseModel, JsonValue, field_validator, model_validator
 
 from runtime_api.connections import ConnectionRef
 from runtime_api.provenance import Provenance
+from runtime_api.sandbox_setup import GitIdentity
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -119,6 +120,8 @@ class SandboxSpec(BaseModel):
     # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
     # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
     github_proxy: ConnectionRef | None = None
+    # Who commits in the sandbox: the thread's owner, written before the run's first command.
+    git_identity: GitIdentity = GitIdentity()
 
     @field_validator("github_proxy")
     @classmethod

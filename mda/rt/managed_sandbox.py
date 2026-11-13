@@ -492,7 +492,8 @@ class ManagedSandboxMiddleware(AgentMiddleware):
             # Readied through a handle that writes the new sandbox's own proxy config, never
             # the one this hook's handle resolved for the old sandbox.
             sandbox_setup(self._backend.run).start(
-                _rebound(request.runtime) if proxy is not None else files
+                _rebound(request.runtime) if proxy is not None else files,
+                self._backend.run.git_identity,
             )
             answer = {
                 "success": True,

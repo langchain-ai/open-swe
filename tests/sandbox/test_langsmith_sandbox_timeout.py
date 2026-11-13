@@ -15,6 +15,7 @@ from langsmith.sandbox import (
     SandboxOperationError,
     SandboxRetryableConnectionError,
 )
+from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 
@@ -79,7 +80,7 @@ async def test_aexecute_kills_on_client_timeout(reset: bool) -> None:
     handle = _FakeHandle(sleep=5.0)
     sb = _backend(handle)
     if reset:
-        sb.reset_git_identity()
+        sb.reset_git_identity(GitIdentity())
     start = time.monotonic()
     resp = await sb.aexecute("sleep 999", timeout=1)
     assert time.monotonic() - start < 3.0
@@ -120,7 +121,7 @@ async def test_aexecute_server_timeout_not_killed(reset: bool) -> None:
     handle = _FakeHandle(raises=CommandTimeoutError("server enforced"))
     sb = _backend(handle)
     if reset:
-        sb.reset_git_identity()
+        sb.reset_git_identity(GitIdentity())
     resp = await sb.aexecute("make hang", timeout=2)
     assert resp.exit_code == 124
     assert "on the sandbox" in resp.output

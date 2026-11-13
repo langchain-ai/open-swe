@@ -360,7 +360,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # A sandbox MDA could not open is not asked for again here: the run's first tool
             # call opens it, or says why it cannot.
             files = getattr(runtime, "backend", None) if opened else None
-            sandbox_setup(run).start(files, self._boot_sandbox)
+            sandbox_setup(run).start(files, run.git_identity, self._boot_sandbox)
         else:
             # Without a sandbox of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)

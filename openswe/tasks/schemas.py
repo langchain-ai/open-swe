@@ -5,6 +5,7 @@ from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.bridge.store import BridgeStore
@@ -88,6 +89,24 @@ class ThreadMetadata(BaseModel):
                 raise PermissionError("Task identity does not match its owner")
             return self.owner_login
         return owner.github_login
+
+    async def owner_if_any(self) -> User | None:
+        """The owning person, by the pinned ``owner_user_id`` first; None for system threads."""
+        if self.owner_type == "system":
+            return None
+        if self.owner_user_id is not None:
+            return await User.get(self.owner_user_id)
+        return await user_for_login(self.owner_login) if self.owner_login else None
+
+    async def git_identity(self) -> GitIdentity:
+        """Who commits in the thread's sandbox: its owner, or the bot without a GitHub owner."""
+        owner = await self.owner_if_any()
+        if owner is None or not owner.github_login:
+            return GitIdentity()
+        login = owner.github_login
+        return GitIdentity(
+            name=owner.display_name or login, email=f"{login}@users.noreply.github.com"
+        )
 
     async def owner(self) -> User:
         if self.owner_type != "user":

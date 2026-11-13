@@ -733,7 +733,7 @@ async def test_slack_files_wait_only_for_an_account_and_a_persisted_thread(
 
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
 @pytest.mark.parametrize("kitchen_channel", [True, False])
-def test_slack_followup_publishes_as_requester_and_preserves_owner(
+def test_slack_followup_publishes_as_the_owner(
     monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool
 ) -> None:
     import importlib
@@ -791,7 +791,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
 
-    assert asyncio.run(opr._resolve_pr_author_token()) == ("bob-token", "user")
+    assert asyncio.run(opr._resolve_pr_author_token()) == ("alice-token", "user")
     assert saved_metadata["owner_login"] == "alice"
 
 

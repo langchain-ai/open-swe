@@ -32,6 +32,7 @@ from langsmith.sandbox import (
 )
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.sandbox_proxy import GITHUB_PROXY_RULES
+from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
@@ -39,7 +40,6 @@ from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.ranges import FileTooLargeError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
-from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
 from openswe.workspaces.cloud_identity import federated_cloud
@@ -656,14 +656,16 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     """
 
     _git_identity_pending: str | None = None
+    _git_identity: GitIdentity = GitIdentity()
     _git_identity_lock: asyncio.Lock | None = None
 
     @property
     def sandbox(self) -> Any:
         return self._sandbox
 
-    def reset_git_identity(self) -> None:
-        """Apply the fallback identity before the next command, without another connection."""
+    def reset_git_identity(self, identity: GitIdentity) -> None:
+        """Apply ``identity`` before the next command, without another connection."""
+        self._git_identity = identity
         self._git_identity_pending = f"__open_swe_git_identity_{secrets.token_hex(16)}__\n"
         forget_work_dir(self)
 
@@ -851,8 +853,8 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             prepared = (
                 f"{{ if mkdir -p {shlex.quote(WORKSPACE_DIR)} && test -w {shlex.quote(WORKSPACE_DIR)}; "
                 f"then printf %s {shlex.quote(work_dir_ready)}; fi; }} 2>&1; "
-                f"{{ if git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
-                f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)}; "
+                f"{{ if git config --global user.name {shlex.quote(self._git_identity.name)} && "
+                f"git config --global user.email {shlex.quote(self._git_identity.email)}; "
                 f"then printf %s {shlex.quote(identity_ready)}; fi; }} 2>&1; "
                 f"printf %s {shlex.quote(command_started)}; "
                 f"exec /bin/bash -c {shlex.quote(command)}"

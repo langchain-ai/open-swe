@@ -43,7 +43,7 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch):
         AsyncMock(side_effect={"alice": "alice-token", "Bob": "bob-token"}.get),
     )
     opr = importlib.import_module("openswe.tools.open_pull_request")
-    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
+    assert await opr._resolve_pr_author_token() == ("alice-token", "user")
     cfg = RunConfig.from_runtime()
     assert cfg.user_email == "bob@example.com"
     assert metadata["owner_login"] == "alice"

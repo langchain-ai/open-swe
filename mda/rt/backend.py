@@ -45,6 +45,7 @@ from runtime_api.catalog import Catalog, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
 from runtime_api.provenance import Provenance
+from runtime_api.sandbox_setup import GitIdentity
 from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
@@ -321,6 +322,12 @@ class Run:
     def catalog(self) -> Catalog:
         """What the run may do: a launched worker's own catalog once it adopted its run."""
         return self.adopted if self.adopted is not None else self.planned
+
+    @property
+    def git_identity(self) -> GitIdentity:
+        """Who commits in the run's sandbox: its thread's owner, or the bot."""
+        sandbox = self.planned.sandbox
+        return sandbox.git_identity if sandbox is not None else GitIdentity()
 
     async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""

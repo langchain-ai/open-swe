@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.sandboxes.lifecycle import configure_git_identity
 from openswe.sandboxes.paths import resolve_checkout_dir, resolve_repo_dir, resolve_sandbox_work_dir
@@ -114,7 +115,7 @@ async def test_the_identity_write_readies_the_work_dir_so_no_probe_follows() -> 
         provider=_FakeProvider(work_dir="/workspace"), writable_dirs={"/workspace"}
     )
 
-    await configure_git_identity(cast(SandboxBackendProtocol, backend))
+    await configure_git_identity(cast(SandboxBackendProtocol, backend), GitIdentity())
 
     assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/workspace"
     assert len(backend.commands) == 1
@@ -127,7 +128,7 @@ async def test_a_work_dir_the_identity_write_could_not_ready_is_still_probed() -
         writable_dirs={"/home/daytona"},
     )
 
-    await configure_git_identity(cast(SandboxBackendProtocol, backend))
+    await configure_git_identity(cast(SandboxBackendProtocol, backend), GitIdentity())
 
     assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/home/daytona"
 

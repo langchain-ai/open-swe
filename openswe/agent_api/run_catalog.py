@@ -249,9 +249,17 @@ class RunCatalog:
     async def granted(self) -> Catalog:
         """The catalog, with who the run acts for, the sandbox MDA creates for it, and the
         grant of each operation to the run."""
-        sandbox = await RunSandbox(self.config, reviews=self.kind.reviews).managed()
+        run_sandbox = RunSandbox(self.config, reviews=self.kind.reviews)
+        sandbox = await run_sandbox.managed()
         spec = (
-            None if sandbox is None else SandboxSpec.model_validate(sandbox.model_dump(mode="json"))
+            None
+            if sandbox is None
+            else SandboxSpec.model_validate(
+                {
+                    **sandbox.model_dump(mode="json"),
+                    "git_identity": await run_sandbox.git_identity(),
+                }
+            )
         )
         catalog = self.build()
         metadata = self.config.get("metadata") or {}

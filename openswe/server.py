@@ -88,8 +88,10 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspac
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
+    RunMessage,
     dynamic_context_hash,
     person_introduction,
+    system_input,
     visible_dynamic_context_hashes,
 )
 from openswe.mcp import load_mcp_tools
@@ -158,6 +160,7 @@ from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
+from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import Task
 from openswe.thread_title import (
     ANTHROPIC_TITLE_GENERATION_MAX_TOKENS,
@@ -1251,6 +1254,30 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             None,
         )
 
+    async def _non_owner_reminder(self, state: PrepareRunState) -> list[RunMessage]:
+        """A reminder after this run's input when someone other than the thread's owner wrote it."""
+        messages = state.get("messages") or []
+        latest = messages[-1] if messages else None
+        provenance = Provenance.of(latest) if isinstance(latest, HumanMessage) else None
+        if provenance is None or not provenance.human:
+            return []
+        indexed = await THREADS.get(self._thread_id)
+        owner = (
+            await ThreadMetadata.model_validate(indexed.metadata).owner_if_any()
+            if indexed is not None
+            else None
+        )
+        if owner is None or provenance.sender == f"user:{owner.id}":
+            return []
+        return [
+            system_input(
+                prompt(
+                    "runs/non-owner-reminder", sender=provenance.sender, owner=f"user:{owner.id}"
+                ),
+                {"sender_id": "system:reminder", "surface": "automation", "kind": "system"},
+            )
+        ]
+
     @staticmethod
     def _participants_messages(
         state: PrepareRunState, participants: Sequence[ThreadParticipant]
@@ -1467,7 +1494,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 triggering_user_identity_task, bound
             )
             if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
-                sandbox_backend.reset_git_identity()
+                sandbox_backend.reset_git_identity(
+                    await ThreadMetadata.model_validate(bound).git_identity()
+                )
             async with aphase(self._thread_id, "prepare.slack_files"):
                 await deliver_slack_files(self._thread_id, bound, sandbox_backend)
             async with aphase(self._thread_id, "prepare.work_dir"):
@@ -1529,6 +1558,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
+                if not bot_id:
+                    sender_messages.extend(await self._non_owner_reminder(state))
         defaults = await workspace_settings
         turn = TurnContext(
             working_dir=work_dir,

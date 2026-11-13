@@ -20,6 +20,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 from pydantic import JsonValue
 from runtime_api.connections import ConnectionRef
+from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
@@ -62,7 +63,6 @@ from openswe.sandboxes.state import (
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
-from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
 from openswe.utils.time import parse_iso
 from openswe.workspaces.refresh import is_snapshot_stale, maybe_start_update
@@ -320,11 +320,11 @@ async def refresh_thread_github_proxy(
 _WORK_DIR_READY = "__open_swe_work_dir_ready__"
 
 
-async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    """Write the bot identity and ready the provider's work dir in one command."""
+async def configure_git_identity(sandbox_backend: SandboxBackendProtocol, git: GitIdentity) -> None:
+    """Write ``git``, the thread owner's identity, and ready the provider's work dir in one command."""
     identity = (
-        f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
+        f"git config --global user.name {shlex.quote(git.name)} && "
+        f"git config --global user.email {shlex.quote(git.email)}"
     )
     work_dir = declared_work_dir(sandbox_backend)
     command = identity
@@ -342,20 +342,37 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> Non
         remember_work_dir(sandbox_backend, work_dir)
 
 
+async def _thread_git_identity(thread_id: str | None) -> GitIdentity:
+    """The thread owner's git identity, or the bot's when it has none or cannot be read."""
+    if thread_id is None:
+        return GitIdentity()
+    try:
+        metadata = await get_sandbox_metadata(thread_id)
+        return await ThreadMetadata.model_validate(metadata).git_identity()
+    except Exception:
+        logger.warning(
+            "Could not resolve the thread owner's git identity",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+        return GitIdentity()
+
+
 @asynccontextmanager
 async def git_identity(
     thread_id: str | None, sandbox_backend: SandboxBackendProtocol
 ) -> AsyncIterator[None]:
-    """Reset identity with the next LangSmith command, or alongside proxy setup elsewhere."""
+    """Write the owner's identity with the next LangSmith command, or alongside proxy setup."""
+    identity = await _thread_git_identity(thread_id)
     if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
-        sandbox_backend.reset_git_identity()
+        sandbox_backend.reset_git_identity(identity)
         yield
         return
 
     async def run() -> None:
         try:
             async with aphase(thread_id, "sandbox.git_identity"):
-                await configure_git_identity(sandbox_backend)
+                await configure_git_identity(sandbox_backend, identity)
         except Exception:
             logger.warning(
                 "Failed to write the bot Git identity",
@@ -418,7 +435,7 @@ async def _connect_existing_sandbox(
                     thread_id=thread_id,
                 )
             async with aphase(thread_id, "sandbox.git_identity"):
-                await configure_git_identity(sandbox_backend)
+                await configure_git_identity(sandbox_backend, await _thread_git_identity(thread_id))
         except Exception as exc:
             logger.warning(
                 "Failed to write the git identity in the sandbox",

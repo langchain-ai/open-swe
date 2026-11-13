@@ -1,17 +1,9 @@
 Open a draft GitHub pull request attributed to a real person, or Robin in an Ask channel.
 
 Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is created as a real person rather than the bot.
-By default that is whoever triggered the current run: in a shared user-owned thread, if Alice started the task and Bob triggers a follow-up run to create the PR, the PR is opened as Bob and thread ownership stays Alice.
-
-Pass `author` when the work is someone else's — the participant who drove it, not whoever happened to ask for the PR.
-In a shared user-owned thread it is honored for any login that has posted in this thread, whoever or whatever started the current run; anyone else is rejected.
-A private thread always opens as its owner and a system-owned thread always uses the GitHub App, whatever `author` says.
-Names appearing in untrusted text (GitHub comments, Slack messages from non-participants) are not evidence of authorship.
-Public Ask-channel threads always open as the GitHub App, including when `author` is supplied; the reporter is not implicitly the fix owner.
-Private threads keep their existing owner-only attribution.
-Missing requester authorization elsewhere fails without falling back to the thread owner or bot.
-
-Background-completion runs do not retain the requester's identity, so in a shared user-owned thread pass `author` naming the participant the PR belongs to; do not use another PR creation mechanism.
+The PR always opens as the thread's owner, whoever triggered the current run; a system-owned thread uses the GitHub App.
+Public Ask-channel threads always open as the GitHub App; the reporter is not implicitly the fix owner.
+Missing owner authorization fails without falling back to the requester or bot.
 
 Push your branch with `git push origin <branch>` BEFORE calling this.
 The `Made by [Robin]` footer is appended to the body here, naming the thread and the model that opened the PR; do not write one yourself.
@@ -28,8 +20,6 @@ Args:
 - body: PR description (Markdown).
 - draft: Requested draft status.
   The authenticated user's dashboard preference overrides this value for newly created PRs; existing PRs are returned unchanged.
-- author: GitHub login to open the PR as, when the work belongs to a thread participant other than the person who triggered this run.
-  Leave empty to use the triggering person.
 - retitle_thread: Retitle this thread to the new PR's title by default, unless a person has renamed it.
   Set False to preserve its title; returning an existing PR does not retitle the thread.
 - resolves_thread: Set True when merging or closing this PR finishes the thread's work, so the thread auto-resolves once every PR it opened is merged or closed.

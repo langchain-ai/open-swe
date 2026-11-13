@@ -1,4 +1,4 @@
-"""Ready the thread's sandbox for the run's git work: its work dir and the bot's git identity.
+"""Ready the thread's sandbox for the run's git work: its work dir and its owner's git identity.
 
 MDA runs no hook of the project's as it creates or adopts a sandbox, so each run readies
 the sandbox MDA opened for it, in the background as the run starts, with one command that
@@ -17,18 +17,11 @@ from collections.abc import Awaitable, Callable
 from typing import Final, Protocol
 
 from deepagents.backends.protocol import SandboxBackendProtocol
-from runtime_api.sandbox_setup import GIT_EMAIL, GIT_NAME, WORK_DIR
+from runtime_api.sandbox_setup import WORK_DIR, GitIdentity
 
 from rt.backend import Run, RunLocal
 
 logger = logging.getLogger(__name__)
-
-# The git identity is written even without a work dir; the exit status says if either failed.
-_SETUP: Final = (
-    f"mkdir -p {shlex.quote(WORK_DIR)} && test -w {shlex.quote(WORK_DIR)}; work_dir=$?; "
-    f"git config --global user.name {shlex.quote(GIT_NAME)} && "
-    f"git config --global user.email {shlex.quote(GIT_EMAIL)} && exit $work_dir"
-)
 
 
 class Boot(Protocol):
@@ -49,9 +42,19 @@ class SandboxSetup:
         self._booted: asyncio.Future[Boot] | None = None
         self._ready: asyncio.Task[None] | None = None
 
+    @staticmethod
+    def command(identity: GitIdentity) -> str:
+        """Ready the work dir and write ``identity``; the exit status says if either failed."""
+        return (
+            f"mkdir -p {shlex.quote(WORK_DIR)} && test -w {shlex.quote(WORK_DIR)}; work_dir=$?; "
+            f"git config --global user.name {shlex.quote(identity.name)} && "
+            f"git config --global user.email {shlex.quote(identity.email)} && exit $work_dir"
+        )
+
     def start(
         self,
         files: object,
+        identity: GitIdentity,
         boot: Callable[[SandboxBackendProtocol], Awaitable[Boot]] | None = None,
     ) -> None:
         """Ready the sandbox ``files`` reaches in the background, once ``boot`` says it has
@@ -59,7 +62,7 @@ class SandboxSetup:
         if not isinstance(files, SandboxBackendProtocol):
             return
         self._booted = None if boot is None else asyncio.ensure_future(boot(files))
-        self._ready = asyncio.ensure_future(self._setup(files))
+        self._ready = asyncio.ensure_future(self._setup(files, identity))
 
     async def booted(self) -> None:
         """Wait for the sandbox to boot; raise ``SandboxUnavailableError`` with why it could not."""
@@ -74,14 +77,14 @@ class SandboxSetup:
         if self._ready is not None:
             await asyncio.shield(self._ready)
 
-    async def _setup(self, files: SandboxBackendProtocol) -> None:
+    async def _setup(self, files: SandboxBackendProtocol, identity: GitIdentity) -> None:
         try:
             await self.booted()
         except SandboxUnavailableError:
             # The calls that need the sandbox report it.
             return
         try:
-            result = await files.aexecute(_SETUP)
+            result = await files.aexecute(self.command(identity))
         except Exception:
             logger.warning("Could not ready the thread's sandbox", exc_info=True)
             return

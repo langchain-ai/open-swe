@@ -18,7 +18,6 @@ from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
     GitHubCredentialScope,
-    PrAuthorNotAParticipant,
     pr_author_login,
     private_credential_login,
 )
@@ -67,13 +66,13 @@ _REPORTED_RESPONSE_HEADERS = (
 )
 
 
-async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | None, str]:
-    """Use the requested or requesting person's OAuth, and the bot for system threads.
+async def _resolve_pr_author_token() -> tuple[str | None, str]:
+    """Use the thread owner's OAuth, and the bot for system threads.
 
     The requester's own GitHub grant, which an MDA run reads from the deployment's
     connection, comes before their dashboard sign-in.
     """
-    login = await pr_author_login(author)
+    login = await pr_author_login()
     if login is None:
         return await get_github_app_installation_token(), "bot"
     if granted := await _requester_grant(login):
@@ -379,12 +378,12 @@ def _branch_failure_payload(
 
 
 async def _revoked_token_payload(
-    *, author: str | None, token: str, owner: str, repo: str, head: str, base: str
+    *, token: str, owner: str, repo: str, head: str, base: str
 ) -> dict[str, Any]:
     from openswe.dashboard.oauth import build_settings_url
     from openswe.dashboard.profiles import mark_access_token_revoked
 
-    if login := await pr_author_login(author):
+    if login := await pr_author_login():
         await mark_access_token_revoked(login, token)
     settings_url = build_settings_url()
     return _failure_payload(
@@ -414,7 +413,6 @@ async def _preflight_pr_access(
     client: httpx2.AsyncClient,
     token: str,
     token_kind: str,
-    author: str | None,
     owner: str,
     repo: str,
     head: str,
@@ -423,7 +421,7 @@ async def _preflight_pr_access(
     repo_resp = await _github_get(client, token, f"/repos/{owner}/{repo}")
     if repo_resp.status_code == 401 and token_kind == "user":
         return await _revoked_token_payload(
-            author=author, token=token, owner=owner, repo=repo, head=head, base=base
+            token=token, owner=owner, repo=repo, head=head, base=base
         )
     if repo_resp.status_code in {403, 404}:
         return _access_failure_payload(
@@ -1049,28 +1047,10 @@ async def _open_pull_request(
     draft: bool,
     resolves_thread: bool = False,
     retitle_thread: bool = True,
-    author: str | None = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ask_channel = await GitHubCredentialScope.is_public_ask()
-    if ask_channel and not RunConfig.from_runtime().background_task_completion:
-        author = None
-    try:
-        token, kind = await _resolve_pr_author_token(author)
-    except PrAuthorNotAParticipant as exc:
-        return _failure_payload(
-            code="pr_author_not_a_participant",
-            owner=owner,
-            repo=repo,
-            head=head,
-            base=base,
-            token_kind="user",
-            http_status=None,
-            reason=str(exc),
-            likely_cause="the requested author has not posted in this thread",
-            branch_pushed=None,
-            failed_step="resolve_pr_author_token",
-        )
+    token, kind = await _resolve_pr_author_token()
     if ask_channel and kind != "user":
         raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "slack", None)
     if not token:
@@ -1112,7 +1092,6 @@ async def _open_pull_request(
             client=client,
             token=token,
             token_kind=kind,
-            author=author,
             owner=owner,
             repo=repo,
             head=head,
@@ -1123,7 +1102,7 @@ async def _open_pull_request(
         requester = None
         requesters: set[str] = set()
         if kind == "user" and ask_channel:
-            requester = await pr_author_login(author)
+            requester = await pr_author_login()
             requesters = {
                 login
                 for login in (requester, RunConfig.from_runtime().github_login)
@@ -1149,7 +1128,6 @@ async def _open_pull_request(
                 client=client,
                 token=token,
                 token_kind=kind,
-                author=None,
                 owner=owner,
                 repo=repo,
                 head=head,
@@ -1365,7 +1343,6 @@ async def open_pull_request(
     draft: bool = True,
     resolves_thread: bool = False,
     retitle_thread: bool = True,
-    author: str = "",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
@@ -1379,7 +1356,6 @@ async def open_pull_request(
         draft=draft,
         resolves_thread=resolves_thread,
         retitle_thread=retitle_thread,
-        author=author or None,
         state=state,
     )
 
@@ -1391,9 +1367,7 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
 
 
 @audit_tool()
-async def link_pull_request(
-    pr_url: str, resolves_thread: bool = False, author: str | None = None
-) -> dict[str, Any]:
+async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread and is_concierge_thread(
@@ -1406,10 +1380,7 @@ async def link_pull_request(
     ref = parse_github_pr_url(pr_url)
     if ref is None:
         return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
-    try:
-        token, kind = await _resolve_pr_author_token(author)
-    except PrAuthorNotAParticipant as exc:
-        return {"success": False, "error": str(exc)}
+    token, kind = await _resolve_pr_author_token()
     if not token:
         return {"success": False, "error": "No GitHub token was available to read the PR"}
     async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:

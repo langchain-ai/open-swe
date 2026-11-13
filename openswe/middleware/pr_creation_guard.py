@@ -22,7 +22,7 @@ _GITHUB_PULLS_ENDPOINT = re.compile(r"(?:^|/)repos/[^/\s]+/[^/\s]+/pulls/?$")
 _GITHUB_PULLS_URL = re.compile(r"https://api\.github\.com/repos/[^/\s]+/[^/\s]+/pulls/?")
 _BLOCK_ERROR = (
     "New pull requests must be opened with the open_pull_request tool so the PR is "
-    "attributed to the triggering user. If open_pull_request failed, surface that "
+    "attributed to the thread's owner. If open_pull_request failed, surface that "
     "failure instead of falling back to gh pr create, gh api /pulls, curl, or another "
     "direct PR creation path."
 )

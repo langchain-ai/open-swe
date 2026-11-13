@@ -5,6 +5,7 @@ from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from runtime_api.loop import Prepare
+from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.agent_api.runs import in_graph_context
 from openswe.github.app import PermissionMap
@@ -20,6 +21,7 @@ from openswe.sandboxes.lifecycle import (
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
+from openswe.tasks.schemas import ThreadMetadata
 
 
 class RunSandbox:
@@ -52,6 +54,13 @@ class RunSandbox:
             github_repositories=repositories,
             github_permissions=permissions,
         )
+
+    async def git_identity(self) -> GitIdentity:
+        """Who commits in the sandbox: the thread's owner, or the bot when it has no GitHub one."""
+        if self._cfg.thread_id is None:
+            return GitIdentity()
+        metadata = await lifecycle.get_sandbox_metadata(self._cfg.thread_id)
+        return await ThreadMetadata.model_validate(metadata).git_identity()
 
     async def bind(self, request: Prepare) -> None:
         """Bind the thread to the sandbox MDA opened before preparing.

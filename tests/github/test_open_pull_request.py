@@ -189,11 +189,11 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
             )
             return httpx2.Response(200, json={"repositories": [{"full_name": full_name}]})
         # OAuth has broader access, including branches already pushed by someone else.
-        assert request.headers["Authorization"] == "Bearer bob-token"
+        assert request.headers["Authorization"] == "Bearer alice-token"
         if not requester_access:
             return httpx2.Response(403, json={"message": "Resource not accessible"})
         if request.method == "POST":
-            return httpx2.Response(201, json={"number": 1, "user": {"login": "bob"}})
+            return httpx2.Response(201, json={"number": 1, "user": {"login": "Alice"}})
         return httpx2.Response(200, json={"name": "existing-branch", "private": False})
 
     client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
@@ -202,14 +202,14 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
 
     if workspace_access == "allowed" and requester_access:
         assert result["success"] is True
-        assert result["author"] == "bob"
+        assert result["author"] == "Alice"
         assert result["token_kind"] == "user"
         assert any(request.method == "POST" for request in requests)
     else:
         assert result["success"] is False
         assert ("403" if workspace_access == "allowed" else "workspace") in result["error"]
         assert not any(request.method == "POST" for request in requests)
-        assert all(request.headers["Authorization"] != "Bearer alice-token" for request in requests)
+        assert all(request.headers["Authorization"] != "Bearer bob-token" for request in requests)
 
 
 def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -333,7 +333,7 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["created"] is False
     assert result["number"] == 9
     assert result["author"] == "johannes117"
-    assert client.post_calls[0]["headers"]["Authorization"] == "Bearer bob-token"
+    assert client.post_calls[0]["headers"]["Authorization"] == "Bearer alice-token"
     pr_lookup = [call for call in client.get_calls if call["url"].endswith("/pulls")]
     assert pr_lookup[0]["params"] == {
         "head": "langchain-ai:open-swe/feature",
@@ -755,8 +755,7 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed,
     )
     _install_client(monkeypatch, client)
 
-    async def requester_token(author: str | None = None) -> tuple[str, str]:
-        assert author is None
+    async def requester_token() -> tuple[str, str]:
         return "requester-token", "user"
 
     monkeypatch.setattr(opr, "_resolve_pr_author_token", requester_token)
@@ -769,7 +768,6 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed,
             title="fix: x",
             body="body",
             draft=True,
-            author="other-participant",
         )
     )
     if allowed and check_required:
@@ -785,15 +783,10 @@ def test_ask_pr_requires_user_repo_access_before_using_app(monkeypatch, allowed,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("valid", [True, False])
-async def test_link_pr_accepts_a_continuation_participant(
-    monkeypatch: pytest.MonkeyPatch, valid: bool
-) -> None:
+async def test_link_pr_reads_as_the_thread_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"thread_id": "thread-1", "background_task_completion": True})
     _stub_token(monkeypatch)
-    token = AsyncMock(return_value=("participant-token", "user"))
-    if not valid:
-        token.side_effect = opr.PrAuthorNotAParticipant("alice", ["bob"])
+    token = AsyncMock(return_value=("owner-token", "user"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", token)
     monkeypatch.setattr(
         opr,
@@ -806,10 +799,6 @@ async def test_link_pr_accepts_a_continuation_participant(
         ),
     )
     monkeypatch.setattr(opr, "_record_pr_telemetry", AsyncMock())
-    result = await opr.link_pull_request(
-        "https://github.com/langchain-ai/open-swe/pull/3", author="alice"
-    )
-    assert result["success"] is valid
-    if not valid:
-        assert "has not participated" in result["error"]
-    token.assert_awaited_once_with("alice")
+    result = await opr.link_pull_request("https://github.com/langchain-ai/open-swe/pull/3")
+    assert result["success"] is True
+    token.assert_awaited_once_with()

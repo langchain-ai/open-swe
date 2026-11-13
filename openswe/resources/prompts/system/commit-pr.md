@@ -21,7 +21,7 @@ Steps, in order:
 
 2. **Push & open/update the PR.**
    Commit locally and `git push origin <branch>`.
-   - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user.
+   - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the thread's owner.
      Pass `resolves_thread=true` unless you know more PRs are coming for this thread (a stack, a planned follow-up); then set it only on the last one.
      It lets the thread auto-resolve once its PRs are merged or closed.
    - **Update an existing PR** (edit body, etc.; never mark a draft ready) with `gh pr edit`.
