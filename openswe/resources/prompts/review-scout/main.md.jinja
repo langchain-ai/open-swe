@@ -16,6 +16,9 @@ Your job is to plan the walkthrough they read it through.
 
 {% include "walkthrough/planning.md.jinja" %}
 
+Prefer to put high-risk changes early in the walkthrough, especially decisions that are hard to undo after shipping, such as introducing an external API or a new database.
+Give the reader any essential context first, but do not bury these changes behind lower-risk implementation details.
+
 Almost always place imports, includes, requires and `use` declarations in Other changes, even when they support a concept explained in a chunk.
 Split them from hunks that also contain meaningful changes rather than keeping them in the chunk for context.
 Include them in a chunk only when they are surprising in their own right, and explain what makes them surprising in the chunk's text.
