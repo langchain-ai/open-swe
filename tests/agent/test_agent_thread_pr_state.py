@@ -514,6 +514,31 @@ async def test_merged_pr_asks_to_monitor_when_no_rollout_check_was_requested() -
 
 
 @pytest.mark.asyncio
+async def test_merged_pr_still_asks_to_monitor_when_feedback_cannot_be_written() -> None:
+    metadata = {
+        "kind": "agent",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+        "pr_state": "open",
+    }
+    payload = {
+        **_pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA),
+        "action": "closed",
+    }
+    feedback = AsyncMock(side_effect=RuntimeError("LangSmith unavailable"))
+    with (
+        patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.create_langsmith_thread_feedback", feedback),
+        patch("openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock),
+        patch("openswe.webhooks.common.ask_to_monitor_rollout", new_callable=AsyncMock) as ask,
+    ):
+        await webhook_common.update_agent_thread_pr_state(payload)
+    written = {call.args[1] for call in feedback.await_args_list}
+    assert "pr_merged" in written
+    ask.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_merged_pr_keeps_its_sha_off_a_different_pull_request() -> None:
     primary = "https://github.com/lc/repo/pull/8"
     merging = "https://github.com/lc/repo/pull/7"

@@ -61,7 +61,7 @@ from openswe.github.comments import (
 )
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from openswe.github.pull_requests import PullRequestEvent
+from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -1455,13 +1455,14 @@ async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
 
     ``github_pr_merged:<url>`` stays unique per PR; ``pr_merged`` is constant
     across threads so LangSmith can filter and count merges project-wide.
+    A failed write is logged, never raised.
 
     Args:
         thread_id: LangGraph thread the PR was opened from.
         pr_url: Stored as the feedback comment.
     """
     source_info = {"source": "github_pr_merged", "thread_id": thread_id, "pr_url": pr_url}
-    await asyncio.gather(
+    results = await asyncio.gather(
         create_langsmith_thread_feedback(
             thread_id,
             f"github_pr_merged:{pr_url}",
@@ -1476,7 +1477,15 @@ async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
             comment=pr_url,
             source_info=source_info,
         ),
+        return_exceptions=True,
     )
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.warning(
+                "Failed to record pull request merge feedback",
+                extra={"thread_id": thread_id, "pr_url": pr_url},
+                exc_info=result,
+            )
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
@@ -1491,6 +1500,9 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     task workers with it. Without that flag the thread is instead marked
     ``attention_reason="prs_closed"`` so a person decides whether to resolve it;
     any PR reopening clears the mark.
+
+    A merge is recorded as feedback on every such thread. The PR's counts and
+    outcome are recorded once, on the thread that opened it, when Robin did.
     """
     event = PullRequestEvent.parse(payload)
     pull_request = event.to_pull_request() if event is not None else None
@@ -1500,9 +1512,10 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     new_state = pull_request.state
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
+    stored: PullRequest | None = None
     try:
-        saved = await pull_request.save(repository_private=event.repo_private)
-        thread_ids = await saved.linked_threads()
+        stored = await pull_request.save(repository_private=event.repo_private)
+        thread_ids = await stored.linked_threads()
     except Exception:  # noqa: BLE001
         logger.warning(
             "Pull request registry unavailable; scanning thread metadata instead",
@@ -1510,6 +1523,22 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             exc_info=True,
         )
         thread_ids = list(await pull_request.discover_threads() or [])
+        if stored is None:
+            # Thread metadata can't tell the opener from a thread that reused the PR, but a
+            # rejected save can leave the stored row that names it readable.
+            try:
+                stored = await PullRequest.get(
+                    pull_request.owner, pull_request.repo, pull_request.number
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to read pull request opener from registry",
+                    extra={"pr_url": pr_url},
+                    exc_info=True,
+                )
+    opener = stored.agent_thread_id if stored is not None else None
+    if opener is not None:
+        await event.record_feedback(opener)
 
     for thread_id in thread_ids:
         metadata: dict[str, Any] | None = None

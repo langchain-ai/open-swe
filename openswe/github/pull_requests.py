@@ -25,6 +25,7 @@ rows carry a synthetic UUIDv7 ``id``; ``(repository, number)`` stays the natural
 key callers address a PR by.
 """
 
+import asyncio
 import logging
 from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
@@ -56,11 +57,13 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
 from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.search import FuzzySearch
 from openswe.utils.thread_ops import langgraph_client
 
@@ -730,6 +733,9 @@ class PullRequestPayload(BaseModel):
     additions: int | None = None
     deletions: int | None = None
     changed_files: int | None = None
+    commits: int | None = None
+    review_comments: int | None = None
+    comments: int | None = None
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
@@ -738,11 +744,37 @@ class PullRequestPayload(BaseModel):
     base_sha: str = Field("", validation_alias=AliasPath("base", "sha"))
     merge_commit_sha: str | None = None
 
+    @property
+    def stats(self) -> dict[str, int]:
+        """The size and activity counts the payload carries, by GitHub field name."""
+        counts = {
+            "additions": self.additions,
+            "deletions": self.deletions,
+            "changed_files": self.changed_files,
+            "commits": self.commits,
+            "review_comments": self.review_comments,
+            "comments": self.comments,
+        }
+        return {name: count for name, count in counts.items() if count is not None}
+
+
+PR_CLOSED_FEEDBACK_KEY = "pr_closed"
+# Deliveries whose pull request counts are recorded as ``pr_<field>`` feedback.
+_PR_STATS_ACTIONS = frozenset(["opened", "closed"])
+
+# A pull request's ``pr_closed`` feedback value. A close without a merge names who closed it:
+# the person Robin opened it for, Robin itself, someone else, or ``unknown`` when that can't be
+# told. A later reopen or merge replaces it with ``reopened`` or ``merged``.
+PrClosure = Literal["requester", "robin", "other", "unknown", "reopened", "merged"]
+
 
 class PullRequestEvent(BaseModel):
     """The slice of a GitHub ``pull_request`` webhook a PR row is built from."""
 
     pull_request: PullRequestPayload
+    action: str = ""
+    sender_login: str = Field("", validation_alias=AliasPath("sender", "login"))
+    sender_id: int | None = Field(None, validation_alias=AliasPath("sender", "id"))
     repo_full_name: str = Field("", validation_alias=AliasPath("repository", "full_name"))
     repo_private: bool | None = Field(None, validation_alias=AliasPath("repository", "private"))
 
@@ -766,6 +798,89 @@ class PullRequestEvent(BaseModel):
             merged=self.pull_request.merged,
             draft=self.pull_request.draft,
         )
+
+    async def closure(self) -> PrClosure | None:
+        """The ``pr_closed`` value this delivery sets; ``None`` when it leaves it alone.
+
+        Robin is checked first, since a pull request Robin authored as itself has Robin as
+        its author. Otherwise the requester is the author, or, when Robin is the author,
+        anyone recorded as asking for it; with nobody recorded the closer is ``unknown``.
+        """
+        if self.action == "reopened":
+            return "reopened"
+        if self.action != "closed":
+            return None
+        if self.pull_request.merged:
+            return "merged"
+        sender = self.sender_login.lower()
+        if not sender:
+            return "unknown"
+        if sender in OPEN_SWE_GITHUB_LOGINS:
+            return "robin"
+        author = self.pull_request.author.lower()
+        if author and author not in OPEN_SWE_GITHUB_LOGINS:
+            same_id = self.sender_id is not None and self.sender_id == self.pull_request.author_id
+            return "requester" if same_id or sender == author else "other"
+        if self.identity is None:
+            return "unknown"
+        logins, ids = await PullRequest.requesters(*self.identity)
+        if not logins and not ids:
+            return "unknown"
+        return "requester" if sender in logins or self.sender_id in ids else "other"
+
+    async def record_feedback(self, thread_id: str) -> None:
+        """Record the pull request's counts and outcome as feedback on the thread that opened it.
+
+        An opened or closed delivery writes each count it carries as ``pr_<field>`` with the
+        count as the score. A closed or reopened delivery writes ``pr_closed`` with its
+        ``closure`` as the value and no score; dashboards count closes without a merge as
+        ``value in (requester, robin, other, unknown)``. Each key keeps one row per pull
+        request, keyed by its URL, so a later delivery replaces the earlier value. A failure
+        is logged, never raised.
+        """
+        pull_request = self.to_pull_request()
+        if pull_request is None:
+            return
+        pr_url = pull_request.url
+        try:
+            closure = await self.closure()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not tell who closed a pull request",
+                extra={"thread_id": thread_id, "pr_url": pr_url},
+                exc_info=True,
+            )
+            closure = "unknown"
+        source_info = {"source": "github_pull_request", "thread_id": thread_id, "pr_url": pr_url}
+        counts = self.pull_request.stats if self.action in _PR_STATS_ACTIONS else {}
+        writes = [
+            create_langsmith_thread_feedback(
+                thread_id,
+                f"pr_{name}",
+                score=float(count),
+                event_id=pr_url,
+                source_info=source_info,
+            )
+            for name, count in counts.items()
+        ]
+        if closure is not None:
+            writes.append(
+                create_langsmith_thread_feedback(
+                    thread_id,
+                    PR_CLOSED_FEEDBACK_KEY,
+                    score=None,
+                    value=closure,
+                    event_id=pr_url,
+                    source_info=source_info,
+                )
+            )
+        for result in await asyncio.gather(*writes, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "Failed to record pull request feedback",
+                    extra={"thread_id": thread_id, "pr_url": pr_url},
+                    exc_info=result,
+                )
 
     def to_pull_request(self) -> PullRequest | None:
         """An unsaved record carrying what this event says about the PR."""
