@@ -956,6 +956,7 @@ async def _compile_resolved_managed_agent_async(
     context_schema = definition.config.get("context_schema")
     declared_memory_layers = _declared_memory_layers(run_memory)
     from managed_deepagents._run_input import (  # noqa: PLC0415
+        DeploymentProjectManagedAgent,
         ManagedCompiledAgent,
         is_channel_execution,
     )
@@ -1007,7 +1008,11 @@ async def _compile_resolved_managed_agent_async(
             timing=timing,
         )
         if isinstance(agent, CompiledAgent):
-            agent.__class__ = ManagedCompiledAgent
+            agent.__class__ = (
+                DeploymentProjectManagedAgent
+                if definition.config.get("trace_only_deployment_project") is True
+                else ManagedCompiledAgent
+            )
         built = _BuiltGraph(policy=policy, agent=agent, configuration=configuration)
         if key is not None:
             _SharedGraphs.keep(key, built)
@@ -1236,6 +1241,7 @@ def _compile_managed_agent(
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
     merged.pop("browser", None)
+    merged.pop("trace_only_deployment_project", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (
