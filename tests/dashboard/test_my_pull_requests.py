@@ -11,6 +11,7 @@ from openswe.github import pull_request_status as prs
 from openswe.github.branch_config import BranchRules
 from openswe.github.ci import RequiredCheck
 from openswe.review import routes as review_routes
+from openswe.review.reviews import ReviewCheck
 
 
 def _client(number: int) -> prs.PullRequestClient:
@@ -252,6 +253,86 @@ async def test_review_and_thread_status_agree_on_current_check_outcomes(
     assert [check["name"] for check in thread["failingChecks"]] == failures
     assert thread["inconclusiveCheckCount"] == inconclusive
     assert len(review.pending_checks) == thread["pendingCheckCount"] == int(conclusion is None)
+
+
+@pytest.mark.parametrize(
+    ("required", "conclusion", "unit", "review_required", "ci", "required_passing"),
+    [
+        (True, "failure", None, True, "none", False),
+        (True, "success", "success", False, "passing", True),
+        (True, None, "success", True, "passing", False),
+        (True, "cancelled", "success", True, "passing", False),
+        (True, "absent", "success", True, "passing", False),
+        (True, "failure", "failure", True, "failing", False),
+        (True, "failure", "queued", True, "pending", False),
+        (False, "failure", "success", False, "passing", True),
+        (None, "failure", "success", False, "passing", None),
+    ],
+)
+async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
+    monkeypatch, required, conclusion, unit, review_required, ci, required_passing
+):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": "blocked" if required else "unstable",
+        "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
+    }
+    runs = []
+    if conclusion != "absent":
+        runs.append(
+            {
+                "name": "Robin Approves",
+                "status": "completed" if conclusion else "queued",
+                "conclusion": conclusion,
+                "html_url": "https://github.com/acme/app/runs/1",
+            }
+        )
+    if unit:
+        runs.append(
+            {
+                "name": "unit",
+                "status": "queued" if unit == "queued" else "completed",
+                "conclusion": None if unit == "queued" else unit,
+            }
+        )
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
+    )
+    monkeypatch.setattr(prs.PullRequestClient, "unresolved_threads", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.BranchConfig,
+        "read",
+        AsyncMock(
+            return_value=BranchRules(
+                {RequiredCheck("Robin Approves", app_id=42)} if required else set(), True
+            )
+            if required is not None
+            else None
+        ),
+    )
+    if runs and conclusion != "absent":
+        runs[0]["app"] = {"id": 42}
+    client = _client(1)
+    review = await client.load()
+    thread = await client.thread_status()
+    checks = await ReviewCheck.on_head(client)
+    assert review is not None
+    assert review.review_required is review_required
+    assert review.ci == ci
+    assert review.required_checks_passing is required_passing
+    assert review.missing_checks == []
+    failures = ["unit"] if unit == "failure" else []
+    assert review.failing_checks == failures
+    assert [check["name"] for check in thread["failingChecks"]] == failures
+    assert len(review.pending_checks) == thread["pendingCheckCount"] == int(unit == "queued")
+    assert thread["inconclusiveCheckCount"] == 0
+    assert [check.name for check in checks] == (["unit"] if unit else [])
 
 
 async def test_clean_merge_confirms_required_checks_when_details_are_unavailable(monkeypatch):

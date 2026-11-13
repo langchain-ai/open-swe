@@ -25,6 +25,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from starlette.types import Receive, Scope, Send
 
 from openswe.github.app import get_github_app_installation_token
+from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_request_diff import (
     fetch_file_versions,
@@ -414,6 +415,7 @@ class ReviewCheck(BaseModel):
                 url=run.get("html_url"),
             )
             for run in runs or []
+            if run.get("name") != APPROVAL_CHECK_RUN_NAME
         ]
 
 

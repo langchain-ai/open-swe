@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
 from openswe.github.branch_config import BranchConfig
+from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
@@ -345,6 +346,8 @@ def _normalize_checks(
     pending = 0
     inconclusive = 0
     for run in runs:
+        if run.get("name") == APPROVAL_CHECK_RUN_NAME:
+            continue
         status = run.get("status")
         conclusion = run.get("conclusion")
         if status != "completed":
@@ -1084,17 +1087,32 @@ class PullRequestClient:
                 if reviewers is not None and config.required_approving_reviews:
                     approvals = sum(reviewer.state == "approved" for reviewer in reviewers)
                     result.review_required |= approvals < config.required_approving_reviews
+        if config is not None and runs is not None and result.merge_state != "clean":
+            approval_checks = {
+                check for check in config.checks if check.name == APPROVAL_CHECK_RUN_NAME
+            }
+            passing_approvals = [
+                run
+                for run in runs
+                if run.get("name") == APPROVAL_CHECK_RUN_NAME
+                and run.get("status") == "completed"
+                and run.get("conclusion") == "success"
+            ]
+            result.review_required |= any(
+                not check.reported_by(passing_approvals, []) for check in approval_checks
+            )
         if runs is None or statuses is None:
             return result
-        failed, _, _ = _normalize_checks(runs, statuses)
+        ci_runs = [run for run in runs if run.get("name") != APPROVAL_CHECK_RUN_NAME]
+        failed, _, _ = _normalize_checks(ci_runs, statuses)
         failures = [_as_str(check["name"], "Unnamed check") for check in failed]
         inconclusive = any(
             run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
-            for run in runs
+            for run in ci_runs
         )
         pending = [
             _as_str(run.get("name"), "Unnamed check")
-            for run in runs
+            for run in ci_runs
             if run.get("status") != "completed"
         ] + [
             _as_str(status.get("context"), "Unnamed status")
@@ -1111,7 +1129,7 @@ class PullRequestClient:
             else "unknown"
             if inconclusive
             else "passing"
-            if runs or statuses
+            if ci_runs or statuses
             else "none"
         )
         if config is not None and result.merge_state != "clean":
@@ -1127,7 +1145,11 @@ class PullRequestClient:
                 check.reported_by(passing_runs, passing_statuses) for check in required
             )
             if not pending:
-                result.missing_checks = unreported_required_checks(required, runs, statuses)
+                result.missing_checks = unreported_required_checks(
+                    {check for check in required if check.name != APPROVAL_CHECK_RUN_NAME},
+                    runs,
+                    statuses,
+                )
         return result
 
 

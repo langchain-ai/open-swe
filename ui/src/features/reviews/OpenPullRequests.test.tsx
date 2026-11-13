@@ -40,6 +40,7 @@ vi.mock("@/lib/api", () => ({
     closePullRequest: vi.fn(),
     markPullRequestReady: vi.fn(),
     repoMergeMethods: vi.fn(),
+    humanReviewAvailability: vi.fn(),
     openPullRequestThread: vi.fn(),
   },
 }))
@@ -203,6 +204,12 @@ const chooseMergeMethod = async (number: number, label: string) => {
 beforeEach(() => {
   vi.mocked(api.repoMergeMethods).mockResolvedValue({
     mergeMethods: ["squash", "merge", "rebase"],
+  })
+  vi.mocked(api.humanReviewAvailability).mockResolvedValue({
+    available: true,
+    active: false,
+    permalink: "",
+    blockers: [],
   })
   vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
@@ -836,6 +843,32 @@ describe("My PRs", () => {
     expect(
       within(card).getByRole("button", { name: "Update branch" })
     ).toBeTruthy()
+  })
+
+  it("shows a required review without enabling Fix up", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          reviewRequired: true,
+          reviewDecision: "approved",
+          requiredChecksPassing: false,
+        }),
+      ],
+    })
+    mount()
+    expect(await screen.findByText("Review required")).toBeTruthy()
+    expect(screen.queryByText("Approved")).toBeNull()
+    expect(screen.queryByText("Failing")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Fix up" })).toBeNull()
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Enable auto-merge" })
+      ).toHaveProperty("disabled", false)
+    )
+    expect(
+      screen.getByRole("button", { name: "Request review in Slack" })
+    ).toHaveProperty("disabled", false)
   })
 
   it("offers both a fix and a merge when only optional checks fail", async () => {

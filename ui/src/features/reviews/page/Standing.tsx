@@ -46,6 +46,7 @@ import {
   canAttemptMerge,
   canUpdateBranch,
   isConflicted,
+  needsFixUp,
 } from "@/features/reviews/lib/status"
 import { AgentMark } from "./AgentMark"
 import {
@@ -194,7 +195,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             )}
           </div>
         </div>
-        {open && status && (
+        {open && status && needsFixUp(status) && (
           <PullRequestThreadAction pr={status} login={login} />
         )}
       </div>
@@ -546,12 +547,12 @@ function ReviewsRow({
     detail.pr.author?.login
   )
   const decision =
-    status.reviewDecision === "approved"
-      ? "Approved"
-      : status.reviewDecision === "changes_requested"
-        ? "Changes requested"
-        : status.reviewRequired
-          ? "An approving review is required"
+    status.reviewDecision === "changes_requested"
+      ? "Changes requested"
+      : status.reviewRequired
+        ? "An approving review is required"
+        : status.reviewDecision === "approved"
+          ? "Approved"
           : "No reviews required"
   const unresolved = open
     ? open.threads.length
@@ -563,13 +564,11 @@ function ReviewsRow({
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         icon={
-          status.reviewDecision === "approved"
-            ? passIcon
-            : status.reviewDecision === "changes_requested"
-              ? failIcon
-              : status.reviewRequired
-                ? warnIcon
-                : passIcon
+          status.reviewDecision === "changes_requested"
+            ? failIcon
+            : status.reviewRequired
+              ? warnIcon
+              : passIcon
         }
         label="Reviews"
         action={
