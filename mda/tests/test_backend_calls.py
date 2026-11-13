@@ -61,6 +61,8 @@ from managed_deepagents import (
     define_deep_agent,
     shared_factory,
 )
+from managed_deepagents._memory.layers import MemoryLayers
+from managed_deepagents._memory_instructions import create_memory_instructions_middleware
 from managed_deepagents._run_input import ManagedTurnTracer
 from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
@@ -970,10 +972,16 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
             *model_call_guards(),
         ],
     )
+    # As MDA mounts user memory: in deepagents' memory slot, inside the prompt cache.
+    user_memory: MemoryLayers = [{"type": "user"}]
     graph = create_deep_agent(
         model=FakeListChatModel(responses=["unused"]),
         system_prompt="The graph's own instructions.",
-        middleware=middleware,
+        memory=["/memories/user/AGENTS.md"],
+        middleware=[
+            *middleware,
+            create_memory_instructions_middleware(user_memory, lambda: "Prefers tabs."),
+        ],
     )
 
     await graph.ainvoke({"messages": [HumanMessage("hi")]})
@@ -983,8 +991,9 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     system = cast(list[dict[str, object]], payload["system"])
     tools = cast(list[dict[str, object]], payload["tools"])
     # The graph's prompt, the run's, the thread's and the conversation's end: Anthropic
-    # rejects a request with more than four breakpoints.
-    assert [block.get("cache_control") for block in system] == [hour, hour, hour]
+    # rejects a request with more than four breakpoints, so the memory after them has none.
+    assert "Prefers tabs." in cast(str, system[-1]["text"])
+    assert [block.get("cache_control") for block in system] == [hour, hour, hour, None]
     assert payload["cache_control"] == hour
     assert all("cache_control" not in tool for tool in tools)
     assert json.dumps(payload).count('"cache_control"') == 4

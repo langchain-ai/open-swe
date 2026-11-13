@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from langchain.agents.middleware.types import (
@@ -81,20 +81,17 @@ def append_memory_instructions(
     request: ModelRequest[None],
     instructions: str = MANAGED_MEMORY_INSTRUCTIONS,
 ) -> ModelRequest[None]:
-    """Return ``request`` with the policy appended as its own content block."""
+    """Return ``request`` with the policy appended as its own content block.
+
+    The block carries no cache breakpoint: the author's prompt cache spends the
+    request's four, and one more here, with its own TTL, fails the call.
+    Remove when langchain-ai/managed-deepagents-sdk#1340 is released.
+    """
     from langchain_core.messages import SystemMessage  # noqa: PLC0415
 
     existing = request.system_message
     blocks: list[ContentBlock] = list(existing.content_blocks if existing is not None else [])
-    block: ContentBlock = {"type": "text", "text": instructions}
-    model = request.model
-    if model is not None:
-        from langchain_anthropic import ChatAnthropic  # noqa: PLC0415
-
-        # Match native MemoryMiddleware, including middleware-level model fallback.
-        if isinstance(model, ChatAnthropic):
-            block = cast("ContentBlock", {**block, "cache_control": {"type": "ephemeral"}})
-    blocks.append(block)
+    blocks.append({"type": "text", "text": instructions})
     return request.override(system_message=SystemMessage(content_blocks=blocks))
 
 
