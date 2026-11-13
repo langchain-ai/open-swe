@@ -189,9 +189,9 @@ async def test_a_dispatch_error_is_retried_with_only_unsent_failures(
     assert dispatch.await_args is not None
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
 
-    checks[1] = _check_run(2, "tests", "failure")
+    checks[1] = _check_run(2, "tests", "cancelled")
     assert await baby_sit.evaluate_watch("acme/repo#7") == "dispatched"
-    assert "- tests (failure)" in dispatch.await_args.args[1]
+    assert "- tests (cancelled)" in dispatch.await_args.args[1]
     assert "- approval (failure)" not in dispatch.await_args.args[1]
 
 
@@ -231,7 +231,7 @@ async def test_spent_rerun_budget_stops_the_watch_only_on_a_new_failure(
     assert watch.active
     assert dispatch.await_count == 1
 
-    checks[1] = _check_run(4, "tests", "failure")
+    checks[1] = _check_run(4, "tests", "cancelled")
     assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
 
 
@@ -477,9 +477,7 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
         RepoClient,
         "check_runs",
         AsyncMock(
-            return_value=[
-                {"id": 1, "name": "tests", "status": "completed", "conclusion": "cancelled"}
-            ]
+            return_value=[{"id": 1, "name": "tests", "status": "completed", "conclusion": "stale"}]
         ),
     )
     monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))

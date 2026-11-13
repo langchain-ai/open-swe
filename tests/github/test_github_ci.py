@@ -149,6 +149,8 @@ def test_commit_check_failures_are_the_failing_runs_and_statuses() -> None:
             {"id": 1, "name": "lint", "status": "completed", "conclusion": "failure"},
             {"id": 2, "name": "tests", "status": "completed", "conclusion": "success"},
             {"id": 3, "name": "e2e", "status": "in_progress", "conclusion": None},
+            {"id": 6, "name": "build", "status": "completed", "conclusion": "cancelled"},
+            {"id": 7, "name": "lint", "status": "completed", "conclusion": "stale"},
         ],
         statuses=[
             {"id": 4, "context": "deploy", "state": "error"},
@@ -158,5 +160,6 @@ def test_commit_check_failures_are_the_failing_runs_and_statuses() -> None:
 
     assert checks.failures == [
         github_ci.CheckFailure(name="lint", conclusion="failure", url="", run_id=1),
+        github_ci.CheckFailure(name="build", conclusion="cancelled", url="", run_id=6),
         github_ci.CheckFailure(name="deploy", conclusion="error", url="", run_id=None),
     ]

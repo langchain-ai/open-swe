@@ -22,10 +22,12 @@ from openswe.github.http import ReadResult, RepoClient, read_result
 
 logger = logging.getLogger(__name__)
 
-# Check-run conclusions that mean "this CI step did not pass" and are worth an
-# auto-fix attempt. ``cancelled`` / ``stale`` / ``skipped`` are intentionally
-# excluded: they're rarely a code problem the agent can fix.
-FAILING_CONCLUSIONS: frozenset[str] = frozenset(["failure", "timed_out", "action_required"])
+# Check-run conclusions that did not pass and are worth waking the agent for.
+# A concurrency group can cancel a pull request's run and nothing reruns it; the agent
+# tells that apart from a person's cancel.
+FAILING_CONCLUSIONS: frozenset[str] = frozenset(
+    ["failure", "timed_out", "action_required", "cancelled"]
+)
 
 # Check runs Open SWE itself produces; never treat them as fixable CI.
 OPEN_SWE_CHECK_NAMES: frozenset[str] = frozenset(
