@@ -33,18 +33,7 @@ It is read from the pull request's head commit, falling back to the default bran
 The `request_human_review` tool accepts a `channel` that overrides it or stands in when the repository sets none.
 
 PR authors must have a Robin account or be one of Robin's own bots.
-To also accept specific GitHub users or apps, add their exact logins to `reviewAllowedAuthors`:
-
-```json
-{
-  "reviewChannel": "#eng-reviews",
-  "reviewAllowedAuthors": ["langsmith-engine[bot]"]
-}
-```
-
-Logins match case-insensitively; wildcards are not supported.
-The allow-list is read only from the repository's default branch, never from the PR head, and unreadable or invalid settings block unregistered authors.
-It only permits requesting standard human review; it does not grant a Robin account or trusted-comment status, bypass draft or closed-PR checks, or relax merge requirements.
+Workspace admins can also allow other GitHub App bots, such as `langsmith-engine[bot]`, from the **Bots** page; their pull requests are treated like a Robin user's.
 `EXTRA_INTERNAL_BOT_LOGINS` controls trusted comments separately and does not grant review eligibility.
 
 For monorepos, add ordered path rules:

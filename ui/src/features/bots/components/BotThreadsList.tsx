@@ -19,6 +19,7 @@ import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
 import type { AllowedSlackBotEntry } from "@/lib/api"
 import { useThreadsPage } from "@/features/agents/lib/queries"
+import { AllowedGitHubBotsSection } from "@/features/bots/components/AllowedGitHubBotsSection"
 import { AllowedSlackBotsSection } from "@/features/bots/components/AllowedSlackBotsSection"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -80,8 +81,9 @@ export function BotThreadsList({
 
         {!bot &&
           (isAdmin ? (
-            <div className="mt-space-4 rounded-xl border border-default bg-surface-level-1">
+            <div className="mt-space-4 divide-y divide-default rounded-xl border border-default bg-surface-level-1">
               <AllowedSlackBotsSection onBotChange={onBotChange} />
+              <AllowedGitHubBotsSection />
             </div>
           ) : (
             <div className="mt-space-4 divide-y divide-default rounded-xl border border-default bg-surface-level-1">

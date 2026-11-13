@@ -12,6 +12,7 @@ import pytest
 
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
+from openswe.github.allowed_bots import AllowedGitHubBot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, ThreadLink
@@ -34,6 +35,7 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+_UNREGISTERED = "its author is not a Robin user or an allowed GitHub bot"
 
 
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
@@ -188,11 +190,10 @@ async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) 
         patch.object(
             User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
         ),
-        patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(
-            RepoClient,
-            "read_file",
-            AsyncMock(return_value='{"reviewAllowedAuthors": ["langsmith-engine[bot]"]}'),
+            AllowedGitHubBot,
+            "allows",
+            AsyncMock(return_value=author == "langsmith-engine[bot]"),
         ),
         patch(
             "openswe.human_review.standard.choose_reviewer",
@@ -944,38 +945,25 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     ]
 
 
-@asynccontextmanager
-async def _review_github_app(owner: str, repo: str) -> AsyncIterator[GitHubClient]:
-    yield GitHubClient(MagicMock())
-
-
 @pytest.mark.parametrize(
     ("author", "user", "draft", "allowed", "expected"),
     [
-        ("ada", User(), False, [], []),
-        ("ada", None, False, [], ["its author is not a Robin user or in reviewAllowedAuthors"]),
-        ("open-swe[bot]", None, False, [], []),
-        ("open-swe-preview[bot]", None, False, [], []),
-        ("openswe-dev[bot]", None, False, [], []),
-        (
-            "another[bot]",
-            None,
-            False,
-            ["langsmith-engine[bot]"],
-            ["its author is not a Robin user or in reviewAllowedAuthors"],
-        ),
-        ("open-swe[bot]", None, True, [], ["it is a draft"]),
-        ("LangSmith-Engine[bot]", None, False, [" langsmith-engine[bot] "], []),
-        ("ada", None, False, ["ADA"], []),
-        ("ada", None, True, ["ada"], ["it is a draft"]),
+        ("ada", User(), False, False, []),
+        ("ada", None, False, False, [_UNREGISTERED]),
+        ("open-swe[bot]", None, False, False, []),
+        ("open-swe-preview[bot]", None, False, False, []),
+        ("openswe-dev[bot]", None, False, False, []),
+        ("another[bot]", None, False, False, [_UNREGISTERED]),
+        ("open-swe[bot]", None, True, False, ["it is a draft"]),
+        ("langsmith-engine[bot]", None, False, True, []),
+        ("langsmith-engine[bot]", None, True, True, ["it is a draft"]),
     ],
 )
-async def test_review_blockers_require_an_account_or_an_allowed_author(
-    author: str, user: User | None, draft: bool, allowed: list[str], expected: list[str]
+async def test_review_blockers_require_an_account_or_an_allowed_bot(
+    author: str, user: User | None, draft: bool, allowed: bool, expected: list[str]
 ) -> None:
     from openswe.human_review.standard import review_blockers
 
-    settings = RepoSettings(review_allowed_authors=allowed).model_dump_json(by_alias=True)
     with (
         patch.object(
             PullRequestClient,
@@ -990,52 +978,10 @@ async def test_review_blockers_require_an_account_or_an_allowed_author(
             ),
         ),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
-        patch.object(GitHubClient, "as_app", _review_github_app),
-        patch.object(RepoClient, "read_file", AsyncMock(return_value=settings)),
+        patch.object(AllowedGitHubBot, "allows", AsyncMock(return_value=allowed)),
     ):
         blockers = await review_blockers(_repo().pull_request(7))
     assert blockers == expected
-
-
-@pytest.mark.parametrize(
-    "settings", [None, "unreadable", "not json", '{"reviewAllowedAuthors": "ada"}']
-)
-async def test_review_author_allowlist_requires_valid_default_branch_settings(
-    settings: str | None,
-) -> None:
-    from openswe.human_review.standard import review_blockers
-
-    async def read_file(
-        repo: RepoClient, path: str, ref: str | None, *, max_chars: int, strict: bool = False
-    ) -> str | None:
-        if ref is not None:
-            return '{"reviewAllowedAuthors": ["ada"]}'
-        if settings == "unreadable":
-            from openswe.github.repo_files import RepoFileUnreadableError
-
-            raise RepoFileUnreadableError("Could not read settings")
-        return settings
-
-    with (
-        patch.object(
-            PullRequestClient,
-            "pull",
-            AsyncMock(
-                return_value={
-                    "state": "open",
-                    "head": {"sha": "abc"},
-                    "user": {"login": "ada"},
-                }
-            ),
-        ),
-        patch.object(User, "for_login", AsyncMock(return_value=None)),
-        patch.object(GitHubClient, "as_app", _review_github_app),
-        patch.object(RepoClient, "read_file", read_file),
-    ):
-        blockers = await review_blockers(_repo().pull_request(7))
-    assert blockers == (
-        ["its author is not a Robin user or in reviewAllowedAuthors"] if settings is None else None
-    )
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -1181,11 +1127,10 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(
             User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
         ),
-        patch.object(GitHubClient, "as_app", _review_github_app),
         patch.object(
-            RepoClient,
-            "read_file",
-            AsyncMock(return_value='{"reviewAllowedAuthors": ["langsmith-engine[bot]"]}'),
+            AllowedGitHubBot,
+            "allows",
+            AsyncMock(return_value=author == "langsmith-engine[bot]"),
         ),
         patch.object(
             standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})

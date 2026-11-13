@@ -2,6 +2,7 @@
 
 import logging
 
+from openswe.github.allowed_bots import AllowedGitHubBot
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
@@ -32,7 +33,7 @@ async def _unavailable_reason(subject: str) -> str | None:
                 return f"{subject} has already been merged or closed."
             if details.draft:
                 return f"{subject} is now a draft. Its author must mark it ready before review."
-            if await User.for_login("github", details.author) is None:
+            if not await AllowedGitHubBot.author_allowed(details.author):
                 return "This review suggestion is no longer available."
             stored = await PullRequest.get(pr_ref.owner, pr_ref.repo, pr_ref.number)
             if stored and any(review.head_sha == details.head_sha for review in stored.reviews):

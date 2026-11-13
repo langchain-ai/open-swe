@@ -4,6 +4,7 @@ import logging
 
 from sqlalchemy.exc import IntegrityError
 
+from openswe.github.allowed_bots import AllowedGitHubBot
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
@@ -70,7 +71,7 @@ async def _watch_pull_request(
         logger.warning("Could not read a pull request posted for review", extra=extra)
         return
     pull_request, details = recorded
-    if await User.for_login("github", details.author) is None:
+    if not await AllowedGitHubBot.author_allowed(details.author):
         return
     if details.state != "open":
         return

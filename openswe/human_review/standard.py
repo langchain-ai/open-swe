@@ -34,6 +34,7 @@ from openswe.expedited_review.readiness import (
     latest_review_states,
     review_authors,
 )
+from openswe.github.allowed_bots import AllowedGitHubBot
 from openswe.github.codeowners import CodeOwners
 from openswe.github.http import (
     GitHubAppUnavailable,
@@ -42,7 +43,6 @@ from openswe.github.http import (
     RepoClient,
     or_none,
 )
-from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -210,20 +210,6 @@ def request_blockers(snapshot: PullRequestSnapshot | PullRequestPayload) -> list
     return blockers
 
 
-async def _review_author_allowed(author: str, owner: str, repo: str) -> bool | None:
-    if author.lower() in OPEN_SWE_GITHUB_LOGINS or await User.for_login("github", author):
-        return True
-    try:
-        async with GitHubClient.as_app(owner, repo) as github:
-            settings = await RepoSettings.fetch(github.repo(owner, repo), strict=True)
-    except GitHubAppUnavailable, RepoFileUnreadableError:
-        logger.exception("Could not read review author allow-list")
-        return None
-    return bool(author) and author.lower() in {
-        login.strip().lower() for login in settings.review_allowed_authors
-    }
-
-
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
     payload = await or_none(pull.pull())
@@ -233,11 +219,8 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if not snapshot.head_sha:
         return None
     blockers = request_blockers(snapshot)
-    author_allowed = await _review_author_allowed(snapshot.author, pull.repo.owner, pull.repo.name)
-    if author_allowed is None:
-        return None
-    if not author_allowed:
-        blockers.append("its author is not a Robin user or in reviewAllowedAuthors")
+    if not await AllowedGitHubBot.author_allowed(snapshot.author):
+        blockers.append("its author is not a Robin user or an allowed GitHub bot")
     return blockers
 
 
@@ -1165,10 +1148,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     if readiness is None:
         return False
     snapshot = readiness.snapshot
-    author_allowed = await _review_author_allowed(snapshot.author, pull.repo.owner, pull.repo.name)
-    if author_allowed is None:
-        return False
-    if not author_allowed:
+    if not await AllowedGitHubBot.author_allowed(snapshot.author):
         await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return True
     if snapshot.merged:
@@ -1334,11 +1314,7 @@ async def _auto_assign(
     replacing = trigger is not None and trigger.kind in ("declined", "expired")
     if not replacing and (request.reviewers or request.picks):
         return AutoAssignResult("claimed")
-    pr = request.pull_request
-    author_allowed = await _review_author_allowed(pr.author, pr.owner, pr.repo)
-    if author_allowed is None:
-        return AutoAssignResult("failed")
-    if not author_allowed:
+    if not await AllowedGitHubBot.author_allowed(request.pull_request.author):
         await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)

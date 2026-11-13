@@ -263,3 +263,31 @@ async def test_selected_bot_is_reverified_at_add_time(
     response = await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "UHUMAN"})
     assert response.status_code == 400
     assert (await client.get("/dashboard/api/slack/allowed-bots")).json() == []
+
+
+async def test_admin_allowed_github_bot_prs_are_treated_like_users(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    from openswe.github.allowed_bots import AllowedGitHubBot
+
+    assert not await AllowedGitHubBot.author_allowed("LangSmith-Engine[bot]")
+    assert (
+        await client.post("/dashboard/api/github/allowed-bots", json={"login": "octocat"})
+    ).status_code == 400
+    response = await client.post(
+        "/dashboard/api/github/allowed-bots", json={"login": " LangSmith-Engine[bot] "}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["login"] == "langsmith-engine[bot]"
+    assert response.json()["created_by"] == "alice"
+    assert await AllowedGitHubBot.author_allowed("LangSmith-Engine[bot]")
+
+    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
+    assert (
+        await client.delete("/dashboard/api/github/allowed-bots/langsmith-engine[bot]")
+    ).status_code == 403
+    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "alice"}
+    assert (
+        await client.delete("/dashboard/api/github/allowed-bots/langsmith-engine[bot]")
+    ).is_success
+    assert not await AllowedGitHubBot.author_allowed("langsmith-engine[bot]")
