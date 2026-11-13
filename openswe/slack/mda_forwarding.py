@@ -13,13 +13,14 @@ MDA's conversations that reaches the backend anyway starts nothing
 
 import logging
 import uuid
-from typing import Final
+from typing import Final, Literal
 
 from pydantic import JsonValue
 
 from openswe.dispatch import channel_of
 from openswe.slack.client import SlackThreadMappingError
 from openswe.slack.dm import CONCIERGE_TS
+from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.records import bind_slack_thread_id, lookup_slack_thread_id
 from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
@@ -74,25 +75,31 @@ async def owned_conversation(channel_id: str, thread_ts: str) -> str | None:
 
 
 async def claim_conversation(
-    app_id: str, team_id: str, channel_id: str, root_ts: str, *, owner_login: str | None = None
+    app_id: str,
+    team_id: str,
+    channel_id: str,
+    root_ts: str,
+    *,
+    owner_login: str | None = None,
+    channel_context: SlackChannelContext,
 ) -> str:
-    """Make a new Slack conversation MDA's: its thread id (:func:`mda_thread_id`).
-
-    ``owner_login`` is the GitHub login of the person who started it, who may prompt the
-    thread while it is still private. Raises :class:`SlackThreadMappingError` when
-    another thread took the Slack thread since.
-    """
+    """Claim a Slack conversation with its verified channel visibility from creation."""
     thread_id = mda_thread_id(app_id, team_id, channel_id, root_ts)
     await bind_slack_thread_id(channel_id, root_ts, thread_id)
-    await _adopt(thread_id, owner_login)
+    collaborative = (
+        channel_context.allows_operations
+        and channel_context.is_im is not True
+        and not channel_id.startswith("D")
+    )
+    await _adopt(thread_id, owner_login, visibility="public" if collaborative else "private")
     return thread_id
 
 
-async def _adopt(thread_id: str, owner_login: str | None) -> None:
-    # Private to the person who started it until the thread's first metadata write, by the
-    # channel's run or by the backend taking the conversation back, says who may see it.
+async def _adopt(
+    thread_id: str, owner_login: str | None, *, visibility: Literal["private", "public"] = "private"
+) -> None:
     metadata: dict[str, JsonValue] = {
-        "visibility": "private",
+        "visibility": visibility,
         PROVISIONAL_VISIBILITY_KEY: True,
         "source": "slack",
     }

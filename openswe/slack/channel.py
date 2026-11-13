@@ -237,7 +237,6 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     ):
         _no_run("another event of this message started its turn", **fields)
         return SlackTurnStarted()
-    channel_context = await common.resolve_slack_channel_context(turn.channel_id)
     key_ts = CONCIERGE_TS if turn.concierge else turn.thread_ts
     declined = await _account_gate(turn, webhook_id, fields)
     if declined is not None:
@@ -247,16 +246,25 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
     )
     branch_of = ""
+    owned = await mda_forwarding.owned_thread(turn.channel_id, key_ts)
+    channel_context = await common.resolve_slack_channel_context(
+        turn.channel_id,
+        use_cache=(
+            owned is not None
+            or turn.kind != "turn"
+            or turn.concierge
+            or turn.channel_id.startswith("D")
+        ),
+    )
     if turn.kind in {"by_the_way", "web"}:
         # On a thread of its own, whoever holds the Slack thread it was asked in. It starts
         # with what the conversation's thread holds when this channel may read it, or is
         # seeded from the Slack thread.
-        source = await mda_forwarding.owned_thread(turn.channel_id, key_ts)
-        if await _branches(source, turn, owner_login):
-            branch_of = str(source)
+        if await _branches(owned, turn, owner_login):
+            branch_of = str(owned)
         conversation = mda_forwarding.side_thread_id(turn.channel_id, turn.message_ts)
         await mda_forwarding.claim_side(conversation, owner_login=owner_login)
-    elif (owned := await mda_forwarding.owned_thread(turn.channel_id, key_ts)) is not None:
+    elif owned is not None:
         conversation = owned
     elif turn.kind == "breakout":
         # Opens its own Slack thread, seeded from this one, whoever holds it.
@@ -271,7 +279,7 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         _no_run(f"{turn.kind} outside an MDA conversation", **fields)
         return SlackTurnStarted()
     else:
-        conversation = await _claim(turn, owner_login)
+        conversation = await _claim(turn, owner_login, channel_context)
     if turn.concierge:
         # Each Slack thread of a concierge DM joins the DM's one conversation.
         await mda_forwarding.join_concierge(turn.channel_id, turn.thread_ts, conversation)
@@ -404,7 +412,9 @@ async def _first_decline(webhook_id: str, turn: StartSlackTurn) -> bool:
     return await event_claims.claim(_DECLINE_SCOPE, decline, ttl=_DECLINE_TTL)
 
 
-async def _claim(turn: StartSlackTurn, owner_login: str | None) -> str:
+async def _claim(
+    turn: StartSlackTurn, owner_login: str | None, channel_context: SlackChannelContext
+) -> str:
     """Make a new conversation MDA's channel's: its thread."""
     try:
         if turn.concierge:
@@ -412,7 +422,12 @@ async def _claim(turn: StartSlackTurn, owner_login: str | None) -> str:
                 turn.app_id, turn.team_id, turn.channel_id, owner_login=owner_login
             )
         return await mda_forwarding.claim_conversation(
-            turn.app_id, turn.team_id, turn.channel_id, turn.thread_ts, owner_login=owner_login
+            turn.app_id,
+            turn.team_id,
+            turn.channel_id,
+            turn.thread_ts,
+            owner_login=owner_login,
+            channel_context=channel_context,
         )
     except SlackThreadMappingError as exc:
         raise HTTPException(

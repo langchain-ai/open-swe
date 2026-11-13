@@ -4,13 +4,16 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from openswe import event_claims
 from openswe.database import postgres
 from openswe.slack import client as slack_client
+from openswe.slack import mda_forwarding
 from openswe.slack import records as slack_records
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
+from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.records import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -24,6 +27,7 @@ from openswe.slack.records import (
 )
 from openswe.thread_ids import mda_successor_thread_id
 from openswe.threads import index
+from openswe.webhooks.common import PROVISIONAL_VISIBILITY_KEY, ThreadRecord
 
 
 @pytest.mark.parametrize("root_field", ["ts", "thread_ts"])
@@ -126,6 +130,52 @@ async def test_resolver_creates_a_concurrency_safe_mapping() -> None:
 
     assert second == first
     assert await lookup_slack_thread_id("C1", "1.0") == first
+
+
+@pytest.mark.parametrize(
+    ("channel_id", "context", "collaborative"),
+    [
+        ("C1", SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False), True),
+        ("D1", SlackChannelContext(is_im=True), False),
+        ("D1", SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False), False),
+        ("C1", SlackChannelContext(), False),
+        ("C1", SlackChannelContext(is_ext_shared=True, is_pending_ext_shared=False), False),
+        ("C1", SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=True), False),
+    ],
+    ids=["internal", "dm", "dm-without-im-flag", "unknown", "external", "pending-external"],
+)
+@pytest.mark.usefixtures("registry_db")
+async def test_a_collaborator_can_prompt_a_claimed_internal_conversation_before_its_first_run(
+    channel_id: str, context: SlackChannelContext, collaborative: bool
+) -> None:
+    thread_id = await mda_forwarding.claim_conversation(
+        "A1", "T1", channel_id, "1.0", owner_login="alice", channel_context=context
+    )
+
+    thread = await index.get(thread_id)
+    assert thread is not None
+    record = ThreadRecord(exists=True, metadata=thread.metadata)
+    assert not record.started
+    assert record.authorize("alice")["owner_login"] == "alice"
+    if collaborative:
+        assert record.authorize("bob")["visibility"] == "public"
+    else:
+        with pytest.raises(HTTPException) as exc:
+            record.authorize("bob")
+        assert exc.value.status_code == 404
+
+    await index.update(thread_id, {"visibility": "private", PROVISIONAL_VISIBILITY_KEY: None})
+    await mda_forwarding.claim_conversation(
+        "A1", "T1", channel_id, "1.0", owner_login="bob", channel_context=context
+    )
+    private = await index.get(thread_id)
+    assert private is not None
+    private_record = ThreadRecord(exists=True, metadata=private.metadata)
+    assert private_record.started
+    assert private_record.authorize("alice")["visibility"] == "private"
+    with pytest.raises(HTTPException) as exc:
+        private_record.authorize("bob")
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio

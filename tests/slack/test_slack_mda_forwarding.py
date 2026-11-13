@@ -32,11 +32,13 @@ from openswe.slack import forks, mda_forwarding
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
 from openswe.slack.allowed_bots import AllowedSlackBot
+from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from tests.mda_helpers import mda_starts, stub_mda_runtime
+from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -47,6 +49,7 @@ _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 # The real lookups, which the fixture below stands in for in the webhook's tests.
 _OWNED_THREAD = mda_forwarding.owned_thread
 _JOIN_CONCIERGE = mda_forwarding.join_concierge
+_CHANNEL_CONTEXT = webhook_common.resolve_slack_channel_context
 
 
 class _FakeBackgroundTasks:
@@ -728,9 +731,11 @@ _PROMPT = SlackTurnPrompt(
 
 @pytest.mark.parametrize("interrupts", [True, False])
 async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
-    monkeypatch: pytest.MonkeyPatch, interrupts: bool
+    monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI, interrupts: bool
 ) -> None:
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", _CHANNEL_CONTEXT)
+    await SlackChannel.save_all({"id": "C1", "name": "engineering"})
     prepare = _prepared(monkeypatch, interrupts=interrupts, prompt=_PROMPT)
     prepare.return_value = (
         slack_service.SlackChannelRun(
@@ -782,6 +787,8 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
     }
     cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
+    assert request.channel_context.name == "engineering"
+    assert slack_api.calls == []
 
 
 async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
@@ -812,17 +819,57 @@ async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
     assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 
+@pytest.mark.parametrize(
+    ("channel_id", "channel_type", "external"),
+    [("C1", "channel", False), ("C1", "channel", True), ("D1", "im", False)],
+    ids=["internal", "newly external", "dm"],
+)
 async def test_a_new_conversation_is_claimed_once_its_sender_passed_the_gate(
     monkeypatch: pytest.MonkeyPatch,
+    slack_api: SlackAPI,
+    channel_id: str,
+    channel_type: str,
+    external: bool,
 ) -> None:
-    _prepared(monkeypatch, prompt=_PROMPT)
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", _CHANNEL_CONTEXT)
+    await SlackChannel.save_all(
+        {
+            "id": channel_id,
+            "is_im": channel_type == "im",
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        }
+    )
+    if channel_type != "im":
+        slack_api.respond(
+            {
+                "ok": True,
+                "channel": {
+                    "id": channel_id,
+                    "is_im": False,
+                    "is_ext_shared": external,
+                    "is_pending_ext_shared": False,
+                },
+            }
+        )
+    prepare = _prepared(monkeypatch, prompt=_PROMPT)
 
-    start = await _start(_start_app(monkeypatch))
+    start = await _start(_start_app(monkeypatch), channel_id=channel_id, channel_type=channel_type)
 
     assert start["run"] is not None
     cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
+    context = SlackChannelContext(
+        id=channel_id,
+        is_im=channel_type == "im",
+        is_ext_shared=external,
+        is_pending_ext_shared=False,
+    )
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
-        "A1", "T1", "C1", "1.2", owner_login="ada"
+        "A1", "T1", channel_id, "1.2", owner_login="ada", channel_context=context
+    )
+    assert prepare.await_args.args[0].channel_context == context
+    assert slack_api.calls == (
+        [] if channel_type == "im" else [("conversations.info", {"channel": channel_id})]
     )
 
 
@@ -895,7 +942,12 @@ async def test_an_allowed_bots_turn_links_no_account_and_no_person_owns_it(
 
     cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
-        "A1", "T1", "C1", "1.2", owner_login=None
+        "A1",
+        "T1",
+        "C1",
+        "1.2",
+        owner_login=None,
+        channel_context=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False),
     )
     request = prepare.await_args.args[0]
     assert (request.triggering_bot_id, request.triggering_bot_app_id) == ("B1", "A2")
@@ -984,8 +1036,10 @@ async def test_the_call_logs_why_it_starts_no_run(
 
 
 async def test_a_by_the_way_question_runs_on_a_thread_of_its_own(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI
 ) -> None:
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", _CHANNEL_CONTEXT)
+    await SlackChannel.save_all({"id": "C1", "name": "engineering"})
     prepare = _prepared(monkeypatch)
     asked = slack_ask.AskChannelRun(
         input={"messages": [{"role": "user", "content": "why?"}]},
@@ -1017,6 +1071,7 @@ async def test_a_by_the_way_question_runs_on_a_thread_of_its_own(
         side,
         "1.0",
     )
+    assert slack_api.calls == []
 
 
 async def test_a_web_breakout_runs_on_a_thread_of_its_own_and_its_thread_hears_once(
@@ -1836,7 +1891,7 @@ async def test_an_edit_outside_an_mda_conversation_or_eligible_channel_starts_no
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
 
     async def external(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
-        return SlackChannelContext(is_ext_shared=True)
+        return SlackChannelContext(is_ext_shared=not use_cache, is_pending_ext_shared=False)
 
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", external)
     assert await _start(app, msg_id="msg_delivery-2", kind="edit", text="x") == _NO_RUN
