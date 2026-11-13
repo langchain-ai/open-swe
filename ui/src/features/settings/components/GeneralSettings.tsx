@@ -226,8 +226,8 @@ export function GeneralSettings() {
           label="Personal kitchen channel"
           description={
             session.data?.slack_user_id
-              ? "Open SWE responds to your messages in this channel without an @mention. Only your messages get kitchen handling; environment kitchen channels stay unchanged. Choose an internal channel Open SWE has joined. Clear to turn off."
-              : "Link Slack in Connections to choose a channel where Open SWE responds to your messages without an @mention."
+              ? "Robin responds to your messages in this channel without an @mention. Only your messages get kitchen handling; environment kitchen channels stay unchanged. Choose an internal channel Robin has joined. Clear to turn off."
+              : "Link Slack in Connections to choose a channel where Robin responds to your messages without an @mention."
           }
           control={
             <SlackChannelCombobox
