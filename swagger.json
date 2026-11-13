@@ -6760,6 +6760,22 @@
         "title": "PullRequestThreadStatus",
         "type": "object"
       },
+      "PullRequestTitleUpdate": {
+        "properties": {
+          "title": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "PullRequestTitleUpdate",
+        "type": "object"
+      },
       "QueueStatus": {
         "properties": {
           "active_batch_id": {
@@ -23285,6 +23301,75 @@
           }
         ],
         "summary": "Api Set Review Thread Resolution",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/title": {
+      "patch": {
+        "operationId": "api_update_pull_request_title_dashboard_api_reviews__owner___repo___pr_number__title_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestTitleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Pull Request Title",
         "tags": [
           "dashboard",
           "review"

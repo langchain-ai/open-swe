@@ -2066,6 +2066,16 @@ export const api = {
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
     ),
+  updatePullRequestTitle: (
+    owner: string,
+    repo: string,
+    number: number,
+    title: string
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/title`,
+      { method: "PATCH", body: JSON.stringify({ title }) }
+    ),
   updatePullRequestDescription: (
     owner: string,
     repo: string,

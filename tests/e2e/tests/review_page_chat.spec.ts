@@ -179,14 +179,17 @@ test.describe("review page", () => {
     const menu = title.getByRole("link", { name: /Add constant modules/ });
     await expect(menu).toContainText("Add constant modules");
     await expect(menu).toContainText(`#${pr.number}`);
-    const link = title.getByRole("link", { name: "Open on GitHub" });
+    const link = page.getByRole("link", {
+      name: "Open on GitHub",
+      exact: true,
+    });
     await expect(link).toBeVisible();
     await expect(link).toHaveAttribute(
       "href",
       `https://github.com/${OWNER}/${REPO}/pull/${pr.number}`,
     );
 
-    const pill = title.locator("xpath=preceding-sibling::span[1]");
+    const pill = title.locator("xpath=../preceding-sibling::span[1]");
     await expect(pill).toHaveText("Reviewable");
     const pillBox = await pill.boundingBox();
     const titleBox = await title.boundingBox();
@@ -196,6 +199,69 @@ test.describe("review page", () => {
     expect(pillMiddle).toBeGreaterThan(titleBox!.y);
     expect(pillMiddle).toBeLessThan(titleBox!.y + titleBox!.height);
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
+  });
+
+  test("edits titles with keyboard controls and restores failed drafts", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const edit = page.getByRole("button", { name: "Edit title", exact: true });
+    const input = page.getByRole("textbox", { name: "PR title", exact: true });
+    const save = page.getByRole("button", { name: "Save title", exact: true });
+    await edit.click();
+    await expect(input).toBeFocused();
+    await expect(save).toBeDisabled();
+    await input.fill("Discard this title");
+    await input.press("Escape");
+    await expect(edit).toBeFocused();
+    await edit.click();
+    await expect(input).toHaveValue("Add constant modules");
+    await input.fill("   ");
+    await expect(save).toBeDisabled();
+    await input.fill("Rename constant modules");
+    const compositionHandled = await input.evaluate((element) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(compositionHandled).toBe(true);
+    await expect(input).toBeVisible();
+    await input.press("Enter");
+    await expect(input).toBeHidden();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(
+      "Rename constant modules",
+    );
+    await page.reload();
+    await edit.click();
+    await expect(input).toHaveValue("Rename constant modules");
+    const endpoint = `**${reviewApi(pr, "/title")}`;
+    await page.route(endpoint, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: "You do not have permission to edit this PR",
+        }),
+      }),
+    );
+    await input.fill("Retry this title");
+    await save.click();
+    await expect(input).toHaveValue("Retry this title");
+    await expect(
+      page.getByText("Couldn't update title", { exact: true }),
+    ).toBeVisible();
+    await page.unroute(endpoint);
+    await save.click();
+    await expect(input).toBeHidden();
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(
+      "Retry this title",
+    );
   });
 
   test("edits descriptions, cancels drafts, and keeps failed saves retryable", async ({

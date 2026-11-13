@@ -36,7 +36,7 @@ import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { isLive } from "./pullRequestStanding"
-import { RecentReviewPagesMenu } from "./RecentReviewPagesMenu"
+import { PullRequestTitle } from "./PullRequestTitle"
 import { RelativeTimestamp } from "./RelativeTimestamp"
 import { ReviewQueueControls, useReviewQueue } from "./ReviewQueue"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
@@ -157,7 +157,7 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <h1 className="flex min-w-0 items-center gap-space-1 text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:text-sm max-sm:leading-5">
+          <div className="flex min-w-0 flex-1 items-center gap-space-1 text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:text-sm max-sm:leading-5">
             <a
               href={githubUrl}
               target="_blank"
@@ -167,11 +167,11 @@ export function Header({
             >
               <GithubLogoIcon aria-hidden size={16} weight="regular" />
             </a>
-            <RecentReviewPagesMenu pr={pr}>
-              {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
-              <span className="font-normal text-secondary"> #{pr.number}</span>
-            </RecentReviewPagesMenu>
-          </h1>
+            <PullRequestTitle
+              key={`${pr.owner}/${pr.repo}/${pr.number}`}
+              pr={pr}
+            />
+          </div>
         </div>
         {detail ? (
           // The meta line and the status sentence share one slot and cross-fade.

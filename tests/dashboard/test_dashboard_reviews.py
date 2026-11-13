@@ -33,8 +33,9 @@ pytestmark = pytest.mark.usefixtures("findings_from_metadata")
     "denied, github_status, expected_status",
     [(False, 200, 204), (True, 200, 403), (False, 422, 422), (False, 503, 502)],
 )
-async def test_description_update_uses_viewer_permissions(
-    monkeypatch, denied: bool, github_status: int, expected_status: int
+@pytest.mark.parametrize("field, endpoint", [("body", "description"), ("title", "title")])
+async def test_pull_request_update_uses_viewer_permissions(
+    monkeypatch, denied: bool, github_status: int, expected_status: int, field: str, endpoint: str
 ) -> None:
     app = FastAPI()
     add_github_error_handlers(app)
@@ -57,7 +58,7 @@ async def test_description_update_uses_viewer_permissions(
     monkeypatch.setattr(review_routes.GitHubClient, "as_user", viewer)
     async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
         response = await client.patch(
-            "/reviews/acme/app/7/description", json={"body": "Updated description"}
+            f"/reviews/acme/app/7/{endpoint}", json={field: "Updated description"}
         )
     assert response.status_code == expected_status
     if github_status >= 400:
@@ -71,7 +72,20 @@ async def test_description_update_uses_viewer_permissions(
             "PATCH",
             "https://api.github.com/repos/acme/app/pulls/7",
         )
-        assert request.await_args.kwargs["json"] == {"body": "Updated description"}
+        assert request.await_args.kwargs["json"] == {field: "Updated description"}
+
+
+@pytest.mark.parametrize("title", ["", " \t\n", "x" * 257])
+async def test_title_update_rejects_invalid_titles(monkeypatch, title: str) -> None:
+    app = FastAPI()
+    app.include_router(review_routes.router)
+    app.dependency_overrides[require_session] = lambda: {"sub": "alice"}
+    access = AsyncMock()
+    monkeypatch.setattr(review_routes, "require_repo_access_for_user", access)
+    async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
+        response = await client.patch("/reviews/acme/app/7/title", json={"title": title})
+    assert response.status_code == 422
+    access.assert_not_awaited()
 
 
 @pytest.fixture(autouse=True)
