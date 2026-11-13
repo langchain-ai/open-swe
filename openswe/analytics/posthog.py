@@ -1,9 +1,10 @@
 """Optional PostHog capture without tool content or page identifiers."""
 
+import asyncio
 import logging
 from typing import Literal, Self
 
-import httpx
+import httpx2
 from langgraph.config import get_config
 from pydantic import BaseModel, ValidationError
 
@@ -11,6 +12,7 @@ from openswe.config import ENV
 from openswe.github.pull_requests import PullRequest
 from openswe.run_config import RunConfig
 from openswe.users import User
+from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks.event_log import LoggedEvent
 
 logger = logging.getLogger(__name__)
@@ -67,10 +69,10 @@ async def _capture(
     if timestamp:
         payload["timestamp"] = timestamp
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            response = await client.post(
-                f"{ENV.POSTHOG_HOST.get().rstrip('/')}/i/v0/e/", json=payload
-            )
+        url = httpx2.URL(f"{ENV.POSTHOG_HOST.get().rstrip('/')}/i/v0/e/")
+        transport = await asyncio.to_thread(pooled_transport, url=url)
+        async with httpx2.AsyncClient(timeout=2.0, transport=transport) as client:
+            response = await client.post(url, json=payload)
             response.raise_for_status()
     except Exception:
         logger.warning("PostHog usage delivery failed", exc_info=True)

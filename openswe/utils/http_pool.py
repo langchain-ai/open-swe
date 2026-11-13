@@ -10,7 +10,9 @@ keeps them warm across calls. Closing such a client leaves the pool open.
 """
 
 import asyncio
+import ipaddress
 import weakref
+from urllib.request import getproxies, proxy_bypass
 
 import aiohttp
 import httpx2
@@ -41,6 +43,28 @@ class _PooledTransport(httpx2.AsyncBaseTransport):
         self.limits = limits
         self.proxy = proxy
 
+    @staticmethod
+    def environment_proxy(url: httpx2.URL) -> str | None:
+        proxies = getproxies()
+        if proxy_bypass(url.netloc.decode()):
+            return None
+        try:
+            address = ipaddress.ip_address(url.host)
+        except ValueError:
+            address = None
+        if address is not None:
+            for host in proxies.get("no", "").split(","):
+                if "/" not in host:
+                    continue
+                try:
+                    network = ipaddress.ip_network(host.strip(), strict=False)
+                except ValueError:
+                    continue
+                if address in network:
+                    return None
+        proxy = proxies.get(url.scheme) or proxies.get("all")
+        return f"http://{proxy}" if proxy and "://" not in proxy else proxy
+
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         pools = _POOLS.setdefault(asyncio.get_running_loop(), {})
         key = (self.name, self.proxy)
@@ -54,9 +78,15 @@ class _PooledTransport(httpx2.AsyncBaseTransport):
 
 
 def pooled_transport(
-    name: str = "default", *, limits: httpx2.Limits = _LIMITS, proxy: str | None = None
+    name: str = "default",
+    *,
+    limits: httpx2.Limits = _LIMITS,
+    proxy: str | None = None,
+    url: httpx2.URL | None = None,
 ) -> httpx2.AsyncBaseTransport:
     """Borrow an event-loop pool, optionally isolated by traffic class and proxy."""
+    if url is not None:
+        proxy = _PooledTransport.environment_proxy(url)
     return _PooledTransport(name, limits, proxy)
 
 

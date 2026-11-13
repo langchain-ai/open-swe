@@ -1,11 +1,13 @@
 import asyncio
 import json
+import threading
+import urllib.request
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import httpx
+import httpx2
 import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import text
@@ -28,16 +30,11 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     monkeypatch.setenv("DD_ENV", "staging")
     requests: list[dict[str, object]] = []
 
-    async def respond(request: httpx.Request) -> httpx.Response:
+    async def respond(request: httpx2.Request) -> httpx2.Response:
         requests.append(json.loads(request.content))
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
-    client_type = httpx.AsyncClient
-    monkeypatch.setattr(
-        posthog.httpx,
-        "AsyncClient",
-        lambda **kwargs: client_type(**kwargs, transport=httpx.MockTransport(respond)),
-    )
+    monkeypatch.setattr(posthog, "pooled_transport", lambda **kwargs: httpx2.MockTransport(respond))
     event = LoggedEvent(
         source="github",
         event_type="issue_comment",
@@ -138,6 +135,98 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     monkeypatch.delenv("POSTHOG_API_KEY")
     await posthog.record_webhook(event)
     assert len(requests) == 9
+
+
+class TestPostHogProxy:
+    def system_bypass(self, host: str) -> bool:
+        ready = threading.Event()
+        self.loop.call_soon_threadsafe(ready.set)
+        self.responsive = ready.wait(timeout=1)
+        return urllib.request._proxy_bypass_macosx_sysconf(
+            host, {"exclude_simple": False, "exceptions": ["127.0.0.0/8"]}
+        )
+
+    async def respond(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self.connections += 1
+        try:
+            while line := await reader.readline():
+                headers = await reader.readuntil(b"\r\n\r\n")
+                self.requests.append(line.rstrip())
+                if line.startswith(b"CONNECT"):
+                    writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                    await writer.drain()
+                    return
+                for header in headers.split(b"\r\n"):
+                    if header.lower().startswith(b"content-length:"):
+                        await reader.readexactly(int(header.split(b":", 1)[1]))
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            self.closed.put_nowait(None)
+
+    @pytest.mark.parametrize(
+        "scheme,bypass,proxy_name,prefix",
+        [
+            ("http", "", "HTTP_PROXY", "http://"),
+            ("https", "", "HTTPS_PROXY", "http://"),
+            ("http", "127.0.0.1", "HTTP_PROXY", "http://"),
+            ("http", "127.0.0.0/8", "HTTP_PROXY", "http://"),
+            ("http", "system", "HTTP_PROXY", "http://"),
+            ("http", "", "HTTP_PROXY", ""),
+            ("http", "", "ALL_PROXY", "http://"),
+        ],
+    )
+    async def test_capture_routes_through_environment_proxy(
+        self, monkeypatch, scheme, bypass, proxy_name, prefix
+    ):
+        from openswe.analytics import posthog
+        from openswe.utils import http_pool
+        from openswe.utils.http_pool import close_pool
+
+        self.requests: list[bytes] = []
+        self.connections = 0
+        self.closed: asyncio.Queue[None] = asyncio.Queue()
+        for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+            monkeypatch.delenv(name.upper(), raising=False)
+        monkeypatch.setenv("POSTHOG_API_KEY", "test-key")
+        server = await asyncio.start_server(self.respond, "127.0.0.1", 0)
+        async with server:
+            port = server.sockets[0].getsockname()[1]
+            host = f"127.0.0.1:{port}" if bypass else "localhost:1"
+            monkeypatch.setenv("POSTHOG_HOST", f"{scheme}://{host}")
+            proxy = "http://127.0.0.1:1" if bypass else f"{prefix}127.0.0.1:{port}"
+            if bypass == "system":
+                monkeypatch.setattr(http_pool, "getproxies", lambda: {"http": proxy})
+                self.loop = asyncio.get_running_loop()
+                self.responsive = False
+                monkeypatch.setattr(http_pool, "proxy_bypass", self.system_bypass)
+            else:
+                monkeypatch.setenv(proxy_name, proxy)
+                monkeypatch.setenv("NO_PROXY", bypass)
+            try:
+                count = 1 if scheme == "https" else 2
+                for _ in range(count):
+                    await posthog._capture("usage", {"distinct_id": "test-user"})
+                assert self.connections == 1
+                if scheme == "https":
+                    assert self.requests == [b"CONNECT localhost:1 HTTP/1.1"]
+                else:
+                    target = b"/i/v0/e/" if bypass else b"http://localhost:1/i/v0/e/"
+                    assert self.requests == [b"POST " + target + b" HTTP/1.1"] * 2
+                await close_pool()
+                await asyncio.wait_for(self.closed.get(), timeout=2)
+                if scheme == "http":
+                    await posthog._capture("usage", {"distinct_id": "test-user"})
+                    assert self.connections == 2
+            finally:
+                await close_pool()
+                if scheme == "http":
+                    await asyncio.wait_for(self.closed.get(), timeout=2)
+            if bypass == "system":
+                assert self.responsive, "System proxy evaluation blocked the event loop"
 
 
 async def _partitions() -> set[str]:
