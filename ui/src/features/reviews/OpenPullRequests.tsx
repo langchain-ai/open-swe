@@ -9,7 +9,11 @@ import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Icon } from "@langchain/macaw-components/Icon"
+import { Text } from "@langchain/macaw-components/Text"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
+import { cn } from "@/lib/utils"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -326,7 +330,7 @@ export function OpenPullRequests({
             </div>
           )}
           <div className="flex flex-wrap items-center gap-space-2">
-            <div className="w-56 shrink-0">
+            <div className="w-96 max-w-full shrink-0">
               <Typeahead
                 multiple
                 disableCloseOnSelect
@@ -346,6 +350,38 @@ export function OpenPullRequests({
                 }
                 options={repoNames}
                 getOptionLabel={(name) => repoLabels.label(name)}
+                renderOption={(name, { selected: isSelected }) => {
+                  const label = repoLabels.label(name)
+                  const middle = Math.max(
+                    Math.ceil(label.length / 2),
+                    label.length - 16
+                  )
+                  return (
+                    <>
+                      <Icon
+                        aria-hidden
+                        icon={CheckIcon}
+                        size="md"
+                        className={cn(
+                          "shrink-0 text-icon-primary",
+                          isSelected ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <Text
+                        as="span"
+                        variant="sm"
+                        className="flex min-w-0 flex-1 overflow-hidden leading-4 tracking-normal whitespace-nowrap"
+                        title={name}
+                        aria-label={label}
+                      >
+                        <span className="min-w-0 truncate">
+                          {label.slice(0, middle)}
+                        </span>
+                        <span className="shrink-0">{label.slice(middle)}</span>
+                      </Text>
+                    </>
+                  )
+                }}
                 filterOptions={(options, { inputValue }) =>
                   options.filter((name) => repoLabels.matches(name, inputValue))
                 }
