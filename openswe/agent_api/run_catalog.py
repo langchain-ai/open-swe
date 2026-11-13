@@ -230,6 +230,7 @@ class RunCatalog:
                 backend_paths=list(surface.backend_paths),
                 artifacts_root=surface.artifacts_root,
                 checks=list(surface.file_checks),
+                auto_review=surface.auto_review,
             ),
             browser=surface.browser,
             worker_webhook=COMPLETION_WEBHOOK_URL if surface.delegates else None,

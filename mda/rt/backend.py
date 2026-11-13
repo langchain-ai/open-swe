@@ -57,6 +57,8 @@ logger = logging.getLogger(__name__)
 
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
+# The graph state the backend's hooks keep, which goes back with every call.
+STATE_KEY: Final = "open_swe_state"
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
 # What MDA's summarization records; the backend hears only where it cut the conversation.
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
@@ -133,7 +135,7 @@ class BackendRefusedError(BackendCallError):
 
 def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     """The graph state the backend's hooks keep, which goes back with every call."""
-    held = state.get("open_swe_state")
+    held = state.get(STATE_KEY)
     forwarded = {key: state[key] for key in _FORWARDED_STATE_KEYS if key in state}
     event = state.get(_SUMMARIZATION_EVENT)
     cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None

@@ -5,7 +5,8 @@ backend (``rt.remote_files``): where the sandbox is not MDA's, such as a thread 
 to a person's machine, and on the paths the backend serves. Reads of the run's
 skills are answered from the skills this runtime keeps (``rt.skills``).
 
-Around every call: a command that may push or open a pull request is first put to
+Around every call: on a person's machine in auto mode, the call is first reviewed
+(``rt.auto_review``); a command that may push or open a pull request is first put to
 the backend's guards, which inspect the push and may need a person's approval, so
 the match here is wider than what they block. A command GitHub refused the sandbox's
 token for gets the sandbox a fresh one. Tool errors become results the model
@@ -43,6 +44,7 @@ from runtime_api.endpoint import call
 from runtime_api.loop import REFRESH_GITHUB_PROXY, RefreshGitHubProxy
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
+from rt.auto_review import PATH_ARGUMENTS, AutoReview
 from rt.backend import OpenSweBackend, RunLocal
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.middleware import reported
@@ -56,16 +58,6 @@ from rt.validate_image_reads import ValidateImageReadsMiddleware
 
 logger = logging.getLogger(__name__)
 
-# The argument naming the path each file tool acts on.
-_PATH_ARGUMENTS: Final = {
-    "ls": "path",
-    "read_file": "file_path",
-    "write_file": "file_path",
-    "edit_file": "file_path",
-    "delete": "file_path",
-    "glob": "path",
-    "grep": "path",
-}
 # A command the push and pull request guards may stop: one naming a push, the GitHub
 # CLI or the pulls API, or nesting shells as deep as the pull request guard reads.
 _GUARDED_WORDS: Final = re.compile(r"\b(?:push|gh|pulls)\b")
@@ -254,8 +246,24 @@ class FileToolsMiddleware(AgentMiddleware):
         return await handler(screened)
 
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
-        """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
+        """``request`` as the guards let it run, an approved push as they fixed it, or the
+        refusal of the guards or, on a person's machine, of auto mode (``rt.auto_review``)."""
         command = request.tool_call["args"].get("command")
+        name = request.tool_call["name"]
+        refusal = await AutoReview.screen(
+            self._backend.run,
+            name,
+            request.tool_call["args"],
+            request.state or {},
+            None if self._in_sandbox else self._remote_files,
+        )
+        if refusal:
+            return ToolMessage(
+                content=refusal,
+                tool_call_id=request.tool_call.get("id") or "",
+                name=name,
+                status="error",
+            )
         if (
             request.tool_call["name"] != "execute"
             or "shell_commands" not in self._spec.guards
@@ -446,7 +454,7 @@ async def _invoked(tool: BaseTool, request: ToolCallRequest) -> ToolMessage | Co
 
 def _under(prefixes: Iterable[str], name: str, arguments: Mapping[str, object]) -> bool:
     """Whether the path ``name``'s call acts on is under one of ``prefixes``."""
-    path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
+    path = _absolute(arguments.get(PATH_ARGUMENTS.get(name, "")))
     return path is not None and any(
         path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes
     )

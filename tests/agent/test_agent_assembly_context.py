@@ -20,6 +20,7 @@ from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurfa
 from openswe.schedules.policy import AutomationPolicy
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads.inbox import ThreadInbox
+from openswe.users.preferences import UserPreferences
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -163,6 +164,45 @@ async def test_task_tools_require_a_served_sandbox(
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
     assert ("control_worker" in names) is available
+
+
+@pytest.mark.parametrize(
+    ("binding", "opted_in", "gateway", "reviewed"),
+    [
+        ({"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True, True, True),
+        ({"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, True, True, True),
+        ({"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, False, True, False),
+        ({"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True, False, False),
+        ({}, True, True, False),
+    ],
+    ids=["desktop", "cli", "not-opted-in", "no-gateway", "cloud-sandbox"],
+)
+async def test_auto_mode_reviews_calls_on_the_persons_machine_once_they_opt_in(
+    saved_thread_scope: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    binding: dict[str, str],
+    opted_in: bool,
+    gateway: bool,
+    reviewed: bool,
+) -> None:
+    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    saved_thread_scope.update(binding)
+    # The server reads the thread's binding through the client it built at import.
+    monkeypatch.setattr("openswe.server.client", langgraph_sdk.get_client())
+    if gateway:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
+    else:
+        monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY", raising=False)
+        monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+
+    with patch(
+        "openswe.server.User.preferences_for_login",
+        new_callable=AsyncMock,
+        return_value=UserPreferences(experimental_local_auto_mode=opted_in),
+    ):
+        captured = await _agent_catalog()
+
+    assert cast(ToolSurface, captured["surface"]).auto_review is reviewed
 
 
 @pytest.mark.parametrize("role", ["coordinator", "worker"])

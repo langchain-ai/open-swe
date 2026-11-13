@@ -2243,6 +2243,12 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.artifacts_root = files.artifacts_root
     surface.file_checks = ("image_reads", "agents_md")
+    # Auto mode reviews each call on the person's machine with Jev, which needs the gateway.
+    surface.auto_review = (
+        bridge_client is not None
+        and sender_preferences.experimental_local_auto_mode
+        and Jev.configured()
+    )
     surface.models = SurfaceModels(
         main=ModelChoice(model_id, dict(model_kwargs)),
         subagent=ModelChoice(

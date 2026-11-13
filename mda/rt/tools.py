@@ -39,7 +39,9 @@ from runtime_api.operations import (
     RunOperation,
 )
 
+from rt.auto_review import AutoReview
 from rt.backend import (
+    STATE_KEY,
     TOOL_CALL_SLACK_SECONDS,
     BackendTimeoutError,
     BackendUnavailableError,
@@ -55,7 +57,6 @@ from rt.session_handoff import HeldSessions
 
 logger = logging.getLogger(__name__)
 
-STATE_KEY: Final = "open_swe_state"
 _TIMED_OUT: Final = (
     "Error: Robin did not answer this tool call in time. Whatever it started may "
     "still be running in the sandbox; check before running it again."
@@ -312,6 +313,15 @@ async def run_operation(
 ) -> ToolMessage | Command:
     """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
     reads of the connections it names."""
+    refusal = await AutoReview.screen(backend.run, spec.name, arguments, runtime.state)
+    if refusal:
+
+        async def refused(tool_call_id: str) -> ToolMessage:
+            return ToolMessage(
+                content=refusal, tool_call_id=tool_call_id, name=spec.name, status="error"
+            )
+
+        return await called(backend, spec.name, arguments, runtime, refused)
     # Read before code mode reports the call: a pause for a grant runs the code again,
     # which reports the call under a new id, so a report made first would never finish.
     try:

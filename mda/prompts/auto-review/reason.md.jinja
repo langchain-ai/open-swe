@@ -1,0 +1,25 @@
+{% if category == "exfiltration" %}
+it may send local data off this machine.
+{% elif category == "credential_access" %}
+it may read or use credentials.
+{% elif category == "destructive" %}
+it may delete or overwrite something hard to recover.
+{% elif category == "persistence" %}
+it may set something up to run later or keep running.
+{% elif category == "security_bypass" %}
+it may weaken a safeguard.
+{% elif category == "scope_escalation" %}
+it goes beyond what the person asked for.
+{% elif category == "sudo" %}
+it asks for administrator privileges.
+{% elif category == "keychain" %}
+it reads secrets from the keychain.
+{% elif category == "remote_script" %}
+it runs a script downloaded from the internet.
+{% elif category == "unconfirmed_path" %}
+a path it names may lead outside the project through a link, or could not be checked.
+{% elif category == "too_long" %}
+its command is too long to review.
+{% else %}
+the reviewer could not confirm it is safe.
+{% endif %}

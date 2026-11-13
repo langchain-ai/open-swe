@@ -149,6 +149,9 @@ class FilesSpec(BaseModel):
     guards: list[ShellGuard] = []
     # Checks on what ``read_file`` returns.
     checks: list[FileCheck] = []
+    # Whether each file and shell call on a person's machine is reviewed before it runs, and
+    # refused unless the classifier finds it routine or the person asked for it (auto mode).
+    auto_review: bool = False
 
 
 class InboxSpec(BaseModel):

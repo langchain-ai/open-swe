@@ -139,6 +139,8 @@ class ToolSurface:
     artifacts_root: str = "/"
     # The checks on what the run's ``read_file`` calls return.
     file_checks: tuple[FileCheck, ...] = ()
+    # Whether the run's file and shell calls on a person's machine go to auto mode's review.
+    auto_review: bool = False
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
     # How the run reads what is sent to its thread while it runs, before each model call.

@@ -92,6 +92,7 @@ class ProfileUpdate(KitchenChannelPreference):
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
     experimental_classify: bool | None = None
+    experimental_local_auto_mode: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -409,6 +410,7 @@ async def put_my_profile(
                 personal_kitchen_channel_id=update.personal_kitchen_channel_id,
                 concierge_mode=update.concierge_mode,
                 experimental_classify=update.experimental_classify,
+                experimental_local_auto_mode=update.experimental_local_auto_mode,
             ),
         )
     except ValueError as exc:
@@ -417,6 +419,7 @@ async def put_my_profile(
         update.personal_kitchen_channel_id is not None
         or update.concierge_mode
         or update.experimental_classify
+        or update.experimental_local_auto_mode
     ):
         raise HTTPException(status_code=409, detail="No Robin user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
