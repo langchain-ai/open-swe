@@ -34,7 +34,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Final, Literal
 from urllib.parse import parse_qs
 
-import httpx
+import httpx2
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -220,7 +220,7 @@ async def _channel_write(
         return ChannelWrite()
     try:
         return await RUNTIMES.mda_runtime.channel_write(thread.thread_id, user_id=user_id)
-    except ChannelThreadError, httpx.HTTPError:
+    except ChannelThreadError, httpx2.HTTPError:
         logger.warning(
             "Can't act on an MDA channel's thread",
             extra={"thread_id": thread.thread_id},
@@ -449,9 +449,10 @@ class ThreadRouter:
             thread_metadata=thread.metadata,
             graph_id=mda_graph_for(thread.metadata),
         )
-        await forward(
-            mda.http, scope, recorder, json.dumps(rewritten).encode(), headers=write.headers
-        )
+        async with mda.http as client:
+            await forward(
+                client, scope, recorder, json.dumps(rewritten).encode(), headers=write.headers
+            )
 
     async def _command(self, send: Send, body: bytes, thread_id: str) -> None:
         reply = await THREADS.command(thread_id, body)
@@ -513,7 +514,8 @@ class ThreadRouter:
                 http = mda.stream_http
             else:
                 http = mda.read_http
-            await forward(http, scope, send, body, headers=write.headers)
+            async with http:
+                await forward(http, scope, send, body, headers=write.headers)
             return
         if thread is not None:
             _warn_local(scope, thread)

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
 import httpx
+import httpx2
 import pytest
 from fastapi import FastAPI, HTTPException
 from langgraph_sdk.errors import APIStatusError
@@ -1117,6 +1118,8 @@ _REFUSED_START = json.dumps(
     [
         pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
         pytest.param(httpx.PoolTimeout(""), 500, id="pool-exhausted"),
+        pytest.param(httpx2.ConnectError("MDA unreachable"), 500, id="mda-undeliverable"),
+        pytest.param(httpx2.PoolTimeout(""), 500, id="mda-pool-exhausted"),
         pytest.param(
             thread_proxy.CommandReply(503, b'{"detail":"runtime unavailable"}', "application/json"),
             503,
@@ -1185,7 +1188,7 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
         )
         assert delivery.error_type == type(refusal).__name__
         assert delivery.command_method == "run.start"
-        if isinstance(refusal, httpx.PoolTimeout):
+        if isinstance(refusal, (httpx.PoolTimeout, httpx2.PoolTimeout)):
             assert "No connection was available" in json.loads(body)["detail"]
     else:
         payload = json.loads(refusal.content)
@@ -1384,21 +1387,30 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
 async def _read_thread_state(
     monkeypatch: pytest.MonkeyPatch,
     runtime: Runtime,
-    agent_server: Callable[[httpx.Request], httpx.Response],
+    agent_server: Callable[[httpx.Request | httpx2.Request], httpx.Response | httpx2.Response],
     *,
     select: list[str],
 ) -> httpx.Response:
     """Read a thread's state through the dashboard, from a runtime whose Agent Server is faked."""
-    transport = httpx.MockTransport(agent_server)
     if runtime == "mda":
         threads = runtimes._MdaThreads(runtimes.MdaRuntime("http://mda.test"))
-        threads.reads = httpx.AsyncClient(base_url="http://mda.test", transport=transport)
+        monkeypatch.setattr(
+            runtimes.MdaRuntime,
+            "read_http",
+            property(
+                lambda self: httpx2.AsyncClient(
+                    base_url="http://mda.test", transport=httpx2.MockTransport(agent_server)
+                )
+            ),
+        )
     else:
         threads = RUNTIMES.local
         monkeypatch.setattr(
             threads.client.http,
             "client",
-            httpx.AsyncClient(base_url="http://agent-server.test", transport=transport),
+            httpx.AsyncClient(
+                base_url="http://agent-server.test", transport=httpx.MockTransport(agent_server)
+            ),
         )
     monkeypatch.setattr(RUNTIMES, "runs_on", lambda _runtime: threads)
     patch_thread_module(monkeypatch, "THREADS", thread_store.THREADS)
@@ -1425,11 +1437,12 @@ async def test_thread_state_sends_select_to_the_threads_runtime_as_given(
 ) -> None:
     sent: list[list[str]] = []
 
-    def agent_server(request: httpx.Request) -> httpx.Response:
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
         if request.url.path.endswith("/state"):
             sent.append(request.url.params.get_list("select"))
-            return httpx.Response(200, json={"values": {"messages": []}, "next": []})
-        return httpx.Response(200, json=[])
+            return response(200, json={"values": {"messages": []}, "next": []})
+        return response(200, json=[])
 
     response = await _read_thread_state(monkeypatch, runtime, agent_server, select=select)
 
@@ -1441,10 +1454,11 @@ async def test_thread_state_sends_select_to_the_threads_runtime_as_given(
 async def test_thread_state_refuses_a_select_the_threads_runtime_refuses(
     monkeypatch, runtime: Runtime
 ) -> None:
-    def agent_server(request: httpx.Request) -> httpx.Response:
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
         if request.url.path.endswith("/state"):
-            return httpx.Response(422, json={"detail": "Invalid select columns: ['bogus']"})
-        return httpx.Response(200, json=[])
+            return response(422, json={"detail": "Invalid select columns: ['bogus']"})
+        return response(200, json=[])
 
     response = await _read_thread_state(monkeypatch, runtime, agent_server, select=["bogus"])
 

@@ -4,7 +4,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
-import httpx
+import httpx2
 from pydantic import JsonValue, TypeAdapter
 from starlette.datastructures import Headers
 from starlette.types import Message, Receive, Scope, Send
@@ -71,7 +71,7 @@ def remote_path(scope: Scope) -> str:
 
 
 async def forward(
-    http: httpx.AsyncClient,
+    http: httpx2.AsyncClient,
     scope: Scope,
     send: Send,
     body: bytes,

@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
 from managed_deepagents import CredentialStoreError
 from managed_deepagents._agent_auth import AgentAuthContext, ResolvePrincipalIdentity
@@ -143,36 +144,54 @@ class _Harness:
         self.local_status = 200
         self.while_starting: Callable[[], Awaitable[object]] | None = None
 
-        def mda(request: httpx.Request) -> httpx.Response:
+        def mda(request: httpx2.Request) -> httpx2.Response:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
             self.acted_as.append({k: v for k, v in request.headers.items() if k in AS_THE_PERSON})
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 json={"run_id": "remote-run"},
                 headers={"content-location": f"/threads/{THREAD}/runs/remote-run"},
             )
 
         mda_runtime = runtimes.MdaRuntime("http://mda.test")
-        mda_runtime._http = httpx.AsyncClient(
-            base_url=mda_runtime.url, transport=httpx.MockTransport(mda)
+        monkeypatch.setattr(
+            runtimes.MdaRuntime,
+            "http",
+            property(
+                lambda self: httpx2.AsyncClient(
+                    base_url=mda_runtime.url, transport=httpx2.MockTransport(mda)
+                )
+            ),
         )
 
-        def mda_reads(request: httpx.Request) -> httpx.Response:
+        def mda_reads(request: httpx2.Request) -> httpx2.Response:
             self.read.append((request.method, request.url.path))
             if (request.method, request.url.path) == ("GET", f"/threads/{THREAD}"):
-                return httpx.Response(200, json={"metadata": {"owner": CHANNEL_OWNER}})
-            return httpx.Response(200, json={})
+                return httpx2.Response(200, json={"metadata": {"owner": CHANNEL_OWNER}})
+            return httpx2.Response(200, json={})
 
-        mda_runtime._read_http = httpx.AsyncClient(
-            base_url=mda_runtime.url, transport=httpx.MockTransport(mda_reads)
+        monkeypatch.setattr(
+            runtimes.MdaRuntime,
+            "read_http",
+            property(
+                lambda self: httpx2.AsyncClient(
+                    base_url=mda_runtime.url, transport=httpx2.MockTransport(mda_reads)
+                )
+            ),
         )
 
-        def mda_held_reads(request: httpx.Request) -> httpx.Response:
+        def mda_held_reads(request: httpx2.Request) -> httpx2.Response:
             self.held.append((request.method, request.url.path))
-            return httpx.Response(200, json={})
+            return httpx2.Response(200, json={})
 
-        mda_runtime._stream_http = httpx.AsyncClient(
-            base_url=mda_runtime.url, transport=httpx.MockTransport(mda_held_reads)
+        monkeypatch.setattr(
+            runtimes.MdaRuntime,
+            "stream_http",
+            property(
+                lambda self: httpx2.AsyncClient(
+                    base_url=mda_runtime.url, transport=httpx2.MockTransport(mda_held_reads)
+                )
+            ),
         )
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
@@ -1143,21 +1162,38 @@ async def _pr_feedback(monkeypatch: pytest.MonkeyPatch, channel: str) -> tuple[_
     harness = _Harness(monkeypatch)
     await router.adopt_channel_run(THREAD, channel, metadata={"source": channel, **_PRIVATE})
 
-    def reads(request: httpx.Request) -> httpx.Response:
+    def reads(request: httpx2.Request) -> httpx2.Response:
         harness.read.append((request.method, request.url.path))
         if request.url.path == f"/threads/{THREAD}/state":
-            return httpx.Response(200, json={"values": {"messages": _CHANNEL_CONVERSATION}})
-        return httpx.Response(200, json={"values": {}})
+            return httpx2.Response(200, json={"values": {"messages": _CHANNEL_CONVERSATION}})
+        return httpx2.Response(200, json={"values": {}})
 
-    harness.runtimes.mda_runtime._read_http = httpx.AsyncClient(
-        base_url=harness.runtimes.mda_runtime.url, transport=httpx.MockTransport(reads)
+    monkeypatch.setattr(
+        runtimes.MdaRuntime,
+        "read_http",
+        property(
+            lambda self: httpx2.AsyncClient(
+                base_url=harness.runtimes.mda_runtime.url, transport=httpx2.MockTransport(reads)
+            )
+        ),
     )
     # The conversation's state is read as MDA's runtime reads it.
     reader = runtimes._MdaThreads(harness.runtimes.mda_runtime)
     monkeypatch.setattr(harness.runtimes.mda, "state", reader.state, raising=False)
     # MDA creates the PR's thread as the backend's own, through the recorded transport.
     mda = harness.runtimes.mda_runtime
-    monkeypatch.setattr(mda, "sdk", lambda: LangGraphClient(mda._http))
+    monkeypatch.setattr(
+        mda,
+        "sdk",
+        lambda: LangGraphClient(
+            httpx.AsyncClient(
+                base_url=mda.url,
+                transport=httpx.MockTransport(
+                    lambda _: httpx.Response(200, json={"run_id": "remote-run"})
+                ),
+            )
+        ),
+    )
     backend = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=harness.router), base_url="http://backend"
     )

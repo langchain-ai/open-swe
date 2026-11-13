@@ -4,9 +4,11 @@ import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from types import ModuleType
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
 from fastapi import FastAPI
 from pydantic import JsonValue
@@ -677,19 +679,20 @@ async def test_automation_rules_name_each_automations_events_on_the_repository(
 
 
 @pytest.mark.parametrize("status", [404, 500])
+@pytest.mark.parametrize("http", [httpx, httpx2], ids=["sdk", "mda"])
 async def test_an_issue_thread_mda_never_ran_has_not_started(
-    monkeypatch: pytest.MonkeyPatch, status: int
+    monkeypatch: pytest.MonkeyPatch, status: int, http: ModuleType
 ) -> None:
-    request = httpx.Request("GET", "http://mda.test/threads/t1/state")
-    error = httpx.HTTPStatusError(
-        "MDA answered", request=request, response=httpx.Response(status, request=request)
+    request = http.Request("GET", "http://mda.test/threads/t1/state")
+    error = http.HTTPStatusError(
+        "MDA answered", request=request, response=http.Response(status, request=request)
     )
     monkeypatch.setattr(github_webhooks.THREADS, "state", AsyncMock(side_effect=error))
 
     if status == 404:
         assert await github_webhooks.conversation_started("t1") is False
     else:
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(http.HTTPStatusError):
             await github_webhooks.conversation_started("t1")
 
 

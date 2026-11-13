@@ -26,38 +26,38 @@ _LIMITS = httpx2.Limits(
 )
 # Each isolated-loop worker thread runs its own loop, and a connection belongs to
 # the loop that opened it.
-_POOLS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx2.AsyncHTTPTransport] = (
-    weakref.WeakKeyDictionary()
-)
+_POOLS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[tuple[str, str | None], httpx2.AsyncHTTPTransport]
+] = weakref.WeakKeyDictionary()
 # The Slack SDK only speaks aiohttp, whose sessions draw from a connector instead.
 _CONNECTORS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, aiohttp.TCPConnector] = (
     weakref.WeakKeyDictionary()
 )
 
 
-def _pool() -> httpx2.AsyncHTTPTransport:
-    loop = asyncio.get_running_loop()
-    pool = _POOLS.get(loop)
-    if pool is None:
-        pool = _POOLS[loop] = httpx2.AsyncHTTPTransport(limits=_LIMITS)
-    return pool
-
-
 class _PooledTransport(httpx2.AsyncBaseTransport):
+    def __init__(self, name: str, limits: httpx2.Limits, proxy: str | None) -> None:
+        self.name = name
+        self.limits = limits
+        self.proxy = proxy
+
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        return await _pool().handle_async_request(request)
+        pools = _POOLS.setdefault(asyncio.get_running_loop(), {})
+        key = (self.name, self.proxy)
+        pool = pools.get(key)
+        if pool is None:
+            pool = pools[key] = httpx2.AsyncHTTPTransport(limits=self.limits, proxy=self.proxy)
+        return await pool.handle_async_request(request)
 
     async def aclose(self) -> None:
-        # The pool outlives any one client; ``close_pool`` closes it.
         return None
 
 
-_POOLED_TRANSPORT = _PooledTransport()
-
-
-def pooled_transport() -> httpx2.AsyncBaseTransport:
-    """The transport for a per-call client that should reuse warm connections."""
-    return _POOLED_TRANSPORT
+def pooled_transport(
+    name: str = "default", *, limits: httpx2.Limits = _LIMITS, proxy: str | None = None
+) -> httpx2.AsyncBaseTransport:
+    """Borrow an event-loop pool, optionally isolated by traffic class and proxy."""
+    return _PooledTransport(name, limits, proxy)
 
 
 def pooled_connector() -> aiohttp.TCPConnector:
@@ -74,7 +74,7 @@ def pooled_connector() -> aiohttp.TCPConnector:
 async def close_pool() -> None:
     """Close this event loop's pools; the next request opens new ones."""
     loop = asyncio.get_running_loop()
-    if (pool := _POOLS.pop(loop, None)) is not None:
+    for pool in _POOLS.pop(loop, {}).values():
         await pool.aclose()
     if (connector := _CONNECTORS.pop(loop, None)) is not None:
         await connector.close()

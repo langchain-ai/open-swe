@@ -13,9 +13,11 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import nullcontext
 from typing import Final, NamedTuple
 
 import httpx
+import httpx2
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.agent_api.client import (
@@ -270,7 +272,7 @@ class ThreadStore:
         runtime = RUNTIMES.runs_on(thread.runtime)
         try:
             return await runtime.state(thread.thread_id, select=select)
-        except httpx.HTTPStatusError as error:
+        except (httpx.HTTPStatusError, httpx2.HTTPStatusError) as error:
             # Indexed with no copy on MDA: creating it there failed, or MDA swept it. A
             # channel makes its own threads there, so the backend makes only its own again.
             if (
@@ -351,7 +353,7 @@ class ThreadStore:
             # A run or an answer on a channel's thread: as its sender, in its conversation.
             try:
                 write = await RUNTIMES.mda_runtime.channel_write(thread_id, user_id=user_id)
-            except ChannelThreadError, httpx.HTTPError:
+            except ChannelThreadError, httpx2.HTTPError:
                 logger.warning(
                     "Can't act on an MDA channel's thread",
                     extra={"thread_id": thread_id},
@@ -398,11 +400,12 @@ class ThreadStore:
                 http = mda.http
         else:
             http = RUNTIMES.local.client.http.client
-        response = await http.post(
-            f"/threads/{thread_id}/commands",
-            content=body,
-            headers={"Content-Type": "application/json", **write.headers},
-        )
+        async with http if isinstance(http, httpx2.AsyncClient) else nullcontext(http):
+            response = await http.post(
+                f"/threads/{thread_id}/commands",
+                content=body,
+                headers={"Content-Type": "application/json", **write.headers},
+            )
         return CommandReply(
             response.status_code, response.content, response.headers.get("content-type")
         )

@@ -319,7 +319,8 @@ async def proxy_dashboard_thread_commands(
                 {
                     "detail": (
                         "No connection was available to start the message. Try sending it again."
-                        if method == "run.start" and isinstance(exc, httpx.PoolTimeout)
+                        if method == "run.start"
+                        and isinstance(exc, (httpx.PoolTimeout, httpx2.PoolTimeout))
                         else "the command could not be delivered"
                     )
                 }

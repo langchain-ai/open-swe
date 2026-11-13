@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 
 from openswe.credential_scope import pr_author_login, private_credential_login
@@ -311,15 +312,20 @@ async def test_a_breakout_of_an_mda_conversation_is_mda_s_too(
 
 
 @pytest.mark.parametrize("deletes", [True, False])
+@pytest.mark.parametrize(
+    "failure",
+    [slack_breakout_tool.ChannelThreadError("no secret"), httpx2.ConnectError("MDA unreachable")],
+    ids=["no-secret", "unreachable"],
+)
 async def test_a_breakout_mda_cant_open_starts_no_run(
-    monkeypatch: pytest.MonkeyPatch, deletes: bool
+    monkeypatch: pytest.MonkeyPatch, deletes: bool, failure: Exception
 ) -> None:
     _, run, _ = _breakout_without_files(monkeypatch)
     monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "holds", AsyncMock(return_value=True))
     monkeypatch.setattr(
         slack_breakout_tool.mda_forwarding,
         "claim_breakout",
-        AsyncMock(side_effect=slack_breakout_tool.ChannelThreadError("no secret")),
+        AsyncMock(side_effect=failure),
     )
 
     deleted: list[str] = []

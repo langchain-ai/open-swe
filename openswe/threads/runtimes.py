@@ -20,8 +20,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
 from typing import Final, Literal
+from urllib.request import getproxies, proxy_bypass
 
-import httpx
+import httpx2
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
@@ -48,6 +49,7 @@ from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -238,48 +240,53 @@ class MdaRuntime:
         # Each channel thread's conversation on MDA, (provider, key), with when it was read;
         # the most recently used ones.
         self._channel_conversations: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
-        self._http: httpx.AsyncClient | None = None
-        self._read_http: httpx.AsyncClient | None = None
-        self._stream_http: httpx.AsyncClient | None = None
 
     def _client(
-        self, extra: Mapping[str, str], *, max_connections: int = _MDA_CONNECTIONS
-    ) -> httpx.AsyncClient:
+        self, extra: Mapping[str, str], *, pool: str, max_connections: int = _MDA_CONNECTIONS
+    ) -> httpx2.AsyncClient:
         headers = dict(extra)
         if api_key := mda_runtime_api_key():
             headers["x-api-key"] = api_key
-        return httpx.AsyncClient(
+        url = httpx2.URL(self.url)
+        proxies = getproxies()
+        proxy = (
+            None
+            if proxy_bypass(url.netloc.decode())
+            or any(
+                url.host.lower().endswith(host.strip()[1:].lower())
+                for host in proxies.get("no", "").split(",")
+                if host.strip().startswith("*.")
+            )
+            else proxies.get(url.scheme, proxies.get("all"))
+        )
+        return httpx2.AsyncClient(
             base_url=self.url,
             headers=headers,
-            timeout=httpx.Timeout(30.0, read=None),
-            limits=httpx.Limits(max_connections=max_connections),
+            timeout=httpx2.Timeout(30.0, read=None),
+            transport=pooled_transport(
+                f"mda-{pool}", limits=httpx2.Limits(max_connections=max_connections), proxy=proxy
+            ),
         )
 
     @property
-    def http(self) -> httpx.AsyncClient:
+    def http(self) -> httpx2.AsyncClient:
         """For writes: thread changes, runs, cancels, answers to interrupts."""
-        if self._http is None:
-            self._http = self._client({})
-        return self._http
+        return self._client({}, pool="write")
 
     @property
-    def read_http(self) -> httpx.AsyncClient:
+    def read_http(self) -> httpx2.AsyncClient:
         """For reads: threads, state, history, runs and their streams, channel threads too."""
-        if self._read_http is None:
-            self._read_http = self._client(MDA_STUDIO_READ_HEADERS)
-        return self._read_http
+        return self._client(MDA_STUDIO_READ_HEADERS, pool="read")
 
     @property
-    def stream_http(self) -> httpx.AsyncClient:
+    def stream_http(self) -> httpx2.AsyncClient:
         """For reads held open until a run ends or a tab closes: thread and run streams, joins.
 
         Their own pool, so open dashboard tabs never leave runs unable to start or stop.
         """
-        if self._stream_http is None:
-            self._stream_http = self._client(
-                MDA_STUDIO_READ_HEADERS, max_connections=_MDA_STREAM_CONNECTIONS
-            )
-        return self._stream_http
+        return self._client(
+            MDA_STUDIO_READ_HEADERS, pool="stream", max_connections=_MDA_STREAM_CONNECTIONS
+        )
 
     def sdk(self) -> LangGraphClient:
         """For writes, scoped to the threads the backend owns."""
@@ -309,7 +316,8 @@ class MdaRuntime:
             self._channel_conversations.move_to_end(thread_id)
             conversation = cached[:2]
         else:
-            response = await self.read_http.get(f"/threads/{thread_id}")
+            async with self.read_http as client:
+                response = await client.get(f"/threads/{thread_id}")
             response.raise_for_status()
             metadata = _object.validate_python(response.json()).get("metadata")
             owner = metadata.get("owner") if isinstance(metadata, dict) else None
@@ -337,11 +345,12 @@ class MdaRuntime:
             raise ChannelThreadError("No MDA_SERVICE_SECRET to act on MDA's channel threads")
         key = handler_threads_key(channel)
         write = await self._conversation_write(secret, provider, key)
-        response = await self.http.post(
-            "/threads",
-            json={"thread_id": thread_id, "if_exists": "do_nothing"},
-            headers=write.headers,
-        )
+        async with self.http as client:
+            response = await client.post(
+                "/threads",
+                json={"thread_id": thread_id, "if_exists": "do_nothing"},
+                headers=write.headers,
+            )
         response.raise_for_status()
         self._remember_conversation(thread_id, provider, key)
 
@@ -459,12 +468,13 @@ class MdaRuntime:
                 if thread is not None and dispatch.channel_of(thread.metadata) is not None
                 else ChannelWrite()
             )
-            response = await self.http.post(
-                f"/threads/{thread_id}/runs/{run_id}/cancel",
-                params={"action": "interrupt"},
-                headers=write.headers,
-            )
-        except httpx.HTTPError, ChannelThreadError:
+            async with self.http as client:
+                response = await client.post(
+                    f"/threads/{thread_id}/runs/{run_id}/cancel",
+                    params={"action": "interrupt"},
+                    headers=write.headers,
+                )
+        except httpx2.HTTPError, ChannelThreadError:
             logger.warning("Could not interrupt an MDA run", extra=extra, exc_info=True)
             return False
         if response.is_error:
@@ -476,7 +486,8 @@ class MdaRuntime:
         return True
 
     async def run(self, thread_id: str, run_id: str) -> MdaRun | None:
-        response = await self.http.get(f"/threads/{thread_id}/runs/{run_id}")
+        async with self.http as client:
+            response = await client.get(f"/threads/{thread_id}/runs/{run_id}")
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -486,9 +497,10 @@ class MdaRuntime:
         """The thread's unfinished runs in the order they hold it: running, then pending oldest first."""
         active: list[MdaRun] = []
         for status in ("running", "pending"):
-            response = await self.http.get(
-                f"/threads/{thread_id}/runs", params={"status": status, "limit": 10}
-            )
+            async with self.http as client:
+                response = await client.get(
+                    f"/threads/{thread_id}/runs", params={"status": status, "limit": 10}
+                )
             response.raise_for_status()
             active += sorted(_runs.validate_python(response.json()), key=lambda run: run.created_at)
         return active
@@ -663,9 +675,10 @@ class MdaRuntime:
         rewritten = await self.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
-        response = await self.http.post(
-            f"/threads/{thread_id}/runs", json=rewritten, headers=write.headers
-        )
+        async with self.http as client:
+            response = await client.post(
+                f"/threads/{thread_id}/runs", json=rewritten, headers=write.headers
+            )
         if response.is_error:
             logger.warning(
                 "Starting an MDA run failed",
@@ -695,19 +708,21 @@ class _MdaThreads(_SdkThreads):
 
     def __init__(self, runtime: MdaRuntime) -> None:
         super().__init__(runtime.sdk())
-        self.reads = runtime.read_http
+        self.runtime = runtime
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
-        response = await self.reads.get(f"/threads/{thread_id}")
-        if response.status_code == httpx.codes.NOT_FOUND:
+        async with self.runtime.read_http as client:
+            response = await client.get(f"/threads/{thread_id}")
+        if response.status_code == httpx2.codes.NOT_FOUND:
             return None
         response.raise_for_status()
         return _object.validate_python(response.json())
 
     async def indexed(self, thread_id: str) -> IndexedThread | None:
-        response = await self.reads.post(
-            "/threads/search", json={"ids": [thread_id], "limit": 1, "select": INDEXED_FIELDS}
-        )
+        async with self.runtime.read_http as client:
+            response = await client.post(
+                "/threads/search", json={"ids": [thread_id], "limit": 1, "select": INDEXED_FIELDS}
+            )
         response.raise_for_status()
         found = response.json()
         return next(
@@ -715,16 +730,18 @@ class _MdaThreads(_SdkThreads):
         )
 
     async def latest_run(self, thread_id: str) -> MdaRun | None:
-        response = await self.reads.get(f"/threads/{thread_id}/runs", params={"limit": 1})
-        if response.status_code == httpx.codes.NOT_FOUND:
+        async with self.runtime.read_http as client:
+            response = await client.get(f"/threads/{thread_id}/runs", params={"limit": 1})
+        if response.status_code == httpx2.codes.NOT_FOUND:
             return None
         response.raise_for_status()
         runs = _runs.validate_python(response.json())
         if runs and runs[0].status in {"pending", "interrupted"}:
-            response = await self.reads.get(
-                f"/threads/{thread_id}/runs", params={"status": "running", "limit": 1}
-            )
-            if response.status_code == httpx.codes.NOT_FOUND:
+            async with self.runtime.read_http as client:
+                response = await client.get(
+                    f"/threads/{thread_id}/runs", params={"status": "running", "limit": 1}
+                )
+            if response.status_code == httpx2.codes.NOT_FOUND:
                 return None
             response.raise_for_status()
             runs = _runs.validate_python(response.json()) or runs
@@ -733,17 +750,19 @@ class _MdaThreads(_SdkThreads):
     async def state(
         self, thread_id: str, *, select: list[str] | None = None
     ) -> dict[str, JsonValue]:
-        response = await self.reads.get(
-            f"/threads/{thread_id}/state", params={"select": select} if select else None
-        )
+        async with self.runtime.read_http as client:
+            response = await client.get(
+                f"/threads/{thread_id}/state", params={"select": select} if select else None
+            )
         response.raise_for_status()
         return _object.validate_python(response.json())
 
     async def has_active_run(self, thread_id: str) -> bool:
         for status in ("pending", "running"):
-            response = await self.reads.get(
-                f"/threads/{thread_id}/runs", params={"status": status, "limit": 1}
-            )
+            async with self.runtime.read_http as client:
+                response = await client.get(
+                    f"/threads/{thread_id}/runs", params={"status": status, "limit": 1}
+                )
             response.raise_for_status()
             if response.json():
                 return True

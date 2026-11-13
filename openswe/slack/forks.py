@@ -16,7 +16,7 @@ owner. Otherwise the branch is seeded from the Slack thread as before.
 
 import logging
 
-import httpx
+import httpx2
 
 from openswe.dispatch import channel_of
 from openswe.input_messages import input_message_timestamps
@@ -46,11 +46,12 @@ async def held_timestamps(thread_id: str) -> set[str]:
     """The Slack messages a thread already holds, by timestamp; none for a thread no run
     started on, or when MDA can't say."""
     try:
-        response = await RUNTIMES.mda_runtime.read_http.get(f"/threads/{thread_id}/state")
-        if response.status_code == httpx.codes.NOT_FOUND:
+        async with RUNTIMES.mda_runtime.read_http as client:
+            response = await client.get(f"/threads/{thread_id}/state")
+        if response.status_code == httpx2.codes.NOT_FOUND:
             return set()
         response.raise_for_status()
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         logger.warning(
             "Could not read what a Slack branch starts with; its Slack context may repeat",
             extra={"agent_thread_id": thread_id, "error_type": type(exc).__name__},

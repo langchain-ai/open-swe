@@ -3,7 +3,7 @@ import re
 import uuid
 from typing import Annotated, Any
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 from pydantic import Field
 
@@ -419,7 +419,7 @@ async def slack_breakout_thread(
     if via_mda:
         try:
             await mda_forwarding.claim_breakout(thread_id, owner_login=owner_login or None)
-        except ChannelThreadError, httpx.HTTPError:
+        except ChannelThreadError, httpx2.HTTPError:
             logger.warning(
                 "Could not open a breakout on MDA's Slack channel",
                 extra={"agent_thread_id": thread_id},

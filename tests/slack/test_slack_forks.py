@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from pydantic import JsonValue
 
@@ -73,16 +73,22 @@ async def test_a_branch_with_no_conversation_thread_seeds_from_slack(
 def state(monkeypatch: pytest.MonkeyPatch) -> dict[str, JsonValue | None]:
     held: dict[str, JsonValue | None] = {"state": None}
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == f"/threads/{_SOURCE}/state":
             if held["state"] is None:
-                return httpx.Response(404, json={"detail": "not found"})
-            return httpx.Response(200, json=held["state"])
-        return httpx.Response(500)
+                return httpx2.Response(404, json={"detail": "not found"})
+            return httpx2.Response(200, json=held["state"])
+        return httpx2.Response(500)
 
     runtime = runtimes.MdaRuntime("https://mda.test")
-    runtime._read_http = httpx.AsyncClient(  # noqa: SLF001
-        base_url="https://mda.test", transport=httpx.MockTransport(handle)
+    monkeypatch.setattr(
+        runtimes.MdaRuntime,
+        "read_http",
+        property(
+            lambda self: httpx2.AsyncClient(
+                base_url="https://mda.test", transport=httpx2.MockTransport(handle)
+            )
+        ),
     )
     monkeypatch.setenv("MDA_RUNTIME_URL", "https://mda.test")
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")

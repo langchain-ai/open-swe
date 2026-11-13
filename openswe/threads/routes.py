@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 import httpx
+import httpx2
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -760,7 +761,7 @@ async def api_get_thread_state(
         payload = await get_dashboard_thread_state(
             thread_id, session["sub"], select=select, email=session.get("email"), timings=timings
         )
-    except httpx.HTTPStatusError as exc:
+    except (httpx.HTTPStatusError, httpx2.HTTPStatusError) as exc:
         # The runtime validates the read, `select` included; what it refuses goes back as it said.
         if exc.response.status_code != httpx.codes.UNPROCESSABLE_ENTITY:
             raise
