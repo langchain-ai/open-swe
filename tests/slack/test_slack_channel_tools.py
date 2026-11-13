@@ -388,11 +388,13 @@ async def test_slack_search_searches_public_channels_with_the_runs_grant(
 
 @pytest.mark.usefixtures("registry_db")
 async def test_slack_search_uses_the_grant_kept_for_the_runs_message(
-    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    caplog.set_level("INFO", logger="openswe.slack.tools.search")
     # The mention's `message` event started the run; its `app_mention` brought the grant.
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     await SlackSearchGrant.keep("C123", "1.5", "grant")
+    await SlackSearchGrant.keep("C123", "1.5", "duplicate-secret-token")
     await SlackSearchGrant.keep("C123", "1.6", "another message's grant")
     # A later run that only copied the thread's `slack_thread` gets no grant.
     _search_run(monkeypatch, shared=False, token="", message_ts="1.5", started_by_message=False)
@@ -403,6 +405,19 @@ async def test_slack_search_uses_the_grant_kept_for_the_runs_message(
     assert (await tools.slack_search("launch plan"))["success"] is True
     _, payload = slack_api.calls[0]
     assert payload["action_token"] == "grant"
+    diagnostics = [r for r in caplog.records if r.name == "openswe.slack.tools.search"]
+    assert [
+        r.grant_store_outcome for r in diagnostics if r.message == "Slack search grant stored"
+    ] == ["inserted", "conflict", "inserted"]
+    assert [r.grant_source for r in diagnostics if r.message == "Slack search grant resolved"] == [
+        "none",
+        "store",
+    ]
+    assert any(r.message == "Slack search grant lookup" and r.grant_found for r in diagnostics)
+    for record in diagnostics:
+        assert "action_token" not in record.__dict__
+        assert "duplicate-secret-token" not in repr(record.__dict__)
+        assert "another message's grant" not in repr(record.__dict__)
 
 
 @pytest.mark.usefixtures("registry_db")

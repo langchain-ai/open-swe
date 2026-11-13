@@ -214,7 +214,17 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     answered already.
     """
     webhook_id = call.request.headers.get("webhook-id", "")
-    fields = {"agent_thread_id": str(turn.thread_id), "slack_message_ts": turn.message_ts}
+    fields = {
+        "agent_thread_id": str(turn.thread_id),
+        "slack_channel_id": turn.channel_id,
+        "slack_message_ts": turn.message_ts,
+        "slack_thread_ts": turn.thread_ts,
+        "webhook_id": webhook_id,
+    }
+    logger.info(
+        "Slack search grant received",
+        extra={**fields, "action_token_present": bool(turn.action_token)},
+    )
     if turn.action_token:
         # Kept before the claim: the event that starts the turn may be the one without it.
         await SlackSearchGrant.keep(turn.channel_id, turn.message_ts, turn.action_token)

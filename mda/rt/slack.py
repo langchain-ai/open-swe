@@ -167,6 +167,22 @@ async def start_turn(
         explicit_mention=event.key == "mention" or card_mention,
         action_token=_text(raw.get("action_token")) or _text(grant_holder.get("action_token")),
     )
+    logger.info(
+        "Slack search grant extracted",
+        extra={
+            "slack_delivery_id": event.delivery_id,
+            "slack_event_type": _text(raw.get("type")),
+            "slack_channel_id": message.channel_id,
+            "slack_message_ts": message.message_ts,
+            "slack_thread_ts": message.thread_ts,
+            "agent_thread_id": str(message.thread_id),
+            "event_action_token_present": bool(_text(raw.get("action_token"))),
+            "assistant_action_token_present": bool(_text(grant_holder.get("action_token"))),
+            "event_action_token_type": type(raw.get("action_token")).__name__,
+            "assistant_action_token_type": type(grant_holder.get("action_token")).__name__,
+            "action_token_present": bool(message.action_token),
+        },
+    )
     if not message.team_id or not message.app_id:
         return None
     parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)

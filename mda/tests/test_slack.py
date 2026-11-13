@@ -1,6 +1,7 @@
 """MDA's Slack channel decides what each message starts and builds the turn's prompt."""
 
 import asyncio
+import logging
 import uuid
 from collections.abc import Mapping
 from typing import Any, cast
@@ -197,11 +198,17 @@ def test_an_allowed_bot_can_mention_the_agent_in_its_own_attachment(
     assert "(no text in mention)" not in prompt
 
 
+@pytest.mark.parametrize("grant_path", ["event", "assistant_thread", "absent", "invalid"])
 @pytest.mark.parametrize("ask", [True, False])
 @pytest.mark.parametrize(("interrupts", "strategy"), [(True, "interrupt"), (False, "enqueue")])
 @pytest.mark.usefixtures("slack_reads")
 def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
-    monkeypatch: pytest.MonkeyPatch, interrupts: bool, strategy: str, ask: bool
+    monkeypatch: pytest.MonkeyPatch,
+    interrupts: bool,
+    strategy: str,
+    ask: bool,
+    grant_path: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     contexts: list[bool] = []
 
@@ -219,7 +226,26 @@ def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
         ),
     )
 
-    result = asyncio.run(slack.start_turn(_event(), _thread()))
+    event = _event()
+    secret = "secret-search-action-token"
+    if grant_path == "event":
+        event.payload["action_token"] = secret
+    elif grant_path == "assistant_thread":
+        event.payload["assistant_thread"] = {"action_token": secret}
+    elif grant_path == "invalid":
+        event.payload["action_token"] = {"unrecognized": secret}
+    with caplog.at_level(logging.INFO, logger=slack.__name__):
+        result = asyncio.run(slack.start_turn(event, _thread()))
+    [diagnostic] = [r for r in caplog.records if r.message == "Slack search grant extracted"]
+    assert diagnostic.__dict__["action_token_present"] == (
+        grant_path in {"event", "assistant_thread"}
+    )
+    assert diagnostic.__dict__["slack_delivery_id"] == "delivery-1"
+    assert diagnostic.__dict__["slack_message_ts"] == "171.2"
+    assert secret not in repr(diagnostic.__dict__)
+    assert backend.turns[0].action_token == (
+        secret if grant_path in {"event", "assistant_thread"} else ""
+    )
 
     assert contexts == [ask]
     [facts] = backend.asked_facts
