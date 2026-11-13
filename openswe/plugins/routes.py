@@ -909,7 +909,8 @@ class PullRequestSummary(BaseModel):
 class PullRequestSearch(BaseModel):
     pulls: list[PullRequestSummary]
     incomplete: bool
-    """Whether GitHub left some out: past its first page, or a search that timed out."""
+    """Whether some are missing because GitHub's search timed out or a later page failed.
+    Its search never lists more than its first 1000 results."""
 
 
 class PullRequestBody(BaseModel):
@@ -1089,18 +1090,33 @@ async def api_plugin_search_pulls(
         readable = await plugin.readable_repositories()
         if not readable:
             return PullRequestSearch(pulls=[], incomplete=False)
+        pulls: list[OpenPullRequest] = []
+        page: int | None = 1
+        incomplete = False
         async with GitHubClient.as_user(plugin.user.github_login) as github:
-            # GitHub's review-requested qualifier includes requests to the person's teams.
-            found = await list_open_pull_requests(
-                github,
-                plugin.user.github_login,
-                ",".join(readable),
-                scope="mine" if role == "author" else "review-requested",
-                lightweight=True,
-            )
+            # GitHub's review-requested qualifier includes requests to the person's teams,
+            # which often run past a page.
+            while page is not None and not incomplete:
+                try:
+                    found = await list_open_pull_requests(
+                        github,
+                        plugin.user.github_login,
+                        ",".join(readable),
+                        scope="mine" if role == "author" else "review-requested",
+                        lightweight=True,
+                        page=page,
+                    )
+                except HTTPException:
+                    if page == 1:
+                        raise
+                    # A later page failing, as past GitHub's search rate limit, keeps the rest.
+                    logger.warning("A later page of a plugin's PR search failed", exc_info=True)
+                    incomplete = True
+                    break
+                pulls += found.pull_requests
+                page, incomplete = found.next_page, found.incomplete
     return PullRequestSearch(
-        pulls=[PullRequestSummary.of(pull) for pull in found.pull_requests],
-        incomplete=found.incomplete or found.next_page is not None,
+        pulls=[PullRequestSummary.of(pull) for pull in pulls], incomplete=incomplete
     )
 
 

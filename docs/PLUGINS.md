@@ -410,7 +410,7 @@ const { pulls, incomplete } = await host.pulls.search({ role: "review-requested"
 ```
 
 `review-requested` includes requests to the person's teams.
-`incomplete` says GitHub left some out: past its first page of results, or because its search timed out.
+`incomplete` says some are missing because GitHub's search timed out or a later page failed; its search lists at most 1000.
 
 A commit carries at most 100 files and 100 deletions.
 `openPull` also takes `body` and `draft`.

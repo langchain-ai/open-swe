@@ -187,7 +187,7 @@ export interface PullRequestSummary {
 
 export interface PullRequestSearch {
   pulls: PullRequestSummary[]
-  /** Whether GitHub left some out: past its first page of results, or a search that timed out. */
+  /** Whether some are missing because GitHub's search timed out or a later page failed; it lists at most 1000. */
   incomplete: boolean
 }
 

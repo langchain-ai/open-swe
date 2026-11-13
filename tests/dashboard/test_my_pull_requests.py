@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import httpx2
 import pytest
@@ -10,6 +10,7 @@ from openswe.github import pull_request_dashboard_routes as pr_routes
 from openswe.github import pull_request_status as prs
 from openswe.github.branch_config import BranchRules
 from openswe.github.ci import RequiredCheck
+from openswe.plugins import routes as plugin_routes
 from openswe.review import routes as review_routes
 from openswe.review.reviews import ReviewCheck
 
@@ -392,6 +393,40 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     with pytest.raises(github_http.GitHubSignInRequired):
         await pr_routes.api_list_pull_requests(session={"sub": "another-user"})
     assert listing.await_count == 1
+
+
+@pytest.mark.parametrize("last_page", ["read", "timed-out", "failed"])
+async def test_a_plugins_search_reads_past_githubs_first_page(monkeypatch, last_page):
+    def page(numbers, next_page, incomplete=False):
+        return prs.OpenPullRequests(
+            pull_requests=[
+                prs.OpenPullRequest(repo="acme/app", number=n, title="") for n in numbers
+            ],
+            next_page=next_page,
+            incomplete=incomplete,
+            updated_at="2026-01-01T00:00:00Z",
+        )
+
+    # A search that times out answers with nothing; one GitHub refuses, as past its rate
+    # limit, raises (``list_open_pull_requests``).
+    last = {
+        "read": page([3], None),
+        "timed-out": page([], None, incomplete=True),
+        "failed": HTTPException(502, "Could not load open PRs from GitHub"),
+    }[last_page]
+    monkeypatch.setattr(
+        plugin_routes,
+        "list_open_pull_requests",
+        AsyncMock(side_effect=[page([1], 2), page([2], 3), last]),
+    )
+    monkeypatch.setattr(github_http.GitHubClient, "as_user", Mock(return_value=MagicMock()))
+    plugin = Mock(readable_repositories=AsyncMock(return_value=["acme/app"]))
+    plugin.user.github_login = "octocat"
+
+    found = await plugin_routes.api_plugin_search_pulls(plugin, "review-requested")
+
+    assert [pull.number for pull in found.pulls] == ([1, 2, 3] if last_page == "read" else [1, 2])
+    assert found.incomplete is (last_page != "read")
 
 
 async def _decision() -> prs.ReviewDecision:

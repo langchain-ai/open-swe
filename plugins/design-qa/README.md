@@ -29,6 +29,8 @@ Nothing is sent until you press Send.
 
 Design QA captures through its [review step](../../docs/PLUGINS.md#review-steps): a workspace adds it in **Settings → Review → Apps in reviews**, and reviews of that workspace's private repositories then follow its instructions.
 When the diff changes what people see and a preview is up, the review signs its browser in, screenshots each changed route on the base and on the preview at one viewport size, looks at each pair, and saves one capture with `save_app_document`: a document under `pulls/<number>/` with the screenshots as attachments.
+Each screenshot waits for the page to settle: fonts, images in view and loading indicators finish, CSS and web animations freeze, and it's taken again until two takes in a row match.
+Anything that keeps moving, such as a carousel, is hidden on both sides where it can be and named in a warning, and the review doesn't note a difference that comes only from when a page rendered.
 Previews usually deploy after the review finishes, so name the check that passes once a preview is deployed under **Preview checks**; when it passes, Robin captures against that preview.
 Robin has no Design QA code of its own: the instructions, and the capture document they describe, are [`review.md`](review.md), which the build puts in the manifest.
 Design QA fills in what a review leaves out: a capture's id and times come from its key and the store (`StoredCapture.read`).
