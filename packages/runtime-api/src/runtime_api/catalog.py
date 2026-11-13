@@ -275,11 +275,18 @@ class TaskContext(BaseModel):
     message: str | None = None
 
 
+# A member's automation thread's best-effort token budget per UTC day, cached input included.
+AUTOMATION_DAILY_TOKENS: Final = 30_000_000
+
+
 class LoopRules(BaseModel):
     """What the runtime's middleware does around each of the run's model calls."""
 
     # Opens every call's system prompt where the deployment is not production.
     deployment_prompt: str = ""
+    # A member's automation: every call goes to the run's own model, and the thread stops
+    # once its UTC day's tokens reach ``AUTOMATION_DAILY_TOKENS``.
+    pinned_model: bool = False
     # Tools kept from every model call.
     hidden_tools: list[str] = []
     # Tools kept from a call while the named run state is not set.

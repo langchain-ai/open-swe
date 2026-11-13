@@ -472,6 +472,8 @@ export function seedAgentThreadLists(
 
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
+  list: (allUsers: boolean) =>
+    [...agentScheduleKeys.all, { allUsers }] as const,
 }
 
 export const agentMutationKeys = {
@@ -1320,10 +1322,11 @@ export function useWorkflowApprovalDecision(threadId: string) {
   })
 }
 
-export function useAgentSchedules() {
+/** The viewer's automations and admins' ones; `allUsers` (admins only) adds every member's. */
+export function useAgentSchedules({ allUsers = false } = {}) {
   return useQuery({
-    queryKey: agentScheduleKeys.all,
-    queryFn: () => agentsApi.listSchedules(),
+    queryKey: agentScheduleKeys.list(allUsers),
+    queryFn: () => agentsApi.listSchedules(allUsers),
   })
 }
 
@@ -1350,18 +1353,25 @@ export function useUpdateAgentSchedule() {
     onMutate: async (vars) => {
       const { enabled } = vars.body
       if (enabled == null) return undefined
-      return {
-        undo: await optimisticUpdate<Array<AgentSchedule>>(
-          queryClient,
-          agentScheduleKeys.all,
-          (prev) =>
-            prev.map((schedule) =>
-              schedule.id === vars.scheduleId
-                ? { ...schedule, enabled }
-                : schedule
+      const undos = await Promise.all(
+        queryClient
+          .getQueriesData<Array<AgentSchedule>>({
+            queryKey: agentScheduleKeys.all,
+          })
+          .map(([queryKey]) =>
+            optimisticUpdate<Array<AgentSchedule>>(
+              queryClient,
+              queryKey,
+              (prev) =>
+                prev.map((schedule) =>
+                  schedule.id === vars.scheduleId
+                    ? { ...schedule, enabled }
+                    : schedule
+                )
             )
-        ),
-      }
+          )
+      )
+      return { undo: () => undos.forEach((undo) => undo()) }
     },
     onError: (_error, _vars, context) => context?.undo(),
     onSettled: () => {
@@ -1569,7 +1579,17 @@ export function useShareThreadWithWorkspace() {
     mutationFn: (threadId: string) =>
       agentsApi.shareThreadWithWorkspace(threadId),
     meta: { errorTitle: "Couldn't share thread with environment" },
-    onSuccess: (thread) => {
+    onSuccess: async (thread) => {
+      await Promise.all([
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.detail(thread.id),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.sidebarActive(thread.id),
+          exact: true,
+        }),
+      ])
       storeAgentThread(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
     },

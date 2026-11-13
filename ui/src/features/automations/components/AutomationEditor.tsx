@@ -32,6 +32,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
+import { describeUsage } from "@/features/automations/lib/usage"
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
@@ -117,7 +118,18 @@ export function AutomationEditor({
 }: AutomationEditorProps) {
   const navigate = useNavigate()
   const session = useSession()
-  const canManage = session.data?.is_admin === true
+  const isAdmin = session.data?.is_admin === true
+  // A system automation belongs to the environment and only admins manage it; a
+  // personal one, its creator or an admin.
+  const [system, setSystem] = useState(schedule?.system ?? false)
+  const usage = schedule ? describeUsage(schedule) : null
+  const canManage =
+    Boolean(session.data) &&
+    (mode === "create" ||
+      isAdmin ||
+      (schedule?.system !== true &&
+        !!session.data?.user_id &&
+        schedule?.ownerId === session.data.user_id))
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
   const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
@@ -174,6 +186,7 @@ export function AutomationEditor({
       drafts.length !== initialDrafts.length ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
+      system !== (schedule?.system ?? false) ||
       (workspaceOverride !== null &&
         workspaceOverride !== (schedule?.workspace ?? null)) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
@@ -255,8 +268,10 @@ export function AutomationEditor({
   const handleSave = () => {
     if (!canSave || workspace === null) return
     const modelIsReal = models.some((m) => m.id === activeSelection?.modelId)
-    const modelId = modelIsReal ? (activeSelection?.modelId ?? null) : null
-    const effort = modelIsReal ? (activeSelection?.effort ?? null) : null
+    const modelId =
+      system && modelIsReal ? (activeSelection?.modelId ?? null) : null
+    const effort =
+      system && modelIsReal ? (activeSelection?.effort ?? null) : null
 
     if (mode === "create") {
       createSchedule.mutate(
@@ -264,10 +279,11 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          admin_thread: adminThread,
+          admin_thread: system && adminThread,
           model_id: modelId,
           effort,
           workspace,
+          system,
         },
         {
           onSuccess: () => {
@@ -286,10 +302,11 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          admin_thread: adminThread,
+          admin_thread: system && adminThread,
           model_id: modelId,
           effort,
           enabled,
+          ...(system !== (schedule.system ?? false) ? { system } : {}),
           ...(workspaceOverride !== null
             ? { workspace: workspaceOverride }
             : {}),
@@ -396,8 +413,9 @@ export function AutomationEditor({
       <div className="mx-auto w-full max-w-3xl px-space-5 pt-space-2 pb-space-9">
         {!canManage && (
           <Banner intent="neutral" className="mb-space-4">
-            This environment automation is read-only. Ask a Robin admin to
-            change it.
+            {schedule?.system
+              ? "This system automation is read-only. Only Robin admins can change it."
+              : "This automation is read-only. Only its creator or a Robin admin can change it."}
           </Banner>
         )}
         <Input
@@ -431,6 +449,16 @@ export function AutomationEditor({
             placeholder="Choose environment"
             showWithOneWorkspace
           />
+          {schedule?.createdBy && (
+            <>
+              <span aria-hidden="true" className="text-quaternary">
+                |
+              </span>
+              <span className="truncate text-tertiary">
+                Created by {schedule.createdBy}
+              </span>
+            </>
+          )}
         </div>
         {savedWorkspaceMissing && (
           <p role="alert" className="mt-space-2 text-xs text-error-secondary">
@@ -682,14 +710,40 @@ export function AutomationEditor({
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-placeholder"
           />
           <div className="mt-space-2 flex items-center">
-            <ModelPicker
-              models={models}
-              selection={activeSelection}
-              onSelectionChange={setSelectionOverride}
-              disabled={!canManage}
-            />
+            {system ? (
+              <ModelPicker
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelectionOverride}
+                disabled={!canManage}
+              />
+            ) : (
+              <span className="text-xs text-secondary">
+                {usage ?? "Fast · ~30M tokens per thread / UTC day"}
+              </span>
+            )}
           </div>
-          {session.data?.is_admin === true && (
+          {isAdmin && (
+            <div className="mt-space-3 border-t border-subtle pt-space-3">
+              <Checkbox
+                checked={system}
+                onCheckedChange={(checked) => setSystem(checked === true)}
+                disabled={!canManage}
+                label="System automation"
+                labelClassName="text-xs font-medium text-primary"
+                aria-describedby="automation-system-description"
+              />
+              <p
+                id="automation-system-description"
+                className="mt-0.5 pl-space-5 text-xs text-tertiary"
+              >
+                Owned by the environment, not you: only admins manage it, and it
+                has no automation or token limit. Personal automations run on
+                Fast.
+              </p>
+            </div>
+          )}
+          {isAdmin && system && (
             <div className="mt-space-3 border-t border-subtle pt-space-3">
               <Checkbox
                 checked={adminThread}

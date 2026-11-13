@@ -8406,6 +8406,11 @@
             "title": "Prompt",
             "type": "string"
           },
+          "system": {
+            "default": false,
+            "title": "System",
+            "type": "boolean"
+          },
           "triggers": {
             "items": {
               "discriminator": {
@@ -8542,6 +8547,17 @@
               }
             ],
             "title": "Prompt"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System"
           },
           "triggers": {
             "anyOf": [
@@ -23613,7 +23629,20 @@
     },
     "/dashboard/api/schedules": {
       "get": {
+        "description": "The viewer's own automations and system ones; ``all_users`` adds everyone's, for admins.",
         "operationId": "api_list_schedules_dashboard_api_schedules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "all_users",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "All Users",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -23629,6 +23658,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

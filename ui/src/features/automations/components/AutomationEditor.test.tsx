@@ -183,14 +183,23 @@ describe("AutomationEditor", () => {
     ).toBe(true)
   })
 
-  it("shows the admin-thread checkbox only to admins", () => {
+  it("offers system automations and admin threads only to admins", () => {
     vi.mocked(useSession).mockReturnValue({
       data: { is_admin: true },
     } as unknown as ReturnType<typeof useSession>)
 
     const adminMarkup = renderToStaticMarkup(<AutomationEditor mode="create" />)
 
-    expect(adminMarkup).toContain("Run as admin thread")
+    expect(adminMarkup).toContain("System automation")
+    expect(adminMarkup).not.toContain("Run as admin thread")
+    render(
+      <TooltipProvider>
+        <AutomationEditor mode="create" />
+      </TooltipProvider>
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "System automation" }))
+    expect(screen.getByText("Run as admin thread")).toBeTruthy()
+    cleanup()
 
     vi.mocked(useSession).mockReturnValue({
       data: { is_admin: false },
@@ -200,8 +209,9 @@ describe("AutomationEditor", () => {
       <AutomationEditor mode="create" />
     )
 
+    expect(memberMarkup).not.toContain("System automation")
     expect(memberMarkup).not.toContain("Run as admin thread")
-    expect(memberMarkup).toContain("This environment automation is read-only")
+    expect(memberMarkup).toContain("Fast · ~30M tokens per thread / UTC day")
     expect(memberMarkup).not.toContain("Save changes")
   })
 

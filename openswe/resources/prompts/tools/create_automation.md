@@ -1,4 +1,9 @@
-Create a workspace automation.
+Create an automation: personal by default, or a system one for admins.
+
+A personal automation belongs to its creator, admin or not: each user can have at most three, including paused ones, and it runs on the workspace Fast model with a best-effort 30M-token cap per thread per UTC day, including cached input.
+Only its creator or an admin may edit, test, or delete it.
+A system automation belongs to the environment rather than a person: only admins create or manage it, it has no count or token cap, and it may pick its model and run as an admin thread.
+Its spend is credited to no person.
 
 Args:
 - prompt: Complete instructions for every run.
@@ -15,9 +20,12 @@ Args:
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
   - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).
     Optional filters: ``labels`` (names; the issue must carry, or for "issue.labeled" gain, one of them), ``project`` (a project name), and ``max_runs_per_hour``.
-    A GitHub trigger's ``repo`` must be one the configuring admin can access.
+    A GitHub trigger's ``repo`` must be one the configuring user can access.
 - name: Short display name.
-- model_id: Optional supported model ID.
+- model_id: Optional supported model ID; a personal automation always runs on Fast.
 - effort: Optional reasoning effort for the model.
-- admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.
+- system: Admins only.
+  Make it a system automation.
+- admin_thread: System automations only.
+  Give runs workspace-admin capabilities while the creator remains an admin.
   Not allowed with GitHub triggers on public repositories, whose event text anyone can write.

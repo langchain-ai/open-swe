@@ -35,6 +35,7 @@ from openswe.schedules.store import (
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
 from openswe.threads import router
+from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.mda_helpers import stub_mda_runtime
 
@@ -171,7 +172,11 @@ def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
 
 
 @pytest.fixture
-def auth(monkeypatch) -> None:  # noqa: ANN001
+async def auth(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    await User.sign_in("github", "alice", login="alice", email="alice@example.com")
+    await User.sign_in("github", "bob", login="bob", email="bob@example.com")
+
     async def fake_get_valid_access_token(login: str) -> str:
         return "gho_token"
 
@@ -249,22 +254,25 @@ async def _seed(record: dict[str, Any]) -> None:
     else:
         trigger = ScheduleTrigger(cron=record.get("schedule") or "0 9 * * *")
         cron_id = record.get("cron_id")
+    owner = await User.for_login("github", record.get("created_by") or "")
     workspace_id = await WORKSPACES.id_for_slug(record.get("workspace") or "default")
     async with transaction() as conn:
         await conn.execute(
             text(
                 "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, model, "
                 "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                "user_email) VALUES (:id, :workspace_id, :name, :prompt, :admin_thread, "
-                ":model, :effort, :base_branch, :branch_prefix, :enabled, :created_by, "
-                ":created_by, :user_email)"
+                "user_email, created_by_user_id, system) VALUES (:id, :workspace_id, :name, "
+                ":prompt, :admin_thread, :model, :effort, :base_branch, :branch_prefix, "
+                ":enabled, :created_by, :created_by, :user_email, :created_by_user_id, :system)"
             ),
             {
                 "id": uuid.UUID(record["id"]),
+                "created_by_user_id": owner.id if owner else None,
                 "workspace_id": workspace_id,
                 "name": record.get("name") or "Automation",
                 "prompt": record["prompt"],
                 "admin_thread": record.get("admin_thread") is True,
+                "system": record.get("system") is True,
                 "model": record.get("model") or "Default",
                 "effort": record.get("effort"),
                 "base_branch": record.get("base_branch") or "main",
@@ -741,6 +749,7 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
 async def test_admin_automations_refuse_events_from_public_repositories(
     fake_client: _FakeClient, auth: None, planning: _Planning, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     visibility = {"langchain-ai/open-swe": False, "langchain-ai/private": True}
 
     async def repo_is_private(full_name: str) -> bool | None:
@@ -753,6 +762,7 @@ async def test_admin_automations_refuse_events_from_public_repositories(
             workspace="default",
             prompt="Triage",
             admin_thread=True,
+            system=True,
             triggers=[GitHubTrigger(repo=repo, events=["issues.opened"])],
         )
 
@@ -967,17 +977,20 @@ async def test_open_swe_events_do_not_trigger_automations(
 
 
 async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
-    fake_client, auth, registry_db
+    fake_client, auth, registry_db, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
     """Fable is a per-workspace kill switch, so the run's own workspace decides.
 
     `default` leaves it on here and the automation's workspace does not, so a
     flag read from `default` would let the Fable model through.
     """
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
     await _seed(
-        _scheduled_record(workspace="oss", model="anthropic:claude-fable-5-1", effort="high"),
+        _scheduled_record(
+            workspace="oss", model="anthropic:claude-fable-5-1", effort="high", system=True
+        ),
     )
 
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
@@ -1065,6 +1078,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
         "prompt": "Manage workspace environments",
         "enabled": True,
         "admin_thread": True,
+        "system": True,
         "created_by": "alice",
     }
     await _seed(record)
@@ -1097,6 +1111,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
         workspace="default",
         triggers=[ScheduleTrigger(cron="0 9 * * *")],
         admin_thread=True,
+        system=True,
     )
     assert child["ok"] is True
     child_id = child["automation"]["id"]
@@ -1144,6 +1159,7 @@ async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_th
         "model": "Default",
         "effort": None,
         "admin_thread": True,
+        "system": True,
         "enabled": True,
         "cron_id": "cron_1",
         "created_by": "alice",
@@ -1167,24 +1183,11 @@ async def test_automation_spend_is_credited_to_its_creator_without_acting_as_the
 ) -> None:  # noqa: ANN001
     from openswe import dispatch
     from openswe.agent_api.connections import ACTING_USER_KEY
-    from openswe.users import User, UserIdentity
+    from openswe.users import User
 
-    alice = User(
-        id=uuid.uuid4(),
-        identities=[
-            UserIdentity(provider="github", external_id="1", login="alice"),
-            UserIdentity(provider="slack", external_id="U1", email="alice@example.com"),
-        ],
-    )
-
-    async def by_login(provider: str, login: str) -> User | None:
-        return alice if (provider, login) == ("github", "alice") else None
-
-    async def by_id(user_id: uuid.UUID) -> User | None:
-        return alice if user_id == alice.id else None
-
-    monkeypatch.setattr(User, "for_login", by_login)
-    monkeypatch.setattr(User, "get", by_id)
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    alice = await User.sign_in("github", "1", login="alice")
+    alice = await alice.link("slack", "U1", email="alice@example.com")
     await _seed({"id": SCHED_1, "prompt": "Triage", "enabled": True, "created_by": "alice"})
 
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
@@ -1268,6 +1271,27 @@ async def test_automation_spend_is_credited_after_the_automation_is_deleted(
     creator = await RunConfig.model_validate(configurable).automation_creator()
     assert creator is not None
     assert creator.id == alice.id
+
+
+async def test_a_system_automation_run_stays_no_persons_spend_once_made_personal(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    from openswe.run_config import RunConfig
+
+    await User.sign_in("github", "3004", login="alice", email="alice@example.com")
+    await _seed(
+        {"id": SCHED_1, "prompt": "Triage", "enabled": True, "created_by": "alice", "system": True}
+    )
+    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
+    configurable = fake_client.runs.created[-1]["config"]["configurable"]
+
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE automation SET system = false WHERE id = :id"), {"id": uuid.UUID(SCHED_1)}
+        )
+
+    assert await RunConfig.model_validate(configurable).automation_creator() is None
 
 
 @pytest.mark.parametrize(("private", "scope"), [(False, ["langchain-ai/open-swe"]), (True, None)])
@@ -1376,7 +1400,7 @@ async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, r
 
     assert await WORKSPACES.remove("core")
 
-    remaining = {item["id"] for item in await schedules.list_agent_schedules()}
+    remaining = {item["id"] for item in await schedules.list_agent_schedules(None)}
     assert remaining == {SCHED_2}
     assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
 
@@ -1398,7 +1422,7 @@ async def test_retrying_a_failed_workspace_delete_finishes_it(
     assert await WORKSPACES.remove("core")
 
     assert await WORKSPACES.get("core") is None
-    assert await schedules.list_agent_schedules() == []
+    assert await schedules.list_agent_schedules(None) == []
     assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
 
 
@@ -1444,3 +1468,109 @@ async def test_a_scheduler_cron_from_before_trigger_ids_moves_for_the_trigger_ho
             {"id": uuid.UUID(SCHED_1)},
         )
     assert held == str(job.id)
+
+
+async def test_automation_limits_and_ownership(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
+    import asyncio
+
+    body = ScheduleCreateBody(
+        workspace="default", prompt="Report", triggers=[ScheduleTrigger(cron="0 9 * * *")]
+    )
+    results = await asyncio.gather(
+        *(schedules.create_agent_schedule("alice", body) for _ in range(4)), return_exceptions=True
+    )
+    created = [r for r in results if isinstance(r, dict)]
+    assert len(created) == 3
+    assert sum(isinstance(r, HTTPException) and r.status_code == 422 for r in results) == 1
+    with pytest.raises(HTTPException) as denied:
+        await schedules.update_agent_schedule(
+            created[0]["id"], "bob", ScheduleUpdateBody(prompt="Changed")
+        )
+    assert denied.value.status_code == 403
+    with pytest.raises(HTTPException):
+        await schedules.delete_agent_schedule(created[0]["id"], login="bob")
+    with pytest.raises(HTTPException):
+        await schedules.trigger_agent_schedule(created[0]["id"], login="bob")
+    assert await schedules.list_agent_schedules("bob") == []
+    with pytest.raises(HTTPException) as listed:
+        await schedules.list_agent_schedules("bob", all_users=True)
+    assert listed.value.status_code == 403
+    await schedules.delete_agent_schedule(created[0]["id"], login="alice")
+    assert (await schedules.create_agent_schedule("alice", body))["ownerId"] == str(
+        (await User.for_login("github", "alice")).id
+    )
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
+    assert await schedules.list_agent_schedules("bob") == []
+    every = await schedules.list_agent_schedules("bob", all_users=True)
+    assert {item["createdBy"] for item in every} == {"alice"}
+    assert all(item["restricted"] for item in every)
+    paused = await schedules.update_agent_schedule(
+        every[0]["id"], "bob", ScheduleUpdateBody(enabled=False)
+    )
+    assert paused["enabled"] is False
+    await schedules.delete_agent_schedule(every[0]["id"], login="bob")
+    assert [item["name"] for item in await schedules.list_agent_schedules("alice")] == [
+        item["name"] for item in every[1:]
+    ]
+
+    # An admin's personal automations count toward their three too; system ones never do.
+    for _ in range(3):
+        await schedules.create_agent_schedule("bob", body)
+    with pytest.raises(HTTPException) as capped:
+        await schedules.create_agent_schedule("bob", body)
+    assert capped.value.status_code == 422
+    system_body = body.model_copy(update={"system": True})
+    shared = await schedules.create_agent_schedule("bob", system_body)
+    assert (shared["system"], shared["restricted"]) == (True, False)
+    with pytest.raises(HTTPException) as refused:
+        await schedules.create_agent_schedule("alice", system_body)
+    assert refused.value.status_code == 403
+    assert shared["id"] in {item["id"] for item in await schedules.list_agent_schedules("alice")}
+    with pytest.raises(HTTPException) as locked:
+        await schedules.update_agent_schedule(
+            shared["id"], "alice", ScheduleUpdateBody(enabled=False)
+        )
+    assert locked.value.status_code == 403
+    # Made personal, it would be bob's fourth.
+    with pytest.raises(HTTPException) as over:
+        await schedules.update_agent_schedule(shared["id"], "bob", ScheduleUpdateBody(system=False))
+    assert over.value.status_code == 422
+    # Promoted by an admin, a member's automation still can't run as an admin thread.
+    promoted = await schedules.update_agent_schedule(
+        every[1]["id"], "bob", ScheduleUpdateBody(system=True)
+    )
+    assert promoted["system"] is True
+    with pytest.raises(HTTPException) as member_made:
+        await schedules.update_agent_schedule(
+            every[1]["id"], "bob", ScheduleUpdateBody(admin_thread=True), allow_admin_thread=True
+        )
+    assert member_made.value.status_code == 422
+
+
+async def test_member_automation_launch_pins_workspace_fast_model(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    from openswe.dashboard.workspace_settings import get_workspace_settings
+
+    body = ScheduleCreateBody(
+        workspace="default",
+        prompt="Report",
+        model_id="anthropic:claude-opus-5-5",
+        effort="high",
+        triggers=[ScheduleTrigger(cron="0 9 * * *")],
+    )
+    created = await schedules.create_agent_schedule("alice", body)
+    fast = (await get_workspace_settings("default")).agent_routing_models["fast"]
+    assert (created["model"], created["effort"]) == fast
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE automation SET model = 'anthropic:claude-opus-5-5', effort = 'high', admin_thread = true WHERE id = :id"
+            ),
+            {"id": uuid.UUID(created["id"])},
+        )
+    assert (await schedules.trigger_agent_schedule(created["id"], login="alice"))[
+        "status"
+    ] == "started"
+    config = fake_client.runs.created[0]["config"]["configurable"]
+    assert (config["agent_model_id"], config["agent_effort"]) == fast
+    assert not config.get("admin_thread")

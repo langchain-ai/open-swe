@@ -7,6 +7,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { CalendarXIcon } from "@phosphor-icons/react/dist/ssr/CalendarX"
 import { useAgentSchedules } from "@/features/agents/lib/queries"
 import { pageTitle } from "@/lib/pageTitle"
+import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents/automations/$scheduleId")({
   component: EditAutomationPage,
@@ -15,7 +16,9 @@ export const Route = createFileRoute("/agents/automations/$scheduleId")({
 
 function EditAutomationPage() {
   const { scheduleId } = Route.useParams()
-  const schedulesQuery = useAgentSchedules()
+  // Admins open any user's automation, not only those their default list shows.
+  const isAdmin = useSession().data?.is_admin === true
+  const schedulesQuery = useAgentSchedules({ allUsers: isAdmin })
   const schedule = schedulesQuery.data?.find((s) => s.id === scheduleId)
 
   if (schedulesQuery.isLoading) {

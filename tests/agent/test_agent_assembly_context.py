@@ -17,6 +17,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.mcp.runtime import MCPTools
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+from openswe.schedules.policy import AutomationPolicy
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads.inbox import ThreadInbox
 
@@ -395,6 +396,22 @@ async def test_adaptive_routing_sends_every_auto_thread_through_the_classifier()
     assert cast(dict[str, object], config["metadata"])["model_routing_mode"] == "auto"
 
 
+async def test_a_personal_automation_gets_no_task_subagent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        AutomationPolicy, "for_schedule", AsyncMock(return_value=AutomationPolicy(None))
+    )
+    config = _base_config()
+    config["configurable"].update(source="schedule", schedule_id="schedule-1")
+    with patch("openswe.server.store_thread_settings", new_callable=AsyncMock):
+        agent = await _agent_catalog(config)
+
+    surface = cast(ToolSurface, agent["surface"])
+    # A subagent's spend would escape the thread's daily token budget.
+    assert surface.loop.pinned_model and not surface.subagents and not surface.delegates
+
+
 @pytest.mark.parametrize(
     "configurable",
     [
@@ -407,6 +424,10 @@ async def test_an_automated_thread_is_left_out_of_the_experiment(
     configurable: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "performance")
+    # A system automation keeps the workspace default; a personal one is pinned to Fast.
+    monkeypatch.setattr(
+        AutomationPolicy, "for_schedule", AsyncMock(return_value=AutomationPolicy(None, True))
+    )
     config = _base_config()
     config["configurable"].update(configurable)
     with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:

@@ -1,6 +1,7 @@
 import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
 import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { Text } from "@langchain/macaw-components/Text"
+import { useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -20,6 +21,7 @@ import type { AgentSchedule } from "@/features/agents/lib/types"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { describeTriggers } from "@/features/automations/lib/triggers"
+import { describeUsage } from "@/features/automations/lib/usage"
 import {
   agentMutationKeys,
   useAgentSchedules,
@@ -50,6 +52,13 @@ const TAB_OPTIONS = [
   { value: "runs", display: "Runs" },
 ] as const
 
+type AutomationsFilter = "mine" | "all"
+
+const FILTER_OPTIONS = [
+  { value: "mine", display: "Mine & system" },
+  { value: "all", display: "All users" },
+] as const
+
 export function AutomationsList({
   tab,
   onTabChange,
@@ -57,8 +66,13 @@ export function AutomationsList({
   tab: AutomationsTab
   onTabChange: (tab: AutomationsTab) => void
 }) {
-  const schedulesQuery = useAgentSchedules()
-  const canManage = useSession().data?.is_admin === true
+  const session = useSession().data
+  const isAdmin = session?.is_admin === true
+  const [filter, setFilter] = useState<AutomationsFilter>("mine")
+  const schedulesQuery = useAgentSchedules({
+    allUsers: isAdmin && filter === "all",
+  })
+  const canManage = Boolean(session)
   const schedules = schedulesQuery.data ?? []
 
   const total = schedules.length
@@ -74,14 +88,15 @@ export function AutomationsList({
         </Text>
         <p className="mt-space-1 text-xs text-secondary">
           Run Robin on a schedule or on GitHub, Slack, and Linear events. Each
-          run starts a fresh agent thread.{" "}
-          {!canManage && "Robin admins manage automation setup."}
+          run starts a fresh agent thread. Each user can have up to 3 personal
+          automations, which use Fast with a best-effort 30M-token cap per
+          thread per UTC day. System automations, managed by admins, have no
+          limits.
         </p>
         {canManage && (
           <Banner intent="neutral" className="mt-space-3">
             Automations can also be listed and managed through Robin. Start a
-            new thread, turn on Admin next to the model picker, then ask the
-            agent to make the change.
+            private thread and ask the agent to make the change.
           </Banner>
         )}
         <GroupedTabs
@@ -109,9 +124,18 @@ export function AutomationsList({
             </div>
 
             <div className="mt-space-6 flex items-center justify-between">
-              <span className="text-xs font-medium text-secondary">
-                {total} {total === 1 ? "automation" : "automations"}
-              </span>
+              <div className="flex items-center gap-space-3">
+                <span className="text-xs font-medium text-secondary">
+                  {total} {total === 1 ? "automation" : "automations"}
+                </span>
+                {isAdmin && (
+                  <GroupedTabs
+                    value={filter}
+                    onChange={setFilter}
+                    options={FILTER_OPTIONS}
+                  />
+                )}
+              </div>
               {canManage && <NewAutomationButton />}
             </div>
 
@@ -135,7 +159,12 @@ export function AutomationsList({
                     <AutomationRow
                       key={schedule.id}
                       schedule={schedule}
-                      canManage={canManage}
+                      canManage={
+                        isAdmin ||
+                        (!schedule.system &&
+                          !!session?.user_id &&
+                          schedule.ownerId === session.user_id)
+                      }
                     />
                   ))}
                 </div>
@@ -205,6 +234,7 @@ function AutomationRow({
   ).some((vars) => vars.scheduleId === schedule.id)
   const isStarting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
+  const usage = describeUsage(schedule)
 
   const onRun = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -272,9 +302,13 @@ function AutomationRow({
                 </span>
               )}
               <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
+              {usage && <span>{usage}</span>}
             </div>
             <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">
-              <span>Created by: {schedule.createdBy || "Unknown"}</span>
+              <span>
+                {schedule.system ? "System · created by" : "Created by"}:{" "}
+                {schedule.createdBy || "Unknown"}
+              </span>
               <span>
                 Last edited by:{" "}
                 {schedule.updatedBy || schedule.createdBy || "Unknown"}

@@ -391,7 +391,8 @@ class RunConfig(BaseModel):
         return None
 
     async def automation_creator(self) -> User | None:
-        """Who created the automation this run executes on its own thread, to credit its spend to.
+        """Who created the personal automation this run executes on its own thread, to credit
+        its spend to; a system automation's spend is no person's.
 
         Only for attribution: an automation run never acts as, or with the credentials
         of, its creator.
@@ -402,7 +403,11 @@ class RunConfig(BaseModel):
         if not self.schedule_id:
             return None
         metadata = await schedule_thread_metadata(self)
-        if metadata is None or metadata.get("schedule_id") != self.schedule_id:
+        if (
+            metadata is None
+            or metadata.get("schedule_id") != self.schedule_id
+            or metadata.get("automation_system") is True
+        ):
             return None
         if creator_id := metadata.get("automation_creator_user_id"):
             try:
@@ -410,4 +415,6 @@ class RunConfig(BaseModel):
             except ValueError:
                 return None
         record = await get_agent_schedule(self.schedule_id)
-        return await User.automation_creator(record) if record is not None else None
+        if record is None or record.get("system") is True:
+            return None
+        return await User.automation_creator(record)

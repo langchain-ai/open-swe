@@ -351,6 +351,14 @@ export interface AgentSchedule {
   lastTriggeredAt?: string | null
   lastError?: string | null
   lastErrorAt?: string | null
+  ownerId?: string | null
+  /** The environment's, not its creator's: only admins manage it, and it is unbounded. */
+  system?: boolean
+  /** A personal automation: it runs on Fast within a daily token budget per thread. */
+  restricted?: boolean
+  dailyTokenCap?: number | null
+  /** Its thread that spent the most of today's (UTC) budget. */
+  usageToday?: { threadId: string; tokens: number } | null
   createdBy?: string | null
   updatedBy?: string | null
   createdAt?: string | null

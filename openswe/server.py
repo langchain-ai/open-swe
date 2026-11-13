@@ -152,6 +152,7 @@ from openswe.sandboxes.tool_runtime import (
     SurfaceSubagent,
     ToolSurface,
 )
+from openswe.schedules.policy import AutomationPolicy
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
@@ -1913,6 +1914,19 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             subagent_model_id = per_thread_model
             subagent_effort = per_thread_effort
 
+    # A member's automation runs on the workspace's Fast model alone, without delegating.
+    restricted_automation = (
+        bool(cfg.schedule_id) and (await AutomationPolicy.for_schedule(cfg.schedule_id)).restricted
+    )
+    if restricted_automation:
+        model_id, profile_effort = settings.agent_routing_models["fast"]
+        subagent_model_id, subagent_effort = model_id, profile_effort
+        routing_defaults = dict.fromkeys(routing_defaults, (model_id, profile_effort))
+        adaptive_model_routing = False
+        image_model_override = None
+        thread_settings["requested_model"] = None
+        thread_settings["model_handoff_complete"] = True
+
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
@@ -2017,6 +2031,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_breakout_thread,
     ]
     withheld = [
+        *((switch_to_performance_model,) if restricted_automation else ()),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools, discover_managed_tools)),
@@ -2161,11 +2176,16 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(page_tools.tools if page_tools else []),
     ]
     surface.model_call_limit = MODEL_CALL_RECURSION_LIMIT
-    surface.delegates = task_coordination is not None and task_coordination.can_delegate
+    surface.delegates = (
+        task_coordination is not None
+        and task_coordination.can_delegate
+        and not restricted_automation
+    )
     reply_tool = _registered_tool_name(slack_reply)
     no_reply_tool = _registered_tool_name(slack_no_reply_needed)
     cli_result_tool = _registered_tool_name(cli_result)
     surface.loop = LoopRules(
+        pinned_model=restricted_automation,
         hidden_tools=sorted(excluded_tools),
         routing=RoutingRules(
             mode=routing_mode,
@@ -2231,21 +2251,27 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         },
         vision=vision_model,
     )
-    surface.subagents = [
-        SurfaceSubagent(
-            name=GENERAL_PURPOSE_SUBAGENT["name"],
-            description=_general_purpose_description(),
-            system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
-            tools=(
-                *FILESYSTEM_TOOL_NAMES,
-                *(
-                    name
-                    for name in map(_registered_tool_name, subagent_tools)
-                    if not _is_subagent_excluded_tool(name)
+    # A personal automation gets no `task` subagent: a subagent's spend is kept in its own
+    # state, outside the thread's daily token budget.
+    surface.subagents = (
+        []
+        if restricted_automation
+        else [
+            SurfaceSubagent(
+                name=GENERAL_PURPOSE_SUBAGENT["name"],
+                description=_general_purpose_description(),
+                system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+                tools=(
+                    *FILESYSTEM_TOOL_NAMES,
+                    *(
+                        name
+                        for name in map(_registered_tool_name, subagent_tools)
+                        if not _is_subagent_excluded_tool(name)
+                    ),
                 ),
-            ),
-        )
-    ]
+            )
+        ]
+    )
     surface.dynamic = dynamic_tool_middleware
     surface.mcp_servers = _owned_mcp_servers(
         config,

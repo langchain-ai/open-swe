@@ -20,7 +20,7 @@ export const Route = createFileRoute("/agents/automations/new")({
 function NewAutomationPage() {
   const { template } = Route.useSearch()
   const session = useSession()
-  if (!session.isLoading && session.data?.is_admin !== true) {
+  if (!session.isLoading && !session.data) {
     return <Navigate to="/agents/automations" />
   }
   return (

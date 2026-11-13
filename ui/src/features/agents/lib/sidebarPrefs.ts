@@ -30,12 +30,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
-  hiddenNavItems: [
-    "/agents/skills",
-    "/agents/automations",
-    "/agents/bots",
-    "/agents/reviews",
-  ],
+  hiddenNavItems: ["/agents/skills", "/agents/bots", "/agents/reviews"],
   organize: "date",
 }
 

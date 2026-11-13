@@ -14,6 +14,7 @@ import {
   agentThreadKeys,
   markAgentThreadViewed,
   useSetAgentThreadViewed,
+  useShareThreadWithWorkspace,
   optimisticThread,
   setAgentThreadStatus,
   setAgentThreadResolved,
@@ -882,6 +883,50 @@ function wrapperFor(client: QueryClient) {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
 }
+
+describe("useShareThreadWithWorkspace", () => {
+  it("keeps confirmed sharing when an older detail read finishes later", async () => {
+    const client = testClient()
+    const thread = {
+      ...optimisticThread("thread-1", { prompt: "Private prompt" }),
+      visibility: "private",
+      status: "finished",
+    } satisfies AgentThread
+    const shared: AgentThread = { ...thread, visibility: "public" }
+    const staleRead = deferred<AgentThread>()
+    const share = deferred<AgentThread>()
+    vi.spyOn(agentsApi, "getThread").mockReturnValue(staleRead.promise)
+    vi.spyOn(agentsApi, "shareThreadWithWorkspace").mockReturnValue(
+      share.promise
+    )
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    const { result } = renderHook(
+      () => ({
+        detail: useAgentThread(thread.id),
+        share: useShareThreadWithWorkspace(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    act(() => result.current.share.mutate(thread.id))
+    await waitFor(() => expect(result.current.share.isPending).toBe(true))
+    const refetch = result.current.detail.refetch()
+    expect(
+      client.isFetching({ queryKey: agentThreadKeys.detail(thread.id) })
+    ).toBe(1)
+    await act(async () => share.resolve(shared))
+    await waitFor(() =>
+      expect(result.current.detail.data?.visibility).toBe("public")
+    )
+    await act(async () => {
+      staleRead.resolve(thread)
+      await refetch
+    })
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(thread.id))
+        ?.visibility
+    ).toBe("public")
+  })
+})
 
 describe("active thread menu metadata", () => {
   it("refreshes menu actions from the sidebar without replacing live detail", () => {

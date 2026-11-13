@@ -198,11 +198,20 @@ class RunStarted(Report):
     sender: RunSender | None = None
 
 
+class AutomationUsage(BaseModel):
+    """The tokens a member's automation thread spent on one UTC day, as its budget counts them."""
+
+    day: str
+    tokens: int
+
+
 class RunEnded(Report):
     # The invocation the run is: a later run on the thread may send this report for it.
     invocation_id: str | None = None
     # The run's replies without their content: their ids, usage and model, for usage.
     replies: list[dict[str, JsonValue]] = []
+    # A member's automation thread's budget counter, which admins read on its automation.
+    automation_usage: AutomationUsage | None = None
 
 
 class ModelFailed(Report):

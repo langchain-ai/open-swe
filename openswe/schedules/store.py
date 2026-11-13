@@ -6,6 +6,7 @@ GitHub and Linear triggers fire from MDA's channels, which start the runs planne
 here; every inbound event is claimed once per automation in ``event_claim`` first.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -44,6 +45,7 @@ from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
+from openswe.schedules.policy import AutomationPolicy, ThreadUsage
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
 from openswe.threads.access import agent_version_metadata, resolve_run_email
@@ -184,6 +186,8 @@ class ScheduleCreateBody(BaseModel):
     admin_thread: bool = False
     # The workspace its runs launch in, always chosen explicitly.
     workspace: str = Field(min_length=1, max_length=120)
+    # The environment's, not its creator's: admins only, unbounded.
+    system: bool = False
 
 
 class ScheduleUpdateBody(BaseModel):
@@ -196,6 +200,7 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     admin_thread: bool | None = None
     workspace: str | None = None
+    system: bool | None = None
 
 
 def _validate_cron_value(value: str, low: int, high: int) -> None:
@@ -240,7 +245,9 @@ def _derive_name(prompt: str) -> str:
     return prompt.strip().splitlines()[0][:80] or "Scheduled agent"
 
 
-def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
+def _schedule_summary(
+    record: dict[str, Any], policy: AutomationPolicy, usage: ThreadUsage | None = None
+) -> dict[str, Any]:
     triggers = record.get("triggers") or []
     schedule = next(
         ((t.get("config") or {}).get("cron") for t in triggers if t.get("kind") == "schedule"),
@@ -266,6 +273,12 @@ def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
         "lastError": record.get("last_error"),
         "lastErrorAt": record.get("last_error_at"),
         "createdBy": record.get("created_by"),
+        "ownerId": str(record["created_by_user_id"]) if record.get("created_by_user_id") else None,
+        "system": policy.system,
+        # A personal automation runs on Fast within a daily token budget per thread.
+        "restricted": policy.restricted,
+        "dailyTokenCap": policy.DAILY_TOKENS if policy.restricted else None,
+        "usageToday": usage,
         "updatedBy": record.get("updated_by") or record.get("created_by"),
         "createdAt": record.get("created_at"),
         "updatedAt": record.get("updated_at"),
@@ -361,6 +374,7 @@ async def _load_records(
                 "base_branch": row["base_branch"],
                 "branch_prefix": row["branch_prefix"],
                 "enabled": row["enabled"],
+                "system": row["system"],
                 "created_by": row["created_by"],
                 "created_by_user_id": str(row["created_by_user_id"])
                 if row.get("created_by_user_id")
@@ -457,10 +471,24 @@ def _assert_schedule_exists(record: dict[str, Any] | None) -> None:
         raise HTTPException(404, "schedule not found")
 
 
-async def list_agent_schedules() -> list[dict[str, Any]]:
+async def list_agent_schedules(
+    login: str | None, *, all_users: bool = False
+) -> list[dict[str, Any]]:
+    """The automations ``login``'s list shows: their own and system ones, or every one in
+    an admin's ``all_users`` view; ``None`` (a system caller) sees every one."""
+    viewer = None if login is None else await AutomationPolicy.for_login(login)
+    if viewer is not None:
+        viewer.check_listing(all_users=all_users)
     async with transaction() as conn:
         records = await _load_records(conn, "ORDER BY a.updated_at DESC")
-    return [_schedule_summary(record) for record in records]
+    policies, usage = await asyncio.gather(
+        AutomationPolicy.for_records(records), AutomationPolicy.usage_today()
+    )
+    return [
+        _schedule_summary(record, policy, usage.get(record["id"]))
+        for record, policy in zip(records, policies, strict=True)
+        if viewer is None or viewer.lists(policy, all_users=all_users)
+    ]
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -684,8 +712,11 @@ async def create_agent_schedule(
     allow_admin_thread: bool = False,
     use_workspace_credentials: bool = False,
 ) -> dict[str, Any]:
-    if body.admin_thread and not allow_admin_thread:
-        raise HTTPException(403, "admin only")
+    creator = await AutomationPolicy.for_login(login)
+    policy = creator.as_system(body.system)
+    policy.check_kind(creator)
+    if body.admin_thread and (not allow_admin_thread or not creator.admin or policy.restricted):
+        raise HTTPException(403, "admin threads are for system automations, by admins")
     if use_workspace_credentials:
         profile: dict[str, Any] = {}
         run_email = email
@@ -702,21 +733,26 @@ async def create_agent_schedule(
     if workspace_id is None:
         raise HTTPException(422, f"no workspace named {workspace!r}")
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
+    if policy.restricted:
+        chosen_model, chosen_effort = (
+            await get_workspace_settings(workspace)
+        ).agent_routing_models["fast"]
     automation_id = str(uuid.uuid4())
     trigger_ids = [uuid.uuid4() for _ in triggers]
-    creator = await User.for_login("github", login)
     cron_ids = await _create_crons(
         automation_id, triggers, trigger_ids, enabled=True, created_by=login, saved_by=login
     )
     try:
         async with transaction() as conn:
+            await policy.check_creation(conn)
             await conn.execute(
                 text(
                     "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, "
                     "model, effort, base_branch, branch_prefix, enabled, created_by, "
-                    "updated_by, user_email, created_by_user_id) VALUES (:id, :workspace_id, "
-                    ":name, :prompt, :admin_thread, :model, :effort, :base_branch, "
-                    ":branch_prefix, true, :login, :login, :user_email, :creator_id)"
+                    "updated_by, user_email, created_by_user_id, system) VALUES (:id, "
+                    ":workspace_id, :name, :prompt, :admin_thread, :model, :effort, "
+                    ":base_branch, :branch_prefix, true, :login, :login, :user_email, "
+                    ":creator_id, :system)"
                 ),
                 {
                     "id": uuid.UUID(automation_id),
@@ -730,7 +766,8 @@ async def create_agent_schedule(
                     "branch_prefix": profile.get("branch_prefix"),
                     "login": login,
                     "user_email": (run_email or "").strip().lower(),
-                    "creator_id": creator.id if creator is not None else None,
+                    "creator_id": creator.owner.id if creator.owner is not None else None,
+                    "system": policy.system,
                 },
             )
             await _insert_triggers(conn, automation_id, triggers, trigger_ids, cron_ids)
@@ -740,7 +777,7 @@ async def create_agent_schedule(
         raise
     record = await get_agent_schedule(automation_id)
     assert record is not None
-    return _schedule_summary(record)
+    return _schedule_summary(record, policy)
 
 
 async def update_agent_schedule(
@@ -755,12 +792,24 @@ async def update_agent_schedule(
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(existing)
     assert existing is not None
+    actor = await AutomationPolicy.for_login(login)
+    current = await AutomationPolicy.for_record(existing)
+    current.authorize(actor)
+    owner = current if body.system is None else current.as_system(body.system)
+    owner.check_kind(actor)
+    if body.admin_thread is True and (not actor.admin or owner.restricted):
+        raise HTTPException(403, "admin threads are for system automations, by admins")
     if (
         body.admin_thread is True
         and existing.get("admin_thread") is not True
         and not allow_admin_thread
     ):
         raise HTTPException(403, "admin only")
+    # An admin thread runs with its creator's admin access, which a member never had.
+    if body.admin_thread is True and existing.get("admin_thread") is not True and not current.admin:
+        raise HTTPException(
+            422, "Admin threads need an automation created by an admin; this one's creator isn't"
+        )
 
     columns: dict[str, object] = {"updated_by": login}
     if body.prompt is not None:
@@ -778,9 +827,19 @@ async def update_agent_schedule(
         columns["enabled"] = body.enabled
     if body.admin_thread is not None:
         columns["admin_thread"] = body.admin_thread
+    if owner.system != current.system:
+        columns["system"] = owner.system
+        if owner.restricted:
+            columns["admin_thread"] = False
     if body.workspace is not None:
         workspace = await _existing_workspace(body.workspace)
         columns["workspace_id"] = await WORKSPACES.id_for_slug(workspace)
+
+    if owner.restricted:
+        workspace = str(body.workspace or existing["workspace"])
+        columns["model"], columns["effort"] = (
+            await get_workspace_settings(workspace)
+        ).agent_routing_models["fast"]
 
     current_triggers = _parsed_triggers(existing)
     triggers = current_triggers
@@ -818,6 +877,9 @@ async def update_agent_schedule(
     assignments = ", ".join(f"{key} = :{key}" for key in columns)
     try:
         async with transaction() as conn:
+            if owner.system != current.system:
+                # Made personal, it counts toward its creator's three.
+                await owner.check_creation(conn)
             await conn.execute(
                 text(
                     f"UPDATE automation SET {assignments}, updated_at = clock_timestamp() "
@@ -840,13 +902,17 @@ async def update_agent_schedule(
             await _delete_cron(cron_id)
     updated = await get_agent_schedule(existing["id"])
     assert updated is not None
-    return _schedule_summary(updated)
+    return _schedule_summary(updated, owner)
 
 
-async def delete_agent_schedule(schedule_id: str) -> None:
+async def delete_agent_schedule(schedule_id: str, *, login: str | None = None) -> None:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(existing)
     assert existing is not None
+    if login is not None:
+        (await AutomationPolicy.for_record(existing)).authorize(
+            await AutomationPolicy.for_login(login)
+        )
     for trigger in existing.get("triggers") or []:
         await _delete_cron(trigger.get("cron_id"))
     async with transaction() as conn:
@@ -878,11 +944,16 @@ async def delete_workspace_automations(workspace: str) -> int:
 
 
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
+    """Only a system automation runs as an admin thread, and only while an admin made it."""
     email = record.get("user_email")
     login = record.get("created_by")
-    return record.get("admin_thread") is True and is_admin(
-        email if isinstance(email, str) else None,
-        login=login if isinstance(login, str) else None,
+    return (
+        record.get("system") is True
+        and record.get("admin_thread") is True
+        and is_admin(
+            email if isinstance(email, str) else None,
+            login=login if isinstance(login, str) else None,
+        )
     )
 
 
@@ -965,7 +1036,11 @@ async def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if admin_thread:
         metadata["admin_thread"] = True
-    if (creator := await User.automation_creator(record)) is not None:
+    # A personal automation's spend is its creator's; a system one's is no person's. Both
+    # are fixed here, so converting the automation later doesn't change who pays.
+    if record.get("system") is True:
+        metadata["automation_system"] = True
+    elif (creator := await User.automation_creator(record)) is not None:
         metadata["automation_creator_user_id"] = str(creator.id)
     return metadata
 
@@ -1032,6 +1107,7 @@ async def _launch_agent_schedule_record(
     if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
 
+    policy = await AutomationPolicy.for_record(record)
     workspace = _record_workspace(record)
     if not await WORKSPACES.slug_exists(workspace):
         # Running in another workspace would hand it that workspace's settings
@@ -1039,6 +1115,11 @@ async def _launch_agent_schedule_record(
         error = f"workspace {workspace!r} no longer exists"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
         return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
+
+    if policy.restricted:
+        settings = await get_workspace_settings(_record_workspace(record))
+        model, effort = settings.agent_routing_models["fast"]
+        record = {**record, "model": model, "effort": effort, "admin_thread": False}
 
     if repo:
         try:
@@ -1692,10 +1773,14 @@ async def launch_scheduled_agent_run(
     return await _launch_agent_schedule_record(record, repo=None)
 
 
-async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
+async def trigger_agent_schedule(schedule_id: str, *, login: str | None = None) -> dict[str, Any]:
     record = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(record)
     assert record is not None
+    if login is not None:
+        (await AutomationPolicy.for_record(record)).authorize(
+            await AutomationPolicy.for_login(login)
+        )
 
     result = await _launch_agent_schedule_record(record, repo=_test_run_repo(record), test_run=True)
     status = result.get("status")

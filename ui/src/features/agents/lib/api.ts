@@ -68,6 +68,8 @@ export interface ScheduleCreateRequest {
   effort?: string | null
   /** Slug of the workspace every run launches in. */
   workspace: string
+  /** The environment's, not the creator's: admins only, unbounded. */
+  system?: boolean
 }
 
 export interface ScheduleUpdateRequest {
@@ -80,6 +82,7 @@ export interface ScheduleUpdateRequest {
   effort?: string | null
   enabled?: boolean | null
   workspace?: string | null
+  system?: boolean
 }
 
 export interface ScheduleTriggerResult {
@@ -476,7 +479,10 @@ export const agentsApi = {
     agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}/pin`, {
       method: pinned ? "POST" : "DELETE",
     }),
-  listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
+  listSchedules: (allUsers = false) =>
+    agentsRequest<Array<AgentSchedule>>(
+      allUsers ? "/schedules?all_users=true" : "/schedules"
+    ),
   createSchedule: (body: ScheduleCreateRequest) =>
     agentsRequest<AgentSchedule>("/schedules", {
       method: "POST",

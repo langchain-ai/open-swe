@@ -32,4 +32,8 @@ An instance admin adds a listed app to everyone's sidebar under **Apps for every
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including the Classify tool, which lets code mode classify with TypeSafe's System One model), recent-work context, and Slack behavior such as concierge mode and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
+- **Automations** (`/agents/automations`): every user can have at most three personal automations, including paused ones, and manage their own; admins can manage any.
+  A personal automation, an admin's included, uses the workspace Fast model, with a best-effort 30M-token cap per thread per UTC day (cached input included).
+  Admins also create **system** automations, which belong to the environment: no count or token cap, any model, admin threads allowed.
+  People see their own automations and system ones; admins switch the list to **All users** to inspect, pause or delete anyone's, as `list_automations` does with `all_users`.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

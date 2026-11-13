@@ -14,7 +14,9 @@ from langchain_core.messages import (
     ToolMessage,
     messages_from_dict,
 )
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, JsonValue
+from rt.automation_budget import AutomationBudgetMiddleware
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
@@ -829,3 +831,74 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+@pytest.mark.parametrize(
+    "pinned,day,allowed", [(True, "today", False), (True, "old", True), (False, "today", True)]
+)
+async def test_automation_budget_uses_checkpointed_daily_counter(
+    monkeypatch: pytest.MonkeyPatch, pinned: bool, day: str, allowed: bool
+) -> None:
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    backend, _ = _backend(monkeypatch, {}, LoopRules(pinned_model=pinned))
+    reply = AIMessage(
+        content="Done",
+        id="ai-1",
+        usage_metadata={
+            "input_tokens": 10,
+            "output_tokens": 2,
+            "total_tokens": 12,
+            "input_token_details": {"cache_read": 9},
+        },
+    )
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter([reply, reply.model_copy(update={"id": "ai-2"})] if allowed else [])
+        ),
+        middleware=[AutomationBudgetMiddleware(backend)],
+        checkpointer=InMemorySaver(),
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "automation-1"}}
+    today = datetime.now(UTC).date().isoformat()
+    await graph.aupdate_state(
+        config,
+        {
+            "automation_usage_day": today if day == "today" else "2000-01-01",
+            "automation_usage_tokens": 30_000_000,
+        },
+        as_node="AutomationBudgetMiddleware.after_model",
+    )
+    checkpoint = await graph.aget_state(config)
+    assert checkpoint.values["automation_usage_tokens"] == 30_000_000
+    result = await graph.ainvoke({"messages": [HumanMessage(content="Work")]}, config)
+    assert [m for m in result["messages"] if isinstance(m, AIMessage)] == (
+        [reply] if allowed else []
+    )
+    checkpoint = await graph.aget_state(config)
+    if pinned:
+        assert checkpoint.values["automation_usage_tokens"] == (12 if allowed else 30_000_000)
+        assert checkpoint.values["automation_usage_day"] == today
+        if allowed:
+            await graph.aupdate_state(
+                config,
+                {"automation_usage_tokens": 29_999_999},
+                as_node="AutomationBudgetMiddleware.after_model",
+            )
+            await graph.ainvoke({"messages": [HumanMessage(content="Continue")]}, config)
+            checkpoint = await graph.aget_state(config)
+            assert checkpoint.values["automation_usage_tokens"] == 30_000_011
+            await graph.ainvoke({"messages": [HumanMessage(content="Continue")]}, config)
+            checkpoint = await graph.aget_state(config)
+            assert checkpoint.values["automation_usage_tokens"] == 30_000_011
+
+
+async def test_pinned_automation_ignores_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, calls = _backend(monkeypatch, {}, LoopRules(pinned_model=True))
+    result = await RunLoop(backend).before_model(
+        _state(HumanMessage(content="Work"), requested_model="expensive", model_route="fast")
+    )
+    assert result.call is not None
+    assert result.call.model == _MAIN
+    assert calls == []
