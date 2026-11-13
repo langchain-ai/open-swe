@@ -127,12 +127,23 @@ def _client(
         pytest.param(_ROBIN, "failure", id="robin-authored-unapproved"),
     ],
 )
+@pytest.mark.parametrize("disabled", [None, "false", "true"])
 async def test_the_check_is_posted_where_the_base_does_not_require_it(
-    monkeypatch: pytest.MonkeyPatch, author: dict[str, str], conclusion: str
+    monkeypatch: pytest.MonkeyPatch, author: dict[str, str], conclusion: str, disabled: str | None
 ) -> None:
+    if disabled is None:
+        monkeypatch.delenv("DISABLE_ROBIN_APPROVES", raising=False)
+    else:
+        monkeypatch.setenv("DISABLE_ROBIN_APPROVES", disabled)
     monkeypatch.setattr(Repository, "requires_approval_check", AsyncMock(return_value=False))
     pull = _client(monkeypatch, "open", author)
     await PullRequestApproval.evaluate("acme", "app", 7)
+    if disabled == "true":
+        pull.pull.assert_not_awaited()
+        pull.repo.create_check_run.assert_not_awaited()
+        pull.issue_comments.assert_not_awaited()
+        pull.comment.assert_not_awaited()
+        return
     (check,), _ = pull.repo.create_check_run.call_args
     assert (check["name"], check["head_sha"], check["conclusion"]) == (
         "Robin Approves",

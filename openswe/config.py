@@ -300,6 +300,11 @@ ENV.var(
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var(
+    "DISABLE_ROBIN_APPROVES",
+    "Disable publishing Robin Approves checks and notes in non-production deployments.",
+    default="false",
+)
+ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
     secret=True,

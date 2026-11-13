@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
+from openswe.config import ENV
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
@@ -184,7 +185,9 @@ class PullRequestApproval:
 
     @classmethod
     async def evaluate(cls, owner: str, repo: str, number: int) -> None:
-        """Post ``Robin Approves`` on an open pull request's head, required by its base or not."""
+        """Post ``Robin Approves`` on an open pull request's head unless publishing is disabled."""
+        if ENV.DISABLE_ROBIN_APPROVES.get_bool():
+            return
         async with PullRequestClient.as_app(owner, repo, number) as pull:
             payload = await pull.pull()
             if payload.get("state") != "open":
