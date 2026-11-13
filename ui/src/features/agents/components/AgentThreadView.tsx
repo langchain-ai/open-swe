@@ -340,6 +340,7 @@ export function AgentThreadView({
     [login]
   )
 
+  const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
     async (
@@ -419,16 +420,33 @@ export function AgentThreadView({
   const submitWithExcerpts = useCallback(
     async (submission: ComposerSubmission, options?: SubmitOptions) => {
       const excerpts = reviewChat?.excerpts ?? []
-      await submitMessage(
-        excerpts.length
-          ? {
-              ...submission,
-              text: serializeExcerpts(submission.text, excerpts),
-            }
-          : submission,
-        options
-      )
-      if (excerpts.length) reviewChat?.clearExcerpts?.()
+      let restored = false
+      const restoreReplies = () => {
+        if (restored || submission.replies.length === 0) return
+        restored = true
+        setRestoreDraft((previous) => ({
+          key: (previous?.key ?? 0) + 1,
+          text: "",
+          images: [],
+          replies: submission.replies,
+        }))
+      }
+      try {
+        await submitMessage(
+          excerpts.length
+            ? {
+                ...submission,
+                text: serializeExcerpts(submission.text, excerpts),
+              }
+            : submission,
+          options,
+          restoreReplies
+        )
+        if (excerpts.length) reviewChat?.clearExcerpts?.()
+      } catch (error) {
+        restoreReplies()
+        throw error
+      }
     },
     [reviewChat, submitMessage]
   )
@@ -448,7 +466,6 @@ export function AgentThreadView({
   const queuedImages = (entry: QueuedTurn) =>
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
-  const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   useEffect(() => {
     if (!composerDraft || appliedComposerDrafts.has(composerDraft)) return
     appliedComposerDrafts.add(composerDraft)
@@ -487,14 +504,6 @@ export function AgentThreadView({
   } | null>(null)
   const addReply = (reply: PassageReply) =>
     setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
-  const sendReply = (reply: PassageReply) => {
-    const restore = () => addReply(reply)
-    submitMessage(
-      { text: "", images: [], replies: [reply] },
-      undefined,
-      restore
-    ).catch(restore)
-  }
   const pageReply = reviewChat?.reply
   const takePageReply = reviewChat?.takeReply
   useEffect(() => {
@@ -1059,7 +1068,7 @@ export function AgentThreadView({
                     onRemoveQueuedMessage={
                       canPost ? removeQueuedMessage : undefined
                     }
-                    onReply={canPost ? sendReply : undefined}
+                    onReply={canPost ? addReply : undefined}
                     isStreaming={isStreaming}
                     streamIsLoading={source.isRunning}
                     scrollControlRef={scrollControlRef}

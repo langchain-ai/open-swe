@@ -342,6 +342,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .getByTestId("queued-message")
       .filter({ hasText: queuedText });
     await expect(queuedMessage).toBeVisible();
+    await expect(queuedMessage).toHaveAttribute("data-queued-pending", "false");
     await page.reload();
     await expect(queuedMessage).toBeVisible();
     const screenshotPath = testInfo.outputPath("queued-messages-dashboard.png");

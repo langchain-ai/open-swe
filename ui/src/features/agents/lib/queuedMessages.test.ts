@@ -12,7 +12,8 @@ import {
 } from "@/features/agents/lib/queuedMessages"
 
 describe("queueEntryToTurn", () => {
-  it("retains reply-only messages for display and cancellation recovery", () => {
+  it("retains batched text and replies for display and cancellation recovery", () => {
+    const content = "Thanks!"
     const replies = [
       {
         source: "conversation" as const,
@@ -30,14 +31,18 @@ describe("queueEntryToTurn", () => {
         values: {
           messages: [
             { id: "context", content: "Context" },
-            { id: "reply", content: "", additional_kwargs: { replies } },
+            { id: "reply", content, additional_kwargs: { replies } },
           ],
         },
       },
       "alice"
     )
 
-    expect(turn?.message).toMatchObject({ id: "reply", chunks: [], replies })
+    expect(turn?.message).toMatchObject({
+      id: "reply",
+      chunks: [{ kind: "text", text: content }],
+      replies,
+    })
   })
 })
 
