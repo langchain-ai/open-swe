@@ -19,7 +19,8 @@ Existing traces are not relabeled.
 
 ## LangSmith rollout
 
-1. Enable LangSmith ABAC for the organization, project-scoped permissions, and `abac_root_run_metadata_conditions` in the target deployment.
+1. Enable LangSmith ABAC (`can_use_abac`) for the organization and project-scoped permissions in the target deployment.
+   Root-run metadata conditions are generally available to ABAC-enabled organizations; no separate feature flag is required.
 1. Remove broad `runs:read` grants from every role/team assigned to individuals; grants are additive.
    Grant `runs:read` on resource type `project`, scoped to the Robin tracing project, with this condition:
 
