@@ -32,6 +32,9 @@ function useBranding() {
   const suffix = environment ? `-${environment}` : ""
   return {
     logo: `${import.meta.env.BASE_URL}bird-mark.png`,
+    coloredLogo: environment
+      ? `${import.meta.env.BASE_URL}bird-mark${suffix}.png`
+      : undefined,
     favicon: `${import.meta.env.BASE_URL}favicon${suffix}.png`,
   }
 }
@@ -50,11 +53,18 @@ export function LogoMark({
       aria-hidden={alt ? undefined : true}
       {...props}
       className={cn(
-        "inline-block bg-current text-icon-brand-fill dark:text-icon-brand-background",
+        "inline-block text-icon-brand-fill dark:text-icon-brand-background",
+        !branding.coloredLogo && "bg-current",
         className
       )}
       style={{
-        maskImage: `url("${branding.logo}")`,
+        backgroundImage: branding.coloredLogo
+          ? `url("${branding.coloredLogo}")`
+          : undefined,
+        backgroundSize: "contain",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "center",
+        maskImage: branding.coloredLogo ? undefined : `url("${branding.logo}")`,
         maskSize: "contain",
         maskRepeat: "no-repeat",
         maskPosition: "center",

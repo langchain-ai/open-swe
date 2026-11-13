@@ -31,6 +31,9 @@ class Branding:
             ("preview", (255, 107, 157)),
             ("staging", (92, 225, 166)),
         ):
+            colored_bird = Image.new("RGBA", bird.size, color)
+            colored_bird.putalpha(bird.getchannel("A"))
+            colored_bird.save(cls.PUBLIC / f"bird-mark-{environment}.png")
             variant = icon.copy()
             variant.putdata(
                 [
