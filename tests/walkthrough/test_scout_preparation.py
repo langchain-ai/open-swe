@@ -4,7 +4,9 @@ import pytest
 from langgraph.runtime import Runtime
 
 from openswe.review_scout import graph
+from openswe.run_config import RunConfig
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError
+from openswe.tools import plan_walkthrough
 
 
 @pytest.mark.parametrize(
@@ -85,3 +87,45 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
         assert workspace.await_count == (1 if expected in ("planned", "complete", "moved") else 0)
     assert prepare.await_count == len(heads)
     assert sleep.await_args_list == ([] if len(heads) == 1 else [((3,), {})])
+
+
+@pytest.mark.parametrize("scout", [False, True, None])
+@pytest.mark.parametrize("tool", ["plan_chunk", "split_hunks", "move_to_other"])
+async def test_planning_url_does_not_route_a_scout_to_implementation(
+    monkeypatch: pytest.MonkeyPatch, scout: bool | None, tool: str
+) -> None:
+    cfg = RunConfig.parse(
+        {"thread_id": "scout", "repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7}
+    )
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
+    monkeypatch.setattr(plan_walkthrough, "get_cached_sandbox_backend", lambda _: MagicMock())
+    locate = AsyncMock(return_value=AsyncMock())
+    implementation = AsyncMock(return_value=AsyncMock())
+    monkeypatch.setattr(plan_walkthrough.PlanWorkspace, "locate", locate)
+    monkeypatch.setattr(plan_walkthrough.PlanWorkspace, "for_implementation", implementation)
+    planned = AsyncMock()
+    monkeypatch.setattr(plan_walkthrough, "_planned", planned)
+    pr_url = "https://github.com/acme/another-repo/pull/99"
+
+    if tool == "plan_chunk":
+        await plan_walkthrough.walkthrough_plan_chunk(
+            scout=scout, tool_call_id="call", pr_url=pr_url, show=[]
+        )
+    elif tool == "split_hunks":
+        await plan_walkthrough.walkthrough_split_hunks(
+            [], scout=scout, tool_call_id="call", pr_url=pr_url
+        )
+    else:
+        await plan_walkthrough.walkthrough_move_to_other(
+            [], scout=scout, tool_call_id="call", pr_url=pr_url
+        )
+
+    if scout is None:
+        implementation.assert_awaited_once_with(cfg, pr_url)
+        locate.assert_not_awaited()
+    else:
+        implementation.assert_not_awaited()
+        assert locate.await_args.kwargs == {"owner": "acme", "repo": "widgets", "number": 7}
+    assert planned.await_args.args == (
+        implementation.return_value if scout is None else locate.return_value,
+    )
