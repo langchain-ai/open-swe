@@ -1,7 +1,11 @@
 """Machine principals on the one command endpoint the dashboard also uses."""
 
+from collections.abc import Awaitable, Callable
+from contextlib import aclosing
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID, uuid7
 
 import pytest
 from fastapi import HTTPException
@@ -10,7 +14,26 @@ from openswe.api_keys.models import ApiKey
 from openswe.federation.github_oidc import GitHubActionsClaims
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.threads import runs
-from openswe.threads.principals import Principal
+from openswe.threads.principals import STARTED_BY_ID, Principal
+from openswe.transcript.attachments import PendingAttachment
+from openswe.transcript.cursor import TurnPageCursor, encode_turn_cursor
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
+    MessageAttachment,
+    MessageSender,
+    ThreadCreated,
+    ToolCompleted,
+    ToolStarted,
+    TurnRequested,
+)
+from openswe.transcript.routes import (
+    _stream,
+    api_get_thread_attachment,
+    api_get_thread_tool_output,
+    api_get_thread_transcript,
+    api_get_thread_transcript_turns,
+    api_stream_thread_transcript,
+)
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
@@ -214,3 +237,119 @@ async def test_a_workflow_on_a_public_repository_records_a_single_repository_sco
     )
 
     assert machine.threads.created[0]["metadata"].get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope
+
+
+@dataclass(frozen=True)
+class _Transcript:
+    thread_id: str
+    turn_cursor: str
+    tool_call_id: str
+    attachment_id: UUID
+
+
+async def _transcript_started_by(principal: Principal) -> _Transcript:
+    thread_id, turn_id, attachment_id = str(uuid7()), uuid7(), uuid7()
+    metadata = {
+        "source": "api",
+        "owner_type": "system",
+        "visibility": "public",
+        STARTED_BY_ID: principal.started_by_id,
+    }
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"thread:{thread_id}:created",
+                event=ThreadCreated(
+                    title="A thread", source="api", owner_login="", metadata=metadata
+                ),
+                actor_kind="agent",
+            ),
+            Command(
+                command_id=f"turn:{turn_id}:requested",
+                event=TurnRequested(
+                    turn_id=turn_id,
+                    message_id="human-1",
+                    text="Upgrade the linter",
+                    sender=MessageSender(login="system", kind="system"),
+                    attachments=[
+                        MessageAttachment(mime_type="text/plain", attachment_id=attachment_id)
+                    ],
+                ),
+                actor_kind="agent",
+                turn_id=turn_id,
+                attachments=(
+                    PendingAttachment(
+                        attachment_id=attachment_id,
+                        message_id="human-1",
+                        position=0,
+                        mime_type="text/plain",
+                        file_name="log.txt",
+                        data=b"log",
+                    ),
+                ),
+            ),
+            Command(
+                command_id=f"tool:{thread_id}:started",
+                event=ToolStarted(turn_id=turn_id, tool_call_id="call-1", name="shell", input={}),
+                actor_kind="agent",
+                turn_id=turn_id,
+            ),
+            Command(
+                command_id=f"tool:{thread_id}:completed",
+                event=ToolCompleted(
+                    turn_id=turn_id,
+                    tool_call_id="call-1",
+                    status="completed",
+                    output_preview="ok",
+                    has_output=True,
+                ),
+                tool_output="ok",
+                actor_kind="agent",
+                turn_id=turn_id,
+            ),
+        ],
+    )
+    cursor = TurnPageCursor(
+        thread_id=thread_id, before_requested_at=datetime.now(UTC), before_turn_id=uuid7()
+    )
+    return _Transcript(thread_id, encode_turn_cursor(cursor), "call-1", attachment_id)
+
+
+type _TranscriptRead = Callable[[_Transcript, Principal], Awaitable[object]]
+
+
+_TRANSCRIPT_READS: dict[str, _TranscriptRead] = {
+    "snapshot": lambda t, p: api_get_thread_transcript(t.thread_id, principal=p),
+    "turns": lambda t, p: api_get_thread_transcript_turns(
+        t.thread_id, before=t.turn_cursor, principal=p
+    ),
+    "events": lambda t, p: api_stream_thread_transcript(t.thread_id, principal=p),
+    "tool output": lambda t, p: api_get_thread_tool_output(
+        t.thread_id, t.tool_call_id, principal=p
+    ),
+    "attachment": lambda t, p: api_get_thread_attachment(t.thread_id, t.attachment_id, principal=p),
+}
+
+
+@pytest.mark.parametrize("read", _TRANSCRIPT_READS.values(), ids=_TRANSCRIPT_READS.keys())
+async def test_a_key_reads_the_transcript_of_only_the_thread_it_started(
+    machine: _FakeClient, read: _TranscriptRead
+) -> None:
+    mine = await _key_caller()
+    theirs = await _key_caller()
+    transcript = await _transcript_started_by(mine)
+
+    await read(transcript, mine)
+    with pytest.raises(HTTPException) as refused:
+        await read(transcript, theirs)
+    assert refused.value.status_code == 404
+
+
+async def test_a_key_stream_ends_on_a_thread_another_key_started(machine: _FakeClient) -> None:
+    mine = await _key_caller()
+    theirs = await _key_caller()
+    transcript = await _transcript_started_by(mine)
+
+    async with aclosing(_stream(transcript.thread_id, 0, theirs)) as stream:
+        assert await anext(stream) == "event: revoked\ndata: {}\n\n"

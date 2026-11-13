@@ -27368,11 +27368,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Get Thread Transcript",
         "tags": [
           "dashboard",
@@ -27425,11 +27420,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Get Thread Attachment",
         "tags": [
           "dashboard",
@@ -27481,11 +27471,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Stream Thread Transcript",
         "tags": [
           "dashboard",
@@ -27542,11 +27527,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Get Thread Tool Output",
         "tags": [
           "dashboard",
@@ -27616,11 +27596,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Get Thread Transcript Turns",
         "tags": [
           "dashboard",

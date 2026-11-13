@@ -10,6 +10,7 @@ from uuid import uuid7
 import pytest
 from fastapi import HTTPException
 
+from openswe.threads.principals import Principal
 from openswe.transcript.cursor import TurnPageCursor, decode_turn_cursor, encode_turn_cursor
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
@@ -26,7 +27,7 @@ from openswe.transcript.routes import api_get_thread_transcript_turns
 from openswe.transcript.snapshot import load_snapshot, load_turn_page
 
 OWNER = "test-user"
-SESSION = {"sub": OWNER, "email": f"{OWNER}@example.com"}
+PERSON = Principal.of_person({"sub": OWNER, "email": f"{OWNER}@example.com"})
 
 
 async def _create(thread_id: str) -> None:
@@ -220,5 +221,5 @@ async def test_a_foreign_or_malformed_cursor_is_rejected(registry_db: None) -> N
     )
     for bad in (foreign, "not-a-cursor"):
         with pytest.raises(HTTPException) as raised:
-            await api_get_thread_transcript_turns(thread_id, before=bad, session=SESSION)
+            await api_get_thread_transcript_turns(thread_id, before=bad, principal=PERSON)
         assert raised.value.status_code == 400

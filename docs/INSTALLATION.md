@@ -612,7 +612,7 @@ steps:
 ```
 
 A workflow that names no `repo` works in its own repository.
-A machine caller reads back only the threads it started, through `GET /dashboard/api/threads` and `GET /dashboard/api/threads/<id>`; unknown, revoked and expired credentials all answer `401`.
+A machine caller reads back only the threads it started, through `GET /dashboard/api/threads` and `GET /dashboard/api/threads/<id>`, and their transcripts, through `GET /dashboard/api/threads/<id>/transcript`, `/transcript/turns`, `/transcript/events`, `/transcript/tool-calls/<id>/output` and `/transcript/attachments/<id>`; unknown, revoked and expired credentials all answer `401`.
 
 </details>
 

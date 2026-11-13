@@ -1,9 +1,10 @@
 """The transcript read API: a windowed snapshot, older pages, an event stream, one tool output.
 
 Nothing here calls LangGraph. A thread is authorized from the ``thread.metadata``
-mirror with the same predicate the LangGraph-backed endpoints use, and a thread
-with no ``thread`` row is simply not served by this API — the caller falls back
-to the old read path.
+mirror with the same principal check the thread endpoints use, so a machine
+reads back the transcript of a thread it started, and a thread with no
+``thread`` row is simply not served by this API; the caller falls back to the
+old read path.
 
 Authorization and the read it guards always share one REPEATABLE READ snapshot:
 a thread flipped to private is either still public in the snapshot a caller is
@@ -17,18 +18,15 @@ import logging
 import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from openswe.dashboard.deps import SESSION_DEP
 from openswe.database import postgres
-
-# The ``thread.metadata`` mirror exists so this predicate is reused unchanged.
-from openswe.threads.summary import assert_thread_readable
+from openswe.threads.principals import Principal, PrincipalDep
 from openswe.transcript import attachments, listener, tool_output
 from openswe.transcript.cursor import decode_turn_cursor
 from openswe.transcript.events import StoredEvent
@@ -60,30 +58,28 @@ _SSE_HEADERS = {
 
 
 @asynccontextmanager
-async def _authorized_read(
-    thread_id: str, session: dict[str, Any]
-) -> AsyncIterator[AsyncConnection]:
-    """A snapshot in which ``session`` may read this thread, for the read it guards."""
+async def _authorized_read(thread_id: str, principal: Principal) -> AsyncIterator[AsyncConnection]:
+    """A snapshot in which ``principal`` may read this thread, for the read it guards."""
     async with postgres.snapshot_transaction() as conn:
         metadata = await load_access(thread_id, conn=conn)
         if metadata is None:
             raise HTTPException(404, "transcript_unavailable")
-        assert_thread_readable(metadata, session["sub"], session.get("email"))
+        principal.assert_can_read(metadata)
         yield conn
 
 
-async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
-    """Raise unless ``session`` may read this thread's transcript."""
-    async with _authorized_read(thread_id, session):
+async def _readable_transcript(thread_id: str, principal: Principal) -> None:
+    """Raise unless ``principal`` may read this thread's transcript."""
+    async with _authorized_read(thread_id, principal):
         pass
 
 
 async def _stream_access(
-    thread_id: str, session: dict[str, Any], conn: AsyncConnection
+    thread_id: str, principal: Principal, conn: AsyncConnection
 ) -> Literal["ok", "deleted", "revoked"]:
     """Whether a live subscriber may still be served this thread, in ``conn``'s snapshot.
 
-    ``assert_thread_readable`` answers a lost thread and a lost permission with
+    ``assert_can_read`` answers a lost thread and a lost permission with
     the same 404, which a live reader has to tell apart: the metadata row is
     what says the transcript is gone, so the two are separated here.
     """
@@ -91,7 +87,7 @@ async def _stream_access(
     if metadata is None:
         return "deleted"
     try:
-        assert_thread_readable(metadata, session["sub"], session.get("email"))
+        principal.assert_can_read(metadata)
     except HTTPException:
         return "revoked"
     return "ok"
@@ -107,13 +103,10 @@ def _frame(event: str, data: str) -> str:
 
 
 @router.get("/threads/{thread_id}/transcript")
-async def api_get_thread_transcript(
-    thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
-) -> JSONResponse:
+async def api_get_thread_transcript(thread_id: str, principal: PrincipalDep) -> JSONResponse:
     timings: dict[str, float] = {}
     with phase(timings, "query"):
-        async with _authorized_read(thread_id, session) as conn:
+        async with _authorized_read(thread_id, principal) as conn:
             snapshot = await load_snapshot(thread_id, conn=conn)
     if snapshot is None:
         raise HTTPException(404, "transcript_unavailable")
@@ -126,8 +119,8 @@ async def api_get_thread_transcript(
 async def api_get_thread_transcript_turns(
     thread_id: str,
     before: str,
+    principal: PrincipalDep,
     limit: int | None = None,
-    session: dict[str, Any] = SESSION_DEP,
 ) -> TranscriptTurnPage:
     """The page of turns immediately older than ``before``.
 
@@ -139,21 +132,21 @@ async def api_get_thread_transcript_turns(
     cursor = decode_turn_cursor(before)
     if cursor is None or cursor.thread_id != thread_id:
         raise HTTPException(400, "invalid_transcript_cursor")
-    async with _authorized_read(thread_id, session) as conn:
+    async with _authorized_read(thread_id, principal) as conn:
         return await load_turn_page(thread_id, before=cursor, limit=limit, conn=conn)
 
 
 @router.get("/threads/{thread_id}/transcript/events")
 async def api_stream_thread_transcript(
     thread_id: str,
+    principal: PrincipalDep,
     after: int = 0,
-    session: dict[str, Any] = SESSION_DEP,
 ) -> StreamingResponse:
     # Checked here as well as in the loop so a caller that may not read this
     # thread at all gets an HTTP error rather than a stream that ends at once.
-    await _readable_transcript(thread_id, session)
+    await _readable_transcript(thread_id, principal)
     return StreamingResponse(
-        _stream(thread_id, after, session),
+        _stream(thread_id, after, principal),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
@@ -163,9 +156,9 @@ async def api_stream_thread_transcript(
 async def api_get_thread_tool_output(
     thread_id: str,
     tool_call_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> dict[str, str]:
-    async with _authorized_read(thread_id, session) as conn:
+    async with _authorized_read(thread_id, principal) as conn:
         output = await tool_output.load(thread_id, tool_call_id, conn=conn)
     if output is None:
         raise HTTPException(404, "tool call not found")
@@ -183,10 +176,10 @@ def _content_disposition(file_name: str | None, mime_type: str) -> str:
 async def api_get_thread_attachment(
     thread_id: str,
     attachment_id: UUID,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> Response:
     """The bytes of one file attached to a message or tool result in this thread."""
-    async with _authorized_read(thread_id, session) as conn:
+    async with _authorized_read(thread_id, principal) as conn:
         attachment = await attachments.load(thread_id, attachment_id, conn=conn)
     if attachment is None:
         raise HTTPException(404, "attachment not found")
@@ -203,7 +196,7 @@ async def api_get_thread_attachment(
     )
 
 
-async def _stream(thread_id: str, after: int, session: dict[str, Any]) -> AsyncGenerator[str]:
+async def _stream(thread_id: str, after: int, principal: Principal) -> AsyncGenerator[str]:
     """Replay, then live. Subscribing happens first so nothing falls in the gap.
 
     A live stream outlives the authorization that opened it, so access is read
@@ -213,7 +206,7 @@ async def _stream(thread_id: str, after: int, session: dict[str, Any]) -> AsyncG
     it, so a slow socket never holds a database snapshot open.
     """
     async with listener.subscribe(thread_id) as notifications:
-        replayed = await _replay(thread_id, after, session)
+        replayed = await _replay(thread_id, after, principal)
         if isinstance(replayed, str):
             yield _frame(replayed, "{}")
             return
@@ -243,7 +236,7 @@ async def _stream(thread_id: str, after: int, session: dict[str, Any]) -> AsyncG
                 # remainder waiting on the next append that may never come,
                 # and the ``turn.completed`` that ended the burst with it.
                 while True:
-                    page = await _live_page(thread_id, session, after=last_sent)
+                    page = await _live_page(thread_id, principal, after=last_sent)
                     if isinstance(page, str):
                         yield _frame(page, "{}")
                         return
@@ -264,18 +257,18 @@ async def _next_version(notifications: AsyncIterator[int]) -> int:
 
 
 async def _live_page(
-    thread_id: str, session: dict[str, Any], *, after: int
+    thread_id: str, principal: Principal, *, after: int
 ) -> list[StoredEvent] | Literal["deleted", "revoked"]:
     """One page of the live log, or why the reader may no longer have it."""
     async with postgres.snapshot_transaction() as conn:
-        access = await _stream_access(thread_id, session, conn)
+        access = await _stream_access(thread_id, principal, conn)
         if access != "ok":
             return access
         return await load_events(thread_id, after=after, limit=_REPLAY_PAGE, conn=conn)
 
 
 async def _replay(
-    thread_id: str, after: int, session: dict[str, Any]
+    thread_id: str, after: int, principal: Principal
 ) -> tuple[int, list[str]] | Literal["deleted", "revoked"]:
     """The frames that carry a subscriber from ``after`` to the head of the log.
 
@@ -299,7 +292,7 @@ async def _replay(
     live loop resumes from the last version read without a gap or a repeat.
     """
     async with postgres.snapshot_transaction() as conn:
-        access = await _stream_access(thread_id, session, conn)
+        access = await _stream_access(thread_id, principal, conn)
         if access != "ok":
             return access
         gap = await measure_gap(thread_id, after, conn=conn)
