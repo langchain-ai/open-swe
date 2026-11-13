@@ -48,6 +48,7 @@ function server(
   bodies: Record<string, string> = {
     "/_shell.html": `shell ${version}`,
     "/assets/lazy.js": `lazy ${version}`,
+    "/open-swe-build-info.json": JSON.stringify({ commit: version }),
     "/desktop-routes.json": JSON.stringify({
       version: 1,
       paths: [
@@ -180,6 +181,38 @@ test("promotes complete updates on next navigation without changing active page 
   assert.equal(await ui.hasPage("/new-page"), true);
   await ui.refresh();
   assert.equal(await (await ui.serve(asset())).text(), "lazy v2");
+});
+
+test("build info reports the version a reload would load, checking for one each time it is asked", async (t) => {
+  const root = await fixture(t);
+  let backend = server("v1");
+  let checks = 0;
+  const ui = new DesktopUi(
+    "https://backend.example",
+    (url, init) => {
+      if (url.endsWith("/desktop-ui.json")) checks++;
+      return backend(url, init);
+    },
+    root,
+    serveFile,
+  );
+  assert.equal(await (await ui.serve(page())).text(), "shell v1");
+  await ui.refresh();
+  backend = server("v2");
+  const before = checks;
+  const buildInfo = "open-swe://app/open-swe-build-info.json";
+  assert.equal(
+    (await (await ui.serve(new Request(buildInfo))).json()).commit,
+    "v1",
+  );
+  assert.equal(checks, before + 1);
+  await ui.refresh();
+  assert.equal(
+    (await (await ui.serve(new Request(buildInfo))).json()).commit,
+    "v2",
+  );
+  assert.equal(await (await ui.serve(asset())).text(), "lazy v1");
+  assert.equal(await (await ui.serve(page())).text(), "shell v2");
 });
 
 test("rejects untrusted archive URLs", async (t) => {

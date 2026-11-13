@@ -70,29 +70,16 @@ class DesktopUi {
       request.headers.get("accept")?.includes("text/html");
     if (navigation) {
       this.snapshot = await this.readSnapshot();
-      const update = this.refresh();
       if (this.localArchive) {
-        this.snapshot = await update;
+        this.snapshot = await this.refresh();
       } else if (!this.snapshot) {
         try {
-          this.snapshot = await update;
+          this.snapshot = await this.refresh();
         } catch (error) {
           throw new Error(firstLoadFailure(error), { cause: error });
         }
       } else {
-        void update.catch((error: unknown) => {
-          if (
-            error instanceof IncompatibleUiError &&
-            !this.warnedIncompatible
-          ) {
-            this.warnedIncompatible = true;
-            this.onIncompatible(error);
-          }
-          console.warn(
-            "Could not update desktop UI; keeping cached version",
-            error,
-          );
-        });
+        this.refreshInBackground();
       }
     }
     if (!this.snapshot)
@@ -100,11 +87,36 @@ class DesktopUi {
     const pathname = navigation
       ? "/_shell.html"
       : new URL(request.url).pathname;
-    if (!this.snapshot.files.includes(pathname))
+    const snapshot =
+      pathname === "/open-swe-build-info.json"
+        ? await this.installedForReload(this.snapshot)
+        : this.snapshot;
+    if (!snapshot.files.includes(pathname))
       return new Response("Not found", { status: 404 });
     return this.serveFile(
-      path.join(this.directory, this.snapshot.version, pathname.slice(1)),
+      path.join(this.directory, snapshot.version, pathname.slice(1)),
     );
+  }
+
+  // The dashboard polls its build info to offer a reload once a newer UI is
+  // live, so answer with the version a reload would load, checking for a newer
+  // one each time the dashboard asks.
+  private async installedForReload(serving: UiSnapshot): Promise<UiSnapshot> {
+    if (!this.localArchive) this.refreshInBackground();
+    return (await this.readSnapshot()) ?? serving;
+  }
+
+  private refreshInBackground(): void {
+    void this.refresh().catch((error: unknown) => {
+      if (error instanceof IncompatibleUiError && !this.warnedIncompatible) {
+        this.warnedIncompatible = true;
+        this.onIncompatible(error);
+      }
+      console.warn(
+        "Could not update desktop UI; keeping cached version",
+        error,
+      );
+    });
   }
 
   async hasPage(pathname: string): Promise<boolean> {

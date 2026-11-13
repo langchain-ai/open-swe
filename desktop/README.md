@@ -47,6 +47,7 @@ The UI runs at `open-swe://app`, with native IPC for local projects, threads, wo
 Downloads carry no session credentials, follow redirects only to GitHub release hosts, and are verified before activation.
 Each backend has its own cache.
 Cached UI opens immediately; updates download in the background and take effect on the next reload.
+While the app is open, the dashboard's reload banner checks for a newer UI every minute and appears once one is installed.
 Interrupted or corrupt downloads leave the previous UI intact.
 Running agents requires the backend.
 

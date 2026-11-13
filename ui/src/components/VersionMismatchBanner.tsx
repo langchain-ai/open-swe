@@ -4,6 +4,7 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 
 import { useIsHydrated } from "@/lib/hydration"
+import { cn } from "@/lib/utils"
 import { sessionQueryOptions } from "@/lib/session"
 
 export function VersionMismatchBanner() {
@@ -26,13 +27,12 @@ export function VersionMismatchBanner() {
         ? info.commit
         : null
     },
-    enabled: !!running && !!user && !window.openSweDesktop,
+    enabled: !!running && !!user,
     refetchInterval: 60_000,
     staleTime: 60_000,
     retry: false,
   })
-  const shown =
-    !!running && !!deployed && running !== deployed && !window.openSweDesktop
+  const shown = !!running && !!deployed && running !== deployed
 
   // `styles.css` makes room for the banner under this class.
   useEffect(() => {
@@ -48,7 +48,12 @@ export function VersionMismatchBanner() {
       <Banner
         flush
         intent="warning"
-        className="h-10 border-b border-b-warning py-0 text-xs"
+        className={cn(
+          "h-10 border-b border-b-warning py-0 text-xs",
+          // Clear the traffic lights, which share the banner's top row.
+          window.openSweDesktop &&
+            "pl-[90px] [.desktop-fullscreen_&]:pl-space-4"
+        )}
         action={
           <Button
             size="xs"
@@ -60,7 +65,7 @@ export function VersionMismatchBanner() {
           </Button>
         }
       >
-        <span className="truncate">
+        <span className="block truncate">
           New changes are available. Reload to get the latest updates.
         </span>
       </Banner>
