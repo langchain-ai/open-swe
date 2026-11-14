@@ -62,6 +62,12 @@ from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
+from openswe.bridge.local_access import (
+    local_execute,
+    local_import_file,
+    local_read_file,
+    local_write_file,
+)
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
@@ -744,6 +750,10 @@ AGENT_TOOLS: Final = (
     *ADMIN_TOOLS,
     cli_result,
     worktree_handoff,
+    local_read_file,
+    local_write_file,
+    local_execute,
+    local_import_file,
     read_only_sql,
     execute_database_sql,
     write_database_rows,
@@ -1509,6 +1519,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             is True,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
+            local_access=bool(cfg.local_access_bridge_id) and not bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
             recent_threads=await recent_threads,
@@ -2007,6 +2018,16 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" else (worktree_handoff,)),
+        *(
+            ()
+            if cfg.local_access_bridge_id
+            and not bridge_client
+            and (
+                settings.get("cloud_first_desktop_enabled") is True
+                or sender_preferences.experimental_cloud_first_desktop
+            )
+            else (local_read_file, local_write_file, local_execute, local_import_file)
+        ),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
         *(() if sender_preferences.experimental_classify and Jev.configured() else (classify,)),
     ]

@@ -1,5 +1,5 @@
 import type { ModelOption } from "@/lib/api"
-import { useOptions } from "@/lib/profile"
+import { useOptions, useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 export interface ModelSelection {
@@ -10,6 +10,7 @@ export interface ModelSelection {
 export interface ModelOptionsResult {
   models: Array<ModelOption>
   defaultSelection: ModelSelection | null
+  cloudFirstDesktopEnabled: boolean
   modelSelectionEnabled: boolean
   isLoading: boolean
   isError: boolean
@@ -58,6 +59,7 @@ export function persistModelSelection(
 /** ``workspace`` is the workspace being composed in, whose defaults these are. */
 export function useModelOptions(workspace?: string | null): ModelOptionsResult {
   const optionsQuery = useOptions(workspace)
+  const profile = useProfile()
   const session = useSession()
   const models = optionsQuery.data?.models ?? []
   const defaultSelection = optionsQuery.data
@@ -67,6 +69,10 @@ export function useModelOptions(workspace?: string | null): ModelOptionsResult {
   return {
     models,
     defaultSelection,
+    // On for the workspace, or by the person's own opt-in under Experiments.
+    cloudFirstDesktopEnabled:
+      optionsQuery.data?.cloud_first_desktop_enabled === true ||
+      profile.data?.experimental_cloud_first_desktop === true,
     modelSelectionEnabled: optionsQuery.data?.model_selection_enabled === true,
     isLoading: optionsQuery.isLoading || session.isLoading,
     isError: optionsQuery.isError && !optionsQuery.data,

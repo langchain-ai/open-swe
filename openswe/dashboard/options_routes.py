@@ -38,6 +38,7 @@ async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
     )
     return {
         "models": list(available_requested_models(fable_enabled=fable_enabled).values()),
+        "cloud_first_desktop_enabled": settings.get("cloud_first_desktop_enabled") is True,
         "model_selection_enabled": settings.get("model_selection_enabled") is True,
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,

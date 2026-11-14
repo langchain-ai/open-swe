@@ -36,11 +36,12 @@ from runtime_api.endpoint import LONG_CALL_SECONDS, call
 from runtime_api.loop import ToolCallReport
 from runtime_api.operations import (
     OPERATION,
+    LocalReview,
     OperationResult,
     RunOperation,
 )
 
-from rt.auto_review import AutoReview
+from rt.auto_review import LOCAL_TOOLS, AutoReview
 from rt.backend import (
     STATE_KEY,
     TOOL_CALL_SLACK_SECONDS,
@@ -216,6 +217,7 @@ async def _operate(
     runtime: ToolRuntime,
     tool_call_id: str,
     credentials: dict[str, str],
+    local_review: LocalReview | None = None,
 ) -> ToolMessage | Command:
     request = _reading(spec, runtime.state).model_copy(
         update={
@@ -224,6 +226,7 @@ async def _operate(
             "request_id": tool_call_id,
             "grant": backend.grant(spec),
             "credentials": credentials,
+            "local_review": local_review,
         }
     )
     started = time.time_ns()
@@ -319,7 +322,13 @@ async def run_operation(
 ) -> ToolMessage | Command:
     """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
     reads of the connections it names."""
-    refusal = await AutoReview.screen(backend.run, spec.name, arguments, runtime.state)
+    local_review: LocalReview | None = None
+    if spec.name in LOCAL_TOOLS:
+        review = await AutoReview.local(backend.run, spec.name, arguments, runtime.state)
+        refusal = review if isinstance(review, str) else None
+        local_review = review if isinstance(review, LocalReview) else None
+    else:
+        refusal = await AutoReview.screen(backend.run, spec.name, arguments, runtime.state)
     if refusal:
 
         async def refused(tool_call_id: str) -> ToolMessage:
@@ -335,7 +344,11 @@ async def run_operation(
     except UnreadConnectionError as exc:
         make = exc.result
     else:
-        run = _run_locally if runs_locally(spec, backend.run, runtime) else _operate
+        run = (
+            _run_locally
+            if runs_locally(spec, backend.run, runtime)
+            else partial(_operate, local_review=local_review)
+        )
         make = partial(run, backend, spec, arguments, runtime, credentials=credentials)
     return await called(backend, spec.name, arguments, runtime, make)
 

@@ -58,6 +58,34 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
+  ensureLocalAccessBridge: () =>
+    ipcRenderer.invoke("desktop:ensure-local-access-bridge"),
+  localAccessGrants: (threadId) =>
+    ipcRenderer.invoke("desktop:local-access-grants", threadId),
+  revokeLocalAccessGrants: (threadId) =>
+    ipcRenderer.invoke("desktop:revoke-local-access-grants", threadId),
+  onLocalAccessGrantsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("desktop:local-access-grants-changed", listener);
+    return () =>
+      ipcRenderer.removeListener(
+        "desktop:local-access-grants-changed",
+        listener,
+      );
+  },
+  localAccessRequests: (threadId) =>
+    ipcRenderer.invoke("desktop:local-access-requests", threadId),
+  reviewLocalAccessRequest: (id) =>
+    ipcRenderer.invoke("desktop:review-local-access-request", id),
+  onLocalAccessRequestsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("desktop:local-access-requests-changed", listener);
+    return () =>
+      ipcRenderer.removeListener(
+        "desktop:local-access-requests-changed",
+        listener,
+      );
+  },
   taskWorkspaces: true,
   prepareLocalThread: (input) =>
     ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),

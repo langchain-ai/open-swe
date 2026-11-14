@@ -17,6 +17,19 @@ class RunRequest(BaseModel):
     run_id: str | None = None
 
 
+class LocalReview(BaseModel):
+    """The runtime's review of a call that would act on the person's own machine.
+
+    The desktop runs a cleared call without asking only inside a grant the person gave
+    the thread; anything else it shows them first. The runtime sets this, never the model.
+    """
+
+    cleared: bool
+    # Why the call was not cleared: a risk the classifier named, ``credential_access`` for
+    # a path that holds credentials, or ``unsure``.
+    concern: str | None = None
+
+
 class RunOperation(RunRequest):
     # A body that fails validation is never quoted back: it may carry credentials.
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -34,6 +47,8 @@ class RunOperation(RunRequest):
     # What the runtime read of each connection the operation's spec names, by slug, for
     # this call alone; kept out of the repr, so nothing that prints the call shows them.
     credentials: dict[str, str] = Field(default={}, repr=False)
+    # The runtime's review, for an operation that acts on the person's own machine.
+    local_review: LocalReview | None = None
 
 
 class PullRequestHead(BaseModel):

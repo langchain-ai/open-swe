@@ -18,6 +18,10 @@ Use only for an explicit request to change shared flags; if personal versus shar
 Supported flags are the agent-manageable boolean fields in the shared workspace settings schema; use `read` on a private admin surface to discover their names and values.
 “Allow Fable models” is `fable_enabled`.
 `model_selection_enabled` controls the model picker in thread composers, off by default; it does not block requests for a model in conversation or other surfaces.
+`cloud_first_desktop_enabled` is off by default.
+It creates new desktop threads in cloud sandboxes and disables moves onto This Mac.
+With an updated desktop release, private owner runs may offer individually approved local file and command tools alongside the cloud sandbox.
+Existing local threads and CLI execution remain unchanged; enabling this flag never migrates or deletes files.
 `implementation_walkthrough_enabled` is off by default.
 When enabled, implementation threads use the existing planning tools to complete shared walkthroughs before delivering a PR, including drafts.
 PR opens and head updates skip the background scout while a linked implementation thread is busy, including before its PR record is saved.

@@ -29,6 +29,7 @@ from openswe.agent_api.git_metadata import collect_pr_targets
 from openswe.agent_api.run_state import json_state, jsonable
 from openswe.agent_api.runs import in_graph_context
 from openswe.agent_api.shell_guards import ShellGuards
+from openswe.bridge.local_access_policy import LocalReviews
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.sandboxes.tool_runtime import tool_parameters
 
@@ -199,7 +200,11 @@ class Operation:
             decision = await guards.decide(request.name, request.arguments)
             if decision.arguments is None:
                 return OperationResult(content=decision.refusal or "", status="error")
-            with collect_pr_targets() as pull_requests, carrying(request.credentials):
+            with (
+                collect_pr_targets() as pull_requests,
+                carrying(request.credentials),
+                LocalReviews.carrying(request.local_review),
+            ):
                 try:
                     outcome = await invoke(tool, decision.arguments, state, request.request_id)
                 except NodeCancelledError:

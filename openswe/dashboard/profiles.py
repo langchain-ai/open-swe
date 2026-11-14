@@ -94,6 +94,7 @@ class ProfileUpdate(KitchenChannelPreference):
     experimental_classify: bool | None = None
     experimental_force_code_mode: bool | None = None
     experimental_local_auto_mode: bool | None = None
+    experimental_cloud_first_desktop: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -413,6 +414,7 @@ async def put_my_profile(
                 experimental_classify=update.experimental_classify,
                 experimental_force_code_mode=update.experimental_force_code_mode,
                 experimental_local_auto_mode=update.experimental_local_auto_mode,
+                experimental_cloud_first_desktop=update.experimental_cloud_first_desktop,
             ),
         )
     except ValueError as exc:
@@ -423,6 +425,7 @@ async def put_my_profile(
         or update.experimental_classify
         or update.experimental_force_code_mode
         or update.experimental_local_auto_mode
+        or update.experimental_cloud_first_desktop
     ):
         raise HTTPException(status_code=409, detail="No Robin user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

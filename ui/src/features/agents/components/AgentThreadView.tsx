@@ -39,6 +39,8 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
+import { LocalAccessGrantBanner } from "@/features/agents/components/LocalAccessGrantBanner"
+import { LocalAccessRequests } from "@/features/agents/components/LocalAccessRequests"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
@@ -261,6 +263,7 @@ export function AgentThreadView({
     : pullRequestStatus.data?.pullRequests
 
   const {
+    cloudFirstDesktopEnabled,
     models,
     defaultSelection,
     modelSelectionEnabled,
@@ -382,7 +385,26 @@ export function AgentThreadView({
       const restoreSelection = () => selectionIntent.restore(messageId)
       try {
         await ensureLocalBridge()
+        let localAccessBridgeId: string | undefined
+        if (
+          cloudFirstDesktopEnabled &&
+          !runsOnAMac(thread) &&
+          thread.visibility === "private" &&
+          ownsThread &&
+          window.openSweDesktop?.ensureLocalAccessBridge
+        ) {
+          try {
+            localAccessBridgeId =
+              await window.openSweDesktop.ensureLocalAccessBridge()
+          } catch (error) {
+            console.warn("Local access unavailable", error)
+            toast.warning(
+              "Local access is unavailable; continuing in the cloud."
+            )
+          }
+        }
         await sendMessage.mutateAsync({
+          local_access_bridge_id: localAccessBridgeId,
           content,
           images,
           replies,
@@ -407,6 +429,9 @@ export function AgentThreadView({
     },
     [
       activeSelection,
+      cloudFirstDesktopEnabled,
+      thread,
+      ownsThread,
       selectionIntent,
       ensureLocalBridge,
       followUpBehavior,
@@ -918,6 +943,12 @@ export function AgentThreadView({
             </Banner>
           </div>
         )}
+        {cloudFirstDesktopEnabled && !runsOnAMac(thread) && (
+          <>
+            <LocalAccessRequests threadId={thread.id} />
+            <LocalAccessGrantBanner threadId={thread.id} />
+          </>
+        )}
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
             <Banner
@@ -1178,16 +1209,19 @@ export function AgentThreadView({
                       localWorktreeLabel: "Worktree",
                     }
                   : {})}
-                {...(canMove && {
-                  runTarget: moving ?? runsHere,
-                  runTargetPending: moving !== null,
-                  onRunTargetChange:
-                    isStreaming || moving
-                      ? undefined
-                      : (next: RunTarget) => {
-                          if (next !== runsHere) moveThread.mutate(next)
-                        },
-                })}
+                {...(canMove &&
+                  // Cloud-first mode moves nothing onto a Mac, but a thread
+                  // already on one can still move to the cloud.
+                  (!cloudFirstDesktopEnabled || runsHere === "local") && {
+                    runTarget: moving ?? runsHere,
+                    runTargetPending: moving !== null,
+                    onRunTargetChange:
+                      isStreaming || moving
+                        ? undefined
+                        : (next: RunTarget) => {
+                            if (next !== runsHere) moveThread.mutate(next)
+                          },
+                  })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
                   contextWindow: activeModel?.context_window ?? null,

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Approve a local action</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --backdrop: rgb(10 12 18 / 0.45);
+        --card: #ffffff;
+        --text: #16191f;
+        --muted: #5a6170;
+        --line: #e1e4ea;
+        --code: #f2f4f7;
+        --accent: #2563eb;
+        --accent-text: #ffffff;
+        --warn: #8a5a00;
+        --warn-bg: #fbf3e2;
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --backdrop: rgb(0 0 0 / 0.55);
+          --card: #1b1f27;
+          --text: #e8eaf0;
+          --muted: #a0a7b5;
+          --line: #2c313c;
+          --code: #12151b;
+          --accent: #3b82f6;
+          --warn: #f0c46a;
+          --warn-bg: #2e2716;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--backdrop);
+        color: var(--text);
+      }
+      body {
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .card {
+        width: min(640px, 100%);
+        max-height: 100%;
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        gap: 14px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px;
+        box-sizing: border-box;
+        box-shadow: 0 20px 60px rgb(0 0 0 / 0.35);
+      }
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .from {
+        margin: 2px 0 0;
+        color: var(--muted);
+      }
+      .concern {
+        background: var(--warn-bg);
+        color: var(--warn);
+        border-radius: 8px;
+        padding: 8px 12px;
+      }
+      pre {
+        margin: 0;
+        min-height: 0;
+        overflow: auto;
+        background: var(--code);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      footer {
+        display: grid;
+        gap: 14px;
+      }
+      .grant {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .actions .later {
+        background: none;
+        border: 0;
+        color: var(--muted);
+        padding: 8px 4px;
+      }
+      .choices {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-left: auto;
+        justify-content: flex-end;
+        min-width: 0;
+      }
+      #grant {
+        white-space: nowrap;
+      }
+      #grant .folder {
+        display: inline-block;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: bottom;
+      }
+      button {
+        font: inherit;
+        border-radius: 8px;
+        padding: 8px 14px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-text);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card" role="dialog" aria-modal="true" aria-labelledby="title">
+      <header>
+        <h1 id="title">Approve a local action</h1>
+        <p class="from" id="from" hidden></p>
+      </header>
+      <p class="concern" id="concern" hidden></p>
+      <pre id="detail"></pre>
+      <footer>
+        <p class="grant" id="grant-note" hidden></p>
+        <div class="actions">
+          <button class="later" id="later" type="button">Decide later</button>
+          <div class="choices">
+            <button id="cancel" type="button">Cancel</button>
+            <button class="primary" id="once" type="button">Allow once</button>
+            <button class="primary" id="grant" type="button" hidden></button>
+          </div>
+        </div>
+      </footer>
+    </main>
+    <script>
+      // The request arrives in the hash as JSON from the desktop's main process; it is
+      // only ever set as text. Choices leave as navigations the main process intercepts.
+      const request = JSON.parse(decodeURIComponent(location.hash.slice(1)))
+      const verbs = {
+        read: "read a file",
+        write: "write a file",
+        import: "copy a file into its sandbox",
+        execute: "run a command",
+      }
+      document.getElementById("title").textContent =
+        `Robin wants to ${verbs[request.kind] ?? "act"} on this Mac`
+      const from = document.getElementById("from")
+      if (request.threadTitle) {
+        from.textContent = `From the thread “${request.threadTitle}”`
+        from.hidden = false
+      }
+      const concern = document.getElementById("concern")
+      if (request.concern) {
+        concern.textContent = `Robin's reviewer wants you to look at this: ${request.concern}.`
+        concern.hidden = false
+      }
+      document.getElementById("detail").textContent = request.detail
+      const grant = document.getElementById("grant")
+      if (request.grantFolder) {
+        // The button names the folder; the note below gives its full path.
+        const name = request.grantFolder.split("/").findLast(Boolean) ?? request.grantFolder
+        const folder = document.createElement("span")
+        folder.className = "folder"
+        folder.textContent = `“${name}”`
+        grant.replaceChildren("Allow in ", folder, " for this thread")
+        grant.title = request.grantFolder
+        grant.hidden = false
+        // A thread grant is the usual answer when one is offered; Allow once steps back.
+        document.getElementById("once").classList.remove("primary")
+        const note = document.getElementById("grant-note")
+        note.textContent = `Allowing for this thread lets Robin read, write and copy files in ${request.grantFolder} without asking for 30 minutes, and run commands there that its reviewer finds routine. Commands can still reach the rest of your Mac; anything the reviewer flags asks you again.`
+        note.hidden = false
+      }
+      const decide = (choice) => {
+        location.href = `open-swe-approval://decide?id=${encodeURIComponent(request.id)}&choice=${choice}`
+      }
+      document.getElementById("cancel").onclick = () => decide("deny")
+      document.getElementById("once").onclick = () => decide("once")
+      grant.onclick = () => decide("grant")
+      document.getElementById("later").onclick = () => decide("later")
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") decide("later")
+      })
+      document.getElementById("cancel").focus()
+    </script>
+  </body>
+</html>

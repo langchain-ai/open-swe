@@ -12,6 +12,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
+import { toast } from "sonner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
@@ -178,11 +179,6 @@ export function AgentsHome({
         ? "cloud"
         : null
   )
-  const runTarget: RunTarget = isDesktop
-    ? cloudEnabled
-      ? (runTargetOverride ?? desktopThreadSource)
-      : "local"
-    : "cloud"
   const [localRepoPath, setLocalRepoPath] = useState<string | null>(
     initialLocalRepo ?? null
   )
@@ -269,6 +265,21 @@ export function AgentsHome({
     instanceDefault: defaultWorkspaceSlug,
     workspaces,
   })
+  const {
+    cloudFirstDesktopEnabled,
+    models,
+    defaultSelection,
+    modelSelectionEnabled,
+    isLoading: modelsLoading,
+    isError: modelsError,
+  } = useModelOptions(selectedWorkspace)
+  const runTarget: RunTarget = cloudFirstDesktopEnabled
+    ? "cloud"
+    : isDesktop
+      ? cloudEnabled
+        ? (runTargetOverride ?? desktopThreadSource)
+        : "local"
+      : "cloud"
   // Then the repository: every workspace can work in every accessible one.
   const accessibleRepos = reposQuery.data?.repositories
   // Memoized: a fresh array fed straight into the pick below reads as a
@@ -311,13 +322,6 @@ export function AgentsHome({
 
   // The picker offers the workspace being composed in its own models and
   // default, not the deployment default's.
-  const {
-    models,
-    defaultSelection,
-    modelSelectionEnabled,
-    isLoading: modelsLoading,
-    isError: modelsError,
-  } = useModelOptions(selectedWorkspace)
   const activeSelection =
     !modelSelectionEnabled || autoSelected
       ? null
@@ -646,6 +650,22 @@ export function AgentsHome({
             configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }
+        if (
+          cloudFirstDesktopEnabled &&
+          !localRun &&
+          visibility === "private" &&
+          desktop?.ensureLocalAccessBridge
+        ) {
+          try {
+            configurable.local_access_bridge_id =
+              await desktop.ensureLocalAccessBridge()
+          } catch (error) {
+            console.warn("Local access unavailable", error)
+            toast.warning(
+              "Local access is unavailable; continuing in the cloud."
+            )
+          }
+        }
         await startRun(
           threadId,
           runStartCommand({
@@ -825,9 +845,14 @@ export function AgentsHome({
                 }
                 onRepoChange={startingThread ? undefined : selectRepo}
                 gitHubLinkUser={gitHubLinkUser}
-                runTarget={composerRunTarget}
+                runTarget={
+                  cloudFirstDesktopEnabled ? undefined : composerRunTarget
+                }
                 onRunTargetChange={
-                  !startingThread && isDesktop && cloudEnabled
+                  !cloudFirstDesktopEnabled &&
+                  !startingThread &&
+                  isDesktop &&
+                  cloudEnabled
                     ? handleRunTargetChange
                     : undefined
                 }

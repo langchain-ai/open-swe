@@ -24,6 +24,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_typesafe import Choice
 from pydantic import JsonValue
 from runtime_api.classifier import DEFAULT_JEV, JevDecision
+from runtime_api.operations import LocalReview
 from runtime_api.provenance import Provenance
 
 from rt.backend import STATE_KEY, Run, RunLocal
@@ -42,6 +43,10 @@ PATH_ARGUMENTS: Final = {
     "delete": "file_path",
     "glob": "path",
     "grep": "path",
+    # A cloud thread's approved actions on the person's machine (``AutoReview.local``).
+    "local_read_file": "path",
+    "local_write_file": "path",
+    "local_import_file": "path",
 }
 _READS: Final = frozenset({"ls", "read_file", "glob", "grep"})
 # The arguments of each tool that run as shell on the machine.
@@ -49,8 +54,15 @@ _SHELL_ARGUMENTS: Final = {
     "execute": ("command",),
     "background_execute": ("command",),
     "monitor": ("command", "filter"),
+    "local_execute": ("command",),
 }
-REVIEWED: Final = frozenset({*PATH_ARGUMENTS, *_SHELL_ARGUMENTS})
+# A cloud thread's tools that act on the person's machine through the desktop app, which
+# runs them without asking only inside a grant the person gave the thread.
+LOCAL_TOOLS: Final = frozenset(
+    {"local_read_file", "local_write_file", "local_import_file", "local_execute"}
+)
+# A bridged thread's own file and shell tools, which auto mode lets through or refuses.
+REVIEWED: Final = frozenset({*PATH_ARGUMENTS, *_SHELL_ARGUMENTS}) - LOCAL_TOOLS
 
 Risk = Literal[
     "routine",
@@ -100,6 +112,12 @@ _SECRET_PARTS: Final = frozenset(
         ".bash_history",
     }
 )
+# Shell startup files, which often export tokens; a local action naming one always asks.
+_SHELL_PROFILES: Final = frozenset(
+    {".zshrc", ".zshenv", ".zprofile", ".bashrc", ".bash_profile", ".profile"}
+)
+# Runs of characters a path is written with, to find paths inside a longer shell word.
+_PATHLIKE: Final = re.compile(r"[~\w.\-/]+")
 # A ``grep`` file filter that runs unreviewed: files of one extension, optionally under
 # plain directories. Any other filter (a dotfile, braces, brackets, a bare ``*``) may
 # reach a secret, as may the extensions keys and environment files carry.
@@ -326,6 +344,24 @@ class Action:
             or folded in {"/etc", "/private/etc"}
         )
 
+    def names_credentials(self) -> bool:
+        """Whether a call on the person's machine names a path that may hold credentials,
+        in its path argument or anywhere in what it runs as shell."""
+        names: list[str] = []
+        if isinstance(path := self.arguments.get(PATH_ARGUMENTS.get(self.name, "")), str):
+            names.append(path)
+        for command in self._commands():
+            try:
+                names.extend(shlex.split(command))
+            except ValueError:
+                return True
+            # Paths inside a word too, such as a script's `Path(".env")` in `python3 -c`.
+            names.extend(_PATHLIKE.findall(command))
+        return any(
+            self._secret(name) or posixpath.basename(name.casefold()) in _SHELL_PROFILES
+            for name in names
+        )
+
     def _readable(self, path: str) -> bool:
         roots = (*self.scratch, *self.served, *((self.work_dir,) if self.work_dir else ()))
         return any(self._inside(path, root) for root in roots)
@@ -428,6 +464,34 @@ class AutoReview:
         )
         return await cls._RUNS.get(run).refusal(action, state, machine)
 
+    @classmethod
+    async def local(
+        cls, run: Run, name: str, arguments: Mapping[str, JsonValue], state: Mapping[str, object]
+    ) -> LocalReview | str:
+        """Review a cloud thread's call on the person's machine: the refusal of a command
+        that never runs, or whether a grant may run the call without asking them.
+
+        Unlike auto mode, a call that is not cleared is not refused: the desktop asks the
+        person, so it counts toward no refusal limit.
+        """
+        action = Action(name=name, arguments=arguments, work_dir=None)
+        disposition, category = action.disposition()
+        if disposition == "forbid":
+            logger.info(
+                "auto_review",
+                extra={"tool": name, "outcome": "forbid", "category": category},
+            )
+            reason = prompt("auto-review/reason", category=category)
+            return prompt("auto-review/hard-denied", tool=name, reason=reason)
+        if action.names_credentials():
+            return LocalReview(cleared=False, concern="credential_access")
+        if action.too_long():
+            return LocalReview(cleared=False, concern="too_long")
+        # A grant skips the person's dialog, so only a routine call clears; a risky one
+        # they asked for still shows them the dialog, which is how they confirm it.
+        review = await cls._RUNS.get(run).review(action, state, routine_only=True)
+        return LocalReview(cleared=review.allowed, concern=review.category or None)
+
     async def refusal(
         self,
         action: Action,
@@ -460,7 +524,11 @@ class AutoReview:
         action: Action,
         state: Mapping[str, object],
         machine: SandboxBackendProtocol | None = None,
+        *,
+        routine_only: bool = False,
     ) -> Review:
+        """Whether ``action`` runs; with ``routine_only``, only a confidently routine call
+        does, however clearly the person asked for a risky one."""
         disposition, category = action.disposition()
         if disposition == "allow":
             confirmed = await self.confirmed(action, machine)
@@ -510,7 +578,7 @@ class AutoReview:
             },
             decisions={"risk": risk, "authorization": authorization},
         )
-        review = self.verdict(risk, authorization)
+        review = self.verdict(risk, authorization, routine_only=routine_only)
         logger.info(
             "auto_review",
             extra={
@@ -567,12 +635,14 @@ class AutoReview:
         )
 
     @classmethod
-    def verdict(cls, risk: JevDecision, authorization: JevDecision) -> Review:
-        """Allow a confidently routine call, or one the person confidently authorized;
-        refuse the rest, naming the risk when the classifier found one."""
+    def verdict(
+        cls, risk: JevDecision, authorization: JevDecision, *, routine_only: bool = False
+    ) -> Review:
+        """Allow a confidently routine call, or one the person confidently authorized
+        unless ``routine_only``; refuse the rest, naming the risk the classifier found."""
         if cls.confident(risk) and risk.choice == "routine":
             return Review(allowed=True)
-        if cls.confident(authorization) and authorization.choice == "explicit":
+        if not routine_only and cls.confident(authorization) and authorization.choice == "explicit":
             return Review(allowed=True)
         if risk.outcome == "accepted" and risk.choice in RISKS and risk.choice != "routine":
             return Review(allowed=False, category=risk.choice)

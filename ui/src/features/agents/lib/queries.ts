@@ -1518,6 +1518,7 @@ export function optimisticThread(
 }
 
 export interface SendAgentMessageVariables {
+  local_access_bridge_id?: string
   content: string
   images?: Array<ImageChunk>
   /** Passages the person replied to, each with its context and their comment. */

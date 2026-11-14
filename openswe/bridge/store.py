@@ -117,6 +117,10 @@ class Bridge(BaseModel):
         return sandbox_id.removeprefix(SANDBOX_ID_PREFIX) or None
 
     @property
+    def local_access_only(self) -> bool:
+        return self.client == "desktop" and self.root_path == "local-access://approved-actions"
+
+    @property
     def sandbox_id(self) -> str:
         return self.sandbox_id_for(self.bridge_id)
 
@@ -145,6 +149,8 @@ class SandboxBridgeBinding(BaseModel):
 
     @classmethod
     def of(cls, bridge: Bridge) -> Self:
+        if bridge.local_access_only:
+            raise HTTPException(409, "An approved-actions bridge cannot be a thread sandbox")
         return cls(sandbox_id=bridge.sandbox_id, sandbox_bridge_client=bridge.client)
 
     def dump(self) -> dict[str, str]:

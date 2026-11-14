@@ -39,6 +39,7 @@ from openswe.bridge.protocol import (
     DownloadFilesParams,
     ExecuteParams,
     JsonObject,
+    LocalActionParams,
     UploadFilesParams,
     WorktreeHandoffParams,
 )
@@ -168,6 +169,11 @@ class BridgeSandboxBackend(BaseSandbox):
         """Ask the desktop app to move this thread into a new worktree."""
         return await self._round_trip(
             "worktree_handoff", params, wait=_WORKTREE_HANDOFF_TIMEOUT_SECONDS + WAIT_GRACE_SECONDS
+        )
+
+    async def alocal_action(self, params: LocalActionParams) -> JsonObject:
+        return await self._round_trip(
+            "local_action", params, wait=params.timeout + 120 + WAIT_GRACE_SECONDS
         )
 
     async def _is_alive(self) -> bool:

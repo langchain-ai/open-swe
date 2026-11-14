@@ -235,6 +235,25 @@ declare global {
         repo: string
       }) => Promise<string>
       /** Serve the thread's checkout again before its next run. */
+      ensureLocalAccessBridge?: () => Promise<string>
+      /** Folders (`~/…` under home) this thread may act in without asking, and until when (ms). */
+      localAccessGrants?: (
+        threadId: string
+      ) => Promise<Array<{ folder: string; until: number }>>
+      revokeLocalAccessGrants?: (threadId: string) => Promise<void>
+      onLocalAccessGrantsChanged?: (callback: () => void) => () => void
+      /** The thread's local actions waiting on the person's OK. */
+      localAccessRequests?: (threadId: string) => Promise<
+        Array<{
+          id: string
+          kind: "read" | "write" | "import" | "execute"
+          concern: string | null
+          createdAt: number
+        }>
+      >
+      /** Opens the desktop's own approval panel on a request; only it can decide. */
+      reviewLocalAccessRequest?: (id: string) => Promise<void>
+      onLocalAccessRequestsChanged?: (callback: () => void) => () => void
       ensureLocalBridge: (threadId: string) => Promise<boolean>
       openTaskFolder?: (threadId: string) => Promise<boolean>
       getLocalThread: (threadId: string) => Promise<DesktopLocalThread | null>

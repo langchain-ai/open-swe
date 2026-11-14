@@ -5487,6 +5487,17 @@
             ],
             "title": "Experimental Classify"
           },
+          "experimental_cloud_first_desktop": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Cloud First Desktop"
+          },
           "experimental_force_code_mode": {
             "anyOf": [
               {
@@ -10864,6 +10875,18 @@
       "WorkspaceSettingsUpdate": {
         "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
         "properties": {
+          "cloud_first_desktop_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud First Desktop Enabled"
+          },
           "concise_walkthrough_enabled": {
             "agent_feature_flag": true,
             "anyOf": [

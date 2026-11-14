@@ -43,6 +43,11 @@ function ExperimentsPage() {
           description="In threads that run on your Mac, a classifier reviews each command and file change before it runs. Routine work inside the project goes ahead; anything that touches credentials, sends data away, deletes outside the project or sets up background jobs is blocked, and Robin carries on without it."
         />
         <ProfileSwitchRow
+          field="experimental_cloud_first_desktop"
+          label="Cloud-first desktop"
+          description="In the desktop app, new threads run in the cloud instead of on This Mac. In your private threads, Robin can ask to read, write or copy in a file, or run a command, on your Mac, and each action needs your approval in a native dialog. Existing This Mac threads keep working. Needs a desktop app with this feature."
+        />
+        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."

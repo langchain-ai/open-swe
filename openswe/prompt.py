@@ -187,6 +187,7 @@ class TurnContext:
     slack_follow_up_suggestions: bool = False
     implementation_walkthrough_enabled: bool = False
     sandbox_file_downloads: bool = False
+    local_access: bool = False
     local_checkout: bool = False
     local_checkout_client: BridgeClient = "cli"
     # Why the run's managed tool catalog could not be read, if it could not.
@@ -204,6 +205,8 @@ class TurnContext:
             working_folder=self.working_folder,
             sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
+        if self.local_access:
+            environment += "\n\n" + prompt("system/local-access")
         if self.implementation_walkthrough_enabled:
             environment += "\n\n" + prompt("system/implementation-walkthrough")
         if self.sandbox_file_downloads:

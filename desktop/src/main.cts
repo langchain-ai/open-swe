@@ -28,6 +28,9 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
+const { LocalAccessBridge } = require("./local-access.cjs");
+const { ApprovalQueue } = require("./approval-queue.cjs");
+const { ApprovalPanel } = require("./approval-panel.cjs");
 const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
@@ -182,6 +185,18 @@ let quitting = false;
 let localThreadStore = null;
 const previewFiles = new PreviewFiles(localWorkspaceRoot);
 let localBridges = null;
+let localAccessBridge = null;
+// Local actions waiting on the person, decided only in the desktop's own panel.
+const approvalQueue = new ApprovalQueue(() => {
+  approvalPanel.sync();
+  if (mainWindow && !mainWindow.isDestroyed())
+    mainWindow.webContents.send("desktop:local-access-requests-changed");
+});
+const approvalPanel = new ApprovalPanel(
+  approvalQueue,
+  () => mainWindow,
+  (folder) => localAccessBridge?.displayPath(folder) ?? folder,
+);
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
@@ -716,7 +731,13 @@ function configureDesktopIpc() {
     );
     updateInstallTimer.unref();
     try {
-      await Promise.all([closeAllTerminals(), localBridges?.closeAll()]);
+      await Promise.all([
+        closeAllTerminals(),
+        localBridges?.closeAll(),
+        localAccessBridge?.close().finally(() => {
+          localAccessBridge = null;
+        }),
+      ]);
       if (!quitting) return false;
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -990,7 +1011,55 @@ function configureDesktopIpc() {
       throw error;
     }
   });
-  /** Serve an existing thread's checkout again, before its next run. */
+  ipcMain.handle("desktop:ensure-local-access-bridge", async (event) => {
+    requireTrustedDesktopIpc(event);
+    localAccessBridge ??= new LocalAccessBridge({
+      send: sendBridgeRequest,
+      env: getUserShellEnv,
+      log: (message) => console.warn(message),
+      onGrantsChanged: () => {
+        if (mainWindow && !mainWindow.isDestroyed())
+          mainWindow.webContents.send("desktop:local-access-grants-changed");
+      },
+      approve: (request, signal) => approvalQueue.request(request, signal),
+    });
+    return localAccessBridge.ensure();
+  });
+  ipcMain.handle("desktop:local-access-requests", (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof threadId !== "string")
+      throw new Error("A thread id is required");
+    // What a thread's card shows; deciding is the approval panel's alone.
+    return approvalQueue
+      .list(threadId)
+      .map(({ id, kind, concern, createdAt }) => ({
+        id,
+        kind,
+        concern,
+        createdAt,
+      }));
+  });
+  ipcMain.handle("desktop:review-local-access-request", (event, id) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof id === "string") approvalPanel.review(id);
+  });
+  ipcMain.handle("desktop:local-access-grants", (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof threadId !== "string")
+      throw new Error("A thread id is required");
+    return (localAccessBridge?.grants.list(threadId) ?? []).map(
+      ({ folder, until }) => ({
+        folder: localAccessBridge?.displayPath(folder) ?? folder,
+        until,
+      }),
+    );
+  });
+  ipcMain.handle("desktop:revoke-local-access-grants", (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof threadId !== "string")
+      throw new Error("A thread id is required");
+    localAccessBridge?.grants.revoke(threadId);
+  });
   ipcMain.handle("desktop:ensure-local-bridge", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
     const thread = await ensureThreadWorktree(localThreadStore.get(threadId));
@@ -1186,6 +1255,15 @@ async function shareBackendSession() {
     (_event, cookie, cause, removed) => {
       if (!isBackendSessionCookie(cookie)) return;
       if (removed && cause === "overwrite") return;
+      if (removed && localAccessBridge) {
+        const previous = localAccessBridge;
+        localAccessBridge = null;
+        void previous
+          .close()
+          .catch((error) =>
+            console.warn("Could not close local access", error),
+          );
+      }
       try {
         if (removed) unshareSession(configPath(), backendUrl, cookie.value);
         else shareSession(configPath(), backendUrl, cookie.value);
@@ -2279,10 +2357,14 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.all([closeAllTerminals(), localBridges?.closeAll()]).finally(
-      () => {
-        app.quit();
-      },
-    );
+    void Promise.all([
+      closeAllTerminals(),
+      localBridges?.closeAll(),
+      localAccessBridge?.close().finally(() => {
+        localAccessBridge = null;
+      }),
+    ]).finally(() => {
+      app.quit();
+    });
   });
 }

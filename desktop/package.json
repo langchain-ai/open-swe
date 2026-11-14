@@ -37,6 +37,7 @@
     "files": [
       "build/**/*",
       "src/setup.html",
+      "src/approval-panel.html",
       "package.json"
     ],
     "extraResources": [
@@ -64,7 +65,11 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
-      "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
+      "extendInfo": {
+        "NSUserActivityTypes": [
+          "NSUserActivityTypeBrowsingWeb"
+        ]
+      },
       "entitlementsInherit": "entitlements.mac.inherit.plist",
       "target": [
         "dmg",

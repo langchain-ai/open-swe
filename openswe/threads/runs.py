@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from runtime_api.provenance import Provenance
 
 from openswe.agent_api.connections import SENDER_USER_KEY
+from openswe.bridge.local_access_policy import LocalAccess
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.config import ENV
 from openswe.dashboard.options import (
@@ -857,6 +858,7 @@ async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge
 async def _bind_thread_to_bridge(
     thread_id: str, bridge: Bridge, metadata: dict[str, Any]
 ) -> dict[str, Any]:
+    await LocalAccess.allow_binding(bridge, metadata)
     binding = SandboxBridgeBinding.of(bridge).dump()
     await THREADS.update(thread_id, binding)
     logger.info(
@@ -1189,6 +1191,9 @@ async def _enrich_run_start_command(
                 repo_config,
                 login=login,
             )
+            if sandbox_bridge is not None:
+                # Refuse a This Mac thread before its record exists.
+                await LocalAccess.allow_binding(sandbox_bridge, {"workspace": workspace})
             thread = await create_dashboard_thread_record(
                 thread_id,
                 login=login,
@@ -1228,6 +1233,13 @@ async def _enrich_run_start_command(
                     run_model, run_effort, has_images=True
                 )
             _validate_command_images(content, model_id=run_model)
+
+        overrides["local_access_bridge_id"] = await LocalAccess.offer_for_run(
+            client_configurable.get("local_access_bridge_id"),
+            metadata=metadata,
+            login=login,
+            owner_id=Principal.of_login(login, email).sender_id,
+        )
 
         prior = await history if history is not None else _ThreadHistory()
         profile = await profile_read or {}
@@ -1962,6 +1974,8 @@ async def _enrich_system_run_start_command(
     )
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
+        if sandbox_bridge is not None:
+            await LocalAccess.allow_binding(sandbox_bridge, {"workspace": principal.workspace})
         title = client_configurable.get("title")
         metadata = thread_metadata(
             await _create_system_thread_record(

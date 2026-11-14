@@ -9,11 +9,15 @@ import asyncio
 from datetime import date
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 
+from openswe.bridge.local_access_policy import LocalAccess
 from openswe.bridge.protocol import JsonObject
-from openswe.bridge.store import Bridge, BridgeInUseError, BridgeStore
+from openswe.bridge.store import Bridge, BridgeInUseError, BridgeStore, SandboxBridgeBinding
+from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
 from openswe.database import postgres
+from tests.conftest import LangSmithUsers
 
 OWNER = "test-user"
 OTHER = "someone-else"
@@ -48,6 +52,76 @@ async def _go_quiet(bridge_id: str, seconds: int = 600) -> None:
             ),
             {"bridge_id": bridge_id, "seconds": seconds},
         )
+
+
+async def test_local_access_requires_an_enabled_private_owner_cloud_run(
+    registry_db: None, langsmith_users: LangSmithUsers
+) -> None:
+    langsmith_users.add(OWNER)
+    langsmith_users.add(OTHER)
+    bridge = await BridgeStore.register(
+        owner_id=OWNER,
+        client="desktop",
+        hostname="laptop.local",
+        root_path="local-access://approved-actions",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
+    metadata: dict[str, object] = {"owner_login": OWNER, "visibility": "private"}
+    with pytest.raises(HTTPException, match="disabled"):
+        await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+    await upsert_instance_settings(WorkspaceSettingsUpdate(cloud_first_desktop_enabled=True))
+    assert (
+        await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+        == bridge.bridge_id
+    )
+    for changed, login in [
+        ({**metadata, "visibility": "workspace"}, OWNER),
+        (metadata, OTHER),
+        ({**metadata, "sandbox_id": bridge.sandbox_id}, OWNER),
+    ]:
+        with pytest.raises(HTTPException):
+            await LocalAccess.offer(bridge.bridge_id, metadata=changed, login=login, owner_id=login)
+    with pytest.raises(HTTPException):
+        SandboxBridgeBinding.of(bridge)
+    legacy = await _open()
+    with pytest.raises(HTTPException, match="approved local actions"):
+        await LocalAccess.offer(legacy.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+    await LocalAccess.allow_binding(legacy, metadata)
+    desktop = legacy.model_copy(update={"client": "desktop"})
+    with pytest.raises(HTTPException, match="Cloud-first"):
+        await LocalAccess.allow_binding(desktop, metadata)
+    await upsert_instance_settings(WorkspaceSettingsUpdate(cloud_first_desktop_enabled=False))
+    await LocalAccess.allow_binding(desktop, metadata)
+    with pytest.raises(HTTPException, match="disabled"):
+        await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+
+
+async def test_a_run_drops_local_access_it_cannot_have_rather_than_failing(
+    registry_db: None, langsmith_users: LangSmithUsers
+) -> None:
+    langsmith_users.add(OWNER)
+    bridge = await BridgeStore.register(
+        owner_id=OWNER,
+        client="desktop",
+        hostname="laptop.local",
+        root_path="local-access://approved-actions",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
+    metadata: dict[str, object] = {"owner_login": OWNER, "visibility": "private"}
+    # The desktop's cached flag says on; the instance says off.
+    assert (
+        await LocalAccess.offer_for_run(
+            bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER
+        )
+        is None
+    )
+    with pytest.raises(HTTPException) as malformed:
+        await LocalAccess.offer_for_run("  ", metadata=metadata, login=OWNER, owner_id=OWNER)
+    assert malformed.value.status_code == 422
 
 
 async def test_a_claimed_request_is_not_offered_to_another_claimer(registry_db: None) -> None:
@@ -220,3 +294,34 @@ async def test_rotation_drops_request_days_no_waiter_can_still_be_reading(
         "sandbox_bridge_request_20990903",
         "sandbox_bridge_request_20990904",
     }
+
+
+async def test_a_persons_experiment_opts_them_into_local_access_without_the_workspace(
+    registry_db: None, langsmith_users: LangSmithUsers
+) -> None:
+    owner = langsmith_users.add(OWNER)
+    bridge = await BridgeStore.register(
+        owner_id=OWNER,
+        client="desktop",
+        hostname="laptop.local",
+        root_path="local-access://approved-actions",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
+    metadata: dict[str, object] = {"owner_login": OWNER, "visibility": "private"}
+    with pytest.raises(HTTPException, match="disabled"):
+        await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+    owner.preferences = {"experimental_cloud_first_desktop": True}
+    assert (
+        await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+        == bridge.bridge_id
+    )
+    # The opt-in is the owner's own: it never reaches someone else's thread.
+    with pytest.raises(HTTPException):
+        await LocalAccess.offer(
+            bridge.bridge_id,
+            metadata={**metadata, "visibility": "workspace"},
+            login=OWNER,
+            owner_id=OWNER,
+        )

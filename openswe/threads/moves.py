@@ -8,6 +8,7 @@ from typing import Any, Self
 from fastapi import HTTPException
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
+from openswe.bridge.local_access_policy import LocalAccess
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dispatch import thread_workspace
 from openswe.input_messages import SystemIdentity, build_input_messages
@@ -57,6 +58,7 @@ class SandboxMove:
             raise HTTPException(422, "sandbox_target must be cloud")
         current = metadata.get("sandbox_id")
         if bridge is not None and bridge.sandbox_id != current:
+            await LocalAccess.allow_binding(bridge, metadata)
             if metadata.get("visibility") != "private" or not thread_is_owner(metadata, login):
                 raise HTTPException(
                     409, "only its owner's private thread can move to their machine"

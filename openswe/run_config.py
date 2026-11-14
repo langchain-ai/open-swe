@@ -115,6 +115,7 @@ class RunConfig(BaseModel):
     prepare_run_id: str | None = None
     invocation_started_at: str | None = None
     offload_conversation: bool = False
+    local_access_bridge_id: str | None = None
     client_tools: list[ClientToolSpec] = Field(default_factory=list)
     plugin_chat: PluginChatConfig | None = None
     # The dashboard page the message came from, which the run queues page commands for.
