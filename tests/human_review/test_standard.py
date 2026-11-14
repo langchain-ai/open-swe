@@ -889,6 +889,7 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         ("5.0", "<@UADA> https://github.com/o/r/pull/12"),
         ("7.0", "<@UADA> https://github.com/o/r/pull/13"),
         ("6.0", "<@UADA> still need you here"),
+        ("8.0", "<@UADA> https://github.com/o/r/pull/15"),
     ]:
         if ts == "6.0":
             async with postgres.session() as session:
@@ -952,7 +953,7 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             "state": "open",
             "user": {"login": author},
             "title": f"PR {self.number}",
-            "draft": self.number == 31,
+            "draft": self.number in {15, 31},
         }
 
     async def states(pull, author):
@@ -974,13 +975,13 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         patch("openswe.human_review.review_queue.list_open_pull_requests", search),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
-    assert [(row.number, row.assignment) for row in result.pull_requests] == [
-        (1, "assigned"),
-        (20, "requested"),
-        (7, "tentative"),
-        (12, "mentioned"),
-        (22, "draft"),
-        (30, "speculative"),
+    assert [(row.number, row.assignment, row.author) for row in result.pull_requests] == [
+        (1, "assigned", "grace"),
+        (20, "requested", "grace"),
+        (7, "tentative", "grace"),
+        (12, "mentioned", "grace"),
+        (22, "draft", "ada"),
+        (30, "speculative", "grace"),
     ]
 
 
