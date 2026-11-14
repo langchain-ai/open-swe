@@ -28,6 +28,7 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
+const { SkillSync } = require("./skill-sync.cjs");
 const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
@@ -182,6 +183,28 @@ let quitting = false;
 let localThreadStore = null;
 const previewFiles = new PreviewFiles(localWorkspaceRoot);
 let localBridges = null;
+const skillSync = new SkillSync({
+  home: require("node:os").homedir(),
+  statePath: path.join(app.getPath("userData"), "skill-sync-source-id"),
+  target: async () => {
+    const url = backendUrl;
+    if (!url) return null;
+    const [cookie] = await session.defaultSession.cookies.get({
+      url,
+      name: SESSION_COOKIE_NAME,
+    });
+    return cookie ? { url, session: cookie.value } : null;
+  },
+  request: (url: string, init: RequestInit) =>
+    fetch(url, {
+      ...init,
+      headers: {
+        ...Object.fromEntries(new Headers(init.headers)),
+        origin: APP_ORIGIN,
+      },
+    }),
+  log: (message: string, error: unknown) => console.warn(message, error),
+});
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
@@ -2228,6 +2251,7 @@ if (!hasSingleInstanceLock) {
     }
     primaryBackendUrl = backendUrl;
     void shareBackendSession();
+    skillSync.start();
 
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-this-mac-threads.json"),
@@ -2279,6 +2303,7 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
+    skillSync.stop();
     void Promise.all([closeAllTerminals(), localBridges?.closeAll()]).finally(
       () => {
         app.quit();

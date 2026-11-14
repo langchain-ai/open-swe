@@ -867,6 +867,8 @@ export interface UserPreferences {
 }
 
 export interface Skill {
+  source?: "desktop" | "desktop-detached"
+  source_id?: string
   name: string
   description: string
   instructions: string
@@ -875,6 +877,7 @@ export interface Skill {
 }
 
 export interface SkillInput {
+  detach?: boolean
   description: string
   instructions: string
 }
