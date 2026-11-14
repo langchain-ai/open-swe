@@ -8,6 +8,7 @@ import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { api, managedToolConnectUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import type {
+  BotToolsView,
   ConnectableServer,
   ManagedConnectResult,
   ManagedServer,
@@ -255,6 +256,72 @@ export function ManagedToolsSection() {
           <p className="px-space-4 pb-space-4 text-xs text-secondary">
             A LangSmith workspace admin adds services to the kit in LangSmith;
             they show up here to connect.
+          </p>
+        </>
+      )}
+    </SettingsSection>
+  )
+}
+
+/**
+ * The services in Robin's bot kit, which runs outside private threads load: shared
+ * threads, Slack channels and automations. Read-only: the bot's credentials live on its
+ * LangSmith Managed Tools profile, which a LangSmith workspace admin manages.
+ */
+export function BotToolsSection() {
+  const view = useQuery<BotToolsView>({
+    queryKey: ["botManagedTools"],
+    queryFn: api.getBotManagedTools,
+  })
+
+  if (!view.data?.configured && !view.isLoading && !view.isError) return null
+  return (
+    <SettingsSection
+      title="Bot Managed Tools"
+      description="The services in Robin's bot kit. Shared threads, Slack channels and automations use them with the API keys stored on the bot's LangSmith Managed Tools profile."
+    >
+      {view.isLoading ? (
+        <p className="p-space-4 text-xs text-secondary">Loading…</p>
+      ) : view.isError ? (
+        <p role="alert" className="p-space-4 text-xs text-error-secondary">
+          {view.error.message}
+        </p>
+      ) : !view.data?.langsmith_connected ? (
+        <SettingsRow
+          label="LangSmith"
+          description="Sign in with LangSmith to see the bot's services; LangSmith shows a kit only to a person."
+          control={<SignInWithLangSmithButton />}
+        />
+      ) : (
+        <>
+          {(view.data?.servers ?? []).length === 0 ? (
+            <p className="p-space-4 text-xs text-secondary">No services yet.</p>
+          ) : (
+            (view.data?.servers ?? []).map((server) => (
+              <SettingsRow
+                key={server.id}
+                label={server.name}
+                description={
+                  server.connected
+                    ? undefined
+                    : "No credential on the bot's profile; its tools don't load"
+                }
+                control={
+                  server.connected ? (
+                    <Badge color="primary" size="xs">
+                      Connected
+                    </Badge>
+                  ) : (
+                    <Badge color="secondary" size="xs">
+                      Not connected
+                    </Badge>
+                  )
+                }
+              />
+            ))
+          )}
+          <p className="px-space-4 pb-space-4 text-xs text-secondary">
+            The kit and the profile&apos;s credentials are managed in LangSmith.
           </p>
         </>
       )}

@@ -70,6 +70,11 @@ type ConsentStatus = Literal["pending", "completed", "failed", "expired"]
 class ManagedToolsError(ValueError):
     """A failure safe to show the person who asked."""
 
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        """LangSmith's HTTP status, when the failure is a refused request."""
+
 
 class LangSmithNotConnected(ManagedToolsError):
     def __init__(self) -> None:
@@ -148,13 +153,14 @@ def managed_tools_configured() -> bool:
 
 
 def _failure(response: httpx2.Response) -> ManagedToolsError:
-    if response.status_code in {401, 403}:
-        return ManagedToolsError("LangSmith refused access to managed tools")
-    if response.status_code == 404:
-        return ManagedToolsError("LangSmith has no such managed tools resource")
-    if response.status_code == 409:
-        return ManagedToolsError("LangSmith cannot connect this service that way")
-    return ManagedToolsError(f"Managed tools failed (HTTP {response.status_code}); retry later")
+    status = response.status_code
+    if status in {401, 403}:
+        return ManagedToolsError("LangSmith refused access to managed tools", status)
+    if status == 404:
+        return ManagedToolsError("LangSmith has no such managed tools resource", status)
+    if status == 409:
+        return ManagedToolsError("LangSmith cannot connect this service that way", status)
+    return ManagedToolsError(f"Managed tools failed (HTTP {status}); retry later", status)
 
 
 def _link(body: object) -> ConsentLink | None:
@@ -269,9 +275,10 @@ class ManagedTools(ABC):
             raise _failure(response)
         return response
 
-    async def _pages(self, path: str) -> list[object]:
+    async def _pages(self, path: str, headers: dict[str, str] | None = None) -> list[object]:
+        """Every page of a listing, with the caller's headers unless ``headers`` replaces them."""
         items: list[object] = []
-        headers = await self.headers()
+        headers = headers or await self.headers()
         async with self._client() as client:
             cursor: str | None = None
             for _ in range(_MAX_PAGES):
@@ -618,3 +625,50 @@ class BotTools(ManagedTools):
     async def _authorize(self) -> None:
         """Any run may call the bot's tools."""
         return
+
+
+class BotKitViewer(PersonalTools):
+    """Robin's bot kit as one admin reads it, to show which services the bot can use.
+
+    LMT lets only a user read a kit, and the bot calls LMT with an API key, so the admin's
+    own LangSmith sign-in reads the kit's links. Each server's state comes from the bot's
+    own listing, as its profile, so it is what the bot can use and asks nothing of the
+    admin's LangSmith grants.
+    """
+
+    def __init__(self, login: str) -> None:
+        super().__init__(login)
+        self.bot = BotTools()
+        self.namespace = ("managed_tools", "bot-viewer", self.login)
+
+    def configured(self) -> bool:
+        return self.bot.configured() and langsmith_oauth_configured()
+
+    def kit(self) -> str | None:
+        return self.bot.kit()
+
+    async def servers(self) -> list[ManagedServer]:
+        try:
+            return await self.bot.servers()
+        except ManagedToolsError as exc:
+            # Only a forbidden listing falls back: a deployment key may invoke the kit
+            # without mcp-servers:read. A revoked key or an outage stays an error, so the
+            # page never reports a broken bot as healthy.
+            if exc.status != 403:
+                raise
+            logger.warning(
+                "Bot key may not list managed tools servers; listing as the admin",
+                exc_info=True,
+            )
+        # As the admin naming the bot's profile, which needs their LangSmith
+        # credential-metadata grant; uncached, so a revoked grant applies at once.
+        return await self._servers_as_bot_profile()
+
+    async def _servers_as_bot_profile(self) -> list[ManagedServer]:
+        if self.bot.profile is None:
+            raise ManagedToolsError("Robin has no LMT bot profile")
+        headers = {**await self.headers(), "X-LangSmith-Profile": self.bot.profile}
+        servers = [
+            ManagedServer.from_lmt(item) for item in await self._pages(SERVERS_PATH, headers)
+        ]
+        return [server for server in servers if server is not None]

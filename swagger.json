@@ -1216,6 +1216,33 @@
         "title": "BlockSuggestionResponse",
         "type": "object"
       },
+      "BotToolsView": {
+        "description": "The services in Robin's bot kit, and whether the bot's LMT profile can use each.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "langsmith_connected": {
+            "default": false,
+            "title": "Langsmith Connected",
+            "type": "boolean"
+          },
+          "servers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ManagedServer"
+            },
+            "title": "Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "configured"
+        ],
+        "title": "BotToolsView",
+        "type": "object"
+      },
       "BranchBody": {
         "properties": {
           "name": {
@@ -14052,6 +14079,33 @@
         "tags": [
           "dashboard",
           "auth"
+        ]
+      }
+    },
+    "/dashboard/api/managed-tools/bot": {
+      "get": {
+        "description": "What the bot kit offers runs outside private threads; credentials are managed in\nLangSmith, so this only reports them.",
+        "operationId": "api_bot_managed_tools_dashboard_api_managed_tools_bot_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotToolsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Bot Managed Tools",
+        "tags": [
+          "dashboard"
         ]
       }
     },

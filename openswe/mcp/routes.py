@@ -12,6 +12,7 @@ from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.oauth import frontend_base_url
 from openswe.mcp.cards import ConnectCard, connect_service
 from openswe.mcp.managed import (
+    BotKitViewer,
     LangSmithNotConnected,
     ManagedServer,
     ManagedToolsError,
@@ -175,6 +176,15 @@ class ManagedToolsView(BaseModel):
     servers: list[ManagedServer] = []
 
 
+class BotToolsView(BaseModel):
+    """The services in Robin's bot kit, and whether the bot's LMT profile can use each."""
+
+    configured: bool
+    langsmith_connected: bool = False
+    """Whether the admin's own LangSmith sign-in, which LMT requires to read a kit, works."""
+    servers: list[ManagedServer] = []
+
+
 class ManagedConnectResponse(BaseModel):
     connected: bool
     url: str | None = None
@@ -198,6 +208,26 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
     except ManagedToolsError as exc:
         raise _managed_error(exc) from None
     return ManagedToolsView(
+        configured=True,
+        langsmith_connected=True,
+        servers=[server for server in servers if server.enabled],
+    )
+
+
+@managed_mcp_router.get("/managed-tools/bot", response_model=BotToolsView)
+async def api_bot_managed_tools(session: dict[str, Any] = ADMIN_DEP) -> BotToolsView:
+    """What the bot kit offers runs outside private threads; credentials are managed in
+    LangSmith, so this only reports them."""
+    viewer = BotKitViewer(session["sub"])
+    if not viewer.configured():
+        return BotToolsView(configured=False)
+    try:
+        servers = await viewer.kit_servers()
+    except LangSmithNotConnected:
+        return BotToolsView(configured=True)
+    except ManagedToolsError as exc:
+        raise _managed_error(exc) from None
+    return BotToolsView(
         configured=True,
         langsmith_connected=True,
         servers=[server for server in servers if server.enabled],

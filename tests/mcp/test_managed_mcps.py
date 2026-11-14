@@ -68,19 +68,31 @@ def lmt(monkeypatch):
             {"server_id": "exa", "tool_name": "web_search"},
             {"builtin_server_key": "off", "tool_name": "off"},
         ],
+        bot_kit_links=[],
+        listed_as=[],
+        bot_listing_status=None,
+        kit_headers=[],
         posts=[],
     )
 
     async def cached(self, listing):
         return await self._loaders()[listing]()
 
-    async def pages(self, path):
+    async def pages(self, path, headers=None):
         assert path == managed.SERVERS_PATH
-        return state.servers.get(self.login, [])
+        caller = getattr(self, "login", "bot")
+        profile = (headers or {}).get("X-LangSmith-Profile")
+        state.listed_as.append(f"{caller} as {profile}" if profile else caller)
+        if caller == "bot" and state.bot_listing_status:
+            raise managed.ManagedToolsError("refused", state.bot_listing_status)
+        return state.servers.get("bot" if profile else caller, [])
 
     async def request(self, method, path, *, body=None, ok=()):
         if (method, path) == ("GET", f"{managed.KITS_PATH}/{KIT_ID}"):
             return httpx.Response(200, json={"id": KIT_ID, "tools": state.kit_links})
+        if (method, path) == ("GET", f"{managed.KITS_PATH}/{BOT_KIT_ID}"):
+            state.kit_headers.append(await self.headers())
+            return httpx.Response(200, json={"id": BOT_KIT_ID, "tools": state.bot_kit_links})
         state.posts.append((method, path))
         return httpx.Response(
             201, json={"verification_url": "https://smith.langchain.com/c/1", "auth_id": "a1"}
@@ -390,6 +402,58 @@ async def card_store(monkeypatch, registry_db) -> None:
         "langgraph_client",
         lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread))),
     )
+
+
+async def test_admins_read_the_bot_kit_as_themselves_and_its_state_as_the_bot(lmt):
+    """LMT lets only a user read a kit, so the admin's LangSmith sign-in reads it; each
+    server's state is the bot's own listing, which needs no LangSmith grant from the admin."""
+    lmt.servers["bot"] = [
+        server("incident", "incident-io-bot", connected=True, kind="secret"),
+        server("brains", "LangChain-Brains", connected=False, kind="secret"),
+        # Not in the bot kit.
+        server("other", "Other", connected=True),
+    ]
+    lmt.bot_kit_links = [
+        {"server_id": "incident", "tool_name": "incident_list"},
+        {"server_id": "brains", "tool_name": "propose"},
+    ]
+
+    view = await routes.api_bot_managed_tools({"sub": "alice"})
+    assert view.langsmith_connected is True
+    assert [(server.name, server.connected) for server in view.servers] == [
+        ("incident-io-bot", True),
+        ("LangChain-Brains", False),
+    ]
+    [kit_headers] = lmt.kit_headers
+    assert kit_headers["Authorization"] == "Bearer alice-langsmith-token"
+    assert "X-LangSmith-Profile" not in kit_headers
+    assert lmt.listed_as == ["bot"]
+
+    # A bot key that may only invoke the kit falls back to listing as the admin, naming
+    # the bot's profile.
+    lmt.bot_listing_status = 403
+    lmt.listed_as.clear()
+    fallback = await routes.api_bot_managed_tools({"sub": "alice"})
+    assert [server.name for server in fallback.servers] == ["incident-io-bot", "LangChain-Brains"]
+    assert lmt.listed_as == ["bot", f"alice as {PROFILE_ID}"]
+
+    # A revoked bot key stays an error rather than showing the profile's stored
+    # credentials as if the bot could use them.
+    lmt.bot_listing_status = 401
+    lmt.listed_as.clear()
+    with pytest.raises(HTTPException) as revoked:
+        await routes.api_bot_managed_tools({"sub": "alice"})
+    assert revoked.value.status_code == 502
+    assert lmt.listed_as == ["bot"]
+
+    # An admin who has not signed in with LangSmith is asked to, not shown an error.
+    signed_out = await routes.api_bot_managed_tools({"sub": "bob"})
+    assert (signed_out.configured, signed_out.langsmith_connected) == (True, False)
+
+
+async def test_the_bot_kit_view_is_off_without_a_bot_profile(monkeypatch):
+    monkeypatch.delenv("LMT_BOT_PROFILE_ID")
+    assert (await routes.api_bot_managed_tools({"sub": "alice"})).configured is False
 
 
 async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, lmt, card_store):

@@ -39,7 +39,7 @@ function WorkspaceSettingsPage() {
     <AppShell
       user={session.data}
       title={name}
-      description="Everything configured for this environment: what it owns, the sandbox image its runs boot from, model defaults, review settings, and MCP servers, including the environment bot's."
+      description="Everything configured for this environment: what it owns, the sandbox image its runs boot from, model defaults, review settings, and MCP servers."
       backTo={{ to: "/workspaces", label: "Back to Environments" }}
     >
       <WorkspaceSettingsPanel

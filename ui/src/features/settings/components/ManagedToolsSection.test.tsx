@@ -1,11 +1,22 @@
 /** @vitest-environment jsdom */
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
 
 import { api } from "@/lib/api"
-import { MANAGED_TOOLS_KEY, useConnectPopup } from "./ManagedToolsSection"
+import {
+  BotToolsSection,
+  MANAGED_TOOLS_KEY,
+  useConnectPopup,
+} from "./ManagedToolsSection"
 
 const url = "https://smith.langchain.com/connect/service"
 
@@ -92,4 +103,60 @@ it("leaves web consent to the button's link and refreshes on return", () => {
   act(() => window.dispatchEvent(new Event("focus")))
   expect(result.current.connecting).toBeNull()
   expect(invalidate).toHaveBeenCalledWith({ queryKey: MANAGED_TOOLS_KEY })
+})
+
+it("lists the bot kit's services with whether the bot's profile can use each", async () => {
+  vi.spyOn(api, "getBotManagedTools").mockResolvedValue({
+    configured: true,
+    langsmith_connected: true,
+    servers: [
+      {
+        id: "i",
+        name: "incident-io-bot",
+        kind: "secret",
+        enabled: true,
+        connected: true,
+        has_credential: true,
+        personal: false,
+      },
+      {
+        id: "b",
+        name: "LangChain-Brains",
+        kind: "secret",
+        enabled: true,
+        connected: false,
+        has_credential: false,
+        personal: false,
+      },
+    ],
+  })
+  const client = new QueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <BotToolsSection />
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText("incident-io-bot")).toBeTruthy()
+  expect(screen.getByText("Connected")).toBeTruthy()
+  expect(screen.getByText("Not connected")).toBeTruthy()
+  // Read-only: the bot's credentials are managed in LangSmith, not here.
+  expect(screen.queryByRole("button")).toBeNull()
+  client.clear()
+})
+
+it("hides the bot section when Robin has no bot kit", async () => {
+  const load = vi.spyOn(api, "getBotManagedTools").mockResolvedValue({
+    configured: false,
+    langsmith_connected: false,
+    servers: [],
+  })
+  const client = new QueryClient()
+  const { container } = render(
+    <QueryClientProvider client={client}>
+      <BotToolsSection />
+    </QueryClientProvider>
+  )
+  await waitFor(() => expect(load).toHaveBeenCalled())
+  await waitFor(() => expect(container.textContent).toBe(""))
+  client.clear()
 })

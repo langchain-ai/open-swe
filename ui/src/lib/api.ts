@@ -485,8 +485,6 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
-  /** The workspace bot's LangSmith Managed Tools kit; every run in the workspace loads it. */
-  /** The LangSmith Managed Tools profile the workspace bot runs its kit's tools as. */
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -580,6 +578,14 @@ export interface ManagedToolsConnectCard {
 
 export interface ManagedToolsView {
   configured: boolean
+  langsmith_connected: boolean
+  servers: ManagedServer[]
+}
+
+/** Robin's bot kit: what runs outside private threads load, as the bot's LMT profile. */
+export interface BotToolsView {
+  configured: boolean
+  /** LangSmith lets only a user read a kit, so the admin's own sign-in reads it. */
   langsmith_connected: boolean
   servers: ManagedServer[]
 }
@@ -1866,6 +1872,7 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
+  getBotManagedTools: () => request<BotToolsView>("/managed-tools/bot"),
   /** With a thread's connect card, the thread continues once every service is connected. */
   connectManagedTool: (serverId: string, card?: ManagedToolsConnectCard) =>
     request<ManagedConnectResult>(
