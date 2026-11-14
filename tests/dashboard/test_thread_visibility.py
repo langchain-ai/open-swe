@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
 from openswe.sandboxes import browsers
 from openswe.sandboxes.browsers import LangSmithBrowser, ThreadBrowser
@@ -169,6 +171,30 @@ async def test_private_routes_deny_nonowner_before_side_effects(private_thread, 
     assert exc.value.status_code == 404
     client.threads.update.assert_not_awaited()
     client.runs.cancel_many.assert_not_awaited()
+
+
+async def test_thread_lookup_does_not_disclose_private_existence(private_thread, monkeypatch):
+    _, client = private_thread
+    monkeypatch.setattr(tools, "_actor", AsyncMock(return_value=tools._Actor("bob", None, "bob")))
+    monkeypatch.setattr(tools._Actor, "mirror_of", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        tools, "get_open_swe_thread_id_from_langsmith", AsyncMock(return_value=None)
+    )
+    thread_id = "11111111-1111-4111-8111-111111111111"
+
+    denied = await tools.get_thread(thread_id)
+    client.threads.get.side_effect = NotFoundError(
+        "not found",
+        response=httpx.Response(404, request=httpx.Request("GET", "http://test")),
+        body=None,
+    )
+    missing = await tools.get_thread(thread_id)
+
+    assert denied == missing
+    assert denied["status_code"] == 404
+    assert "not found or inaccessible" in denied["error"]
+    assert "may be private" in denied["error"]
+    client.threads.get_state.assert_not_awaited()
 
 
 async def test_admin_can_view_but_not_open_terminal(private_thread):

@@ -993,6 +993,12 @@ async def get_thread(
         # LangGraph run instead — count it too.
         queued_count += len(pending_runs_task.result())
     except HTTPException as exc:
+        if exc.status_code == 404:
+            return _failure(
+                "thread not found or inaccessible; the ID may be wrong, or the thread "
+                "may be private or otherwise unavailable to you",
+                status_code=404,
+            )
         return _http_failure(exc)
     except Exception:
         logger.exception("Could not load thread %s", thread_id)
