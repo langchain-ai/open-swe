@@ -109,6 +109,7 @@ const appliedComposerDrafts = new WeakSet<ComposerDraft>()
 interface AgentThreadViewProps {
   thread: AgentThread
   composerDraft?: ComposerDraft
+  retry: () => void
 }
 
 function plainSubmission(text: string): ComposerSubmission {
@@ -150,6 +151,7 @@ function editedPaths(messages: Array<Message>): Array<string> {
 export function AgentThreadView({
   thread,
   composerDraft,
+  retry,
 }: AgentThreadViewProps) {
   const reviewChat = useContext(ReviewChatActionsContext)
   const embedded = useContext(EmbeddedThreadContext)
@@ -997,6 +999,7 @@ export function AgentThreadView({
           {hydrationFailed || hydrationTimedOut ? (
             <LoadError
               title="Unable to load messages"
+              retry={retry}
               context={`Thread: ${thread.id}`}
               error={
                 hydrateError !== null

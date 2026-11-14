@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { CatchBoundary } from "@tanstack/react-router"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
@@ -7,7 +8,7 @@ import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import { useAgentThread } from "@/features/agents/lib/queries"
+import { agentThreadKeys, useAgentThread } from "@/features/agents/lib/queries"
 import type { ComposerDraft } from "@/features/agents/lib/types"
 import {
   ensureThreadLoad,
@@ -25,6 +26,9 @@ export function AgentThreadPage(props: {
   /** False when the thread is embedded in a page that names the tab itself. */
   ownsTitle?: boolean
 }) {
+  const [attempt, setAttempt] = useState(0)
+  const retry = () => setAttempt((current) => current + 1)
+
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}
@@ -37,7 +41,11 @@ export function AgentThreadPage(props: {
         />
       )}
     >
-      <AgentThreadContent key={props.threadId} {...props} />
+      <AgentThreadContent
+        key={`${props.threadId}:${attempt}`}
+        {...props}
+        retry={retry}
+      />
     </CatchBoundary>
   )
 }
@@ -48,14 +56,24 @@ function AgentThreadContent({
   subagentId,
   composerDraft,
   ownsTitle = true,
+  retry,
 }: {
   threadId: string
   active?: boolean
   subagentId?: string
   composerDraft?: ComposerDraft
   ownsTitle?: boolean
+  retry: () => void
 }) {
+  const queryClient = useQueryClient()
   const threadQuery = useAgentThread(threadId, active)
+  const retryDetail = () => {
+    void queryClient.resetQueries({
+      queryKey: agentThreadKeys.detail(threadId),
+      exact: true,
+    })
+    retry()
+  }
   const transcript = threadQuery.data?.transcript === "v2"
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title
@@ -95,6 +113,7 @@ function AgentThreadContent({
     return (
       <LoadError
         title="Unable to load thread"
+        retry={retryDetail}
         context={`Thread: ${threadId}`}
         error={
           threadQuery.error ??
@@ -117,6 +136,7 @@ function AgentThreadContent({
           <AgentThreadView
             thread={threadQuery.data}
             composerDraft={composerDraft}
+            retry={retry}
           />
         )}
       </ThreadSourceProvider>
