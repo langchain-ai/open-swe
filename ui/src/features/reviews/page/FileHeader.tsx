@@ -124,7 +124,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       <IconButton
         icon={CopyIcon}
         label={`Copy ${path}`}
-        onClick={() => copyText(path, "Copied the path")}
+        onClick={() => copyText(path)}
         className={onHover}
         {...quiet}
         size="xxs"
