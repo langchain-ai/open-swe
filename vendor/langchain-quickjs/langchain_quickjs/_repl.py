@@ -11,11 +11,13 @@ import contextlib
 import hashlib
 import json
 import logging
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, get_type_hints
 
+import tree_sitter_javascript
 from langchain_core.tools.base import (
     InjectedToolCallId,
     _is_injected_arg_type,
@@ -40,6 +42,7 @@ from quickjs_rs import (
 from quickjs_rs import (
     TimeoutError as QJSTimeoutError,
 )
+from tree_sitter import Language, Parser
 
 from langchain_quickjs._format import (
     coerce_tool_output_for_ptc,
@@ -414,6 +417,9 @@ class _ThreadREPL:
     ) -> None:
         self._worker = worker
         self._runtime = runtime
+        self._source_parser = Parser(Language(tree_sitter_javascript.language()))
+        self._eval_started = False
+        self._eval_marker = "__quickjs_eval_started"
         self._resolve_tool = resolve_tool
         # The Context-level `timeout` is used as the cumulative budget
         # for sync evals. Async evals pass `timeout=` per call so each
@@ -456,6 +462,7 @@ class _ThreadREPL:
 
     async def _ainit(self) -> None:
         self._ctx = self._runtime.new_context(timeout=self._per_call_timeout)
+        self._ctx.register(self._eval_marker, self._mark_eval_started)
         if self._capture_console:
             self._install_console()
         if self._resolve_tool is not None:
@@ -908,6 +915,8 @@ class _ThreadREPL:
             ctx,
             inject_globals=inject_globals,
         )
+        if ctx.eval(f"typeof this[{json.dumps(self._eval_marker)}]") != "function":
+            ctx.register(self._eval_marker, self._mark_eval_started)
 
     async def _aprepare_for_eval(
         self, payload: bytes | None, tools: Sequence[BaseTool] | None
@@ -925,6 +934,97 @@ class _ThreadREPL:
         if tools is not None:
             await self._ainstall_tools(tools)
 
+    def _mark_eval_started(self) -> None:
+        self._eval_started = True
+
+    def _reassign_top_level_let(  # noqa: C901
+        self, code: str, name: str
+    ) -> str | None:
+        """Reassign a conflicting top-level identifier binding."""
+        source = code.encode("utf-8")
+        root = self._source_parser.parse(source).root_node
+        if root.has_error:
+            return None
+        for declaration in root.named_children:
+            if declaration.type != "lexical_declaration":
+                continue
+            kind = declaration.child_by_field_name("kind")
+            if kind is None or kind.type != "let":
+                continue
+            declarators = [
+                child
+                for child in declaration.named_children
+                if child.type == "variable_declarator"
+            ]
+            for index, declarator in enumerate(declarators):
+                binding = declarator.child_by_field_name("name")
+                if binding is None or binding.type != "identifier":
+                    continue
+                if (
+                    source[binding.start_byte : binding.end_byte].decode("utf-8")
+                    != name
+                ):
+                    continue
+                edits: list[tuple[int, int, bytes]] = []
+                if index == 0:
+                    edits.append((kind.start_byte, kind.end_byte, b""))
+                else:
+                    comma = next(
+                        child
+                        for child in declaration.children
+                        if child.type == ","
+                        and child.end_byte <= declarator.start_byte
+                        and child.start_byte >= declarators[index - 1].end_byte
+                    )
+                    edits.append((comma.start_byte, comma.end_byte, b";"))
+                if index + 1 < len(declarators):
+                    comma = next(
+                        child
+                        for child in declaration.children
+                        if child.type == "," and child.start_byte >= declarator.end_byte
+                    )
+                    edits.append((comma.start_byte, comma.end_byte, b"; let"))
+                if declarator.child_by_field_name("value") is None:
+                    edits.append((binding.end_byte, binding.end_byte, b" = undefined"))
+                for start, end, replacement in sorted(edits, reverse=True):
+                    source = source[:start] + replacement + source[end:]
+                return source.decode("utf-8")
+        return None
+
+    async def _ahas_valid_declarations(self, code: str) -> bool:
+        """Reject conflicts within the script itself in an isolated context."""
+        probe = self._runtime.new_context(timeout=self._per_call_timeout)
+        try:
+            await probe.eval_handle_async(
+                self._prefix_eval(code, "throw null;"), timeout=self._per_call_timeout
+            )
+        except JSError as exc:
+            valid = exc.name == "Error" and exc.message == "null"
+            _clear_exception_references(exc)
+            return valid
+        finally:
+            probe.close()
+        return False
+
+    def _prefix_eval(self, code: str, prologue: str) -> str:
+        source = code.encode("utf-8")
+        root = self._source_parser.parse(source).root_node
+        offset = 0
+        for statement in root.named_children:
+            if statement.type == "comment":
+                offset = statement.end_byte
+                continue
+            if (
+                statement.type != "expression_statement"
+                or not statement.named_children
+                or statement.named_children[0].type != "string"
+            ):
+                break
+            offset = statement.end_byte
+        # Repeating directives preserves strict mode and the original completion value.
+        marker = f"\n;{prologue}\n".encode()
+        return (source[:offset] + marker + source).decode("utf-8")
+
     async def _aeval_async(  # noqa: C901, PLR0912, PLR0915
         self,
         code: str,
@@ -934,20 +1034,14 @@ class _ThreadREPL:
         tools: Sequence[BaseTool] | None = None,
         outer_loop: asyncio.AbstractEventLoop | None = None,
     ) -> EvalOutcome:
-        """Uses `ctx.eval_async` directly.
-
-        Overlapping evals on the same context surface as
-        `ConcurrentEvalError` (recorded in `EvalOutcome.error_type`).
-        We intentionally do not queue: a model dispatching overlapping
-        evals against shared state is almost always a prompting bug,
-        and a loud failure is a better signal than silent serialisation.
-        """
+        """Evaluate code, recovering declaration conflicts only before execution."""
         ctx = self._require_ctx()
         outcome = EvalOutcome()
         # Save/restore rather than clear-on-exit: a second eval that hits
         # ConcurrentEvalError would otherwise null out the in-flight
         # eval's state and orphan its bridge calls.
         prev_ptc_state = self._ptc_state
+        prev_eval_started = self._eval_started
         self._ptc_state = _PTCState(
             remaining_calls=self._max_ptc_calls,
             outer_runtime=outer_runtime,
@@ -960,7 +1054,33 @@ class _ThreadREPL:
             # this the Promise object itself fails to marshal and
             # the result surfaces as `[object]` rather than the
             # awaited value.
-            handle = await ctx.eval_handle_async(code, timeout=self._per_call_timeout)
+            # Only compilation failures may be retried; a nested eval can throw
+            # the same error after the outer script has already called tools.
+            while True:
+                self._eval_started = False
+                try:
+                    handle = await ctx.eval_handle_async(
+                        self._prefix_eval(
+                            code, f"this[{json.dumps(self._eval_marker)}]();"
+                        ),
+                        timeout=self._per_call_timeout,
+                    )
+                    break
+                except JSError as exc:
+                    conflict = re.fullmatch(r"redeclaration of '([^']+)'", exc.message)
+                    rewritten = (
+                        self._reassign_top_level_let(code, conflict[1])
+                        if not self._eval_started
+                        and exc.name == "SyntaxError"
+                        and conflict
+                        else None
+                    )
+                    if rewritten is None or not await self._ahas_valid_declarations(
+                        code
+                    ):
+                        raise
+                    _clear_exception_references(exc)
+                    code = rewritten
             try:
                 if handle.is_promise():
                     resolved = await handle.await_promise(
@@ -1037,6 +1157,7 @@ class _ThreadREPL:
             _clear_exception_references(e)
         finally:
             self._ptc_state = prev_ptc_state
+            self._eval_started = prev_eval_started
             outcome.stdout, outcome.stdout_truncated_chars = self._console.drain()
         return outcome
 

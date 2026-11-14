@@ -1300,6 +1300,8 @@ dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "quickjs-rs" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-javascript" },
 ]
 
 [package.metadata]
@@ -1310,6 +1312,8 @@ requires-dist = [
     { name = "langchain-core", specifier = ">=1.7.6,<2.0.0" },
     { name = "langgraph", specifier = ">=1.2.20,<2.0.0" },
     { name = "quickjs-rs", specifier = ">=0.2.6,<0.3.0" },
+    { name = "tree-sitter", specifier = ">=0.25,<0.27" },
+    { name = "tree-sitter-javascript", specifier = ">=0.25,<0.26" },
 ]
 
 [[package]]
