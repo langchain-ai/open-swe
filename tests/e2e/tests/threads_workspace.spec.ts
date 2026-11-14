@@ -514,30 +514,39 @@ test.describe("threads workspace", () => {
       });
     });
 
-    await page.getByRole("link", { name: title }).click();
-    await threadChunkStarted.promise;
-    profileGate.resolve();
-    await profileFinished.promise;
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        }),
-    );
-    threadChunkGate.resolve();
+    try {
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await page
+        .getByPlaceholder("Search commands, threads, and pull requests…")
+        .fill(title);
+      await page.getByRole("option", { name: title }).click();
+      await threadChunkStarted.promise;
+      profileGate.resolve();
+      await profileFinished.promise;
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      threadChunkGate.resolve();
 
-    await expect(page).toHaveURL(`/agents/${threadId}`);
-    await expect(
-      page.getByText("This thread has no messages yet."),
-    ).toBeVisible();
-    const flashed = await page.evaluate(
-      () =>
-        (
-          (window as unknown as Record<string, unknown>)
-            .__newThreadDialogSeen as { value: boolean }
-        ).value,
-    );
-    expect(flashed).toBe(false);
+      await expect(page).toHaveURL(`/agents/${threadId}`);
+      await expect(
+        page.getByText("This thread has no messages yet."),
+      ).toBeVisible();
+      const flashed = await page.evaluate(
+        () =>
+          (
+            (window as unknown as Record<string, unknown>)
+              .__newThreadDialogSeen as { value: boolean }
+          ).value,
+      );
+      expect(flashed).toBe(false);
+    } finally {
+      profileGate.resolve();
+      threadChunkGate.resolve();
+    }
   });
 
   test("shows a recency-sorted repository list in the sidebar", async ({

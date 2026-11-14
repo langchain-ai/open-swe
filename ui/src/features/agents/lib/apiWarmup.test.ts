@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 import { agentsApi } from "./api"
 import { apiWarmupScript } from "./apiWarmup"
 import { SIDEBAR_PAGE_SIZE, sidebarRecentsParams } from "./queries"
@@ -79,6 +80,8 @@ function stubPrefs(prefs: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  clearPerfSpans()
   setReadyState("complete")
 })
 
@@ -122,6 +125,100 @@ describe("apiWarmupScript", () => {
     expect(original).toHaveBeenCalledTimes(2)
     // Pool drained → the patch removes itself.
     expect(window.fetch).toBe(original)
+  })
+
+  it("times a completed warmup from its start to its response, not its later handoff", async () => {
+    setReadyState("loading")
+    const now = vi.spyOn(performance, "now").mockReturnValue(100)
+    let resolveResponse!: (response: Response) => void
+    const original = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve
+        })
+    )
+    vi.stubGlobal("fetch", original)
+    run(apiWarmupScript("/agents")!)
+    now.mockReturnValue(180)
+    resolveResponse(new Response("{}"))
+    await Promise.resolve()
+    now.mockReturnValue(500)
+
+    await agentsApi.listThreadsPage(
+      {
+        ...sidebarRecentsParams({
+          owned: true,
+          repoMode: false,
+          sort: "updated",
+        }),
+        limit: SIDEBAR_PAGE_SIZE,
+        offset: 0,
+      },
+      true
+    )
+
+    expect(original).toHaveBeenCalledTimes(1)
+    expect(getPerfSpans().at(-1)).toMatchObject({
+      name: "thread_list_request",
+      startedAt: 100,
+      duration: 80,
+      attributes: { endpoint: "page", status: 200, outcome: "success" },
+    })
+  })
+
+  it("uses the original start for a warmup still in flight at handoff", async () => {
+    setReadyState("loading")
+    const now = vi.spyOn(performance, "now").mockReturnValue(100)
+    let resolveResponse!: (response: Response) => void
+    const original = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve
+        })
+    )
+    vi.stubGlobal("fetch", original)
+    run(apiWarmupScript("/agents")!)
+    now.mockReturnValue(150)
+    const page = agentsApi.listThreadsPage(
+      {
+        ...sidebarRecentsParams({
+          owned: true,
+          repoMode: false,
+          sort: "updated",
+        }),
+        limit: SIDEBAR_PAGE_SIZE,
+        offset: 0,
+      },
+      true
+    )
+    now.mockReturnValue(220)
+    resolveResponse(new Response("{}"))
+    await page
+
+    expect(original).toHaveBeenCalledTimes(1)
+    expect(getPerfSpans().at(-1)).toMatchObject({
+      name: "thread_list_request",
+      startedAt: 100,
+      duration: 120,
+      attributes: { endpoint: "page", status: 200, outcome: "success" },
+    })
+  })
+
+  it("does not attribute an unmatched warmup to a different page request", async () => {
+    setReadyState("loading")
+    const now = vi.spyOn(performance, "now").mockReturnValue(100)
+    const original = stubFetch()
+    run(apiWarmupScript("/agents")!)
+    now.mockReturnValue(500)
+
+    await agentsApi.listThreadsPage({ limit: 123 }, true)
+
+    expect(original).toHaveBeenCalledTimes(2)
+    expect(getPerfSpans().at(-1)).toMatchObject({
+      name: "thread_list_request",
+      startedAt: 500,
+      attributes: { endpoint: "page" },
+    })
   })
 
   it("passes unrelated requests through", async () => {

@@ -887,6 +887,264 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
   });
 
+  test("shows each sidebar section once earlier sections have settled", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    const id = "75000000-0000-4000-8000-000000000001";
+    const now = Date.now();
+    await page.request.delete(`/threads/${id}`);
+    const created = await page.request.post("/threads", {
+      data: {
+        thread_id: id,
+        if_exists: "raise",
+        metadata: {
+          owner_login: SAME_USER.login,
+          participant_logins: { [SAME_USER.login]: true },
+          title: "Sidebar pinned thread",
+          source: "dashboard",
+          origin: "dashboard",
+          thread_category: "interactive",
+          trigger_kind: "user",
+          created_at_ms: now,
+          updated_at_ms: now,
+        },
+      },
+    });
+    expect(created.ok()).toBeTruthy();
+    const pin = await page.request.post(`/dashboard/api/threads/${id}/pin`, {
+      headers: { origin: new URL(created.url()).origin },
+    });
+    expect(pin.ok()).toBeTruthy();
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({ organize: "date", collapsedSectionKeys: ["pinned"] }),
+      );
+    });
+    let releaseRecents = () => {};
+    let releasePlugins = () => {};
+    let releasePinned = () => {};
+    const heldRecents = new Promise<void>((resolve) => {
+      releaseRecents = resolve;
+    });
+    const heldPlugins = new Promise<void>((resolve) => {
+      releasePlugins = resolve;
+    });
+    const heldPinned = new Promise<void>((resolve) => {
+      releasePinned = resolve;
+    });
+    await page.route("**/dashboard/api/threads/page?*", async (route) => {
+      await heldRecents;
+      await route.continue();
+    });
+    await page.route("**/dashboard/api/threads/pinned", async (route) => {
+      await heldPinned;
+      await route.continue();
+    });
+    await page.route("**/dashboard/api/plugins", async (route) => {
+      await heldPlugins;
+      await route.continue();
+    });
+    try {
+      await page.goto("/agents", { waitUntil: "commit" });
+      const pinned = page.getByText("Sidebar pinned thread");
+      const pinnedHeader = page.getByRole("button", {
+        name: "Pinned",
+        exact: true,
+      });
+      const recents = page.getByRole("status", {
+        name: "Loading recent threads",
+      });
+      await expect(
+        page.getByRole("status", { name: "Loading apps" }),
+      ).toBeVisible();
+      await expect(pinnedHeader).toBeHidden();
+      await expect(recents).toBeHidden();
+      releasePlugins();
+      await expect(pinnedHeader).toBeVisible();
+      await expect(recents).toBeHidden();
+      releasePinned();
+      await expect(recents).toBeVisible();
+      await pinnedHeader.click();
+      await expect(pinned).toBeVisible();
+      const pinnedY = (await pinned.boundingBox())!.y;
+      releaseRecents();
+      await expect(recents).toBeHidden();
+      expect((await pinned.boundingBox())!.y).toBe(pinnedY);
+    } finally {
+      releaseRecents();
+      releasePlugins();
+      releasePinned();
+      await page.request.delete(`/threads/${id}`);
+    }
+  });
+
+  test("keeps navigation in place when the concierge profile loads", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/profile", async (route) => {
+      const response = await route.fetch();
+      const profile = (await response.json()) as Record<string, unknown>;
+      await held;
+      await route.fulfill({
+        response,
+        json: { ...profile, concierge_mode: true },
+      });
+    });
+    try {
+      await page.goto("/agents", { waitUntil: "commit" });
+      const newThread = page.getByRole("link", { name: "New", exact: true });
+      const navigation = page.getByRole("link", {
+        name: "Automations",
+        exact: true,
+      });
+      await expect(newThread).toBeVisible();
+      await expect(navigation).toBeHidden();
+      const newThreadY = (await newThread.boundingBox())!.y;
+      release();
+      await expect(page.getByText("Concierge", { exact: true })).toBeVisible();
+      await expect(navigation).toBeVisible();
+      expect((await newThread.boundingBox())!.y).toBe(newThreadY);
+    } finally {
+      release();
+    }
+  });
+
+  test("keeps later project folders hidden until earlier folders load", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    const ids = [
+      "75000000-0000-4000-8000-000000000011",
+      "75000000-0000-4000-8000-000000000012",
+    ];
+    const names = ["sidebar-first-folder", "sidebar-second-folder"];
+    for (const [index, id] of ids.entries()) {
+      await page.request.delete(`/threads/${id}`);
+      const created = await page.request.post("/threads", {
+        data: {
+          thread_id: id,
+          if_exists: "raise",
+          metadata: {
+            owner_login: SAME_USER.login,
+            participant_logins: { [SAME_USER.login]: true },
+            title: names[index],
+            source: "dashboard",
+            origin: "dashboard",
+            thread_category: "interactive",
+            trigger_kind: "user",
+            repo_owner: "acme",
+            repo_name: names[index],
+            created_at_ms: Date.now() + (1 - index) * 1000,
+            updated_at_ms: Date.now() + (1 - index) * 1000,
+          },
+        },
+      });
+      expect(created.ok()).toBeTruthy();
+    }
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({
+          organize: "repo",
+          pinnedRepoKeys: [
+            "repo:acme/sidebar-first-folder",
+            "repo:acme/sidebar-second-folder",
+          ],
+        }),
+      );
+    });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/page?*", async (route) => {
+      if (
+        new URL(route.request().url()).searchParams.get("repo") ===
+        "acme/sidebar-first-folder"
+      ) {
+        await held;
+      }
+      await route.continue();
+    });
+    try {
+      await page.goto("/agents", { waitUntil: "commit" });
+      const first = page.getByRole("button", { name: names[0], exact: true });
+      const second = page.getByRole("button", { name: names[1], exact: true });
+      await expect(first).toBeVisible();
+      await expect(
+        page.getByRole("status", { name: `Loading chats in ${names[0]}` }),
+      ).toBeVisible();
+      await expect(second).toBeHidden();
+      const firstY = (await first.boundingBox())!.y;
+      release();
+      await expect(second).toBeVisible();
+      expect((await first.boundingBox())!.y).toBe(firstY);
+    } finally {
+      release();
+      for (const id of ids) await page.request.delete(`/threads/${id}`);
+    }
+  });
+
+  test("keeps the active chat visible while its project loads", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    const id = "75000000-0000-4000-8000-000000000002";
+    await page.request.delete(`/threads/${id}`);
+    const now = Date.now();
+    const created = await page.request.post("/threads", {
+      data: {
+        thread_id: id,
+        if_exists: "raise",
+        metadata: {
+          owner_login: SAME_USER.login,
+          participant_logins: { [SAME_USER.login]: true },
+          title: "Sidebar active thread",
+          source: "dashboard",
+          origin: "dashboard",
+          thread_category: "interactive",
+          trigger_kind: "user",
+          repo_owner: "acme",
+          repo_name: "sidebar-loading",
+          created_at_ms: now,
+          updated_at_ms: now,
+        },
+      },
+    });
+    expect(created.ok()).toBeTruthy();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/page?*", async (route) => {
+      if (new URL(route.request().url()).searchParams.has("repo")) await held;
+      await route.continue();
+    });
+    try {
+      await page.goto(`/agents/${id}`, { waitUntil: "commit" });
+      await expect(
+        page.getByRole("status", { name: "Loading chats in sidebar-loading" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: /Sidebar active thread/ }).first(),
+      ).toBeVisible();
+      release();
+      await expect(
+        page.getByRole("status", { name: "Loading chats in sidebar-loading" }),
+      ).toBeHidden();
+    } finally {
+      release();
+      await page.request.delete(`/threads/${id}`);
+    }
+  });
+
   // A slow sidebar used to render as a blank column, indistinguishable from an
   // account with no threads.
   test("shows a loading placeholder while the sidebar list is in flight", async ({
@@ -900,23 +1158,23 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
     await page.route("**/dashboard/api/threads/page?*", async (route) => {
       const params = new URL(route.request().url()).searchParams;
-      if (params.get("resolved") === "false" && params.get("limit") === "10") {
+      if (params.get("ownerless") === "true" && params.get("limit") === "25") {
         await held;
       }
       await route.continue();
     });
 
-    // The held request would block `load`, so stop waiting at the first byte.
-    await page.goto("/agents", { waitUntil: "commit" });
-
-    const skeleton = page.locator(
-      "[data-testid=sidebar-threads-skeleton]:visible",
-    );
-    await expect(skeleton).toBeVisible({ timeout: 30_000 });
-    await expect(skeleton.getByRole("status")).toContainText("Loading threads");
-
-    release();
-    await expect(skeleton).toBeHidden({ timeout: 30_000 });
+    try {
+      await page.goto("/agents", { waitUntil: "commit" });
+      const skeleton = page.getByRole("status", {
+        name: "Loading chats in No project",
+      });
+      await expect(skeleton).toBeVisible({ timeout: 30_000 });
+      release();
+      await expect(skeleton).toBeHidden({ timeout: 30_000 });
+    } finally {
+      release();
+    }
   });
 
   // A persisted filter makes the "no matches" branch true before any data has
@@ -928,7 +1186,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await page.addInitScript(() => {
       localStorage.setItem(
         "open-swe.agents.sidebar-prefs",
-        JSON.stringify({ filters: { sources: ["slack"] } }),
+        JSON.stringify({
+          organize: "date",
+          filters: { sources: ["slack"] },
+        }),
       );
     });
 
@@ -936,37 +1197,35 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
+    await page.route("**/dashboard/api/threads/pinned", (route) =>
+      route.fulfill({ json: [] }),
+    );
     await page.route("**/dashboard/api/threads/page?*", async (route) => {
       const params = new URL(route.request().url()).searchParams;
-      if (params.get("resolved") === "false" && params.get("limit") === "10") {
+      if (params.get("resolved") === "false" && params.get("limit") === "25") {
         await held;
+        await route.fulfill({ json: { items: [], limit: 25, offset: 0 } });
+      } else {
+        await route.continue();
       }
-      await route.continue();
     });
 
-    const sidebarRequest = page.waitForRequest((request) => {
-      const url = new URL(request.url());
-      return (
-        url.pathname === "/dashboard/api/threads/page" &&
-        url.searchParams.get("resolved") === "false" &&
-        url.searchParams.get("limit") === "10"
-      );
-    });
-    await page.goto("/agents", { waitUntil: "commit" });
-
-    const skeleton = page.locator(
-      "[data-testid=sidebar-threads-skeleton]:visible",
-    );
-    await expect(skeleton).toBeVisible({ timeout: 30_000 });
-
-    await sidebarRequest;
-
-    await expect(skeleton).toBeVisible();
-    await expect(page.getByText("No threads match these filters.")).toHaveCount(
-      0,
-    );
-
-    release();
+    try {
+      await page.goto("/agents", { waitUntil: "commit" });
+      const skeleton = page.getByRole("status", {
+        name: "Loading recent threads",
+      });
+      await expect(skeleton).toBeVisible({ timeout: 30_000 });
+      await expect(
+        page.getByText("No threads match these filters."),
+      ).toHaveCount(0);
+      release();
+      await expect(
+        page.getByText("No threads match these filters."),
+      ).toBeVisible();
+    } finally {
+      release();
+    }
   });
 });
 

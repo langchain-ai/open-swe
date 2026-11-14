@@ -1,5 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,75 +90,86 @@ export function SidebarNav({
             {item.label}
           </Link>
         ))}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            color="secondary"
-            variant="plain"
-            size="sm"
-            aria-label="More"
-            type="button"
-            className={cn(
-              ROW,
-              // Match the Link rows' box and hover: Macaw's plain variant adds a
-              // 1px transparent border that shifts the label, and its own dark hover.
-              "h-auto justify-start border-0 text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
-              hidden.some((item) => item.to === activeSection) &&
-                cn(SELECTED_ROW, "text-primary dark:hover:bg-selected-hover")
-            )}
-          >
-            <DotsThreeIcon size={16} weight="bold" className="shrink-0" />
-            More
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          side="right"
-          align="start"
-          className="w-48"
-          onCloseAutoFocus={(event) => {
-            if (navigated.current) event.preventDefault()
-            navigated.current = false
-          }}
+      {plugins.isLoading ? (
+        <div
+          data-sidebar-loading
+          role="status"
+          aria-label="Loading apps"
+          className="flex h-8 items-center px-space-2"
         >
-          {hidden.map((item) => (
-            <DropdownMenuItem key={item.to} asChild>
-              <Link
-                {...target(item.to)}
-                onClick={() => {
-                  navigated.current = true
-                  onNavigate()
-                }}
-              >
-                <item.icon size={14} weight="regular" className="shrink-0" />
-                {item.label}
-              </Link>
-            </DropdownMenuItem>
-          ))}
-          {hidden.length > 0 && <DropdownMenuSeparator />}
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <PencilSimpleIcon size={14} weight="regular" />
-              Edit sidebar
-              <CaretRightIcon
-                size={12}
-                weight="regular"
-                className="ml-auto text-icon-secondary"
-              />
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-48">
-              {items.map((item) => (
-                <MenuCheckItem
-                  key={item.to}
-                  checked={!hidden.includes(item)}
-                  onCheckedChange={() => toggleNavItemHidden(item.to)}
+          <Skeleton className="h-2.5 w-24" />
+        </div>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label="More"
+              type="button"
+              className={cn(
+                ROW,
+                // Match the Link rows' box and hover: Macaw's plain variant adds a
+                // 1px transparent border that shifts the label, and its own dark hover.
+                "h-auto justify-start border-0 text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
+                hidden.some((item) => item.to === activeSection) &&
+                  cn(SELECTED_ROW, "text-primary dark:hover:bg-selected-hover")
+              )}
+            >
+              <DotsThreeIcon size={16} weight="bold" className="shrink-0" />
+              More
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="right"
+            align="start"
+            className="w-48"
+            onCloseAutoFocus={(event) => {
+              if (navigated.current) event.preventDefault()
+              navigated.current = false
+            }}
+          >
+            {hidden.map((item) => (
+              <DropdownMenuItem key={item.to} asChild>
+                <Link
+                  {...target(item.to)}
+                  onClick={() => {
+                    navigated.current = true
+                    onNavigate()
+                  }}
                 >
+                  <item.icon size={14} weight="regular" className="shrink-0" />
                   {item.label}
-                </MenuCheckItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        </DropdownMenuContent>
-      </DropdownMenu>
+                </Link>
+              </DropdownMenuItem>
+            ))}
+            {hidden.length > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <PencilSimpleIcon size={14} weight="regular" />
+                Edit sidebar
+                <CaretRightIcon
+                  size={12}
+                  weight="regular"
+                  className="ml-auto text-icon-secondary"
+                />
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-48">
+                {items.map((item) => (
+                  <MenuCheckItem
+                    key={item.to}
+                    checked={!hidden.includes(item)}
+                    onCheckedChange={() => toggleNavItemHidden(item.to)}
+                  >
+                    {item.label}
+                  </MenuCheckItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </nav>
   )
 }

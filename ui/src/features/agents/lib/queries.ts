@@ -669,7 +669,7 @@ export function useSeedAgentThreadDetails(
   }, [activeThreadId, queryClient, threads])
 }
 
-export const SIDEBAR_PAGE_SIZE = 10
+export const SIDEBAR_PAGE_SIZE = 25
 
 /** The sources the sidebar asks the server to leave out. */
 function excludedSources(
@@ -710,9 +710,13 @@ export function useSidebarPinnedThreads({
   enabled = true,
   measure = false,
 } = {}) {
+  const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: agentThreadKeys.pinned,
-    queryFn: () => agentsApi.listPinnedThreads(),
+    queryFn: () =>
+      agentsApi.listPinnedThreads(
+        !queryClient.getQueryState(agentThreadKeys.pinned)?.dataUpdatedAt
+      ),
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -753,12 +757,14 @@ export function useSidebarRepos({
   const { data: user } = useSession()
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
+  const queryClient = useQueryClient()
+  const reposKey = agentThreadKeys.repos({
+    ...params,
+    includeClaudeCode,
+    includeSlack,
+  })
   const query = useQuery({
-    queryKey: agentThreadKeys.repos({
-      ...params,
-      includeClaudeCode,
-      includeSlack,
-    }),
+    queryKey: reposKey,
     meta: {
       invalidatedBy: [
         ...(user?.user_id ? [invalidationTopic("threads", user.user_id)] : []),
@@ -767,11 +773,14 @@ export function useSidebarRepos({
           : []),
       ],
     },
-    queryFn: () =>
-      agentsApi.listThreadRepos({
-        ...params,
-        ...excludedSources(includeClaudeCode, includeSlack),
-      }),
+    queryFn: ({ queryKey }) =>
+      agentsApi.listThreadRepos(
+        {
+          ...params,
+          ...excludedSources(includeClaudeCode, includeSlack),
+        },
+        !queryClient.getQueryState(queryKey)?.dataUpdatedAt
+      ),
     enabled: enabled && hydrated,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -1825,11 +1834,14 @@ export function useInfiniteThreadsPages(
 ) {
   const queryClient = useQueryClient()
   const { data: user } = useSession()
-  const queryKey = agentThreadKeys.infinitePages(params)
+  const pagesKey = agentThreadKeys.infinitePages(params)
   const pagesQuery = useInfiniteQuery({
-    queryKey,
-    queryFn: ({ pageParam }) =>
-      agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    queryKey: pagesKey,
+    queryFn: ({ pageParam, queryKey }) =>
+      agentsApi.listThreadsPage(
+        { ...params, offset: pageParam },
+        !queryClient.getQueryState(queryKey)?.dataUpdatedAt
+      ),
     meta: {
       invalidatedBy: (data) => [
         ...(user?.user_id ? [invalidationTopic("threads", user.user_id)] : []),

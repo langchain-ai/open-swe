@@ -237,6 +237,9 @@ const API_BASE = dashboardApiBase()
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
+const timedListFetch = withRequestTiming((input, init) => fetch(input, init), {
+  measureLists: true,
+})
 
 function errorDetailMessage(detail: unknown): string {
   if (typeof detail === "string") return detail
@@ -281,20 +284,24 @@ function errorDetailMessage(detail: unknown): string {
 
 export async function agentsRequest<T>(
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  measureList = false
 ): Promise<T> {
   return productAnalytics.mutation(path, init.method, async () => {
     const requestId = newRequestId()
-    const res = await timedFetch(dashboardApiUrl(path), {
-      ...init,
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        [REQUEST_ID_HEADER]: requestId,
-        ...dashboardForwardedHeaders(),
-        ...init.headers,
-      },
-    }).catch((cause: unknown) => {
+    const res = await (measureList ? timedListFetch : timedFetch)(
+      dashboardApiUrl(path),
+      {
+        ...init,
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          [REQUEST_ID_HEADER]: requestId,
+          ...dashboardForwardedHeaders(),
+          ...init.headers,
+        },
+      }
+    ).catch((cause: unknown) => {
       throw networkError(cause, requestId)
     })
     if (!res.ok) {
@@ -420,12 +427,16 @@ export const agentsApi = {
       includeAutomations?: boolean
       owned?: boolean
       excludeSources?: Array<string>
-    } = {}
+    } = {},
+    measure = false
   ) =>
     agentsRequest<Array<SidebarFolder>>(
-      `/threads/repos${buildReposQuery(params)}`
+      `/threads/repos${buildReposQuery(params)}`,
+      {},
+      measure
     ),
-  listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  listPinnedThreads: (measure = false) =>
+    agentsRequest<Array<AgentThread>>("/threads/pinned", {}, measure),
   reorderSidebarThreads: (body: {
     thread_ids: Array<string>
     project?: string
@@ -441,8 +452,12 @@ export const agentsApi = {
       method: "PUT",
       body: JSON.stringify({ thread_ids: threadIds }),
     }),
-  listThreadsPage: (params: ThreadsPageParams = {}) =>
-    agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  listThreadsPage: (params: ThreadsPageParams = {}, measure = false) =>
+    agentsRequest<ThreadsPage>(
+      `/threads/page${buildThreadsPageQuery(params)}`,
+      {},
+      measure
+    ),
   shareThreadWithWorkspace: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,

@@ -421,6 +421,11 @@ describe("sidebar queries", () => {
         result.current.data?.every((thread) => thread.status === "finished")
       ).toBe(true)
     )
+    expect(listPins.mock.calls.map(([measure]) => measure)).toEqual([
+      true,
+      false,
+      false,
+    ])
     const calls = listPins.mock.calls.length
     await act(() => vi.advanceTimersByTimeAsync(6000))
     expect(listPins).toHaveBeenCalledTimes(calls)
@@ -467,6 +472,33 @@ describe("sidebar queries", () => {
     await waitFor(() => expect(result.current.pins.data).toEqual([]))
   })
 
+  it("does not measure background page polling", async () => {
+    vi.useFakeTimers()
+    const running = optimisticThread("running", { prompt: "Running" })
+    const listThreads = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockResolvedValue({
+        ...page,
+        items: [running],
+      })
+    const client = testClient()
+    const { result } = renderHook(
+      () => useSidebarRecents({ repoMode: false }),
+      {
+        wrapper: wrapperFor(client),
+      }
+    )
+    await vi.waitFor(() => expect(result.current.items).toHaveLength(1))
+    await act(() => vi.advanceTimersByTimeAsync(2000))
+    await vi.waitFor(() =>
+      expect(listThreads.mock.calls.length).toBeGreaterThan(1)
+    )
+    expect(listThreads.mock.calls[0]?.[1]).toBe(true)
+    expect(
+      listThreads.mock.calls.slice(1).every(([, measure]) => !measure)
+    ).toBe(true)
+  })
+
   it("scopes Recents to ownerless threads only in repository mode", async () => {
     const listThreads = vi
       .spyOn(agentsApi, "listThreadsPage")
@@ -481,28 +513,34 @@ describe("sidebar queries", () => {
     )
 
     await waitFor(() =>
-      expect(listThreads).toHaveBeenCalledWith({
-        limit: SIDEBAR_PAGE_SIZE,
-        hierarchy: true,
-        offset: 0,
-        resolved: false,
-        scope: "interactive",
-        ownerless: true,
-        sortBy: "created_at",
-      })
+      expect(listThreads).toHaveBeenCalledWith(
+        {
+          limit: SIDEBAR_PAGE_SIZE,
+          hierarchy: true,
+          offset: 0,
+          resolved: false,
+          scope: "interactive",
+          ownerless: true,
+          sortBy: "created_at",
+        },
+        true
+      )
     )
 
     rerender({ repoMode: false })
 
     await waitFor(() =>
-      expect(listThreads).toHaveBeenCalledWith({
-        limit: SIDEBAR_PAGE_SIZE,
-        hierarchy: true,
-        offset: 0,
-        resolved: false,
-        scope: "interactive",
-        sortBy: "created_at",
-      })
+      expect(listThreads).toHaveBeenCalledWith(
+        {
+          limit: SIDEBAR_PAGE_SIZE,
+          hierarchy: true,
+          offset: 0,
+          resolved: false,
+          scope: "interactive",
+          sortBy: "created_at",
+        },
+        true
+      )
     )
   })
 
@@ -553,14 +591,16 @@ describe("sidebar queries", () => {
         expect.objectContaining({
           repo: "langchain-ai/first",
           offset: 1,
-        })
+        }),
+        false
       )
     )
     expect(listThreads).not.toHaveBeenCalledWith(
       expect.objectContaining({
         repo: "langchain-ai/second",
         offset: 1,
-      })
+      }),
+      false
     )
   })
 
@@ -1534,17 +1574,19 @@ describe("sidebar activity invalidation", () => {
     const now = new Date(2026, 5, 10, 15)
     const yesterday = new Date(2026, 5, 9, 12).getTime()
     let updatedAt = yesterday
-    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({
-      ...page,
-      items: [
-        {
-          ...optimisticThread("old-thread", { prompt: "Continue" }),
-          createdAt: yesterday,
-          updatedAt,
-          status: "idle",
-        },
-      ],
-    }))
+    const listThreads = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockImplementation(async () => ({
+        ...page,
+        items: [
+          {
+            ...optimisticThread("old-thread", { prompt: "Continue" }),
+            createdAt: yesterday,
+            updatedAt,
+            status: "idle",
+          },
+        ],
+      }))
     const client = testClient()
     const { result } = renderHook(
       () =>
@@ -1565,6 +1607,10 @@ describe("sidebar activity invalidation", () => {
       })
     )
     await waitFor(() => expect(result.current[0]?.label).toBe("Last 12 hours"))
+    expect(listThreads.mock.calls.map(([, measure]) => measure)).toEqual([
+      true,
+      false,
+    ])
   })
 })
 

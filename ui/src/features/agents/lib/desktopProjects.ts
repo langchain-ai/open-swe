@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 import type { DesktopProject } from "@/desktop"
+import { reportError } from "@/lib/errorReporting"
 
 export function useDesktopProjects() {
   const [projects, setProjects] = useState<Array<DesktopProject>>([])
@@ -9,11 +10,20 @@ export function useDesktopProjects() {
   useEffect(() => {
     const desktop = window.openSweDesktop
     if (!desktop) return
-    const unsubscribe = desktop.onProjectsChanged(setProjects)
-    void desktop.listProjects().then((nextProjects) => {
+    const unsubscribe = desktop.onProjectsChanged((nextProjects) => {
       setProjects(nextProjects)
       setLoaded(true)
     })
+    void desktop.listProjects().then(
+      (nextProjects) => {
+        setProjects(nextProjects)
+        setLoaded(true)
+      },
+      (error) => {
+        reportError({ title: "Couldn't load local projects", error })
+        setLoaded(true)
+      }
+    )
     return unsubscribe
   }, [])
 

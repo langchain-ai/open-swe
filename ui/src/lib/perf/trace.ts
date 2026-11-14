@@ -11,7 +11,11 @@
 
 export type PerfAttributeValue = string | number | boolean | null
 export type PerfAttributes = Record<string, PerfAttributeValue>
-export type PerfSpanName = "thread_load" | "thread_list_load" | "agent_run"
+export type PerfSpanName =
+  | "thread_load"
+  | "thread_list_load"
+  | "thread_list_request"
+  | "agent_run"
 export type PerfSpanStatus = "open" | "ended" | "abandoned"
 
 export interface PerfStep {
@@ -44,7 +48,7 @@ export interface SpanHandle {
   set(attributes: PerfAttributes): void
   /** Add to a numeric attribute, starting from zero. */
   add(attribute: string, value: number): void
-  end(attributes?: PerfAttributes): PerfSpan
+  end(attributes?: PerfAttributes, options?: { endedAt?: number }): PerfSpan
   abandon(reason: string): PerfSpan
 }
 
@@ -109,11 +113,12 @@ export function formatSpan(span: PerfSpan): string {
 function finish(
   span: PerfSpan,
   status: Exclude<PerfSpanStatus, "open">,
-  attributes?: PerfAttributes
+  attributes?: PerfAttributes,
+  endedAt = perfNow()
 ): PerfSpan {
   if (span.status !== "open") return span
   span.status = status
-  span.duration = perfNow() - span.startedAt
+  span.duration = endedAt - span.startedAt
   if (attributes) Object.assign(span.attributes, attributes)
   if (status === "ended") {
     userTimingMark(`osw:${span.name}:end`, span.startedAt + span.duration)
@@ -183,8 +188,8 @@ export function startSpan(
       span.attributes[attribute] =
         (typeof current === "number" ? current : 0) + value
     },
-    end(endAttributes) {
-      return finish(span, "ended", endAttributes)
+    end(endAttributes, endOptions) {
+      return finish(span, "ended", endAttributes, endOptions?.endedAt)
     },
     abandon(reason) {
       return finish(span, "abandoned", { abandoned_reason: reason })

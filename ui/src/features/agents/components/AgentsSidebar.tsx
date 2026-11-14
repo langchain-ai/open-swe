@@ -74,7 +74,10 @@ import {
   hasActiveFilters,
 } from "@/features/agents/lib/sidebarFilter"
 import type { OrganizeMode } from "@/features/agents/lib/sidebarPrefs"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import {
+  useSidebarPrefs,
+  useSidebarPrefsHydrated,
+} from "@/features/agents/lib/sidebarPrefs"
 import {
   agentMutationKeys,
   agentThreadKeys,
@@ -117,7 +120,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-import { usePlugins } from "@/features/plugins/lib/queries"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -170,7 +172,6 @@ export function AgentsSidebar({
   const pinnedSectionRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
   const profile = useProfile()
-  const plugins = usePlugins()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -191,6 +192,7 @@ export function AgentsSidebar({
     },
     [navigate, queryClient]
   )
+  const prefsHydrated = useSidebarPrefsHydrated()
   const {
     prefs,
     setFilters,
@@ -277,6 +279,7 @@ export function AgentsSidebar({
   )
   const {
     projects: localRepos,
+    loaded: localReposLoaded,
     addProject: addLocalRepo,
     removeProject: removeLocalRepo,
   } = useDesktopProjects()
@@ -300,7 +303,9 @@ export function AgentsSidebar({
   )
   useRegisterAppCommands(repoCommands)
 
-  const { projects } = useProjects({ enabled: true })
+  const { projects, isPending: projectsPending } = useProjects({
+    enabled: true,
+  })
   const [creatingProject, setCreatingProject] = useState(false)
   useLinkDesktopFolders(localRepos, localThreadsQuery.data, isDesktop)
   const pinnedThreads = pinnedQuery.data ?? []
@@ -636,7 +641,6 @@ export function AgentsSidebar({
   const recentGroups = threadGroups.length
     ? threadGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
-
   const macFolders = new Set(
     repoGroups.flatMap((group) =>
       group.localRepoPath ? [group.localRepoPath] : []
@@ -652,7 +656,11 @@ export function AgentsSidebar({
     updatedAt: unfiledRecents[0]?.updatedAt ?? 0,
     threads: unfiledRecents,
   }
-  const noRepoAvailable = unfiledRecents.length > 0 || recentsQuery.hasMore
+  const noRepoAvailable =
+    unfiledRecents.length > 0 ||
+    recentsQuery.hasMore ||
+    recentsQuery.isPending ||
+    (isDesktop && localThreadsQuery.isPending)
   const noRepoPinned = pinnedRepoKeys.has(NO_REPO_GROUP_KEY)
 
   const renderRepoGroup = (group: HydratedRepoGroup) => (
@@ -688,24 +696,34 @@ export function AgentsSidebar({
           ? recentsQuery.isFetchingNextPage
           : undefined
       }
+      initialLoading={
+        (group.key === NO_REPO_GROUP_KEY &&
+          (recentsQuery.isPending ||
+            (isDesktop && localThreadsQuery.isPending))) ||
+        (Boolean(group.localRepoPath) &&
+          isDesktop &&
+          localThreadsQuery.isPending)
+      }
       renderRow={(item, live) => (
         <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
       )}
     />
   )
 
+  const foldersPending =
+    repoMode &&
+    (sidebarReposQuery.isPending ||
+      projectsPending ||
+      (isDesktop && !localReposLoaded) ||
+      (workspaceOrganize && workspaceOptionsQuery.isPending))
+  const pinnedPending =
+    pinnedQuery.isPending || (foldersPending && prefs.pinnedRepoKeys.length > 0)
   const cloudPending =
-    pinnedQuery.isPending ||
-    recentsQuery.isPending ||
-    (repoMode && sidebarReposQuery.isPending)
+    pinnedQuery.isPending || recentsQuery.isPending || foldersPending
   const cloudError =
     pinnedQuery.isError ||
     recentsQuery.isError ||
     (repoMode && sidebarReposQuery.isError)
-  // The skeleton stands in for the sections, so they mount once it goes rather than sliding up under it.
-  const skeleton = cloudPending && allItems.length === 0
-  // Plugin rows join the nav above everything else, so the list stays hidden until they are known.
-  const navPending = plugins.isPending
   const isEmpty =
     !cloudPending &&
     filteredPinnedItems.length === 0 &&
@@ -713,18 +731,20 @@ export function AgentsSidebar({
     recents.length === 0
 
   const recentSections = (() => {
-    if (repoMode || skeleton) return []
-    return recentGroups.map((group, index) => ({
+    if (repoMode) return []
+    const groups = recentsQuery.isPending
+      ? [{ key: "recents", label: "Recents", threads: [] }]
+      : recentGroups
+    return groups.map((group, index) => ({
       key: group.key,
       content: (
         <section
           key={group.key}
-          className={cn(
+          className={
             group.key === "recents:status:running"
               ? "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2 py-space-2"
-              : "mb-space-3",
-            navPending && "invisible"
-          )}
+              : "mb-space-3"
+          }
         >
           <SidebarSectionHeader
             label={group.label}
@@ -756,7 +776,10 @@ export function AgentsSidebar({
               {group.threads.map((item) => (
                 <SidebarThreadRow key={item.key} {...rowProps(item)} />
               ))}
-              {index === recentGroups.length - 1 &&
+              {index === 0 && recentsQuery.isPending && (
+                <ThreadListSkeleton label="Loading recent threads" />
+              )}
+              {index === groups.length - 1 &&
                 prefs.organize !== "date" &&
                 recentsQuery.hasMore && (
                   <LoadMoreThreadsOnScroll
@@ -887,15 +910,17 @@ export function AgentsSidebar({
           <div
             ref={scrollViewport}
             className={cn(
-              "scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
-              navPending && "invisible"
+              "sidebar-content scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
+              user && profile.isPending && "invisible"
             )}
           >
             <SidebarNav
-              className={isDesktop ? "pb-space-3" : "pb-space-4"}
+              className={cn(
+                isDesktop ? "pb-space-3" : "pb-space-4",
+                !prefsHydrated && "invisible"
+              )}
               onNavigate={layout.closeOnMobile}
             />
-            {skeleton && <ThreadListSkeleton />}
             {cloudError && (
               <ThreadSourceError
                 label="Cloud threads unavailable"
@@ -906,17 +931,15 @@ export function AgentsSidebar({
                 }}
               />
             )}
-            {cloudPending && allItems.length > 0 && (
-              <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-tertiary">
-                <Spinner size="xxs" />
-                Loading threads…
-              </div>
-            )}
-
-            {(filteredPinnedItems.length > 0 ||
+            {(pinnedPending ||
+              filteredPinnedItems.length > 0 ||
               pinnedGroups.length > 0 ||
               (repoMode && noRepoPinned && noRepoAvailable)) && (
-              <section ref={pinnedSectionRef} className="mb-space-3">
+              <section
+                ref={pinnedSectionRef}
+                className="mb-space-3"
+                data-sidebar-loading={pinnedPending ? "" : undefined}
+              >
                 <SidebarSectionHeader
                   label="Pinned"
                   collapsed={sectionCollapsed("pinned")}
@@ -926,7 +949,7 @@ export function AgentsSidebar({
                   <>
                     <SortableThreadList
                       label="pinned threads"
-                      items={filteredPinnedItems}
+                      items={pinnedPending ? [] : filteredPinnedItems}
                       threadIds={pinnedThreads.map((thread) => thread.id)}
                       disabled={reorderPins.isPending || pendingPins.length > 0}
                       onReorder={(ids) => reorderPins.mutate(ids)}
@@ -934,18 +957,33 @@ export function AgentsSidebar({
                         <SidebarThreadRow {...rowProps(item)} />
                       )}
                     />
-                    {pinnedGroups.map(renderRepoGroup)}
-                    {repoMode &&
-                      noRepoPinned &&
-                      noRepoAvailable &&
-                      renderRepoGroup(noRepoGroup)}
+                    {pinnedPending && (
+                      <ThreadListSkeleton label="Loading pinned threads" />
+                    )}
+                    {!pinnedPending && (
+                      <div className="sidebar-groups">
+                        {pinnedGroups.map(renderRepoGroup)}
+                        {repoMode &&
+                          noRepoPinned &&
+                          noRepoAvailable &&
+                          renderRepoGroup(noRepoGroup)}
+                      </div>
+                    )}
                   </>
                 )}
               </section>
             )}
 
-            {repoMode && !skeleton && (
-              <section className="mb-space-3">
+            {repoMode && (
+              <section
+                className={cn(
+                  "mb-space-3",
+                  workspaceOrganize &&
+                    workspaceOptionsQuery.isPending &&
+                    "invisible"
+                )}
+                data-sidebar-loading={foldersPending ? "" : undefined}
+              >
                 <SidebarSectionHeader
                   label={workspaceMode ? "Environments" : "Projects"}
                   collapsed={!workspaceMode && sectionCollapsed("repos")}
@@ -968,47 +1006,47 @@ export function AgentsSidebar({
                     />
                   }
                 />
-                {(workspaceMode || !sectionCollapsed("repos")) && (
-                  <>
-                    {workspaceMode
-                      ? workspaceGroups.map((workspace) => (
-                          <WorkspaceGroupSection
-                            key={workspace.slug}
-                            workspace={workspace}
-                            collapsed={sectionCollapsed(
-                              `workspace:${workspace.slug}`
-                            )}
-                            onToggleCollapsed={() =>
-                              toggleSectionCollapsed(
+                {(workspaceMode || !sectionCollapsed("repos")) &&
+                  (foldersPending ? (
+                    <ThreadListSkeleton label="Loading projects" />
+                  ) : (
+                    <div className="sidebar-groups">
+                      {workspaceMode
+                        ? workspaceGroups.map((workspace) => (
+                            <WorkspaceGroupSection
+                              key={workspace.slug}
+                              workspace={workspace}
+                              collapsed={sectionCollapsed(
                                 `workspace:${workspace.slug}`
-                              )
-                            }
-                            renderRepoGroup={renderRepoGroup}
-                          />
-                        ))
-                      : unpinnedGroups.map(renderRepoGroup)}
-                    {!noRepoPinned &&
-                      noRepoAvailable &&
-                      renderRepoGroup(noRepoGroup)}
-                  </>
-                )}
+                              )}
+                              onToggleCollapsed={() =>
+                                toggleSectionCollapsed(
+                                  `workspace:${workspace.slug}`
+                                )
+                              }
+                              renderRepoGroup={renderRepoGroup}
+                            />
+                          ))
+                        : unpinnedGroups.map(renderRepoGroup)}
+                      {!noRepoPinned &&
+                        noRepoAvailable &&
+                        renderRepoGroup(noRepoGroup)}
+                    </div>
+                  ))}
               </section>
             )}
 
             {recentSections
               .filter((section) => section.key !== "recents:status:running")
               .map((section) => section.content)}
-            {!repoMode &&
-              !skeleton &&
-              prefs.organize === "date" &&
-              recentsQuery.hasMore && (
-                <LoadMoreThreadsOnScroll
-                  label="Load more threads"
-                  root={scrollViewport}
-                  loading={recentsQuery.isFetchingNextPage}
-                  onLoadMore={recentsQuery.fetchNextPage}
-                />
-              )}
+            {!repoMode && prefs.organize === "date" && recentsQuery.hasMore && (
+              <LoadMoreThreadsOnScroll
+                label="Load more threads"
+                root={scrollViewport}
+                loading={recentsQuery.isFetchingNextPage}
+                onLoadMore={recentsQuery.fetchNextPage}
+              />
+            )}
             {isEmpty && !cloudError && (
               <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
                 {hasActiveFilters(prefs.filters)
@@ -1082,7 +1120,7 @@ function WorkspaceGroupSection({
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
-    <div className="mb-space-1">
+    <div className="sidebar-group mb-space-1">
       <div className={GROUP_HEADER_CLASS}>
         <Button
           color="secondary"
@@ -1107,7 +1145,9 @@ function WorkspaceGroupSection({
         </Button>
       </div>
       {!collapsed && (
-        <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
+        <div className="sidebar-groups pl-space-2">
+          {workspace.repos.map(renderRepoGroup)}
+        </div>
       )}
     </div>
   )
@@ -1136,6 +1176,7 @@ function RepoGroup({
   onLoadMore,
   hasMore: externalHasMore,
   loadingMore = false,
+  initialLoading = false,
   renderRow,
 }: {
   group: HydratedRepoGroup
@@ -1160,6 +1201,7 @@ function RepoGroup({
   onLoadMore?: () => void
   hasMore?: boolean
   loadingMore?: boolean
+  initialLoading?: boolean
   renderRow: (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined
@@ -1211,18 +1253,16 @@ function RepoGroup({
     : active && !preview.includes(active)
       ? [...preview.slice(0, -1), active]
       : preview
-  const loading =
-    repo.isFetchingNextPage ||
-    loadingMore ||
-    (Boolean(group.project || group.repoFullName) &&
-      !collapsed &&
-      repo.isPending)
+  const pending =
+    initialLoading ||
+    (Boolean(group.project || group.repoFullName) && repo.isPending)
+  const loading = pending || repo.isFetchingNextPage || loadingMore
   const hasMore = expanded
     ? (externalHasMore ?? repo.hasMore)
     : threads.length > REPO_PREVIEW_COUNT || (externalHasMore ?? repo.hasMore)
 
   return (
-    <div className="mb-space-1">
+    <div className="sidebar-group mb-space-1">
       <div className={GROUP_HEADER_CLASS}>
         <Button
           color="secondary"
@@ -1297,10 +1337,9 @@ function RepoGroup({
             onReorder={(ids) => reorderChats.mutate(ids)}
             renderRow={(item) => renderRow(item, pullRequestFor(item))}
           />
-          {shown.length === 0 && loading && (
-            <div className="flex items-center gap-space-2 py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
-              <Spinner size="xxs" />
-              Loading chats…
+          {pending && (
+            <div className="pl-space-3">
+              <ThreadListSkeleton label={`Loading chats in ${group.label}`} />
             </div>
           )}
           {shown.length === 0 && !loading && !repo.isError && (
@@ -1321,7 +1360,7 @@ function RepoGroup({
               Retry loading chats
             </Button>
           )}
-          {hasMore && (
+          {hasMore && !pending && (
             <Button
               color="secondary"
               variant="plain"
@@ -1346,35 +1385,22 @@ function RepoGroup({
   )
 }
 
-/**
- * Mirrors the grouped thread list's shape so the sidebar reads as loading
- * rather than as an account with no threads. Widths vary per row because a
- * column of identical bars reads as a UI element, not as pending content.
- */
-function ThreadListSkeleton() {
-  const groups = [
-    [90, 64, 76],
-    [72, 84],
-  ]
+function ThreadListSkeleton({ label }: { label: string }) {
   return (
-    <div data-testid="sidebar-threads-skeleton">
-      <span className="sr-only" role="status">
-        Loading threads
-      </span>
-      {groups.map((widths, groupIndex) => (
-        <div key={groupIndex} className="mb-space-3" aria-hidden>
-          <div className="flex items-center gap-space-1 px-space-2 py-space-1">
-            <Skeleton className="h-2 w-16 rounded-sm" />
-          </div>
-          {widths.map((width, rowIndex) => (
-            <div
-              key={rowIndex}
-              className="mb-0.5 flex h-8 items-center gap-space-2 px-space-2"
-            >
-              <Skeleton className="size-3 shrink-0 rounded-full" />
-              <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
-            </div>
-          ))}
+    <div
+      data-testid="sidebar-threads-skeleton"
+      data-sidebar-loading
+      role="status"
+      aria-label={label}
+    >
+      {[90, 64, 76].map((width) => (
+        <div
+          key={width}
+          className="mb-0.5 flex h-8 items-center gap-space-2 px-space-2"
+          aria-hidden
+        >
+          <Skeleton className="size-3 shrink-0 rounded-full" />
+          <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
         </div>
       ))}
     </div>

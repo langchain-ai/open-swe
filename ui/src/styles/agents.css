@@ -29,6 +29,15 @@
   scrollbar-color: color-mix(in srgb, var(--text-primary) 18%, transparent) transparent;
 }
 
+.sidebar-content:has(> :is([data-sidebar-loading], :has([data-sidebar-loading]))) ~ * {
+  visibility: hidden;
+}
+
+.sidebar-content > :is([data-sidebar-loading], :has([data-sidebar-loading])) ~ *,
+.sidebar-content .sidebar-groups > .sidebar-group:has([data-sidebar-loading]) ~ .sidebar-group {
+  visibility: hidden;
+}
+
 .shimmer-text {
   color: var(--text-secondary);
 }

@@ -4,6 +4,8 @@
  * Only header metadata is recorded; never bodies, cookies, or tokens.
  */
 
+import { startSpan } from "./trace"
+
 export interface ServerTimingEntry {
   name: string
   /** Milliseconds, when the backend reported one. */
@@ -104,21 +106,64 @@ function requestUrl(input: RequestInfo | URL): string {
  * wrapped function looks `fetch` up at call time, which keeps the head warmup
  * script's hand-off patch (`apiWarmup.ts`) working underneath it.
  */
-export function withRequestTiming(fetchImpl: typeof fetch): typeof fetch {
+export function withRequestTiming(
+  fetchImpl: typeof fetch,
+  { measureLists = false }: { measureLists?: boolean } = {}
+): typeof fetch {
   return async (input, init) => {
-    const classified =
-      typeof window === "undefined"
-        ? null
-        : classifyDashboardRequest(requestUrl(input))
-    if (!classified) return fetchImpl(input, init)
+    if (typeof window === "undefined") return fetchImpl(input, init)
+    const url = requestUrl(input)
+    const classified = classifyDashboardRequest(url)
+    const method = String(
+      init?.method ??
+        (typeof input === "string" || input instanceof URL
+          ? "GET"
+          : input.method)
+    ).toUpperCase()
+    const listKind =
+      measureLists && method === "GET" && url
+        ? /\/dashboard\/api\/threads\/(pinned|repos|page)\/?$/i
+            .exec(url.split(/[?#]/, 1)[0] ?? "")?.[1]
+            ?.toLowerCase()
+        : undefined
+    if (!classified && !listKind) return fetchImpl(input, init)
     const started = performance.now()
-    const response = await fetchImpl(input, init)
-    recordRequestTiming({
-      ...classified,
-      status: response.status,
-      ttfbMs: performance.now() - started,
-      serverTiming: parseServerTiming(response.headers.get("server-timing")),
-    })
+    const request = fetchImpl(input, init) as Promise<Response> & {
+      __openSweWarmTiming?: { startedAt?: number; endedAt?: number }
+    }
+    const warmTiming = listKind ? request.__openSweWarmTiming : undefined
+    let listSpan: ReturnType<typeof startSpan> | undefined
+    try {
+      if (listKind)
+        listSpan = startSpan(
+          "thread_list_request",
+          { endpoint: listKind },
+          { startedAt: warmTiming?.startedAt ?? started }
+        )
+    } catch {}
+    let response: Response
+    try {
+      response = await request
+    } catch (error) {
+      try {
+        listSpan?.end({ outcome: "error" }, { endedAt: warmTiming?.endedAt })
+      } catch {}
+      throw error
+    }
+    try {
+      listSpan?.end(
+        { status: response.status, outcome: response.ok ? "success" : "error" },
+        { endedAt: warmTiming?.endedAt }
+      )
+    } catch {}
+    if (classified) {
+      recordRequestTiming({
+        ...classified,
+        status: response.status,
+        ttfbMs: performance.now() - started,
+        serverTiming: parseServerTiming(response.headers.get("server-timing")),
+      })
+    }
     return response
   }
 }

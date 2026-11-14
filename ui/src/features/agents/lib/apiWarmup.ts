@@ -64,12 +64,33 @@ function warmApiRequests(
     targets.push(sidebarPath + "?" + search.toString())
   }
 
-  const pending = new Map<string, Promise<Response>>()
+  const pending = new Map<
+    string,
+    {
+      request: Promise<Response>
+      timing: { startedAt?: number; endedAt?: number }
+    }
+  >()
   for (const url of targets) {
     const href = new URL(url, location.href).href
+    const timing: { startedAt?: number; endedAt?: number } = {}
+    try {
+      timing.startedAt = performance.now()
+    } catch {}
     const request = fetch(href, { credentials: "include" })
-    request.catch(() => {})
-    pending.set(href, request)
+    request.then(
+      () => {
+        try {
+          timing.endedAt = performance.now()
+        } catch {}
+      },
+      () => {
+        try {
+          timing.endedAt = performance.now()
+        } catch {}
+      }
+    )
+    pending.set(href, { request, timing })
   }
 
   const original = window.fetch
@@ -102,7 +123,13 @@ function warmApiRequests(
         if (warmed) {
           pending.delete(resolved)
           if (pending.size === 0) release()
-          return warmed
+          try {
+            return Object.assign(warmed.request, {
+              __openSweWarmTiming: warmed.timing,
+            })
+          } catch {
+            return warmed.request
+          }
         }
       } catch {
         // A URL the constructor rejects is not one we warmed.

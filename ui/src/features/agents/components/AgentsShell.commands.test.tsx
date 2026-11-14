@@ -223,7 +223,7 @@ it("keeps a project thread out of No project even when the unscoped page is cach
   ])
   client.setQueryData(
     agentThreadKeys.infinitePages({
-      limit: 10,
+      limit: 25,
       hierarchy: true,
       resolved: false,
       scope: "interactive",
@@ -231,7 +231,7 @@ it("keeps a project thread out of No project even when the unscoped page is cach
       sortBy: "created_at",
     }),
     {
-      pages: [{ items: [thread], hasMore: false, limit: 10, offset: 0 }],
+      pages: [{ items: [thread], hasMore: false, limit: 25, offset: 0 }],
       pageParams: [0],
     }
   )
