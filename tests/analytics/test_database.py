@@ -111,15 +111,17 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
 async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db, monkeypatch):
     migrations = postgres.load_migrations()
     heads = migrations.get_heads()
-    async with postgres.engine().begin() as conn:
+    async with postgres.engine().connect() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.commit()
         await conn.run_sync(
             postgres.upgrade,
             migrations,
             "open_swe",
             migrations.get_revision(heads[0]).down_revision,
         )
-        await conn.execute(text("INSERT INTO alembic_version VALUES ('a8caff4f6051')"))
+        await conn.execute(text("INSERT INTO open_swe.alembic_version VALUES ('a8caff4f6051')"))
+        await conn.commit()
     with pytest.raises(CommandError, match="a8caff4f6051"):
         await postgres.migrate()
     monkeypatch.setenv("OPENSWE_ENV", "preview")
