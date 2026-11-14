@@ -5,7 +5,7 @@ description: How a Robin workspace's sandbox image works and how to change it â€
 
 # Workspaces
 
-A workspace prefers repositories and owns Slack channels, MCP connections, and team settings, plus the sandbox image its runs boot from.
+A workspace prefers repositories and owns Slack channels and team settings, plus the sandbox image its runs boot from.
 Preferring a repository routes its GitHub and Linear events here and preloads it into the image; it does not limit access, since every workspace's sandbox can reach every repository the GitHub App installation can.
 That image is two things: a **record** (name, prompt, repos, sizing, optional scripts) and a published **sandbox image**, `<prefix>-environment-<slug>:latest`.
 Runs routed to a workspace boot from its image and get its prompt appended to their system prompt.

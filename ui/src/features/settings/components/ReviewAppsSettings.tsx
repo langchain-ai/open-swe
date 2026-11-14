@@ -197,9 +197,9 @@ function PreviewChecks({
 }
 
 /**
- * Where the browser of a review that works for apps may sign in, and the MCP
- * tool that signs it in. Instance only: they decide where every workspace's
- * reviews sign in, and as whom.
+ * Where the browser of a review that works for apps may sign in, and the tool
+ * of Robin's bot kit that signs it in. Instance only: they decide where every
+ * workspace's reviews sign in, and as whom.
  */
 export function ReviewBrowserSettings({
   settings,
@@ -249,8 +249,8 @@ export function ReviewBrowserSettings({
           label="Session tool"
           aria-label="Session tool"
           size="md"
-          placeholder="connection/tool"
-          hintText="An instance or environment MCP connection's tool that returns a browser session. Leave it empty to browse signed out."
+          placeholder="homebase_sign_in"
+          hintText="The tool of Robin's bot kit, by its name in the kit, that returns a browser session. Leave it empty to browse signed out."
           value={toolDraft}
           onChange={setToolDraft}
           disabled={!editable}

@@ -55,7 +55,7 @@ ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _DOMAIN = re.compile(rf"(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+")
 # An MCP connection's name, then the name of a tool on its server.
-_SESSION_TOOL = re.compile(r"[a-z][a-z0-9_-]{0,31}/[A-Za-z0-9_.-]{1,128}")
+_SESSION_TOOL = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 
 
 class AppRelease(TypedDict):
@@ -100,9 +100,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     request's head means its preview serves that commit: a review that works for apps then
     does that work on it; managed with ``manage_review_apps``."""
     # Where the browser of a review that works for apps may sign in, each domain with its
-    # subdomains, and the instance or workspace MCP tool that signs it in, as
-    # <connection>/<tool>. Only the instance record's values are read: they decide where
-    # reviews sign in, and as whom.
+    # subdomains, and the tool of Robin's bot kit that signs it in, by its name in the kit.
+    # Only the instance record's values are read: they decide where reviews sign in, and
+    # as whom.
     review_browser_domains: list[str] | None = Field(default=None, max_length=20)
     review_browser_session_tool: str | None = None
     featured_apps: list[FeaturedApp] | None = Field(default=None, max_length=20)
@@ -231,7 +231,9 @@ class WorkspaceSettingsUpdate(BaseModel):
             return None
         tool = str(v).strip()
         if not _SESSION_TOOL.fullmatch(tool):
-            raise ValueError("the session tool is <connection>/<tool>, such as homebase/sign_in")
+            raise ValueError(
+                "the session tool is a tool of Robin's bot kit, such as homebase_sign_in"
+            )
         return tool
 
     @field_validator("org_guidelines", mode="before")
@@ -880,7 +882,7 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     @property
     def review_browser_session_tool(self) -> str | None:
-        """The ``<connection>/<tool>`` that signs a review's browser in."""
+        """The bot kit's tool, by its name in the kit, that signs a review's browser in."""
         value = self.get("review_browser_session_tool")
         return value if isinstance(value, str) and value else None
 

@@ -66,8 +66,8 @@ PR chat does not need a sandbox.
 - **GitHub access:** Coding sandboxes normally receive installation-wide GitHub App access; selected workflows use narrower repository scopes.
   Workspace repository bindings control routing and preloaded checkouts, not a separate credential boundary.
   See [GitHub access](docs/reference/workspaces.md#github-access-and-the-sandbox-image).
-- **Integrations:** MCP connections layer instance-wide, workspace-specific, and personal tools.
-  Configure their scope and credentials in the [customization guide](docs/CUSTOMIZATION.md#workspace-mcp-servers).
+- **Integrations:** Runs get MCP tools from LangSmith Managed Tools kits: the owner's personal kit in private threads and Robin's bot kit otherwise.
+  Add other servers to a kit in LangSmith; see the [customization guide](docs/CUSTOMIZATION.md#mcp-servers).
 - **Approvals:** Workflow-file approval prompts guard detected Git pushes, not every possible shell or API write.
   Reviewers are instructed not to commit or push; PR chat excludes mutation tools.
 

@@ -138,12 +138,12 @@ it("saves where the review browser signs in, and the tool that signs it in", () 
     target: { value: "review.example.com, dev.example.com" },
   })
   fireEvent.change(screen.getByLabelText("Session tool"), {
-    target: { value: " homebase/sign_in " },
+    target: { value: " homebase_sign_in " },
   })
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
   expect(save).toHaveBeenCalledWith({
     review_browser_domains: ["review.example.com", "dev.example.com"],
-    review_browser_session_tool: "homebase/sign_in",
+    review_browser_session_tool: "homebase_sign_in",
   })
 })

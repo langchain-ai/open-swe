@@ -1,4 +1,4 @@
-"""Public HTTPS transport for admin-configured remote MCP connections."""
+"""Public HTTPS transport for the remote MCP servers the backend calls."""
 
 import asyncio
 from urllib.parse import urlsplit

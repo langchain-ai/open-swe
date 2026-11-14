@@ -58,7 +58,6 @@ These integrations retain their specialized behavior:
 - Sonner for the imperative toast API, with Macaw icons and semantic styles in `@/components/Toaster`.
 - Sandboxed artifact HTML and its in-frame annotation controls, which run in a separate document.
 - The desktop's standalone setup form, which connects to the backend before loading the React dashboard and intentionally runs without JavaScript.
-- The composer's hidden native file picker and `SecretInput`'s native password field.
-  The latter uses Macaw's input style helpers and a labelled Macaw reveal button while preserving native password semantics and controlled visibility.
+- The composer's hidden native file picker.
 - Structural navigation/card links, interactive images, and inline disclosure controls inside navigation links or field labels.
   These preserve the host element's semantics; ordinary content links use Macaw `Link`.

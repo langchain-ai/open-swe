@@ -251,7 +251,7 @@ export function WorkspacesSection({
       title="Environments"
       description={
         isAdmin
-          ? "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Open an environment to change its name, repositories, Slack channels, instructions, scripts, model defaults, review settings, and MCP connections. To publish a new sandbox image, start a new agent thread, open the + menu, enable admin mode, and ask Robin to capture it."
+          ? "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Open an environment to change its name, repositories, Slack channels, instructions, scripts, model defaults, and review settings. To publish a new sandbox image, start a new agent thread, open the + menu, enable admin mode, and ask Robin to capture it."
           : "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a Robin admin to start an admin thread and ask Robin to make the change."
       }
     >

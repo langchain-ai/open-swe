@@ -4,14 +4,9 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp.types import CallToolResult, TextContent, Tool
-from pydantic import JsonValue
 
-from openswe.mcp import MCPConnection, runtime
 from openswe.mcp.caller import ToolCaller, UnknownTool
-from openswe.mcp.records import SharedMCPConnections, UserMCPConnections
 from openswe.sandboxes.tool_runtime import tool_parameters
-from tests.mcp_helpers import Transport, fake_mcp_server
 
 USER = ToolCaller(login="user", email=None)
 ADMIN = ToolCaller(login="admin", email=None)
@@ -58,57 +53,3 @@ async def test_invoke_validates_python_parameters(monkeypatch: pytest.MonkeyPatc
     result = await ADMIN.invoke("manage_feature_flags", {"action": "invalid"})
     assert result.status == "error"
     assert "action" in str(result.content)
-
-
-@pytest.mark.asyncio
-async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shared = {
-        "linear": MCPConnection(
-            name="linear",
-            url="https://workspace.example/mcp",
-            allowed_tools=["search"],
-            revision="workspace-revision",
-            updated_at="2026-09-09T00:00:00Z",
-        )
-    }
-    personal = [
-        shared["linear"].model_copy(update={"url": "https://alice.example/mcp"}),
-        shared["linear"].model_copy(update={"name": "legacy"}),
-    ]
-    monkeypatch.setattr(
-        SharedMCPConnections, "records", AsyncMock(side_effect=lambda: list(shared.values()))
-    )
-    monkeypatch.setattr(
-        SharedMCPConnections, "get", AsyncMock(side_effect=lambda name: shared.get(name))
-    )
-    monkeypatch.setattr(UserMCPConnections, "records", AsyncMock(return_value=personal))
-    monkeypatch.setattr(
-        UserMCPConnections,
-        "get",
-        AsyncMock(side_effect=lambda name: next((r for r in personal if r.name == name), None)),
-    )
-
-    async def discover(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
-        return [Tool(name="search", input_schema={"type": "object"})]
-
-    async def call(
-        transport: Transport, name: str, arguments: dict[str, JsonValue]
-    ) -> CallToolResult:
-        return CallToolResult(content=[TextContent(type="text", text=transport.url)])
-
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-    fake_mcp_server(monkeypatch, call=call)
-    alice = ToolCaller(login="alice", email=None)
-    bob = ToolCaller(login="bob", email=None)
-    name = next(name for name in await alice.tools() if name == "mcp_linear_search")
-    assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
-    assert name in await bob.tools()
-    assert "workspace.example" in str((await alice.invoke(name, {})).content)
-    assert "workspace.example" in str((await bob.invoke(name, {})).content)
-    with pytest.raises(UnknownTool):
-        await alice.invoke("mcp_legacy_search", {})
-    shared["linear"] = shared["linear"].model_copy(update={"allowed_tools": []})
-    with pytest.raises(UnknownTool):
-        await alice.invoke(name, {})

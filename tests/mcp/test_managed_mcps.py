@@ -12,8 +12,7 @@ import pytest
 from fastapi import HTTPException
 from mcp.types import Tool
 
-from openswe.mcp import MCPConnection, cards, managed, routes, runtime
-from openswe.mcp.records import SharedMCPConnections, UserMCPConnections
+from openswe.mcp import cards, managed, routes, runtime
 from openswe.mcp.transport import MCPCredentialMissing
 from openswe.users.models import User
 
@@ -125,7 +124,7 @@ def remote(monkeypatch):
     """The kit lists the same tools to every caller, and echoes calls."""
     seen: list[tuple[str, dict[str, str]]] = []
 
-    async def discover(record, namespace):
+    async def discover(record):
         seen.append((record.url, record.connection_headers()))
         return [
             Tool(name=name, input_schema={"type": "object"})
@@ -175,7 +174,7 @@ async def test_connecting_a_service_lists_the_kits_tools_again(monkeypatch, lmt)
     monkeypatch.setattr(langgraph_api.cache, "swr", swr)
     listed = []
 
-    async def discover(record, namespace):
+    async def discover(record):
         listed.append(record.revision)
         return [Tool(name="linear_list_issues", input_schema={"type": "object"})]
 
@@ -238,14 +237,12 @@ async def test_the_bot_leaves_out_tools_of_services_its_profile_has_not_connecte
         async def list_tools_mcp(self, *, cursor=None, cache_mode="use"):
             return pages[0 if cursor is None else 1]
 
-    monkeypatch.setattr(runtime, "_client", lambda record, namespace: Client())
+    monkeypatch.setattr(runtime, "_client", lambda record: Client())
     bot = (await managed.BotTools().connections())[0]
-    assert [tool.name for tool in await runtime._discover_tools(bot, ("b",))] == [
-        "linear_list_issues"
-    ]
+    assert [tool.name for tool in await runtime._discover_tools(bot)] == ["linear_list_issues"]
     private_thread(monkeypatch, "alice")
     person = (await managed.PersonalTools("alice").connections())[0]
-    assert [tool.name for tool in await runtime._discover_tools(person, ("p",))] == [
+    assert [tool.name for tool in await runtime._discover_tools(person)] == [
         "linear_list_issues",
         "notion_search",
     ]
@@ -275,54 +272,22 @@ async def test_a_missing_credential_tells_the_model_what_to_do(status, expected)
 async def test_private_threads_load_the_kit_as_the_owner_and_others_as_the_bot(
     monkeypatch, private, remote
 ):
-    from runtime_api.connections import ConnectionRef
-
     import openswe.server as server_module
 
     private_thread(monkeypatch, "alice")
-    workspace = MCPConnection(
-        name="linear",
-        url="https://workspace.example/mcp",
-        allowed_tools=["linear_list_issues"],
-        revision="workspace-revision",
-        updated_at="",
-    )
-    monkeypatch.setattr(SharedMCPConnections, "records", AsyncMock(return_value=[workspace]))
-    monkeypatch.setattr(
-        UserMCPConnections,
-        "records",
-        AsyncMock(
-            return_value=[
-                workspace.model_copy(
-                    update={"name": "personal", "url": "https://legacy.example/mcp"}
-                ),
-                workspace.model_copy(
-                    update={
-                        "name": "legacy",
-                        "connection": ConnectionRef(slug="open-swe-mcp-legacy", owner="user"),
-                    }
-                ),
-            ]
-        ),
-    )
-    tools = await server_module._mcp_tools_for("alice" if private else None, "eng")
+    tools = await server_module._mcp_tools_for("alice" if private else None)
     assert sorted(tool.name for tool in tools) == [
-        "mcp_linear_linear_list_issues",
         "mcp_lmt_linear_list_issues",
         "mcp_lmt_notion_search",
     ]
-    assert tools.runtime_servers == []
-    assert sorted(remote) == sorted(
-        [
-            ("https://workspace.example/mcp", {}),
-            (
-                f"https://api.smith.langchain.com{managed.KITS_PATH}/{KIT_ID if private else BOT_KIT_ID}/mcp",
-                {"Authorization": "Bearer alice-langsmith-token"}
-                if private
-                else {"X-Api-Key": "openswe-key", "X-LangSmith-Profile": PROFILE_ID},
-            ),
-        ]
-    )
+    assert remote == [
+        (
+            f"https://api.smith.langchain.com{managed.KITS_PATH}/{KIT_ID if private else BOT_KIT_ID}/mcp",
+            {"Authorization": "Bearer alice-langsmith-token"}
+            if private
+            else {"X-Api-Key": "openswe-key", "X-LangSmith-Profile": PROFILE_ID},
+        )
+    ]
     # A private thread's prompt names the kit's services its owner could still connect.
     assert tools.connectable == (["Notion", "Exa"] if private else [])
     note = runtime.catalog_note(tools.failures, tools.connectable)
@@ -618,21 +583,3 @@ async def test_a_pending_consent_polls_again_through_the_queue_until_it_expires(
     scheduled.assert_not_awaited()
     with pytest.raises(managed.ManagedToolsError):
         await managed.PersonalTools("alice").consent_status("b")
-
-
-async def test_new_personal_mcp_servers_go_through_lmt_while_stored_ones_stay_editable(
-    monkeypatch,
-):
-    from openswe.dashboard import langsmith_oauth
-    from openswe.mcp.models import MCPConnection, MCPConnectionUpdate, prepare_connection
-
-    monkeypatch.setattr(langsmith_oauth, "langsmith_oauth_configured", lambda: True)
-    update = MCPConnectionUpdate(name="docs", url="https://docs.example/mcp")
-    with pytest.raises(ValueError, match="LangSmith Managed Tools"):
-        await prepare_connection(update, scope="user")
-    assert (await prepare_connection(update, scope="workspace")).name == "docs"
-    stored = MCPConnection(
-        name="docs", url="https://docs.example/mcp", revision="r1", updated_at="2026-11-01"
-    )
-    edited = update.model_copy(update={"enabled": False})
-    assert (await prepare_connection(edited, stored, scope="user")).enabled is False

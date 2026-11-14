@@ -20,9 +20,8 @@ class ReviewAppTools:
     find: ``save_app_document`` when an app writes, and when one browses, the one MCP tool
     that signs the browser in."""
 
-    def __init__(self, apps: ReviewApps, workspace: str | None) -> None:
+    def __init__(self, apps: ReviewApps) -> None:
         self.apps = apps
-        self.workspace = workspace
         self.tools: list[BaseTool] = (
             apply_tool_descriptions([save_app_document]) if apps.writes else []
         )
@@ -31,14 +30,14 @@ class ReviewAppTools:
     async def of_run(cfg: RunConfig) -> ReviewAppTools | None:
         """The tools of a review that works for apps; None for any other run."""
         apps = await ReviewApps.of(cfg)
-        return None if apps is None else ReviewAppTools(apps, cfg.workspace_slug)
+        return None if apps is None else ReviewAppTools(apps)
 
     async def offer(self, surface: ToolSurface) -> None:
         """Adds these tools to ``surface``, with the browser and its sign-in when an app
         browses."""
         session_tools: list[BaseTool] = []
         if self.apps.browses:
-            session_tools, surface.mcp_servers = await ReviewBrowser.sign_in(self.workspace)
+            session_tools = await ReviewBrowser.sign_in()
             surface.browser = await ReviewBrowser.spec()
         surface.base_tools = [*surface.base_tools, *self.tools, *session_tools]
 
@@ -47,7 +46,7 @@ class ReviewAppTools:
         found = next((tool for tool in self.tools if tool.name == name), None)
         if found is not None or not self.apps.browses:
             return found
-        session_tools, _ = await ReviewBrowser.sign_in(self.workspace)
+        session_tools = await ReviewBrowser.sign_in()
         return next((tool for tool in session_tools if tool.name == name), None)
 
 

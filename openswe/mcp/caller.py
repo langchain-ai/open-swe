@@ -1,9 +1,8 @@
 """A person calling Open SWE's agent tools from outside any thread.
 
 The remote MCP server serves this catalog: every agent tool opted in with
-``@expose_mcp``, plus the integration MCPs the person may use in a private
-thread. Each call runs through a tool node exactly as in a private thread the
-caller owns, so injected state and access policies resolve the same way.
+``@expose_mcp``. Each call runs through a tool node exactly as in a private thread
+the caller owns, so injected state and access policies resolve the same way.
 """
 
 from dataclasses import dataclass
@@ -105,21 +104,12 @@ class ToolCaller:
         }
 
     async def tools(self) -> dict[str, tuple[BaseTool, Access]]:
-        from openswe.mcp.runtime import load_mcp_tools
-        from openswe.mcp.workspace import workspace_mcp_source
-        from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
-
         admin = self.admin
-        tools = {
+        return {
             name: (tool, access)
             for name, (tool, access) in _exposed().items()
             if access == "session" or admin
         }
-        for tool in await load_mcp_tools(workspace_mcp_source(DEFAULT_WORKSPACE_SLUG)):
-            if tool.name in tools:
-                raise ValueError(f"MCP tool name collides with a local tool: {tool.name}")
-            tools[tool.name] = (tool, "session")
-        return tools
 
     async def invoke(self, name: str, arguments: dict[str, JsonValue]) -> ToolResult:
         from langgraph.graph import MessagesState

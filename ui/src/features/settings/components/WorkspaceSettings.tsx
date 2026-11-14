@@ -19,7 +19,6 @@ import {
   type WorkspaceOption,
   type WorkspaceRecord,
 } from "@/lib/api"
-import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
 import { ShadowReviewSection } from "./ShadowReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
@@ -316,7 +315,6 @@ export function WorkspaceSettingsPanel({
           (model) => model.can_be_default !== false
         )}
       />
-      <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
           title="Delete environment"

@@ -30,7 +30,6 @@ from runtime_api.catalog import (
     CliResultRules,
     InboxSpec,
     LoopRules,
-    McpServerSpec,
     ReplyRules,
     RoutingRules,
 )
@@ -59,7 +58,6 @@ from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
 from runtime_api.models import DEFAULT_LLM_MAX_TOKENS, make_model, provider_model_kwargs
 
-from openswe.agent_api.connections import acting_user
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
@@ -95,7 +93,6 @@ from openswe.input_messages import (
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.managed import BotTools, PersonalTools, managed_tools_configured
 from openswe.mcp.runtime import MCPTools, catalog_note
-from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -300,7 +297,6 @@ from openswe.utils.thread_settings import (
     store_thread_settings,
 )
 from openswe.workspaces.store import (
-    DEFAULT_WORKSPACE_SLUG,
     load_workspace,
 )
 
@@ -815,14 +811,14 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
     return {tool.name: tool for tool in built}
 
 
-# How long a process keeps the MCP tools it loaded for a person in a workspace, and
+# How long a process keeps the MCP tools it loaded for a person, or for the bot, and
 # for how many at once.
 _INTEGRATIONS_TTL_SECONDS: Final = 300.0
 _INTEGRATIONS_LIMIT: Final = 128
-_integrations: dict[tuple[str | None, str], tuple[float, dict[str, BaseTool]]] = {}
+_integrations: dict[str | None, tuple[float, dict[str, BaseTool]]] = {}
 
 
-def _keep_integrations(key: tuple[str | None, str], tools: dict[str, BaseTool]) -> None:
+def _keep_integrations(key: str | None, tools: dict[str, BaseTool]) -> None:
     """Keep ``tools`` for a while, dropping what expired and then the oldest past the limit."""
     now = time.monotonic()
     for stale in [k for k, (expires, _tools) in _integrations.items() if expires <= now]:
@@ -841,13 +837,12 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
     except Exception:
         logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
         return {}
-    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
-    loaded = _integrations.get((login, workspace))
+    loaded = _integrations.get(login)
     if loaded is not None and loaded[0] > time.monotonic():
         return loaded[1]
-    tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
+    tools = await _run_mcp_tools(cfg.thread_id or "", login)
     by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
-    _keep_integrations((login, workspace), by_name)
+    _keep_integrations(login, by_name)
     return by_name
 
 
@@ -917,56 +912,23 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _mcp_tools_for(credential_login: str | None, workspace: str) -> MCPTools:
-    """Load workspace MCPs with the owner's LMT kit privately, or Robin's bot kit otherwise."""
+async def _mcp_tools_for(credential_login: str | None) -> MCPTools:
+    """The owner's LMT kit in a private thread, or Robin's bot kit otherwise."""
     if not credential_login:
-        return await load_mcp_tools(BotTools().source(), workspace_mcp_source(workspace))
+        return await load_mcp_tools(BotTools().source())
     personal = PersonalTools(credential_login)
     tools, connectable = await asyncio.gather(
-        load_mcp_tools(workspace_mcp_source(workspace), personal.source()),
+        load_mcp_tools(personal.source()),
         personal.connectable(),
     )
     tools.connectable = connectable
     return tools
 
 
-def _owned_mcp_servers(
-    config: RunnableConfig, credential_login: str | None, servers: Sequence[McpServerSpec]
-) -> list[McpServerSpec]:
-    """``servers`` without the personal ones, unless the MDA run acts as their owner.
-
-    MDA reads a personal server's connection as the person the run acts as there
-    (``acting_user``), whom the run is also attributed to. A run that acts as no one, such
-    as a wakeup or a background task's completion, has no person's principal, whoever it
-    is attributed to: MDA starts it as a service principal, MDA's channel one
-    (``mda:channel``) on a channel's thread and the backend key's own on any other, and
-    MDA refuses user connections to a service principal, so a grant there can be neither
-    made nor read.
-    """
-    metadata = config.get("metadata") or {}
-    attributed = metadata.get("ls_attribution_identifier")
-    for_owner = (
-        acting_user(metadata) is not None
-        and isinstance(attributed, str)
-        and credential_login is not None
-        and attributed.lower() == credential_login.lower()
-    )
-    owned: list[McpServerSpec] = []
-    for server in servers:
-        if server.connection.owner == "user" and not for_owner:
-            logger.warning(
-                "Leaving out a personal MCP server of a run that does not act for its owner",
-                extra={"mcp_name": server.name},
-            )
-            continue
-        owned.append(server)
-    return owned
-
-
-async def _run_mcp_tools(thread_id: str, credential_login: str | None, workspace: str) -> MCPTools:
+async def _run_mcp_tools(thread_id: str, credential_login: str | None) -> MCPTools:
     """The MCP tools the run may use."""
     async with aphase(thread_id, "factory.mcp_tools"):
-        return await _mcp_tools_for(credential_login, workspace)
+        return await _mcp_tools_for(credential_login)
 
 
 # The sandbox's file and shell tools, which code mode offers directly as well.
@@ -1075,11 +1037,9 @@ async def _thread_settings(thread_id: str) -> tuple[ThreadSettings, bool]:
     return normalize_thread_settings(await load_thread_settings(client, thread_id))
 
 
-async def _scoped_mcp_tools(
-    thread_id: str, scope: Awaitable[tuple[str | None, bool]], workspace: str
-) -> MCPTools:
+async def _scoped_mcp_tools(thread_id: str, scope: Awaitable[tuple[str | None, bool]]) -> MCPTools:
     login, known = await scope
-    return await _run_mcp_tools(thread_id, login, workspace) if known else MCPTools()
+    return await _run_mcp_tools(thread_id, login) if known else MCPTools()
 
 
 async def _cached_profile(profile_login: str | None):
@@ -1756,13 +1716,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         raise ValueError("An agent run needs a thread")
 
     credential_scope = asyncio.ensure_future(_credential_scope(config))
-    # MCP loading needs only who the run acts for and where, and it is the slowest
-    # lookup here, so it overlaps every lookup below.
-    mcp_tools_task = asyncio.ensure_future(
-        _scoped_mcp_tools(
-            thread_id, credential_scope, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
-        )
-    )
+    # MCP loading needs only who the run acts for, and it is the slowest lookup here, so
+    # it overlaps every lookup below.
+    mcp_tools_task = asyncio.ensure_future(_scoped_mcp_tools(thread_id, credential_scope))
     (
         profile_login,
         (credential_login, _),
@@ -2291,11 +2247,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ]
     )
     surface.dynamic = dynamic_tool_middleware
-    surface.mcp_servers = _owned_mcp_servers(
-        config,
-        credential_login,
-        mcp_tools.runtime_servers if isinstance(mcp_tools, MCPTools) else [],
-    )
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
     surface.backend_paths = tuple(

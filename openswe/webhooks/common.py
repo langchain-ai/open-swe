@@ -1147,8 +1147,8 @@ async def trigger_or_queue_run(
     record = await ThreadRecord.read(thread_id)
     record.authorize(github_login)
     # An existing thread keeps the workspace it started in even if its
-    # repository has since moved: the settings and MCP connections a
-    # conversation began with must not change under it.
+    # repository has since moved: the settings a conversation began with
+    # must not change under it.
     workspace = record.workspace or await workspace_for_repo_config(repo_config)
     persisted = await upsert_agent_thread_metadata(
         thread_id,

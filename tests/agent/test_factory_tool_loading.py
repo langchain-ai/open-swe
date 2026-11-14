@@ -41,7 +41,7 @@ def _config() -> RunnableConfig:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
-async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
+async def test_mcp_tools_load_for_non_admins_with_legacy_plan_state(
     initial_plan_mode: bool,
     github_login: str | None,
     monkeypatch: pytest.MonkeyPatch,

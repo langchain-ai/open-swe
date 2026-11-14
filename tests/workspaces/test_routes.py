@@ -21,9 +21,9 @@ async def admin_client(
 ) -> AsyncIterator[httpx.AsyncClient]:
     """A client hitting the real dashboard app, signed in as an admin.
 
-    Uses the aggregate dashboard router (mounted at ``/dashboard/api``, same as
-    ``tests/dashboard/test_workspace_mcps.py``) rather than the workspaces
-    router alone, so origin-checked mutations behave as they do in production.
+    Uses the aggregate dashboard router (mounted at ``/dashboard/api``) rather
+    than the workspaces router alone, so origin-checked mutations behave as they
+    do in production.
     Carries ``registry_db`` because every workspace this writes is a row.
     """
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")

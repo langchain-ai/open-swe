@@ -47,13 +47,11 @@ Every call is authenticated with the run token.
   The deployment reads each set once per process (`tool_set`) and `search_tools` searches it here, with the backend's own BM25 index (`runtime_api.tool_search.ToolIndex`); a run whose catalog names no set searches on the backend.
   The run calls a tool by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, is looked up in the set here, and only a name it has asks `resolve_tool` for the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
-- **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Robin record).
-  The catalog names those (`mcp_servers`), and `rt/mcp.py` connects to them before the run's first model call, in a node of its own: it reads each credential with `managed_deepagents.connections`, the deployment's for an instance or workspace server and the person's own for a personal one, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.
+- **MCP servers:** the backend serves the LangSmith Managed Tools kits' tools as operations.
+  The catalog can also name servers whose credential is an MDA connection (`mcp_servers`); the backend names none today.
+  `rt/mcp.py` connects to each before the run's first model call, in a node of its own: it reads the credential with `managed_deepagents.connections`, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.
   Each call reads the credential again and sends it only to the server's HTTPS origin, at a public address.
-  Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Robin or a channel reads for itself, such as `mda/github-token`.
-  The one exception is the Linear channel's app token, `mda/linear-token`, and only for an instance or workspace server on Linear's MCP origin, `https://mcp.linear.app`.
-  A person who has not granted a connection is asked to (MDA's credential interrupt); a run that acts for no one, or whose agent connection is missing, goes without that server.
-  The backend names a personal server only to a run that acts for its owner, never to one for no person, such as a background task's completion.
+  `ConnectionRef.for_mcp_server` lets a server receive only an `open-swe-mcp-<server>` connection, or `mda/linear-token` on Linear's MCP origin, `https://mcp.linear.app`, so no server gets a credential Robin or a channel reads for itself, such as `mda/github-token`.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   Where MDA owns the sandbox they run in it.
   On the paths the backend serves (`files.backend_paths`: offloaded images), and on a thread whose sandbox is not MDA's, such as a desktop thread, deepagents' own tools run against the backend's files through the typed files API (`rt/remote_files.py`).

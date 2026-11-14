@@ -395,7 +395,6 @@ class ManagedTools(ABC):
                 name=KIT_CONNECTION,
                 url=f"{langsmith_issuer()}{KITS_PATH}/{quote(kit, safe='')}/mcp",
                 revision=revision,
-                updated_at="",
                 headers=headers,
                 connected_only=self.connected_only,
             )

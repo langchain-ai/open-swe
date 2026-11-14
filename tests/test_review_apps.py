@@ -10,8 +10,6 @@ from deepagents.backends.protocol import FileDownloadResponse
 from langchain_core.tools import BaseTool, StructuredTool
 from PIL import Image
 from pydantic import JsonValue, ValidationError
-from runtime_api.catalog import McpServerSpec
-from runtime_api.connections import ConnectionRef
 
 from openswe import reviewer
 from openswe.agent_api.reviewer import ReviewerKind
@@ -304,43 +302,32 @@ def _instance_settings(monkeypatch: pytest.MonkeyPatch, **values: object) -> Non
     )
 
 
-def _hub() -> McpServerSpec:
-    return McpServerSpec(
-        name="hub",
-        url="https://hub.example.com/mcp",
-        transport="streamable_http",
-        tools={"mint_session": "hub__mint_session", "query": "hub__query"},
-        connection=ConnectionRef(slug="hub", owner="agent"),
-    )
-
-
-async def test_a_review_signs_in_with_the_session_tool_alone(
+async def test_a_review_signs_in_with_the_bot_kits_session_tool_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _instance_settings(monkeypatch, review_browser_session_tool="hub/mint_session")
+    _instance_settings(monkeypatch, review_browser_session_tool="homebase_mint_session")
     loaded = MCPTools(
-        [_mcp_tool("ops__mint_session", "mint_session"), _mcp_tool("ops__query", "query")],
-        runtime_servers=[_hub(), _hub().model_copy(update={"tools": {"query": "x__query"}})],
+        [
+            _mcp_tool("mcp_lmt_homebase_mint_session", "homebase_mint_session"),
+            _mcp_tool("mcp_lmt_homebase_query", "homebase_query"),
+        ]
     )
     load = AsyncMock(return_value=loaded)
     monkeypatch.setattr(review_browser_module, "load_mcp_tools", load)
 
-    tools, servers = await ReviewBrowser.sign_in("design")
+    tools = await ReviewBrowser.sign_in()
 
-    # Only the named connection loads, so another connection's tool of that name never does.
-    assert load.await_args is not None and load.await_args.kwargs == {"connection_name": "hub"}
-    assert [tool.name for tool in tools] == ["ops__mint_session"]
-    assert [s.tools for s in servers] == [{"mint_session": "hub__mint_session"}]
+    assert [tool.name for tool in tools] == ["mcp_lmt_homebase_mint_session"]
 
 
-async def test_without_a_session_tool_a_review_loads_no_mcp_connections(
+async def test_without_a_session_tool_a_review_loads_no_mcp_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _instance_settings(monkeypatch)
-    load = AsyncMock(side_effect=AssertionError("must not load MCP connections"))
+    load = AsyncMock(side_effect=AssertionError("must not load MCP tools"))
     monkeypatch.setattr(review_browser_module, "load_mcp_tools", load)
 
-    assert await ReviewBrowser.sign_in("design") == ([], [])
+    assert await ReviewBrowser.sign_in() == []
 
 
 async def test_a_review_browser_signs_in_only_to_the_instance_domains(
@@ -361,12 +348,11 @@ async def test_a_review_browser_signs_in_only_to_the_instance_domains(
     [
         {"review_browser_domains": ["https://dev.example.com"]},
         {"review_browser_domains": ["localhost"]},
-        {"review_browser_session_tool": "mint_session"},
-        {"review_browser_session_tool": "Hub/mint_session"},
-        {"review_browser_session_tool": "hub/mint session"},
+        {"review_browser_session_tool": "hub/mint_session"},
+        {"review_browser_session_tool": "mint session"},
     ],
 )
-def test_review_browser_settings_take_domains_and_one_connection_tool(
+def test_review_browser_settings_take_domains_and_one_kit_tool(
     values: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
@@ -959,12 +945,17 @@ async def test_a_save_that_cannot_finish_keeps_nothing(
 async def test_only_a_review_that_works_for_apps_gets_their_tools_and_browser(
     monkeypatch: pytest.MonkeyPatch, works: bool
 ) -> None:
-    _instance_settings(monkeypatch, review_browser_session_tool="hub/mint_session")
+    _instance_settings(monkeypatch, review_browser_session_tool="hub_mint_session")
     monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=_apps() if works else None))
     monkeypatch.setattr(
         reviewer, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
     )
-    loaded = MCPTools([_mcp_tool("ops__query", "query")], runtime_servers=[_hub()])
+    loaded = MCPTools(
+        [
+            _mcp_tool("mcp_lmt_hub_mint_session", "hub_mint_session"),
+            _mcp_tool("mcp_lmt_hub_query", "hub_query"),
+        ]
+    )
     monkeypatch.setattr(review_browser_module, "load_mcp_tools", AsyncMock(return_value=loaded))
     config = _base_config()
     config["configurable"].update(
@@ -977,13 +968,13 @@ async def test_only_a_review_that_works_for_apps_gets_their_tools_and_browser(
     names = {getattr(tool, "name", "") for tool in surface.base_tools}
     assert (surface.browser is not None) is works
     assert ("save_app_document" in names) is works
-    assert "ops__query" not in names
-    expected = [{"mint_session": "hub__mint_session"}] if works else []
-    assert [server.tools for server in surface.mcp_servers] == expected
-    # The run's calls find the tools its catalog offered, and no other tool of that server.
+    assert ("mcp_lmt_hub_mint_session" in names) is works
+    assert "mcp_lmt_hub_query" not in names
+    # The run's calls find the tools its catalog offered, and no other tool of the kit.
     kind = ReviewerKind()
     assert (await kind.tool(config, "save_app_document") is not None) is works
-    assert await kind.tool(config, "ops__query") is None
+    assert (await kind.tool(config, "mcp_lmt_hub_mint_session") is not None) is works
+    assert await kind.tool(config, "mcp_lmt_hub_query") is None
     assert await kind.tool(config, "add_finding") is not None
 
 

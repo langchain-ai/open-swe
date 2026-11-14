@@ -300,152 +300,29 @@ const { answers } = await tools.classify({
 });
 ```
 
-### Workspace MCP servers
+### MCP servers
 
-Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
-Connections belong to this Robin deployment and are shared across repositories and remote coding-agent threads.
-Enabled connections provide baseline tools for all users, limited to the tools selected by an admin.
-Only admins can manage connections or reveal saved credentials.
+Robin stores no MCP servers of its own.
+A run gets MCP tools from LangSmith Managed Tools kits:
 
-1. Choose **Add MCP server** and enter a unique lowercase connection name, an HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
-1. Choose **Headers / API key** or **OAuth client credentials** for authentication.
-   For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY` in PostgreSQL; normal dashboard responses only return header names.
-   Admins can use the eye icon (**Show saved headers**) to reveal values on demand, then the crossed-out eye to clear them from the editor.
-   Entered or imported values also have an eye icon to show or hide them.
-   Use headers for credentials, rather than URL query parameters.
-   For OAuth, enter the token URL, client ID, client secret, scopes, and the provider's client authentication method.
-   The secret is encrypted in PostgreSQL and is never returned to the browser.
-   Leave it blank when editing to keep it.
-1. Choose **Save and discover tools**.
-   For new connections, all discovered tools are selected by default.
-   Review the selection, then choose **Save connection** to enable those tools.
-   Rediscovering an existing connection preserves its selected tools, including an intentionally empty selection.
-   Newly added tools on the remote server require explicit selection.
-   Discovery checks the draft before saving; if it fails, no connection is created and existing settings stay unchanged.
-   Discovery only lists tools.
+- A private thread loads its owner's personal kit (`LMT_KIT_ID`), called with the owner's own LangSmith sign-in.
+- Every other run loads Robin's bot kit (`LMT_BOT_KIT_ID`), called as the LMT profile `LMT_BOT_PROFILE_ID` with Robin's LangSmith key.
 
-Alternatively, choose **Import JSON** and paste a Claude-style configuration:
+The kits, their servers, and the bot profile's credentials are managed in LangSmith; Robin only reads them.
+To give runs another MCP server, such as Datadog, incident.io, Currents, or Linear, add it to the bot kit, or to the personal kit for tools people use with their own accounts.
+Robin has no setting, dashboard form, or API for adding MCP servers.
 
-```json
-{
-  "mcpServers": {
-    "datadog": {
-      "type": "http",
-      "url": "https://mcp.us5.datadoghq.com/v1/mcp?toolsets=core",
-      "headers": {
-        "DD_API_KEY": "YOUR_API_KEY",
-        "DD_APPLICATION_KEY": "YOUR_APPLICATION_KEY"
-      }
-    }
-  }
-}
-```
-
-Datadog, LangSmith, Linear, and Currents agent tools are configured through Workspace MCPs.
-The dedicated Datadog and Currents credentials forms and built-in provider tools have been removed.
-Reconnect Datadog using the MCP configuration above; legacy saved credentials are not migrated automatically.
-Use the JSON import or connection form to add the other MCP servers as needed.
-
-The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the Currents REST API.
-Run its Streamable HTTP server on an HTTPS host reachable by Robin, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY` header.
-The Currents REST API URL itself does not speak MCP, and the local `npx @currents/mcp` command cannot be imported as a workspace connection.
-
-Optional reviewer trace resolution and personal LangSmith credential proxying have been removed.
-Configure agent access to LangSmith through Workspace MCPs.
-Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
-Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session; configure other Linear operations through Workspace MCPs.
+Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session.
 The channel reports a session's failed run in the session.
-Notices a run posts on its issue itself, such as a failing sandbox, use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
-These notices run independently of the agent and honor the connection's enabled state and tool selection.
-Delivery failures are logged without marking the run as notified.
+Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
 
-Use the endpoint for your Datadog site (this example uses US5).
-Replace the key placeholders directly in the dashboard.
-Import supports multiple named servers, optional `type` (`http` by default, or `sse`), and string authentication headers.
-It opens each connection for review without saving automatically.
-Existing connections keep their enabled state and selected tools.
-Local `command` servers and environment-variable expansion are not supported.
+MCP tools are named `mcp_<connection>_<tool>`, such as `mcp_lmt_…` for a kit's tools, with a hash suffix when the plain name would be ambiguous, contain other characters, or exceed 64 characters.
+The backend caches a kit's tool list for ten minutes, and each tool call checks the connection and tool again.
+An unavailable server omits its tools without preventing other servers from loading.
 
-For Linear on an MDA deployment with the Linear channel, use the channel's app token instead of the example below; see [Linear's MCP server on the Linear channel's token](#linears-mcp-server-on-the-linear-channels-token).
-Linear holds one app token per app: a client-credentials token for the channel's app revokes the channel's, and its Linear grant then needs an admin's approval again.
-
-For a Linear OAuth application, enable **Client credentials tokens** in the application's settings, then import this configuration.
-The `oauth` object is a Robin extension to the remote MCP JSON format:
-
-```json
-{
-  "mcpServers": {
-    "linear": {
-      "type": "http",
-      "url": "https://mcp.linear.app/mcp",
-      "oauth": {
-        "grant_type": "client_credentials",
-        "token_url": "https://api.linear.app/oauth/token",
-        "client_id": "YOUR_CLIENT_ID",
-        "client_secret": "YOUR_CLIENT_SECRET",
-        "scope": "read,write",
-        "token_endpoint_auth_method": "client_secret_post"
-      }
-    }
-  }
-}
-```
-
-Client credentials require no redirect URI.
-Robin requests a bearer token, caches it in memory until shortly before expiry, and obtains another when needed.
-A rejected token is renewed once on HTTP 401.
-Client credentials go only to the configured token URL; bearer tokens go to the MCP server.
-Both destinations use the same public HTTPS address validation and redirect restrictions.
-An explicit `Authorization` header cannot be combined with OAuth.
-
-Other providers can use the same `oauth` settings with their own token URL and scope format; `client_secret_basic` sends credentials using HTTP Basic instead of the request body.
-Changing the token URL, client ID, or MCP URL requires re-entering the client secret.
-Sending `oauth: null` removes OAuth credentials; omitting `oauth` from a partial API update preserves them.
-Linear documents this flow under [client credentials tokens](https://linear.app/developers/oauth-2-0-authentication#client-credentials-tokens).
-
-Examples for the generic connection form:
-
-| Connection | URL | Authentication headers |
-|---|---|---|
-| `incident` | `https://mcp.incident.io/mcp` | `Authorization`: `Bearer <your incident.io API key>` |
-| `datadog` | `https://mcp.datadoghq.com/v1/mcp?toolsets=core` | `DD_API_KEY`: your API key; `DD_APPLICATION_KEY`: your application key |
-
-Both examples use Streamable HTTP.
-Choose the Datadog MCP hostname for your site (for example, `mcp.datadoghq.eu`).
-Use appropriately scoped provider keys and select the read tools you need for investigation.
-The incident.io authentication and catalog are documented in [its remote MCP guide](https://docs.incident.io/ai/remote-mcp).
-Datadog documents its headers and site-specific endpoints in the [MCP setup guide](https://docs.datadoghq.com/mcp_server/setup/#api-and-application-keys).
-Enter Datadog key values directly, without a `Bearer` prefix.
-The `core` toolset includes logs, metrics, traces, dashboards, monitors, and incidents.
-
-Allowed tools appear in the agent's **MCPs** tool group with connection prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming collisions.
-Catalogs are cached for ten minutes per settings revision.
-Changing a connection causes the next run to discover its catalog again.
-Every tool call reloads the current authentication settings and checks whether the connection and tool are still enabled.
-Disabling or deleting a connection blocks subsequent calls from already-loaded tools; it does not cancel an in-flight call.
-
-Editing keeps saved headers unless **Replace headers** is selected.
-Replacing with an empty header list clears those headers.
-Changing the URL requires explicitly replacing or clearing saved headers.
-Requests must remain on the configured public HTTPS origin; redirects, private addresses, local processes, and interactive OAuth login are not supported by this connection manager.
-
-The backend implementation lives in `openswe/mcp`: connection models and credential preparation, OAuth, HTTPS transport, and tool discovery/execution.
-Workspace storage and dashboard authorization remain in the workspace adapters.
-Existing stored connections and imported JSON need no migration.
-
-For another scope, provide an `MCPSource` with an owner-specific `namespace` plus async `list_connections` and `get_connection` callbacks.
-The caller must authorize each source before passing it to `load_mcp_tools(*sources)`.
-Sources are ordered from lowest to highest precedence.
-Distinct connection names contribute tools; a later connection with the same name replaces the entire earlier connection, including credentials and allowed tools.
-Disabled connections and empty tool selections also override earlier entries, preventing fallback to broader access.
-Saved secrets must only be preserved from the previous record in the same scope.
-
-Catalog and token caches include the source namespace.
-Each tool call resolves the current winning connection again, checks its allowlist, and refuses to switch scopes mid-run.
+The backend implementation lives in `openswe/mcp`: `managed.py` reads the LMT kits, and `runtime.py` discovers and calls tools.
+`load_mcp_tools(*sources)` takes caller-authorized `MCPSource`s from lowest to highest precedence; a later connection with the same name replaces the earlier one entirely.
 Source lookup errors must raise instead of returning an empty result, so a failed lookup cannot expose a lower-precedence connection.
-Robin loads workspace MCP connections with the owner's personal LangSmith Managed Tools kit in private threads, or Robin's bot kit otherwise.
-An unavailable server omits its tools without preventing other connections from loading.
-This catalog is not attached to the separate read-only reviewer or Investigate graphs.
 
 ### Personal integrations
 
@@ -453,58 +330,6 @@ Use **Settings → Connections → LangSmith Managed Tools** for supported perso
 The personal kit runs with the owner's accounts only in a **private thread started by its immutable owner**, and rechecks ownership before each tool call.
 Collaborative threads use Robin's bot kit instead.
 GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
-
-Legacy personal MCP connections no longer load or execute in agent runs or through Robin's inbound MCP server, including servers backed by personal MDA connections.
-They cannot override workspace connections, and their editor is no longer available in Settings → Connections.
-Existing records and credentials remain in PostgreSQL under the person's `users` row; no data is deleted or migrated.
-The authenticated `/dashboard/api/my-mcps` APIs remain available for the signed-in user's records, including CRUD, header reveal, and tool discovery, which does not execute tools.
-Workspace MCP settings and LangSmith Managed Tools are unaffected.
-
-### MCP servers on an MDA connection
-
-A workspace MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Robin's database.
-The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
-Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
-
-```json
-{
-  "name": "incident",
-  "url": "https://mcp.incident.io/mcp",
-  "allowed_tools": ["incident_list"],
-  "connection": {"slug": "open-swe-mcp-incident-io", "owner": "agent"}
-}
-```
-
-The slug must be `open-swe-mcp-<server>`: a server never gets a credential Robin or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
-The one exception is Linear's MCP server, below.
-Workspace servers read the deployment's connection (`"owner": "agent"`).
-Legacy personal servers (`"owner": "user"`) are no longer loaded.
-The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
-A server with a connection takes no headers or OAuth, and saving it drops those the record had.
-An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
-Robin cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
-A run whose agent connection is missing goes without the server.
-
-#### Linear's MCP server on the Linear channel's token
-
-With the Linear channel on the MDA deployment, Linear's MCP server can read the channel's own app token, `mda/linear-token`, which the channel's `mda deploy` keeps and Agent Auth renews.
-Linear's MCP server takes an existing OAuth token as `Authorization: Bearer` ([Linear's MCP docs](https://linear.app/docs/mcp)), and its tools then act as the Open SWE app, as with client credentials.
-Prefer this over the client-credentials example above: Linear holds one app token per app, so a server requesting its own for the channel's app revokes the channel's.
-Save an instance or workspace server with no `oauth` or headers:
-
-```json
-{
-  "name": "linear",
-  "url": "https://mcp.linear.app/mcp",
-  "allowed_tools": ["list_issues", "get_issue"],
-  "connection": {"slug": "mda/linear-token", "owner": "agent"}
-}
-```
-
-The URL must be on `https://mcp.linear.app` (`/mcp`, `/mcp/readonly` or `/sse`), with no port or credentials; the backend refuses the token for any other server, and the MDA run refuses to send it anywhere else.
-Personal servers cannot name it.
-Once the server reads the channel's token, turn off **Client credentials tokens** on the Linear app.
-The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
 
 ### Adding a Python tool
 

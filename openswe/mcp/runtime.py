@@ -19,14 +19,12 @@ from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langsmith import tracing_context
-from runtime_api.catalog import McpServerSpec
 from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
-from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPToolProvenance
-from openswe.mcp.oauth import MCPOAuthError, connection_auth
+from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
 from openswe.utils.startup_trace import asubphase
@@ -50,33 +48,21 @@ _MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
 
 
 class MCPTools(list[BaseTool]):
-    """The tools of the MCP servers the backend serves, and the servers only an MDA run reaches."""
+    """The tools of the MCP servers the backend serves."""
 
-    def __init__(
-        self, tools: Iterable[BaseTool] = (), runtime_servers: Iterable[McpServerSpec] = ()
-    ) -> None:
+    def __init__(self, tools: Iterable[BaseTool] = ()) -> None:
         super().__init__(tools)
         self.failures: list[str] = []
         # Managed tools services the private thread's owner could connect, which the prompt names.
         self.connectable: list[str] = []
-        # Servers whose credential is an MDA connection, which the run reads and connects with.
-        self.runtime_servers = list(runtime_servers)
 
     @property
     def catalog_note(self) -> str:
         return catalog_note(self.failures, self.connectable)
 
     def without(self, tool_name: str) -> MCPTools:
-        """These tools less every one named ``tool_name`` on its server, wherever it runs."""
-        kept = MCPTools(
-            (t for t in self if (t.metadata or {}).get("mcp_tool_name") != tool_name),
-            (
-                server.model_copy(
-                    update={"tools": {k: v for k, v in server.tools.items() if k != tool_name}}
-                )
-                for server in self.runtime_servers
-            ),
-        )
+        """These tools less every one named ``tool_name`` on its server."""
+        kept = MCPTools(t for t in self if (t.metadata or {}).get("mcp_tool_name") != tool_name)
         kept.failures = list(self.failures)
         kept.connectable = list(self.connectable)
         return kept
@@ -141,11 +127,8 @@ class _MCPTool(StructuredTool):
         return await self.coroutine(*args, **kwargs)
 
 
-def _client(
-    record: MCPConnection, namespace: tuple[str, ...]
-) -> Client[SSETransport | StreamableHttpTransport]:
+def _client(record: MCPConnection) -> Client[SSETransport | StreamableHttpTransport]:
     headers = record.connection_headers()
-    auth = connection_auth(record, namespace)
 
     def factory(
         headers: dict[str, str] | None = None,
@@ -162,21 +145,20 @@ def _client(
         transport = SSETransport(
             record.url,
             headers=headers,
-            auth=auth,
             sse_read_timeout=_TIMEOUT_SECONDS,
             httpx_client_factory=factory,
         )
     else:
         transport = StreamableHttpTransport(
-            record.url, headers=headers, auth=auth, httpx_client_factory=factory
+            record.url, headers=headers, httpx_client_factory=factory
         )
     return Client(transport, timeout=_TIMEOUT_SECONDS)
 
 
-async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+async def _discover_tools(record: MCPConnection) -> list[Tool]:
     tools: list[Tool] = []
     unusable: set[str] = set()
-    async with _client(record, namespace) as client:
+    async with _client(record) as client:
         cursor: str | None = None
         for _ in range(_MAX_TOOL_PAGES):
             page = await client.list_tools_mcp(cursor=cursor, cache_mode="bypass")
@@ -200,7 +182,7 @@ def _discovery_error(error: Exception) -> str:
         current = pending.pop()
         if isinstance(current, BaseExceptionGroup):
             pending.extend(reversed(current.exceptions))
-        elif isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
+        elif isinstance(current, MCPDiscoveryError):
             return str(current)
         elif isinstance(current, MCPError):
             return f"MCP server returned error {current.code} while listing tools"
@@ -250,12 +232,6 @@ def _discovery_slots() -> asyncio.Semaphore:
 
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
-    if record.connection is not None:
-        raise MCPDiscoveryError(
-            "Only an MDA run reads this server's connection, so Robin cannot list its "
-            "tools; enter the names of the tools to allow"
-        )
-
     from langgraph_api.cache import cache_get, cache_set
 
     key: str | None = None
@@ -277,7 +253,7 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
             raise MCPDiscoveryError(failure[0])
     try:
         async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
-            tools = await _discover_tools(record, namespace)
+            tools = await _discover_tools(record)
     except Exception as exc:
         reason = _discovery_error(exc)
         if key is not None and _backoff_failure(exc):
@@ -329,11 +305,11 @@ def _wrap_tool(
                 raise ToolException("MCP connection scope changed; start a new run")
             if not record.enabled:
                 raise ToolException("MCP is disabled or disconnected")
-            if record.url != url or record.transport != transport or record.connection is not None:
+            if record.url != url or record.transport != transport:
                 raise ToolException("MCP connection changed; start a new run")
             if not record.allows_tool(definition.name):
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
-            fresh = await as_langchain_tool(definition, _client(record, namespace))
+            fresh = await as_langchain_tool(definition, _client(record))
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
             # Call the coroutine directly so remote arguments LangChain reserves pass through.
@@ -442,34 +418,6 @@ async def _load_tools(
         return [], "failed"
 
 
-def _runtime_server(
-    source: MCPSource, record: MCPConnection, overridden_scopes: list[MCPScope]
-) -> McpServerSpec | None:
-    """``record`` as the MDA run connects to it, if its tier may read its connection."""
-    connection = record.connection
-    if (
-        connection is None
-        or not connection.for_mcp_server(record.url)
-        or connection.owner != CONNECTION_OWNERS.get(source.scope)
-    ):
-        logger.warning(
-            "Skipping an MCP server whose connection its tier may not read",
-            extra={"mcp_name": record.name, "mcp_scope": source.scope},
-        )
-        return None
-    return McpServerSpec(
-        name=record.name,
-        url=record.url,
-        transport=record.transport,
-        tools={tool: _tool_name(record.name, tool) for tool in record.allowed_tools},
-        connection=connection,
-        header=record.connection_header,
-        provenance=MCPToolProvenance(
-            connection_name=record.name, scope=source.scope, overridden_scopes=overridden_scopes
-        ).note(),
-    )
-
-
 async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> MCPTools:
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     result = MCPTools()
@@ -502,7 +450,6 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
                 result.failures,
             )
             for source, record in connections
-            if record.connection is None
         )
     )
     outcomes = Counter(outcome for _, outcome in groups)
@@ -514,10 +461,4 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         },
     )
     result.extend(tool for tools, _ in groups for tool in tools)
-    runtime_servers = [
-        _runtime_server(source, record, scopes[record.name][:-1])
-        for source, record in connections
-        if record.connection is not None
-    ]
-    result.runtime_servers = [server for server in runtime_servers if server is not None]
     return result

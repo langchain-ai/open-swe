@@ -3,7 +3,7 @@
 A person connects an MCP client (Claude Code, Claude.ai, Cursor) to ``/robin/mcp``
 and signs in with GitHub through the dashboard's GitHub App. Each request lists
 and runs the tools that person's ``ToolCaller`` offers, so the catalog follows
-their admin status and integration MCPs without any session state.
+their admin status without any session state.
 """
 
 import json

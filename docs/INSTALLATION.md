@@ -105,7 +105,7 @@ Query-only changes do not count as page views.
 `agents_thread_created` still means an accepted new thread, with `run_target` (`local` or `cloud`) and `has_attachments`.
 `agents_message_submitted` still means a follow-up attempt, with `mode` (`new_turn`, `queue` or `steer`) and `has_attachments`; it excludes offloading.
 
-`agents_action_started` and `agents_action_completed` add bounded `action`, `result` (`accepted` or `failed`) and `failure_kind` properties for thread starts, follow-ups, queue/steer/offload/cancel, project membership and filing, thread sharing, integration connection, MCP saves/deletes, automations, explicit preference saves and review request/submission/rerun.
+`agents_action_started` and `agents_action_completed` add bounded `action`, `result` (`accepted` or `failed`) and `failure_kind` properties for thread starts, follow-ups, queue/steer/offload/cancel, project membership and filing, thread sharing, integration connection, automations, explicit preference saves and review request/submission/rerun.
 Acceptance is the API's acceptance, not successful agent completion; a later stream failure does not rewrite an accepted action.
 OAuth redirects only record the start when the browser cannot observe the outcome.
 `agents_feature_opened` records intentional panel/tab opens for terminal, browser, files, diff, artifacts, background work, apps and review surfaces, not automatic panel opens or background reads.
@@ -504,10 +504,10 @@ Within a few seconds you should see a 👀 reaction, a run in your LangSmith pro
 GitHub lists every delivery and its response under the App's **Advanced** tab.
 
 **How a run picks its workspace.**
-A workspace owns repositories, Slack channels, MCP connections, and workspace settings, and carries the sandbox prompt/snapshot/scripts described above.
+A workspace owns repositories, Slack channels, and workspace settings, and carries the sandbox prompt/snapshot/scripts described above.
 New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread starts with `/workspace:<slug>` (`workspace:<slug>` and `env:<slug>` anywhere in the message still work); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **Settings → General**; otherwise it falls back to `default`.
 GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run.
-Workspace records and their repository and Slack-channel bindings, instance and workspace settings, per-repository agent instructions, and MCP connections live in PostgreSQL (see **Analytics storage** above).
+Workspace records and their repository and Slack-channel bindings, instance and workspace settings, and per-repository agent instructions live in PostgreSQL (see **Analytics storage** above).
 
 ---
 
@@ -565,7 +565,7 @@ Robin can join new incident channels on its own and start investigating.
 
 When a public internal channel is created with the prefix, or renamed into it, Robin joins, posts one message, and about a minute later starts a system-owned thread under that message with a prompt to investigate the issue.
 From then on the thread is an ordinary Robin Slack thread: mention Robin there to follow up.
-Optionally give the agent an incident tracker by adding its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Workspaces → the workspace → MCP connections** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers).
+Optionally give the agent an incident tracker by adding its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, to Robin's LangSmith Managed Tools bot kit in LangSmith; see [MCP servers](CUSTOMIZATION.md#mcp-servers).
 
 </details>
 
@@ -649,10 +649,11 @@ The dashboard shows these threads read-only: continue them in Linear.
 1. Run `mda deploy` in `mda/`.
    Deploy sets up the Linear app, which takes a Linear workspace admin: it opens Linear's new-app page filled in with the app's name, redirect URI, webhook URL and events, then asks for the app's client ID, client secret and webhook signing secret, and the admin approves the install.
    The deployment checks each delivery's signature with that secret; the backend needs no Linear secret.
-1. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Robin may use to read issues and change them.
-   Include `save_comment` (or `create_comment` if offered) so a run can still post a notice on the issue, such as when its sandbox keeps failing; the session's answer and errors need no tool.
 1. Set a workspace default repository under **Robin Agent**.
    Add a `repo:owner/name` token or GitHub URL to the message that mentions the app when the issue belongs to another repository.
+
+The session's answer and errors need no tool.
+For Robin to read and change issues beyond the session, add Linear's tools to the LangSmith Managed Tools bot kit; see [MCP servers](CUSTOMIZATION.md#mcp-servers).
 
 Issue events still reach workspace automations and `listen_events`: the channel forwards them to the backend.
 
@@ -832,10 +833,9 @@ Missing requester authorization blocks the PR rather than borrowing the thread o
 Outside Ask channels, PRs use the saved thread owner's identity, including background completions; system-owned and legacy unowned threads retain bot authorship.
 GitHub prevents the author from approving their own PR; person-authored PRs otherwise follow the repository's review rules.
 
-Public threads load workspace MCP connections, Robin's LangSmith Managed Tools bot kit, and organization skills.
+Public threads load Robin's LangSmith Managed Tools bot kit and organization skills.
 Personal LangSmith Managed Tools, user skills, and user custom instructions are available only in a private thread started by its immutable owner.
 The same ownership check applies when a personal managed tool refreshes its credentials at execution time.
-Legacy personal MCP connections no longer load or execute; their saved records remain available through the authenticated API.
 
 Private threads use their owner's stored GitHub OAuth token for server-side GitHub operations and PR creation.
 If that token is unavailable, the owner must sign in again; the run does not fall back to the bot.

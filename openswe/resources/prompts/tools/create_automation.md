@@ -10,7 +10,7 @@ Args:
   Runs post nowhere on their own; say in the prompt if a run should report to a Slack channel.
   Runs act as the automation, not as you: they can read public threads, including their own earlier runs, but cannot message threads, start threads, or see private conversations.
   For anything they report, name a channel, or say to send it to you: a run can DM its result to the automation's creator, and only to them.
-- workspace: Slug of the workspace every run launches in, with its settings, MCP connections, and sandbox image.
+- workspace: Slug of the workspace every run launches in, with its settings and sandbox image.
   Required; ask which workspace when it is not clear.
 - triggers: Everything that fires the automation, each with its own filters; any one of them starts a run:
   - ``{"kind": "schedule", "cron": "0 9 * * 1"}`` runs on a five-field UTC cron.
