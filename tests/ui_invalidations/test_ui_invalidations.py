@@ -13,6 +13,7 @@ from openswe.plugins.records import DocumentScope
 from openswe.ui_invalidations import Topic, outbox
 from openswe.ui_invalidations.hub import HUB, Stream
 from openswe.ui_invalidations.routes import _stream
+from openswe.ui_invalidations.topics import KeyedTopic
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 
@@ -28,11 +29,13 @@ def test_a_plugins_document_topics_can_always_be_subscribed_to() -> None:
         assert Topic.well_formed(Topic.PLUGIN_DOCUMENTS.keyed(key))
 
 
-async def test_a_burst_of_check_changes_reaches_a_reader_as_its_first_and_last(
+@pytest.mark.parametrize("topic", [Topic.PULL_REQUEST_CHECKS, Topic.THREADS])
+async def test_a_burst_of_changes_reaches_a_reader_as_its_first_and_last(
     monkeypatch: pytest.MonkeyPatch,
+    topic: KeyedTopic[str],
 ) -> None:
-    monkeypatch.setattr(Topic.PULL_REQUEST_CHECKS, "min_interval_seconds", 0.3)
-    checks = Topic.PULL_REQUEST_CHECKS.keyed("acme/app/7")
+    monkeypatch.setattr(topic, "min_interval_seconds", 0.3)
+    checks = topic.keyed("public" if topic is Topic.THREADS else "acme/app/7")
     review = Topic.PULL_REQUESTS.keyed("acme/app/7")
     stream = Stream(frozenset({checks, review}))
 

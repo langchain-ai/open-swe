@@ -31,7 +31,7 @@ const CONNECT_DEBOUNCE_MS = 150
 const SILENCE_LIMIT_MS = 45_000
 const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 30_000
-const PULL_REQUEST_REFRESH_MS = 5_000
+const COALESCED_REFRESH_MS = 5_000
 
 /**
  * One browser tab's part in the dashboard's single invalidation stream.
@@ -52,7 +52,7 @@ export class InvalidationTab {
   private reportTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribeCache: (() => void) | null = null
   private stopped = false
-  private readonly pullRequestRefreshes = new Map<
+  private readonly coalescedRefreshes = new Map<
     InvalidationTopic,
     { timer: ReturnType<typeof setTimeout> | null; dirty: boolean }
   >()
@@ -105,10 +105,10 @@ export class InvalidationTab {
     this.stopped = true
     this.unsubscribeCache?.()
     if (this.reportTimer) clearTimeout(this.reportTimer)
-    for (const refresh of this.pullRequestRefreshes.values()) {
+    for (const refresh of this.coalescedRefreshes.values()) {
       if (refresh.timer) clearTimeout(refresh.timer)
     }
-    this.pullRequestRefreshes.clear()
+    this.coalescedRefreshes.clear()
     this.leave()
     window.removeEventListener("pagehide", this.leave)
     this.leader?.close()
@@ -217,21 +217,21 @@ export class InvalidationTab {
     if (this.stopped || !topics.length) return
     const immediate: InvalidationTopic[] = []
     for (const topic of topics) {
-      if (topic !== "pull-requests" && !topic.startsWith("pull-requests/")) {
+      if (!/^(pull-requests|threads)(\/|$)/.test(topic)) {
         immediate.push(topic)
         continue
       }
-      const pending = this.pullRequestRefreshes.get(topic)
+      const pending = this.coalescedRefreshes.get(topic)
       if (pending) {
         pending.dirty = true
       } else {
-        this.refreshPullRequest(topic)
+        this.refreshCoalesced(topic)
       }
     }
     this.refetch(immediate)
   }
 
-  private refreshPullRequest(topic: InvalidationTopic): void {
+  private refreshCoalesced(topic: InvalidationTopic): void {
     const pending: {
       timer: ReturnType<typeof setTimeout> | null
       dirty: boolean
@@ -246,13 +246,13 @@ export class InvalidationTab {
             queryTopics(query).includes(topic)
         ),
     }
-    this.pullRequestRefreshes.set(topic, pending)
+    this.coalescedRefreshes.set(topic, pending)
     void this.refetch([topic], false).finally(() => {
       if (this.stopped) return
       pending.timer = setTimeout(() => {
-        this.pullRequestRefreshes.delete(topic)
-        if (pending.dirty) this.refreshPullRequest(topic)
-      }, PULL_REQUEST_REFRESH_MS)
+        this.coalescedRefreshes.delete(topic)
+        if (pending.dirty) this.refreshCoalesced(topic)
+      }, COALESCED_REFRESH_MS)
     })
   }
 

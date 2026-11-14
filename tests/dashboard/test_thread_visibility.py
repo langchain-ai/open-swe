@@ -19,6 +19,7 @@ from openswe.threads import (
 )
 from openswe.tools import threads as tools
 from openswe.ui_invalidations.topics import Topic
+from openswe.utils.json_types import ThreadLike
 from tests.conftest import serve_threads_from
 
 _ADMINS = {"admin", "admin@example.com"}
@@ -237,18 +238,94 @@ async def test_admin_can_read_artifact_but_not_mutate(private_thread, monkeypatc
 async def test_private_candidates_filtered_before_pagination(private_thread, monkeypatch):
     thread, client = private_thread
     public = {"thread_id": "public-thread", "metadata": {"source": "dashboard"}}
-    monkeypatch.setattr(listing, "_search_threads_batch", AsyncMock(return_value=[thread, public]))
+    threads: list[ThreadLike] = [
+        *({**thread, "thread_id": f"private-{i}"} for i in range(2535)),
+        public,
+    ]
+
+    class Search:
+        calls: int = 0
+        scanned: int = 0
+
+        async def page(
+            self, client: object, metadata: object, *, limit: int, offset: int, **kwargs: object
+        ) -> list[ThreadLike]:
+            self.calls += 1
+            self.scanned += len(threads[offset : offset + limit])
+            return threads[offset : offset + limit]
+
+    search = Search()
+    monkeypatch.setattr(listing, "_search_threads_batch", search.page)
     result = await listing._collect_thread_candidates(
         client, [{}], viewer_login="bob", target_per_search=1
     )
     assert [item["thread_id"] for item in result] == ["public-thread"]
+    assert search.calls <= 7
+    assert search.scanned == len(threads)
     for viewer in ("alice", "admin"):
         result = await listing._collect_thread_candidates(client, [{}], viewer_login=viewer)
-        assert len(result) == 2
+        assert len(result) == len(threads)
     result = await listing._collect_thread_candidates(
         client, [{}], viewer_login="alice", include_private=False
     )
     assert [item["thread_id"] for item in result] == ["public-thread"]
+
+    search.calls = search.scanned = 0
+    await listing._collect_thread_candidates(
+        client, [{}], viewer_login="alice", target_per_search=1
+    )
+    assert search.calls == 1
+    assert search.scanned == listing._THREADS_SEARCH_PAGE
+
+    monkeypatch.setattr(listing, "_THREADS_PAGE_SCAN_CAP", 2000)
+    search.scanned = 0
+    result = await listing._collect_thread_candidates(client, [{}], viewer_login="bob")
+    assert result == []
+    assert search.scanned == 2000
+
+
+@pytest.mark.parametrize(("viewed", "status"), [(False, None), (None, "finished")])
+async def test_filtered_hierarchy_bounds_run_summaries(
+    monkeypatch: pytest.MonkeyPatch, viewed: bool | None, status: str | None
+) -> None:
+    threads: list[ThreadLike] = [
+        {"thread_id": f"thread-{i}", "metadata": {"source": "dashboard"}} for i in range(1550)
+    ]
+
+    class Search:
+        summarized: int = 0
+
+        async def page(
+            self, client: object, metadata: object, *, limit: int, offset: int, **kwargs: object
+        ) -> list[ThreadLike]:
+            return threads[offset : offset + limit]
+
+        async def summaries(
+            self, client: object, batch: list[ThreadLike], **kwargs: object
+        ) -> list[dict[str, object]]:
+            self.summarized += len(batch)
+            return [
+                {
+                    "id": thread["thread_id"],
+                    "viewed": int(str(thread["thread_id"]).split("-")[1]) < 750,
+                    "status": (
+                        "running"
+                        if int(str(thread["thread_id"]).split("-")[1]) < 750
+                        else "finished"
+                    ),
+                }
+                for thread in batch
+            ]
+
+    search = Search()
+    monkeypatch.setattr(listing, "_search_threads_batch", search.page)
+    monkeypatch.setattr(listing, "_summarize_threads", search.summaries)
+    monkeypatch.setattr(listing, "sidebar_memberships", AsyncMock(return_value={}))
+    result = await listing._collect_thread_candidates(
+        None, [{}], hierarchy=True, viewed=viewed, status=status, target_per_search=1
+    )
+    assert {thread["thread_id"] for thread in result} == {f"thread-{i}" for i in range(750, 800)}
+    assert search.summarized == 800
 
 
 async def test_owner_can_publish_thread_without_retaining_admin_capabilities(

@@ -816,11 +816,13 @@ async def _collect_thread_candidates(
             bot=bot,
             admin_threads=admin_threads,
         )
+        batch_limit = _THREADS_SEARCH_PAGE
         while offset < _THREADS_PAGE_SCAN_CAP:
+            batch_limit = min(batch_limit, _THREADS_PAGE_SCAN_CAP - offset)
             batch = await _search_threads_batch(
                 client,
                 metadata_filter,
-                limit=_THREADS_SEARCH_PAGE,
+                limit=batch_limit,
                 offset=offset,
                 sort_by=sort_by,
                 text=query,
@@ -932,11 +934,13 @@ async def _collect_thread_candidates(
                 thread_id = str(_thread_id(thread))
                 matched_for_search.add(root_ids.get(thread_id, thread_id))
                 seen.setdefault(thread_id, thread)
-            if batch_size < _THREADS_SEARCH_PAGE:
+            if batch_size < batch_limit:
                 break
             if target_per_search is not None and len(matched_for_search) >= target_per_search:
                 break
-            offset += _THREADS_SEARCH_PAGE
+            offset += batch_limit
+            if not hierarchy or viewed is None and status is None:
+                batch_limit = min(batch_limit * 2, 1000)
     return sorted(
         seen.values(),
         key=lambda thread: (_search_rank(thread), _thread_timestamp_ms(thread, sort_by)),

@@ -312,7 +312,7 @@ Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
-Topic.THREADS = ThreadListsTopic("threads")
+Topic.THREADS = ThreadListsTopic("threads", min_interval_seconds=5.0)
 Topic.PULL_REQUEST_CHECKS = KeyedTopic(
     "pull-request-checks",
     authorize_keys=_readable_pull_requests,
