@@ -30,6 +30,7 @@ An agent previews a build beside its thread with `preview_app` and releases it w
 | `github:read` | read files, trees, history and pull requests in its repositories |
 | `github:write` | create branches, commit files and open pull requests there |
 | `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
+| `threads:read` | list and read agent threads the person may read, including incident investigations |
 
 A plugin reaches no repository until the person shares one.
 Ask with `host.repositories.pick()`: the dashboard shows them a picker of the repositories they can read, and the plugin gets back only the ones they chose.

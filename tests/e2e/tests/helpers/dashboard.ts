@@ -39,7 +39,7 @@ export async function seedRepoSidebar(page: Page) {
         "open-swe.agents.sidebar-prefs",
         JSON.stringify({
           organize: "workspace",
-          hiddenNavItems: ["/agents/bots", "/incidents"],
+          hiddenNavItems: ["/incidents"],
         }),
       );
   });

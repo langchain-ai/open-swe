@@ -3,7 +3,7 @@
 ``/plugins`` publishes apps' versions and adds them to a person's web UI;
 ``/plugins/previews/{thread_id}`` is the one an agent builds in a thread. ``/plugins/{installation_id}/...`` is
 everything a running plugin may ask for: its documents, its repositories on
-GitHub, and agent threads. The dashboard relays those from the plugin's
+GitHub, its agent chats, and the agent threads its person may read. The dashboard relays those from the plugin's
 sandboxed frame, which cannot reach the network itself.
 """
 
@@ -87,6 +87,17 @@ from openswe.plugins.records import (
     PreviewHeldByAnother,
 )
 from openswe.plugins.rooms import MAX_PRESENCE_BYTES, ROOMS, Room
+from openswe.plugins.threads import (
+    MAX_MESSAGES,
+    MAX_THREAD_PAGE,
+    BotModel,
+    ThreadArtifactModel,
+    ThreadMessagesModel,
+    ThreadNotFound,
+    ThreadPageModel,
+    ThreadSource,
+    ThreadSummaryModel,
+)
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.object_store import ObjectStoreError
@@ -114,6 +125,8 @@ def _as_http() -> Iterator[None]:
     except (PluginPermissionDenied, RepositoryNotGranted, CollectionWrittenByApp) as exc:
         raise HTTPException(403, str(exc)) from exc
     except PluginChatNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ThreadNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     except (PluginNameTaken, PreviewHeldByAnother, ConflictingDocumentWrites) as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -156,8 +169,12 @@ async def _installed(
     with _as_http():
         installation = await PluginInstallations.get(installation_id, viewer.id)
     email = session.get("email")
+    login = session.get("sub")
     return InstalledPlugin(
-        installation=installation, user=viewer, email=email if isinstance(email, str) else None
+        installation=installation,
+        user=viewer,
+        email=email if isinstance(email, str) else None,
+        login=login if isinstance(login, str) else None,
     )
 
 
@@ -1261,6 +1278,64 @@ async def api_answer_plugin_chat_calls(
         chat = await plugin.own_chat(chat_id)
         answer = await plugin.answer(chat, {o.call_id: o.output for o in body.outputs})
     return ChatResumed(run_id=answer.run_id, paused=answer.paused)
+
+
+# ---- Agent threads -----------------------------------------------------------------
+
+ThreadId = Annotated[str, Path(min_length=1, max_length=200)]
+
+
+@router.get("/{installation_id}/threads")
+async def api_plugin_threads(
+    plugin: PluginDep,
+    source: ThreadSource,
+    bot: Annotated[str | None, Query(pattern=r"^(\*|[A-Z0-9]{1,32}:[A-Z0-9]{1,32})$")] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_THREAD_PAGE)] = 25,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+) -> ThreadPageModel:
+    """Threads from ``source`` the person may read, most recently updated first.
+
+    ``bot`` keeps threads one allowlisted Slack bot started (``team_id:bot_id``), or
+    any bot's with ``*``. Unlike the dashboard's lists, this one includes incident
+    threads when asked for ``incidents_agent``; see
+    :meth:`openswe.plugins.threads.PluginThreads.may_read`.
+    """
+    with _as_http():
+        return await plugin.threads.page(source, bot=bot, limit=limit, offset=offset)
+
+
+@router.get("/{installation_id}/bots")
+async def api_plugin_bots(plugin: PluginDep) -> list[BotModel]:
+    """The allowlisted Slack bots, whose threads the thread list filters by with ``bot``."""
+    with _as_http():
+        return await plugin.threads.bots()
+
+
+@router.get("/{installation_id}/threads/{thread_id}")
+async def api_plugin_thread(thread_id: ThreadId, plugin: PluginDep) -> ThreadSummaryModel:
+    with _as_http():
+        return await plugin.threads.summary(thread_id)
+
+
+@router.get("/{installation_id}/threads/{thread_id}/messages")
+async def api_plugin_thread_messages(
+    thread_id: ThreadId,
+    plugin: PluginDep,
+    limit: Annotated[int, Query(ge=1, le=MAX_MESSAGES)] = 100,
+) -> ThreadMessagesModel | None:
+    """The newest messages people and the agent wrote in the thread, oldest first, or
+    ``null`` for a thread from before the transcript log, whose messages aren't read here."""
+    with _as_http():
+        return await plugin.threads.messages(thread_id, limit=limit)
+
+
+@router.get("/{installation_id}/threads/{thread_id}/artifact")
+async def api_plugin_thread_artifact(
+    thread_id: ThreadId, plugin: PluginDep
+) -> ThreadArtifactModel | None:
+    """The artifact the thread published, or ``null`` when it published none."""
+    with _as_http():
+        return await plugin.threads.artifact(thread_id)
 
 
 # ---- People ------------------------------------------------------------------------

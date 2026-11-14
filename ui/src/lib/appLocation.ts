@@ -8,7 +8,6 @@ export const SECTION_ROOTS = [
   "/agents/chat",
   "/agents/skills",
   "/agents/automations",
-  "/agents/bots",
   "/agents/reviews",
 ] as const
 

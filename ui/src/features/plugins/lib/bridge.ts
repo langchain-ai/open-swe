@@ -30,10 +30,17 @@ import type {
   RoomEvent,
   RoomScope,
   SharedRepository,
+  SlackBot,
   StoredAttachment,
   StoredDocument,
   StoredJson,
   Subscription,
+  ThreadArtifact,
+  ThreadListOptions,
+  ThreadMessages,
+  ThreadPage,
+  ThreadSource,
+  ThreadSummary,
   Toast,
 } from "@openswe/plugin-sdk"
 import { RpcTarget } from "capnweb"
@@ -324,6 +331,47 @@ function pullNumber(value: unknown): number {
 function pullRole(value: unknown): PullRequestRole {
   if (value !== "review-requested" && value !== "author")
     invalid('role must be "review-requested" or "author"')
+  return value
+}
+
+const THREAD_SOURCES = new Set<string>([
+  "dashboard",
+  "web",
+  "github",
+  "slack",
+  "linear",
+  "schedule",
+  "api",
+  "claude_code",
+  "incidents_agent",
+] satisfies Array<ThreadSource>)
+
+function threadSource(value: unknown): ThreadSource {
+  if (typeof value !== "string" || !THREAD_SOURCES.has(value))
+    invalid(`source must be one of ${[...THREAD_SOURCES].join(", ")}`)
+  return value as ThreadSource
+}
+
+function boundedInteger(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number
+): number | undefined {
+  const found = optionalInteger(value, name)
+  if (found !== undefined && (found < min || found > max))
+    invalid(`${name} must be from ${min} to ${max}`)
+  return found
+}
+
+const threadIdArg = (value: unknown) => text(value, "threadId", 200)
+
+const SLACK_BOT = /^(\*|[A-Z0-9]{1,32}:[A-Z0-9]{1,32})$/
+
+function optionalBot(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "string" || !SLACK_BOT.test(value))
+    invalid('bot must be a bot\'s key, "<team_id>:<bot_id>", or "*"')
   return value
 }
 
@@ -799,6 +847,51 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     return this.#budget.run(() =>
       pluginsApi.searchPulls(this.#host().plugin.id, pullRole(role))
     )
+  }
+
+  listThreads(options: ThreadListOptions): Promise<ThreadPage> {
+    return this.#budget.run(() => {
+      this.#require("threads:read")
+      const fields = record(options, "options")
+      return pluginsApi.listThreads(this.#host().plugin.id, {
+        source: threadSource(fields.source),
+        bot: optionalBot(fields.bot),
+        limit: boundedInteger(fields.limit, "limit", 1, 50),
+        offset: boundedInteger(fields.offset, "offset", 0, 10_000),
+      })
+    })
+  }
+
+  slackBots(): Promise<Array<SlackBot>> {
+    return this.#budget.run(() => {
+      this.#require("threads:read")
+      return pluginsApi.slackBots(this.#host().plugin.id)
+    })
+  }
+
+  thread(id: string): Promise<ThreadSummary | null> {
+    return this.#budget.run(() => {
+      this.#require("threads:read")
+      return pluginsApi.thread(this.#host().plugin.id, threadIdArg(id))
+    })
+  }
+
+  threadMessages(id: string, limit?: number): Promise<ThreadMessages | null> {
+    return this.#budget.run(() => {
+      this.#require("threads:read")
+      return pluginsApi.threadMessages(
+        this.#host().plugin.id,
+        threadIdArg(id),
+        boundedInteger(limit, "limit", 1, 200)
+      )
+    })
+  }
+
+  threadArtifact(id: string): Promise<ThreadArtifact | null> {
+    return this.#budget.run(() => {
+      this.#require("threads:read")
+      return pluginsApi.threadArtifact(this.#host().plugin.id, threadIdArg(id))
+    })
   }
 
   provideTools(

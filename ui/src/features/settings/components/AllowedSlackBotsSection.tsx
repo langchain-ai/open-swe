@@ -1,6 +1,5 @@
 import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
-  CaretRightIcon,
   MagnifyingGlassRegularIcon,
   PlusIcon,
 } from "@langchain/macaw-components/icons"
@@ -23,17 +22,11 @@ import { api } from "@/lib/api"
 import type { AllowedSlackBot } from "@/lib/api"
 
 const QUERY_KEY = ["allowedSlackBots"]
-/** What every user's Bots page lists; it follows the allowlist. */
-const DIRECTORY_QUERY_KEY = ["allowedSlackBotDirectory"]
 
 const sameBot = (a: AllowedSlackBot, b: AllowedSlackBot) =>
   a.team_id === b.team_id && a.bot_id === b.bot_id
 
-export function AllowedSlackBotsSection({
-  onBotChange,
-}: {
-  onBotChange?: (bot: string) => void
-}) {
+export function AllowedSlackBotsSection() {
   const [open, setOpen] = useState(false)
   const [manual, setManual] = useState(false)
   const [botId, setBotId] = useState("")
@@ -55,7 +48,6 @@ export function AllowedSlackBotsSection({
     mutationFn: api.allowSlackBot,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: QUERY_KEY })
-      void qc.invalidateQueries({ queryKey: DIRECTORY_QUERY_KEY })
       setOpen(false)
       setBotId("")
       setSearch("")
@@ -77,11 +69,7 @@ export function AllowedSlackBotsSection({
           ? [...current, bot]
           : current
       ),
-    onSettled: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: QUERY_KEY }),
-        qc.invalidateQueries({ queryKey: DIRECTORY_QUERY_KEY }),
-      ]),
+    onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
 
   const pending = add.isPending
@@ -306,16 +294,7 @@ export function AllowedSlackBotsSection({
               key={`${bot.team_id}:${bot.bot_id}`}
               className="flex items-center gap-space-3 px-space-3 py-space-3"
             >
-              <Button
-                color="secondary"
-                variant="plain"
-                size="sm"
-                aria-label={`${bot.name} ${bot.bot_id} Enabled`}
-                type="button"
-                onClick={() => onBotChange?.(`${bot.team_id}:${bot.bot_id}`)}
-                className="h-auto min-w-0 flex-1 justify-start gap-space-3 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                disabled={!onBotChange}
-              >
+              <div className="flex min-w-0 flex-1 items-center gap-space-3 py-space-1">
                 <span aria-hidden="true">
                   <Avatar
                     size="md"
@@ -333,15 +312,7 @@ export function AllowedSlackBotsSection({
                   <p className="text-xs text-secondary">{bot.bot_id}</p>
                 </div>
                 <span className="text-xs text-success-secondary">Enabled</span>
-                {onBotChange && (
-                  <CaretRightIcon
-                    aria-hidden="true"
-                    size={14}
-                    weight="regular"
-                    className="text-icon-secondary"
-                  />
-                )}
-              </Button>
+              </div>
               <Button
                 color="secondary"
                 variant="plain"

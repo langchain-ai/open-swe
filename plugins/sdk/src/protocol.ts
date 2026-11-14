@@ -63,6 +63,7 @@ export type PluginPermission =
   | "github:write"
   | "agent"
   | "realtime"
+  | "threads:read"
 
 export type Theme = "light" | "dark"
 
@@ -189,6 +190,105 @@ export interface PullRequestSearch {
   pulls: PullRequestSummary[]
   /** Whether some are missing because GitHub's search timed out or a later page failed; it lists at most 1000. */
   incomplete: boolean
+}
+
+/**
+ * Where agent threads come from. `incidents_agent` holds the investigations
+ * Robin starts in new incident channels, which the dashboard's own lists leave
+ * out; `slack` is the threads people start by mentioning Robin there.
+ */
+export type ThreadSource =
+  | "dashboard"
+  | "web"
+  | "github"
+  | "slack"
+  | "linear"
+  | "schedule"
+  | "api"
+  | "claude_code"
+  | "incidents_agent"
+
+export interface ThreadListOptions {
+  source: ThreadSource
+  /**
+   * Only threads one allowlisted Slack bot started, by its `key` from
+   * `threads.bots()`, or any bot's with `"*"`. Bots post as `slack`.
+   */
+  bot?: string
+  /** 1 to 50; 25 by default. */
+  limit?: number
+  /** Where to start: `0`, or a page's `nextOffset`. */
+  offset?: number
+}
+
+/** A Slack bot a workspace admin allowed to start threads by mentioning Robin. */
+export interface SlackBot {
+  /** `<team_id>:<bot_id>`. */
+  key: string
+  /** `null` once it is no longer on the allowlist. */
+  name: string | null
+}
+
+/** The Slack thread an agent thread answers in. */
+export interface SlackThread {
+  channelId: string
+  threadTs: string
+  /** The channel's name when the thread began, when Robin knows it. */
+  channelName: string | null
+  permalink: string | null
+}
+
+/** An agent thread the person may read; open it with `nav.openThread`. */
+export interface ThreadSummary {
+  threadId: string
+  title: string | null
+  source: string
+  /** `running`, `idle`, `error`, `interrupted` and the like, as the dashboard shows it. */
+  status: string
+  visibility: "public" | "private"
+  createdAt: string
+  updatedAt: string
+  /** The thread in the dashboard; `null` for one it won't open, such as an incident thread. */
+  url: string | null
+  slack: SlackThread | null
+  /** Whether it published an artifact, which `threads.artifact` reads. */
+  hasArtifact: boolean
+  /** The allowlisted Slack bot that started it, if one did. */
+  bot: SlackBot | null
+}
+
+export interface ThreadPage {
+  /** Fewer than asked for when some on the page are ones the person can't read. */
+  threads: ThreadSummary[]
+  /** The next page's `offset`; `null` at the end. */
+  nextOffset: number | null
+}
+
+/** Something a person or the agent wrote in a thread; tool calls and subagents are left out. */
+export interface ThreadMessage {
+  id: string
+  role: "user" | "assistant"
+  /** At most 20,000 characters. */
+  text: string
+  truncated: boolean
+  /** Who sent a `user` message: a GitHub login, `slack:…`, `system:…` and the like. */
+  senderId: string | null
+  senderName: string | null
+  timestamp: string
+}
+
+export interface ThreadMessages {
+  /** The newest messages, oldest first. */
+  messages: ThreadMessage[]
+  /** How many earlier ones were left out. */
+  omitted: number
+}
+
+/** The HTML or Markdown a thread published for review. */
+export interface ThreadArtifact {
+  status: string | null
+  format: "html" | "markdown"
+  content: string
 }
 
 export interface RoomScope extends DocumentScope {
@@ -422,6 +522,26 @@ export interface HostApi extends RpcTarget {
    * read, by the person's part in them, newest activity first.
    */
   searchPulls(role: PullRequestRole): Promise<PullRequestSearch>
+  /**
+   * Agent threads from `options.source` the person may read, most recently
+   * updated first. These and the other thread calls need `threads:read`.
+   */
+  listThreads(options: ThreadListOptions): Promise<ThreadPage>
+  /** The allowlisted Slack bots, whose threads `listThreads` filters by with `bot`. */
+  slackBots(): Promise<SlackBot[]>
+  /** One thread the person may read; `null` when there is none they can. */
+  thread(threadId: string): Promise<ThreadSummary | null>
+  /**
+   * The thread's newest messages, at most `limit` (1 to 200; 100 by default);
+   * `null` when the person can't read the thread, or when it predates the
+   * transcript log and its messages aren't readable here.
+   */
+  threadMessages(
+    threadId: string,
+    limit?: number
+  ): Promise<ThreadMessages | null>
+  /** The artifact the thread published; `null` when it published none. */
+  threadArtifact(threadId: string): Promise<ThreadArtifact | null>
   /**
    * Offers the agent in the dock tools, as JSON text of
    * `{ tools: [{ name, description, parameters }], instructions }`, in place

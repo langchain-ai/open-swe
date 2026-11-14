@@ -160,6 +160,8 @@ class IncidentChannel:
             source_context=SourceContext(slack_thread=slack_thread),
             visibility="public",
             owner_type="system",
+            # The channel's name as the investigation began, so readers need not parse the title.
+            extra_metadata={"incident_channel": {"id": channel.channel_id, "name": channel.name}},
         ):
             raise RuntimeError("could not persist incident thread metadata")
         if (job.attempts or job.lapsed_lease is not None) and (

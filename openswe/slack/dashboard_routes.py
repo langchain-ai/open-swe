@@ -10,11 +10,9 @@ from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import session_user_id
 from openswe.slack.allowed_bots import (
     AllowedSlackBot,
-    AllowedSlackBotEntry,
     AllowSlackBot,
     SlackBotOption,
     allow_slack_bot,
-    allowed_slack_bot_directory,
     list_slack_bots,
 )
 from openswe.slack.channel_options import (
@@ -138,14 +136,6 @@ async def api_list_allowed_slack_bots(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> list[AllowedSlackBot]:
     return await AllowedSlackBot.all()
-
-
-@router.get("/slack/allowed-bots/directory")
-async def api_allowed_slack_bot_directory(
-    _session: dict[str, Any] = SESSION_DEP,
-) -> list[AllowedSlackBotEntry]:
-    """Names and avatars of allowed bots, for the Bots view every user can open."""
-    return await allowed_slack_bot_directory()
 
 
 @router.post("/slack/allowed-bots")

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { Text } from "@langchain/macaw-components/Text"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
@@ -18,9 +19,12 @@ import {
 } from "@/components/AppShell"
 import { SlackChannelMultiCombobox } from "@/components/SlackChannelCombobox"
 import { invalidationTopic } from "@/lib/invalidations/topics"
-import { incidentsApi } from "./api"
-import type { IncidentPolicy, IncidentSettingsPayload } from "./api"
-import { ErrorState, formatTime, LoadingState } from "./shared"
+import { incidentsApi } from "@/features/settings/lib/incidentsApi"
+import type {
+  IncidentPolicy,
+  IncidentSettingsPayload,
+  Timestamp,
+} from "@/features/settings/lib/incidentsApi"
 
 function Notice({ children, error }: { children: ReactNode; error?: boolean }) {
   return (
@@ -281,6 +285,48 @@ export function IncidentSettings() {
           })
         }}
       />
+    </div>
+  )
+}
+
+function formatTime(value: Timestamp | null) {
+  if (value === null) return "Not verified"
+  const date = new Date(typeof value === "number" ? value * 1000 : value)
+  if (!Number.isFinite(date.getTime())) return "Unknown time"
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+function LoadingState() {
+  return (
+    <div
+      role="status"
+      className="flex items-center justify-center gap-space-2 py-24 text-sm text-secondary"
+    >
+      <Spinner size="xs" />
+      Loading settings…
+    </div>
+  )
+}
+
+function ErrorState({ error, retry }: { error: Error; retry: () => void }) {
+  return (
+    <div role="alert">
+      <Banner
+        intent="error"
+        title="Unable to load incident settings"
+        action={
+          <Button color="secondary" variant="outlined" onClick={retry}>
+            Try again
+          </Button>
+        }
+      >
+        {error.message}
+      </Banner>
     </div>
   )
 }

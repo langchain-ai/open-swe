@@ -173,30 +173,6 @@
         "title": "AllowedSlackBot",
         "type": "object"
       },
-      "AllowedSlackBotEntry": {
-        "description": "What any signed-in user may see of an allowed bot: enough to name its threads.",
-        "properties": {
-          "image_url": {
-            "default": "",
-            "title": "Image Url",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "name"
-        ],
-        "title": "AllowedSlackBotEntry",
-        "type": "object"
-      },
       "AnnouncementCreate": {
         "properties": {
           "test": {
@@ -1214,6 +1190,32 @@
           "options"
         ],
         "title": "BlockSuggestionResponse",
+        "type": "object"
+      },
+      "BotModel": {
+        "description": "An allowlisted Slack bot, as any signed-in person may see it.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "BotModel",
         "type": "object"
       },
       "BotToolsView": {
@@ -5373,7 +5375,8 @@
           "github:read",
           "github:write",
           "agent",
-          "realtime"
+          "realtime",
+          "threads:read"
         ],
         "title": "PluginPermission",
         "type": "string"
@@ -8960,7 +8963,9 @@
               "chat-circle",
               "calendar",
               "lightbulb",
-              "images"
+              "images",
+              "siren",
+              "robot"
             ],
             "title": "Icon",
             "type": "string"
@@ -9301,6 +9306,48 @@
         "title": "SlackEndpointFile",
         "type": "object"
       },
+      "SlackThreadModel": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "channel_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Name"
+          },
+          "permalink": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permalink"
+          },
+          "thread_ts": {
+            "title": "Thread Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "thread_ts",
+          "channel_name",
+          "permalink"
+        ],
+        "title": "SlackThreadModel",
+        "type": "object"
+      },
       "SlackTrigger": {
         "description": "Fires on messages in one Slack channel Open SWE is a member of.",
         "properties": {
@@ -9583,6 +9630,40 @@
         "title": "TextAnchor",
         "type": "object"
       },
+      "ThreadArtifactModel": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "html",
+              "markdown"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "status",
+          "format",
+          "content"
+        ],
+        "title": "ThreadArtifactModel",
+        "type": "object"
+      },
       "ThreadBrowserView": {
         "description": "A thread's browser window as the dashboard embeds it.",
         "properties": {
@@ -9690,6 +9771,89 @@
         "title": "ThreadComment",
         "type": "object"
       },
+      "ThreadMessageModel": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "sender_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Id"
+          },
+          "sender_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Name"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "text",
+          "truncated",
+          "sender_id",
+          "sender_name",
+          "timestamp"
+        ],
+        "title": "ThreadMessageModel",
+        "type": "object"
+      },
+      "ThreadMessagesModel": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadMessageModel"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "omitted": {
+            "title": "Omitted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messages",
+          "omitted"
+        ],
+        "title": "ThreadMessagesModel",
+        "type": "object"
+      },
       "ThreadMoveRequest": {
         "description": "Where to move a thread: onto the caller's machine through a bridge, or to the cloud.",
         "properties": {
@@ -9718,6 +9882,34 @@
           }
         },
         "title": "ThreadMoveRequest",
+        "type": "object"
+      },
+      "ThreadPageModel": {
+        "properties": {
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadSummaryModel"
+            },
+            "title": "Threads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "threads",
+          "next_offset"
+        ],
+        "title": "ThreadPageModel",
         "type": "object"
       },
       "ThreadReadState": {
@@ -9781,6 +9973,101 @@
           }
         },
         "title": "ThreadResolveBody",
+        "type": "object"
+      },
+      "ThreadSummaryModel": {
+        "properties": {
+          "bot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "has_artifact": {
+            "title": "Has Artifact",
+            "type": "boolean"
+          },
+          "slack": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlackThreadModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "private"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "title",
+          "source",
+          "status",
+          "visibility",
+          "created_at",
+          "updated_at",
+          "url",
+          "slack",
+          "has_artifact",
+          "bot"
+        ],
+        "title": "ThreadSummaryModel",
         "type": "object"
       },
       "ToolCallView": {
@@ -16824,6 +17111,60 @@
         ]
       }
     },
+    "/dashboard/api/plugins/{installation_id}/bots": {
+      "get": {
+        "description": "The allowlisted Slack bots, whose threads the thread list filters by with ``bot``.",
+        "operationId": "api_plugin_bots_dashboard_api_plugins__installation_id__bots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BotModel"
+                  },
+                  "title": "Response Api Plugin Bots Dashboard Api Plugins  Installation Id  Bots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Bots",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
     "/dashboard/api/plugins/{installation_id}/bundle": {
       "get": {
         "operationId": "api_plugin_bundle_dashboard_api_plugins__installation_id__bundle_get",
@@ -18992,6 +19333,327 @@
           }
         ],
         "summary": "Api Plugin Room Update",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/threads": {
+      "get": {
+        "description": "Threads from ``source`` the person may read, most recently updated first.\n\n``bot`` keeps threads one allowlisted Slack bot started (``team_id:bot_id``), or\nany bot's with ``*``. Unlike the dashboard's lists, this one includes incident\nthreads when asked for ``incidents_agent``; see\n:meth:`openswe.plugins.threads.PluginThreads.may_read`.",
+        "operationId": "api_plugin_threads_dashboard_api_plugins__installation_id__threads_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "enum": [
+                "dashboard",
+                "web",
+                "github",
+                "slack",
+                "linear",
+                "schedule",
+                "api",
+                "claude_code",
+                "incidents_agent"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bot",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(\\*|[A-Z0-9]{1,32}:[A-Z0-9]{1,32})$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadPageModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Threads",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/threads/{thread_id}": {
+      "get": {
+        "operationId": "api_plugin_thread_dashboard_api_plugins__installation_id__threads__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadSummaryModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Thread",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/threads/{thread_id}/artifact": {
+      "get": {
+        "description": "The artifact the thread published, or ``null`` when it published none.",
+        "operationId": "api_plugin_thread_artifact_dashboard_api_plugins__installation_id__threads__thread_id__artifact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ThreadArtifactModel"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Plugin Thread Artifact Dashboard Api Plugins  Installation Id  Threads  Thread Id  Artifact Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Thread Artifact",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/threads/{thread_id}/messages": {
+      "get": {
+        "description": "The newest messages people and the agent wrote in the thread, oldest first, or\n``null`` for a thread from before the transcript log, whose messages aren't read here.",
+        "operationId": "api_plugin_thread_messages_dashboard_api_plugins__installation_id__threads__thread_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ThreadMessagesModel"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Plugin Thread Messages Dashboard Api Plugins  Installation Id  Threads  Thread Id  Messages Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Thread Messages",
         "tags": [
           "dashboard",
           "plugins"
@@ -24121,38 +24783,6 @@
           }
         ],
         "summary": "Api Allow Slack Bot",
-        "tags": [
-          "dashboard",
-          "slack"
-        ]
-      }
-    },
-    "/dashboard/api/slack/allowed-bots/directory": {
-      "get": {
-        "description": "Names and avatars of allowed bots, for the Bots view every user can open.",
-        "operationId": "api_allowed_slack_bot_directory_dashboard_api_slack_allowed_bots_directory_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/AllowedSlackBotEntry"
-                  },
-                  "title": "Response Api Allowed Slack Bot Directory Dashboard Api Slack Allowed Bots Directory Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Allowed Slack Bot Directory",
         "tags": [
           "dashboard",
           "slack"

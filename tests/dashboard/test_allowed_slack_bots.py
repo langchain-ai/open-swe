@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import AuditLog
 from openswe.dashboard import oauth, profiles, routes
+from openswe.slack.allowed_bots import AllowedSlackBotEntry, allowed_slack_bot_directory
 from openswe.users.models import User
 
 
@@ -176,14 +177,13 @@ async def test_non_admin_cannot_manage_bots(
     assert (await client.request(method, path, json=body)).status_code == 403
 
 
-async def test_any_user_can_read_the_bot_directory(client: httpx.AsyncClient, app: FastAPI) -> None:
+async def test_bot_directory_follows_the_allowlist(client: httpx.AsyncClient) -> None:
     assert (
         await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"})
     ).is_success
-    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
-    response = await client.get("/dashboard/api/slack/allowed-bots/directory")
-    assert response.status_code == 200, response.text
-    assert response.json() == [{"key": "T123:B123", "name": "Release bot", "image_url": ""}]
+    assert await allowed_slack_bot_directory() == [
+        AllowedSlackBotEntry(key="T123:B123", name="Release bot", image_url="")
+    ]
 
 
 async def test_cannot_supply_another_execution_identity(client: httpx.AsyncClient) -> None:

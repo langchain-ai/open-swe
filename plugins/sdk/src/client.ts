@@ -35,6 +35,7 @@ import {
   type StoredAttachment,
   type StoredDocument,
   type StoredJson,
+  type ThreadListOptions,
   type Toast,
 } from "./protocol"
 
@@ -141,8 +142,11 @@ export class PluginHost {
   }
 
   readonly nav = {
-    setPath: (path: string, options: { replace?: boolean } = {}) =>
-      settle(this.api.setPath(path, options.replace === true)),
+    setPath: async (path: string, options: { replace?: boolean } = {}) => {
+      await settle(this.api.setPath(path, options.replace === true))
+      // The web UI doesn't echo back a path this frame set, so record it here.
+      this.receive({ type: "path", path })
+    },
     openThread: (threadId: string) => settle(this.api.openThread(threadId)),
     openExternal: (url: string) => settle(this.api.openExternal(url)),
   }
@@ -222,6 +226,20 @@ export class PluginHost {
      */
     search: (options: { role: PullRequestRole }) =>
       settle(this.api.searchPulls(options.role)),
+  }
+
+  /**
+   * Agent threads the person may read, read as them; needs `threads:read`.
+   * `get`, `messages` and `artifact` resolve to `null` for a thread they can't.
+   */
+  readonly threads = {
+    list: (options: ThreadListOptions) => settle(this.api.listThreads(options)),
+    /** The allowlisted Slack bots, to list each one's threads with `list({ source: "slack", bot })`. */
+    bots: () => settle(this.api.slackBots()),
+    get: (threadId: string) => settle(this.api.thread(threadId)),
+    messages: (threadId: string, options: { limit?: number } = {}) =>
+      settle(this.api.threadMessages(threadId, options.limit)),
+    artifact: (threadId: string) => settle(this.api.threadArtifact(threadId)),
   }
 
   /** The agent in the dock beside the plugin, which the person chats with. */

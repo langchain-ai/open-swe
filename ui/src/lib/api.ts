@@ -442,13 +442,6 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
-/** What any signed-in user may see of an allowed bot; `key` is `team_id:bot_id`. */
-export interface AllowedSlackBotEntry {
-  key: string
-  name: string
-  image_url: string
-}
-
 /** An app reviews follow, by id, pinned to the release (an app version id) an admin approved. */
 export interface AppRelease {
   app: string
@@ -1809,8 +1802,6 @@ export const api = {
       method: "POST",
     }),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
-  listAllowedSlackBotDirectory: () =>
-    request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
       method: "POST",

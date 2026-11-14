@@ -21,7 +21,7 @@ An instance admin adds a listed app to everyone's sidebar under **Apps for every
   Ask channels suggest filing a Linear ticket or opening a PR and wait for an explicit human choice; requested PRs are authored as that person, not Robin.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
-- **Bots** (`/agents/bots`): bots allowed to trigger Robin from Slack.
+- **Slack bots** (**Integrations**, `/admin/integrations`, admins only): bots allowed to trigger Robin from Slack.
   Admins use `list_slack_bots`, `allow_slack_bot`, and `remove_slack_bot`.
   Listing requires a private admin surface; writes also work in verified sole-writer shared threads and are audited with the affected bot ID.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, each in a workspace and optionally bound to one repository whose threads then file under it.

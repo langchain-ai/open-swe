@@ -24,6 +24,11 @@ export const PERMISSION_COPY: Record<
     description:
       "Share live edits, cursors and who is viewing with everyone using it on the same repository.",
   },
+  "threads:read": {
+    label: "Read agent threads",
+    description:
+      "List and read the agent threads you can read, including incident investigations: their status, messages and published artifacts.",
+  },
   agent: {
     label: "Work with an agent",
     description:

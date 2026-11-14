@@ -102,7 +102,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `version` | Free text, at most 32 characters. It is shown to people, not compared. |
 | `description` | Optional, at most 280 characters. |
 | `sidebar.label` | At most 24 characters. |
-| `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`, `images`. |
+| `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`, `images`, `siren`, `robot`. |
 | `permissions` | What the plugin may ask for; see below. |
 | `collections` | Optional rules for storage collections, by name: `{ "captures": { "write": "app" } }`; see [Who writes a collection](#who-writes-a-collection). |
 | `review` | Optional work pull request reviews do for the app: `{ "instructions": "…", "writes": ["captures"], "browser": true }`; see [Review steps](#review-steps). |
@@ -117,6 +117,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `github:read` | read repository info, refs, trees, files, history and pull requests, and search pull requests |
 | `github:write` | create branches, commit files and open pull requests (also allows reads) |
 | `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
+| `threads:read` | list and read the agent threads the person may read, including Robin's incident investigations: status, messages and published artifacts |
 
 The person approves these permissions when they add the app.
 If a newer version asks for more, the install stays where it is until they approve them.
@@ -415,6 +416,40 @@ const { pulls, incomplete } = await host.pulls.search({ role: "review-requested"
 A commit carries at most 100 files and 100 deletions.
 `openPull` also takes `body` and `draft`.
 File paths and branch names have no empty, `.` or `..` segment and no backslash, or the call fails with status 400.
+
+### Agent threads
+
+With `threads:read`, a plugin lists and reads agent threads as the person using it would: never one they can't open themselves.
+
+```ts
+const { threads, nextOffset } = await host.threads.list({ source: "incidents_agent", limit: 25 })
+// threads: [{ threadId, title, source, status, visibility, createdAt, updatedAt, url,
+//   slack: { channelId, threadTs, channelName, permalink } | null, hasArtifact, bot: { key, name } | null }]
+const more = nextOffset === null ? null : await host.threads.list({ source: "incidents_agent", offset: nextOffset })
+
+const thread = await host.threads.get(threadId) // null when the person can't read it
+// null for a thread from before the transcript log: link to it in Slack instead.
+const read = await host.threads.messages(threadId, { limit: 100 })
+// messages: [{ id, role: "user" | "assistant", text, truncated, senderId, senderName, timestamp }], oldest first
+const artifact = await host.threads.artifact(threadId) // { status, format: "html" | "markdown", content } | null
+```
+
+Threads Slack bots on the allowlist started are `slack` threads with a `bot`; list one bot's, or every bot's with `"*"`:
+
+```ts
+const bots = await host.threads.bots() // [{ key: "T…:B…", name }]
+const { threads } = await host.threads.list({ source: "slack", bot: bots[0].key })
+```
+
+A list names one `source`: `dashboard`, `web`, `github`, `slack`, `linear`, `schedule`, `api`, `claude_code`, or `incidents_agent`, the investigations Robin starts in new incident channels.
+Threads come most recently updated first, 1 to 50 a page.
+A page leaves out threads the person can't read, so it may hold fewer than asked for; keep paging until `nextOffset` is `null`.
+Plugin chats, review chats and other threads kept out of the dashboard's lists stay out of these too.
+Messages are what people and the agent wrote, without tool calls or subagents, from the thread's recent turns: at most 200 per read and 20,000 characters each.
+
+Incident threads are the one place a plugin reads more than the dashboard shows.
+The dashboard opens none of them, so its lists stay free of them, but Robin starts them only in public, internal Slack channels, where everyone in the workspace reads them.
+So a plugin may list and read public incident threads for anyone using it; their `url` is `null`, so link to `slack.permalink` or the channel instead.
 
 ### Live rooms
 

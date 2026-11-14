@@ -159,6 +159,129 @@ describe("PluginHostApi", () => {
   })
 })
 
+describe("agent threads", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function threadsApi(permissions: Array<string>) {
+    return new PluginHostApi(
+      () =>
+        ({
+          ...host,
+          plugin: { ...host.plugin, manifest: { permissions } },
+        }) as unknown as BridgeHost,
+      new SessionBudget()
+    )
+  }
+
+  it("are read only with threads:read, and only with arguments the backend takes", async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal("fetch", fetch)
+    const denied = threadsApi(["storage"])
+    for (const call of [
+      denied.listThreads({ source: "incidents_agent" }),
+      denied.slackBots(),
+      denied.thread("t-1"),
+      denied.threadMessages("t-1"),
+      denied.threadArtifact("t-1"),
+    ])
+      await expect(call).rejects.toMatchObject({ status: 403 })
+
+    const api = threadsApi(["threads:read"])
+    for (const call of [
+      api.listThreads({ source: "everything" as "slack" }),
+      api.listThreads({ source: "slack", limit: 51 }),
+      api.listThreads({ source: "slack", offset: -1 }),
+      api.listThreads({ source: "slack", bot: "../../admin" }),
+      api.threadMessages("t-1", 0),
+      api.thread(""),
+    ])
+      await expect(call).rejects.toMatchObject({ status: 400 })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("list a source's threads in the plugin's own shape", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            threads: [
+              {
+                thread_id: "t-1",
+                title: "#inc-42-db",
+                source: "incidents_agent",
+                status: "running",
+                visibility: "public",
+                created_at: "2026-11-12T10:00:00Z",
+                updated_at: "2026-11-12T10:05:00Z",
+                url: null,
+                slack: {
+                  channel_id: "C1",
+                  thread_ts: "1.0",
+                  channel_name: "inc-42-db",
+                  permalink: null,
+                },
+                has_artifact: true,
+                bot: null,
+              },
+            ],
+            next_offset: 25,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    )
+    vi.stubGlobal("fetch", fetch)
+
+    const page = await threadsApi(["threads:read"]).listThreads({
+      source: "incidents_agent",
+      limit: 25,
+    })
+
+    expect(String((fetch.mock.calls[0] as unknown[])[0])).toContain(
+      "/plugins/install-1/threads?source=incidents_agent&limit=25"
+    )
+    expect(page).toEqual({
+      threads: [
+        {
+          threadId: "t-1",
+          title: "#inc-42-db",
+          source: "incidents_agent",
+          status: "running",
+          visibility: "public",
+          createdAt: "2026-11-12T10:00:00Z",
+          updatedAt: "2026-11-12T10:05:00Z",
+          url: null,
+          slack: {
+            channelId: "C1",
+            threadTs: "1.0",
+            channelName: "inc-42-db",
+            permalink: null,
+          },
+          hasArtifact: true,
+          bot: null,
+        },
+      ],
+      nextOffset: 25,
+    })
+  })
+
+  it("read a thread the person can't as null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: "thread not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          })
+      )
+    )
+    const api = threadsApi(["threads:read"])
+    await expect(api.thread("t-9")).resolves.toBeNull()
+    await expect(api.threadMessages("t-9")).resolves.toBeNull()
+    await expect(api.threadArtifact("t-9")).resolves.toBeNull()
+  })
+})
+
 describe("the agent's tools over Cap'n Web", () => {
   it("run in the plugin and return its result to the dock", async () => {
     let offered: Parameters<BridgeHost["provideTools"]> | null = null

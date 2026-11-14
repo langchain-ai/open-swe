@@ -12,7 +12,6 @@ import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
-import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useRef } from "react"
@@ -41,7 +40,6 @@ interface NavItem {
 const NAV: ReadonlyArray<NavItem> = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
 ]
 

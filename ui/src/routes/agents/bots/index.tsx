@@ -1,22 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
-import { BotThreadsList } from "@/features/bots/components/BotThreadsList"
-import { pageTitle } from "@/lib/pageTitle"
-
+// The Bots page was removed; old links land on the agents home instead of
+// matching /agents/$threadId as a thread called "bots".
 export const Route = createFileRoute("/agents/bots/")({
-  validateSearch: (search: Record<string, unknown>): { bot?: string } =>
-    typeof search.bot === "string" && search.bot ? { bot: search.bot } : {},
-  component: BotsIndexPage,
-  head: () => ({ meta: [{ title: pageTitle("Bots") }] }),
+  component: () => <Navigate to="/agents" replace />,
 })
-
-function BotsIndexPage() {
-  const { bot } = Route.useSearch()
-  const navigate = Route.useNavigate()
-  return (
-    <BotThreadsList
-      bot={bot}
-      onBotChange={(next) => navigate({ search: next ? { bot: next } : {} })}
-    />
-  )
-}

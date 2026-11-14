@@ -50,6 +50,8 @@ class PluginPermission(StrEnum):
     """Chat with an agent in a dock beside the plugin, which can call tools the plugin provides."""
     REALTIME = "realtime"
     """Join live rooms: broadcast updates and presence to others with the same access."""
+    THREADS_READ = "threads:read"
+    """List and read agent threads the person may read: summaries, messages and published artifacts."""
 
 
 SidebarIcon = Literal[
@@ -63,6 +65,8 @@ SidebarIcon = Literal[
     "calendar",
     "lightbulb",
     "images",
+    "siren",
+    "robot",
 ]
 
 

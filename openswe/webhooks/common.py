@@ -15,7 +15,7 @@ import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from openswe.analytics.usage import update_agent_pr_usage_from_webhook
 from openswe.config import ENV
@@ -523,6 +523,7 @@ async def upsert_agent_thread_metadata(
     token_repositories: Sequence[str] | None = None,
     identity: ThreadIdentity | None = None,
     public_only: bool = False,
+    extra_metadata: Mapping[str, JsonValue] | None = None,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -536,7 +537,7 @@ async def upsert_agent_thread_metadata(
     narrowed to (see :mod:`openswe.github.token_scope`).
     Slack events on an existing thread also pass ``slack_participant_user_ids`` so
     every linked human in the Slack thread becomes an Open SWE participant of the
-    agent thread.
+    agent thread. ``extra_metadata`` is merged in as given, on every call.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     category = "interactive"
@@ -564,6 +565,8 @@ async def upsert_agent_thread_metadata(
     # thread on the web, and that promotion must survive later Slack events.
     if unlisted:
         metadata["unlisted"] = True
+    if extra_metadata:
+        metadata.update(extra_metadata)
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     snapshot = None

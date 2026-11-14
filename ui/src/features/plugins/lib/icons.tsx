@@ -10,6 +10,8 @@ import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
 import { NotebookIcon } from "@phosphor-icons/react/dist/ssr/Notebook"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 
 import type { SidebarIcon } from "@/features/plugins/lib/api"
 
@@ -25,6 +27,8 @@ export const PLUGIN_ICONS: Record<SidebarIcon, IconComponent> = {
   calendar: CalendarIcon,
   lightbulb: LightbulbIcon,
   images: ImagesIcon,
+  siren: SirenIcon,
+  robot: RobotIcon,
 }
 
 export function pluginIcon(icon: string): IconComponent {

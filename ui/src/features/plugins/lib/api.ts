@@ -10,7 +10,13 @@ import type {
   RepositoryInfo,
   RepositoryTree,
   StoredAttachment,
+  SlackBot,
   StoredDocument,
+  ThreadArtifact,
+  ThreadMessages,
+  ThreadPage,
+  ThreadSource,
+  ThreadSummary,
 } from "@openswe/plugin-sdk"
 
 import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
@@ -35,6 +41,8 @@ export type SidebarIcon =
   | "calendar"
   | "lightbulb"
   | "images"
+  | "siren"
+  | "robot"
 
 export interface PluginManifest {
   name: string
@@ -134,6 +142,50 @@ function segments(value: string): string {
 
 function plugin(id: string): string {
   return `/plugins/${segment(id)}`
+}
+
+interface ThreadSummaryWire {
+  thread_id: string
+  title: string | null
+  source: string
+  status: string
+  visibility: "public" | "private"
+  created_at: string
+  updated_at: string
+  url: string | null
+  slack: {
+    channel_id: string
+    thread_ts: string
+    channel_name: string | null
+    permalink: string | null
+  } | null
+  has_artifact: boolean
+  bot: { key: string; name: string | null } | null
+}
+
+function threadSummary(wire: ThreadSummaryWire): ThreadSummary {
+  return {
+    threadId: wire.thread_id,
+    title: wire.title,
+    source: wire.source,
+    status: wire.status,
+    visibility: wire.visibility,
+    createdAt: wire.created_at,
+    updatedAt: wire.updated_at,
+    url: wire.url,
+    slack: wire.slack && {
+      channelId: wire.slack.channel_id,
+      threadTs: wire.slack.thread_ts,
+      channelName: wire.slack.channel_name,
+      permalink: wire.slack.permalink,
+    },
+    hasArtifact: wire.has_artifact,
+    bot: wire.bot,
+  }
+}
+
+function threadPath(id: string, threadId: string): string {
+  return `${plugin(id)}/threads/${segment(threadId)}`
 }
 
 function ownerAndName(repository: string): string {
@@ -644,6 +696,76 @@ export const pluginsApi = {
         ...json(body),
       })
     ),
+
+  listThreads: async (
+    id: string,
+    options: {
+      source: ThreadSource
+      bot?: string
+      limit?: number
+      offset?: number
+    }
+  ): Promise<ThreadPage> => {
+    const page = await agentsRequest<{
+      threads: Array<ThreadSummaryWire>
+      next_offset: number | null
+    }>(`${plugin(id)}/threads${query(options)}`)
+    return {
+      threads: page.threads.map(threadSummary),
+      nextOffset: page.next_offset,
+    }
+  },
+  slackBots: (id: string): Promise<Array<SlackBot>> =>
+    agentsRequest<Array<SlackBot>>(`${plugin(id)}/bots`),
+  thread: async (id: string, threadId: string) => {
+    const found = await orNull(
+      agentsRequest<ThreadSummaryWire>(threadPath(id, threadId))
+    )
+    return found && threadSummary(found)
+  },
+  threadMessages: async (
+    id: string,
+    threadId: string,
+    limit?: number
+  ): Promise<ThreadMessages | null> => {
+    const found = await orNull(
+      agentsRequest<{
+        messages: Array<{
+          id: string
+          role: "user" | "assistant"
+          text: string
+          truncated: boolean
+          sender_id: string | null
+          sender_name: string | null
+          timestamp: string
+        }>
+        omitted: number
+      }>(`${threadPath(id, threadId)}/messages${query({ limit })}`)
+    )
+    return (
+      found && {
+        messages: found.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          text: message.text,
+          truncated: message.truncated,
+          senderId: message.sender_id,
+          senderName: message.sender_name,
+          timestamp: message.timestamp,
+        })),
+        omitted: found.omitted,
+      }
+    )
+  },
+  threadArtifact: (
+    id: string,
+    threadId: string
+  ): Promise<ThreadArtifact | null> =>
+    orNull(
+      agentsRequest<ThreadArtifact | null>(
+        `${threadPath(id, threadId)}/artifact`
+      )
+    ).then((found) => found ?? null),
 
   people: async (id: string, logins: Array<string>) => {
     const people = await agentsRequest<

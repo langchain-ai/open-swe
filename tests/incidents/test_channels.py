@@ -84,6 +84,10 @@ async def test_a_new_incident_channel_is_joined_and_investigated_in_a_thread(sla
 
     slack.conversations_join.assert_awaited_once_with(channel="C1")
     channels.resolve_slack_thread_id.assert_awaited_once_with("C1", "5.0")
+    # Readers such as an incidents app get the channel without parsing the title.
+    assert channels.upsert_agent_thread_metadata.await_args.kwargs["extra_metadata"] == {
+        "incident_channel": {"id": "C1", "name": "inc-api"}
+    }
     run = channels.create_durable_run.await_args
     assert run.kwargs["config"]["configurable"]["slack_thread"] == {
         "channel_id": "C1",
