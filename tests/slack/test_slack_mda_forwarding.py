@@ -36,6 +36,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
+from openswe.threads import index
+from openswe.threads.index import IndexedThread
 from openswe.webhooks import common as webhook_common
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 from tests.support.slack_api import SlackAPI
@@ -792,8 +794,10 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
     assert slack_api.calls == []
 
 
+@pytest.mark.parametrize("trigger_kind", ["user", "slack_bot"])
 async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
     monkeypatch: pytest.MonkeyPatch,
+    trigger_kind: str,
 ) -> None:
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
     _prepared(monkeypatch, prompt=_PROMPT)
@@ -810,6 +814,32 @@ async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
         ),
     )
 
+    classification: dict[str, JsonValue] = {
+        "trigger_kind": trigger_kind,
+        "origin": "slack",
+        "source": "slack",
+        "owner_type": "system" if trigger_kind == "slack_bot" else "user",
+        "thread_category": "interactive",
+        "owner_login": "ada",
+    }
+    if trigger_kind == "slack_bot":
+        classification["triggering_bot"] = "T1:B1"
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        index,
+        "get",
+        AsyncMock(
+            return_value=IndexedThread(
+                thread_id=_MDA_THREAD,
+                runtime="mda",
+                metadata=classification,
+                status="idle",
+                created_at=now,
+                updated_at=now,
+            )
+        ),
+    )
+
     start = await _start(_start_app(monkeypatch))
 
     token = verify_runtime_token(start["run"]["context"]["__run_token"])
@@ -817,6 +847,7 @@ async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
     # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
     metadata = mda_starts({key: value for key, value in start["run"].items() if value})["metadata"]
     assert metadata["channel"] == "slack"
+    assert classification.items() <= metadata.items()
     assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 

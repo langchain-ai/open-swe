@@ -116,6 +116,22 @@ class IndexedThread(BaseModel):
     # How well the thread matched a text search, higher first; ``None`` outside one.
     rank: float | None = None
 
+    def run_classification(self) -> dict[str, JsonValue]:
+        """The thread classification carried by each run's root trace."""
+        return {
+            key: self.metadata[key]
+            for key in (
+                "trigger_kind",
+                "origin",
+                "source",
+                "owner_type",
+                "triggering_bot",
+                "thread_category",
+                "owner_login",
+            )
+            if key in self.metadata
+        }
+
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
         return cls.model_validate(dict(row))

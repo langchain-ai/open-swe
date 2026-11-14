@@ -33,6 +33,8 @@ from openswe.agent_api.tokens import verify_runtime_token
 from openswe.linear import session
 from openswe.mda_channels import api
 from openswe.schedules import store
+from openswe.threads import index
+from openswe.threads.index import IndexedThread
 from openswe.users import User, UserIdentity
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
@@ -248,6 +250,30 @@ async def test_a_session_turn_gets_the_run_context_mda_starts_it_with(
     )
     stub_mda_runtime(monkeypatch)
 
+    classification: dict[str, JsonValue] = {
+        "trigger_kind": "user",
+        "origin": "linear",
+        "source": "linear",
+        "owner_type": "user",
+        "thread_category": "issue",
+        "owner_login": "ada",
+    }
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        index,
+        "get",
+        AsyncMock(
+            return_value=IndexedThread(
+                thread_id=_THREAD,
+                runtime="mda",
+                metadata=classification,
+                status="idle",
+                created_at=now,
+                updated_at=now,
+            )
+        ),
+    )
+
     plan = {"turn": _turn(), "repository": "acme/api", "workspace": "core"}
     response = await _post(app, PLAN_LINEAR_SESSION.path, plan)
 
@@ -265,6 +291,7 @@ async def test_a_session_turn_gets_the_run_context_mda_starts_it_with(
     # MDA starts the run: its metadata sets none of the keys MDA keeps.
     started = mda_starts({"input": "x", "context": run.context, "metadata": run.metadata})
     assert started["metadata"]["channel"] == "linear"
+    assert classification.items() <= started["metadata"].items()
     reserved = {"user_id", "ls_repo_provider", "ls_attribution_identifier", ACTING_USER_KEY}
     assert not reserved & started["metadata"].keys()
 
