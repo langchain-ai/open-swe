@@ -121,6 +121,22 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
   const [maximized, setMaximized] = useState(false)
   const narrow = useIsNarrowLayout()
 
+  useEffect(
+    () =>
+      useRightPanelStore.subscribe((state, previous) => {
+        const before = selectThreadRightPanelState(
+          previous.byThreadKey,
+          threadRef
+        )
+        const after = selectThreadRightPanelState(state.byThreadKey, threadRef)
+        if (before.surfaces.length > 0 && after.surfaces.length === 0) {
+          setMaximized(false)
+          onCollapsedChange(true)
+        }
+      }),
+    [onCollapsedChange, threadRef]
+  )
+
   // Terminal groups are the source of truth for which terminal surfaces exist:
   // a pty closed from inside the terminal must not leave a dead tab behind.
   const terminalGroupIds = terminals.state.terminalGroups
