@@ -128,7 +128,7 @@ class FileToolsMiddleware(AgentMiddleware):
     @property
     def _in_sandbox(self) -> bool:
         """Whether the run's files are in MDA's sandbox, rather than only on the backend."""
-        return self._backend.run.planned.sandbox is not None
+        return self._backend.run.catalog.sandbox is not None
 
     @property
     def _spec(self) -> FilesSpec:

@@ -19,7 +19,7 @@ from langgraph.types import Command
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
-from openswe.sandboxes.state import SANDBOX_BACKENDS, get_sandbox_backend
+from openswe.sandboxes.state import SandboxUnreachableError, get_sandbox_backend
 from openswe.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
@@ -207,16 +207,12 @@ def _thread_id(request: ToolCallRequest) -> str | None:
 async def _backend(thread_id: str | None) -> SandboxBackendProtocol | None:
     if not thread_id:
         return None
-    backend = SANDBOX_BACKENDS.get(thread_id)
-    if backend is not None:
-        return backend
     try:
         return await get_sandbox_backend(thread_id)
-    except Exception:
-        logger.warning(
-            "Workflow push sandbox connection failed", extra={"thread_id": thread_id}, exc_info=True
-        )
-        return None
+    except Exception as exc:
+        raise SandboxUnreachableError(
+            thread_id, None, "Cannot resolve the sandbox for push inspection", reason=str(exc)
+        ) from exc
 
 
 # What deepagents' local shell backend reports for a command that printed nothing.
@@ -842,12 +838,17 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
     ) -> ToolMessage | Command:
         try:
             change = await self._change_for_request(request)
-        except WorkflowPushInspectionError as exc:
+            if change is None:
+                if await self._unsupported_workflow_push(request):
+                    return _unsupported_push_message(request)
+                if await self._chained_workflow_push(request):
+                    return _chained_push_message(request)
+        except (WorkflowPushInspectionError, SandboxUnreachableError) as exc:
             return ToolMessage(
                 content=json.dumps(
                     {
                         "status": "error",
-                        "error_type": "WorkflowPushInspectionError",
+                        "error_type": type(exc).__name__,
                         "error": str(exc),
                     }
                 ),
@@ -856,10 +857,6 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             )
         if change is not None:
             return await self._handle_change_async(request, handler, change)
-        if await self._unsupported_workflow_push(request):
-            return _unsupported_push_message(request)
-        if await self._chained_workflow_push(request):
-            return _chained_push_message(request)
         return await handler(request)
 
     async def _unsupported_workflow_push(self, request: ToolCallRequest) -> bool:
