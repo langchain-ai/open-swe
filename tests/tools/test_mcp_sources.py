@@ -1,7 +1,3 @@
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
-import langgraph_sdk
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 from runtime_api.connections import ConnectionRef
@@ -157,30 +153,6 @@ async def test_unavailable_source_does_not_expose_lower_precedence_tools(remote,
     user = runtime.MCPSource(("user_mcps", "alice"), unavailable, unavailable, scope="user")
     assert await runtime.load_mcp_tools(workspace, user) == []
     assert "private store details" not in caplog.text
-
-
-async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monkeypatch):
-    from openswe.mcp import user
-    from openswe.mcp.records import UserMCPConnections
-
-    metadata = {"visibility": "private", "owner_type": "user", "owner_login": "alice"}
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _: {"metadata": metadata}))
-        ),
-    )
-    monkeypatch.setattr(
-        "openswe.run_config.get_config",
-        lambda: {"configurable": {"thread_id": "t", "github_login": "alice"}},
-    )
-    monkeypatch.setattr(UserMCPConnections, "records", AsyncMock(return_value=[record()]))
-    monkeypatch.setattr(UserMCPConnections, "get", AsyncMock(return_value=record()))
-    tool = (await runtime.load_mcp_tools(user.user_mcp_source("alice")))[0]
-    assert (await tool.ainvoke({}))[0]["text"] == "https://linear.example/mcp"
-    metadata["visibility"] = "public"
-    assert "MCP call failed" in await tool.ainvoke({})
 
 
 async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, caplog):

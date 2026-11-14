@@ -9,6 +9,7 @@ from pydantic import JsonValue
 
 from openswe.mcp import MCPConnection, runtime
 from openswe.mcp.caller import ToolCaller, UnknownTool
+from openswe.mcp.records import SharedMCPConnections, UserMCPConnections
 from openswe.sandboxes.tool_runtime import tool_parameters
 from tests.mcp_helpers import Transport, fake_mcp_server
 
@@ -72,34 +73,21 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
             updated_at="2026-09-09T00:00:00Z",
         )
     }
-    personal = {
-        "linear": MCPConnection(
-            name="linear",
-            url="https://alice.example/mcp",
-            allowed_tools=["search"],
-            revision="user-revision",
-            updated_at="2026-09-09T00:00:00Z",
-        )
-    }
-
-    def source(
-        scope: runtime.MCPScope, namespace: tuple[str, ...], records: dict[str, MCPConnection]
-    ) -> runtime.MCPSource:
-        async def list_connections() -> list[MCPConnection]:
-            return list(records.values())
-
-        async def get_connection(name: str) -> MCPConnection | None:
-            return records.get(name)
-
-        return runtime.MCPSource(namespace, list_connections, get_connection, scope=scope)
-
+    personal = [
+        shared["linear"].model_copy(update={"url": "https://alice.example/mcp"}),
+        shared["linear"].model_copy(update={"name": "legacy"}),
+    ]
     monkeypatch.setattr(
-        "openswe.mcp.workspace.workspace_mcp_source",
-        lambda workspace: source("workspace", ("workspace_mcps", workspace), shared),
+        SharedMCPConnections, "records", AsyncMock(side_effect=lambda: list(shared.values()))
     )
     monkeypatch.setattr(
-        "openswe.mcp.user.user_mcp_source",
-        lambda login: source("user", ("user_mcps", login), personal if login == "alice" else {}),
+        SharedMCPConnections, "get", AsyncMock(side_effect=lambda name: shared.get(name))
+    )
+    monkeypatch.setattr(UserMCPConnections, "records", AsyncMock(return_value=personal))
+    monkeypatch.setattr(
+        UserMCPConnections,
+        "get",
+        AsyncMock(side_effect=lambda name: next((r for r in personal if r.name == name), None)),
     )
 
     async def discover(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
@@ -117,8 +105,10 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     name = next(name for name in await alice.tools() if name == "mcp_linear_search")
     assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
     assert name in await bob.tools()
-    assert "alice.example" in str((await alice.invoke(name, {})).content)
+    assert "workspace.example" in str((await alice.invoke(name, {})).content)
     assert "workspace.example" in str((await bob.invoke(name, {})).content)
-    personal["linear"] = personal["linear"].model_copy(update={"allowed_tools": []})
+    with pytest.raises(UnknownTool):
+        await alice.invoke("mcp_legacy_search", {})
+    shared["linear"] = shared["linear"].model_copy(update={"allowed_tools": []})
     with pytest.raises(UnknownTool):
         await alice.invoke(name, {})

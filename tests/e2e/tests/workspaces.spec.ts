@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-import { seedRepoSidebar } from "./helpers/dashboard";
+import { seedRepoSidebar, typeIntoComposer } from "./helpers/dashboard";
 
 // Workspaces end-to-end: dashboard management, the admin gate, and an admin
 // thread that creates, provisions, and captures its own sandbox. The agent, the
@@ -159,13 +159,6 @@ async function createWorkspace(
   // No snapshot: the prompt applies on its own, and the sandbox falls back to
   // the base image — which is what these selection specs assert on.
   return ((await created.json()) as { slug: string }).slug;
-}
-
-async function typeIntoComposer(page: Page, text: string) {
-  const editor = page.getByTestId("composer-editor");
-  await editor.click();
-  await editor.pressSequentially(text);
-  await editor.press("Enter");
 }
 
 test.describe("Workspaces", () => {
@@ -420,7 +413,7 @@ test.describe("Workspaces", () => {
     await page.getByRole("menuitem", { name: new RegExp(ALT_NAME) }).click();
     await expect(picker).toContainText(ALT_NAME);
 
-    await typeIntoComposer(page, "Which workspace am I in?");
+    await typeIntoComposer(page, "Which instructions apply? E2E_FOLLOWUP");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
 
@@ -442,6 +435,9 @@ test.describe("Workspaces", () => {
     expect(await lastSystemPrompt(page)).not.toContain(
       DEFAULT_WORKSPACE_PROMPT,
     );
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible();
 
     await deleteWorkspace(page, ALT_SLUG);
     await resetDefaultWorkspace(page);

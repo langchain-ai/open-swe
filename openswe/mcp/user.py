@@ -1,12 +1,10 @@
-"""Personal MCP connections owned by one dashboard user and used only in their runs."""
+"""Stored legacy personal MCP connections, retained for authenticated API access."""
 
 from typing import Any
 
-from openswe.credential_scope import private_credential_login
 from openswe.mcp import (
     MCPConnection,
     MCPConnectionUpdate,
-    MCPSource,
     discover_tools,
     prepare_connection,
 )
@@ -57,14 +55,3 @@ async def discover_user_mcp(
         raise ValueError("Personal MCP connection does not exist")
     definitions = await discover_tools(record, UserMCPConnections(login).namespace)
     return [{"name": tool.name, "description": tool.description or ""} for tool in definitions]
-
-
-def user_mcp_source(login: str) -> MCPSource:
-    connections = UserMCPConnections(login)
-
-    async def authorize() -> None:
-        owner = await private_credential_login()
-        if owner is None or owner.strip().lower() != connections.login:
-            raise RuntimeError("Personal MCP tools require the private thread owner")
-
-    return connections.source(authorize)

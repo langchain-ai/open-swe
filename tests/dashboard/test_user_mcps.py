@@ -4,7 +4,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 
 from openswe.dashboard import oauth, routes
-from openswe.mcp import MCPConnectionUpdate, load_mcp_tools
+from openswe.mcp import MCPConnectionUpdate
 from openswe.mcp import user as mcps
 from openswe.mcp import workspace as workspace_mcps
 from openswe.users.models import User
@@ -41,13 +41,7 @@ async def test_saved_credentials_are_reused_only_from_the_same_user(people):
     assert stored is not None and stored["encrypted_headers"] == ""
     assert await mcps.list_user_mcps("bob") != [saved]
     assert await mcps.list_user_mcps("ALICE") == [saved]
-    assert (
-        await load_mcp_tools(
-            workspace_mcps.workspace_mcp_source("default"), mcps.user_mcp_source("alice")
-        )
-        == []
-    )
-    record = await mcps.user_mcp_source("ALICE").get_connection("linear")
+    record = await mcps.get_user_mcp("ALICE", "linear")
     assert record is not None and not record.enabled
     await mcps.delete_user_mcp("ALICE", "linear")
     assert await mcps.list_user_mcps("alice") == []

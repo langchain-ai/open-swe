@@ -12,7 +12,8 @@ import pytest
 from fastapi import HTTPException
 from mcp.types import Tool
 
-from openswe.mcp import cards, managed, routes, runtime
+from openswe.mcp import MCPConnection, cards, managed, routes, runtime
+from openswe.mcp.records import SharedMCPConnections, UserMCPConnections
 from openswe.mcp.transport import MCPCredentialMissing
 from openswe.users.models import User
 
@@ -260,21 +261,55 @@ async def test_a_missing_credential_tells_the_model_what_to_do(status, expected)
 
 @pytest.mark.parametrize("private", [True, False])
 async def test_private_threads_load_the_kit_as_the_owner_and_others_as_the_bot(
-    monkeypatch, private
+    monkeypatch, private, remote
 ):
+    from runtime_api.connections import ConnectionRef
+
     import openswe.server as server_module
 
-    loaded = []
-
-    async def load(*sources):
-        loaded.extend(source.namespace for source in sources)
-        return runtime.MCPTools()
-
-    monkeypatch.setattr(server_module, "load_mcp_tools", load)
+    private_thread(monkeypatch, "alice")
+    workspace = MCPConnection(
+        name="linear",
+        url="https://workspace.example/mcp",
+        allowed_tools=["linear_list_issues"],
+        revision="workspace-revision",
+        updated_at="",
+    )
+    monkeypatch.setattr(SharedMCPConnections, "records", AsyncMock(return_value=[workspace]))
+    monkeypatch.setattr(
+        UserMCPConnections,
+        "records",
+        AsyncMock(
+            return_value=[
+                workspace.model_copy(
+                    update={"name": "personal", "url": "https://legacy.example/mcp"}
+                ),
+                workspace.model_copy(
+                    update={
+                        "name": "legacy",
+                        "connection": ConnectionRef(slug="open-swe-mcp-legacy", owner="user"),
+                    }
+                ),
+            ]
+        ),
+    )
     tools = await server_module._mcp_tools_for("alice" if private else None, "eng")
-    managed_sources = [namespace for namespace in loaded if namespace[0] == "managed_tools"]
-    assert managed_sources == (
-        [("managed_tools", "alice")] if private else [("managed_tools", "bot", PROFILE_ID)]
+    assert sorted(tool.name for tool in tools) == [
+        "mcp_linear_linear_list_issues",
+        "mcp_lmt_linear_list_issues",
+        "mcp_lmt_notion_search",
+    ]
+    assert tools.runtime_servers == []
+    assert sorted(remote) == sorted(
+        [
+            ("https://workspace.example/mcp", {}),
+            (
+                f"https://api.smith.langchain.com{managed.KITS_PATH}/{KIT_ID if private else BOT_KIT_ID}/mcp",
+                {"Authorization": "Bearer alice-langsmith-token"}
+                if private
+                else {"X-Api-Key": "openswe-key", "X-LangSmith-Profile": PROFILE_ID},
+            ),
+        ]
     )
     # A private thread's prompt names the kit's services its owner could still connect.
     assert tools.connectable == (["Notion", "Exa"] if private else [])

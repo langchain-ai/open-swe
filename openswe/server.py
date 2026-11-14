@@ -95,7 +95,6 @@ from openswe.input_messages import (
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.managed import BotTools, PersonalTools, managed_tools_configured
 from openswe.mcp.runtime import MCPTools, catalog_note
-from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
     BasePrepareRunMiddleware,
@@ -919,16 +918,12 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
 
 
 async def _mcp_tools_for(credential_login: str | None, workspace: str) -> MCPTools:
-    """Load MCPs by precedence: the managed tool kit, as Robin's bot outside a private
-    thread, then the workspace's, then in a private thread the owner's own MCPs and the
-    kit as the owner, each replacing same-named connections before it."""
+    """Load workspace MCPs with the owner's LMT kit privately, or Robin's bot kit otherwise."""
     if not credential_login:
         return await load_mcp_tools(BotTools().source(), workspace_mcp_source(workspace))
     personal = PersonalTools(credential_login)
     tools, connectable = await asyncio.gather(
-        load_mcp_tools(
-            workspace_mcp_source(workspace), user_mcp_source(credential_login), personal.source()
-        ),
+        load_mcp_tools(workspace_mcp_source(workspace), personal.source()),
         personal.connectable(),
     )
     tools.connectable = connectable

@@ -434,7 +434,7 @@ Workspace storage and dashboard authorization remain in the workspace adapters.
 Existing stored connections and imported JSON need no migration.
 
 For another scope, provide an `MCPSource` with an owner-specific `namespace` plus async `list_connections` and `get_connection` callbacks.
-The caller must authorize each source before passing it to `load_mcp_tools(workspace_source, user_source)`.
+The caller must authorize each source before passing it to `load_mcp_tools(*sources)`.
 Sources are ordered from lowest to highest precedence.
 Distinct connection names contribute tools; a later connection with the same name replaces the entire earlier connection, including credentials and allowed tools.
 Disabled connections and empty tool selections also override earlier entries, preventing fallback to broader access.
@@ -443,27 +443,26 @@ Saved secrets must only be preserved from the previous record in the same scope.
 Catalog and token caches include the source namespace.
 Each tool call resolves the current winning connection again, checks its allowlist, and refuses to switch scopes mid-run.
 Source lookup errors must raise instead of returning an empty result, so a failed lookup cannot expose a lower-precedence connection.
-The product wires the workspace source and the triggering user's personal source (below) into every remote coding-agent run.
+Robin loads workspace MCP connections with the owner's personal LangSmith Managed Tools kit in private threads, or Robin's bot kit otherwise.
 An unavailable server omits its tools without preventing other connections from loading.
 This catalog is not attached to the separate read-only reviewer or Investigate graphs.
 
-### Personal MCP servers
+### Personal integrations
 
-Any signed-in user can connect remote MCP servers with their own credentials under **Settings → Connections → MCP servers**.
-The form, JSON import, OAuth, header handling, and tool discovery work exactly like workspace connections.
-Records live in PostgreSQL under the person's `users` row, so one user's connections and credentials are never visible to, reused by, or revealed to another user.
-The dashboard API is `/dashboard/api/my-mcps` and requires only a signed-in session.
-
-Personal connections load only inside a **private thread owned by the triggering user**.
-Collaborative (workspace or Slack channel) threads can be prompted by anyone, so they run without personal credentials; to use yours, continue the thread privately from the dashboard.
-Both scopes share the **MCPs** tool group.
-A personal connection with the same name as a workspace connection replaces it entirely for that user's runs, and a disabled personal connection hides the workspace one rather than falling back to it.
-Desktop (local) runs do not load MCP connections yet.
+Use **Settings → Connections → LangSmith Managed Tools** for supported personal integrations.
+The personal kit runs with the owner's accounts only in a **private thread started by its immutable owner**, and rechecks ownership before each tool call.
+Collaborative threads use Robin's bot kit instead.
 GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
+
+Legacy personal MCP connections no longer load or execute in agent runs or through Robin's inbound MCP server, including servers backed by personal MDA connections.
+They cannot override workspace connections, and their editor is no longer available in Settings → Connections.
+Existing records and credentials remain in PostgreSQL under the person's `users` row; no data is deleted or migrated.
+The authenticated `/dashboard/api/my-mcps` APIs remain available for the signed-in user's records, including CRUD, header reveal, and tool discovery, which does not execute tools.
+Workspace MCP settings and LangSmith Managed Tools are unaffected.
 
 ### MCP servers on an MDA connection
 
-An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Robin's database.
+A workspace MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Robin's database.
 The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
 Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
 
@@ -478,12 +477,13 @@ Create the connection from `mda/` after the deployment's first `mda deploy`, for
 
 The slug must be `open-swe-mcp-<server>`: a server never gets a credential Robin or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
 The one exception is Linear's MCP server, below.
-Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
+Workspace servers read the deployment's connection (`"owner": "agent"`).
+Legacy personal servers (`"owner": "user"`) are no longer loaded.
 The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
 A server with a connection takes no headers or OAuth, and saving it drops those the record had.
 An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
 Robin cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
-A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+A run whose agent connection is missing goes without the server.
 
 #### Linear's MCP server on the Linear channel's token
 

@@ -134,7 +134,7 @@ class SharedMCPConnections(MCPConnections):
 
 
 class UserMCPConnections(MCPConnections):
-    """One person's own connections, used only in their runs."""
+    """One person's legacy connections, retained without runtime loading."""
 
     _records = UserRecords(_PERSONAL_KIND)
 

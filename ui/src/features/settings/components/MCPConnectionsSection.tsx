@@ -93,16 +93,12 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
 export function MCPConnectionsSection({
   scope,
   workspace = DEFAULT_WORKSPACE_SLUG,
-  addInLangSmith = false,
 }: {
   scope: MCPScope
   /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
   workspace?: string
-  /** New servers are added through LangSmith Managed Tools, so only stored ones show here. */
-  addInLangSmith?: boolean
 }) {
   const { description, queryKey, ...client } = scopeConfig(scope, workspace)
-  const lmtOnly = addInLangSmith
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -693,18 +689,8 @@ export function MCPConnectionsSection({
     </form>
   ) : null
 
-  if (lmtOnly && connections.isSuccess && connections.data.length === 0) {
-    return null
-  }
   return (
-    <SettingsSection
-      title="MCP Servers"
-      description={
-        lmtOnly
-          ? "MCP servers Robin stored for you before Managed Tools. They still load in your private threads; add new servers under Managed Tools."
-          : description
-      }
-    >
+    <SettingsSection title="MCP Servers" description={description}>
       <div className="space-y-space-4 p-space-4">
         {connections.isLoading && (
           <p className="text-sm text-secondary">Loading connections…</p>
@@ -824,7 +810,7 @@ export function MCPConnectionsSection({
             }}
             onCancel={() => setImporting(false)}
           />
-        ) : lmtOnly && !draft ? null : !draft ? (
+        ) : !draft ? (
           <div className="flex gap-space-2">
             <Button
               size="xs"

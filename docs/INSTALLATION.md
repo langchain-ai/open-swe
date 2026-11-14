@@ -812,9 +812,10 @@ Start a direct user-triggered run to publish.
 System-owned and legacy unowned threads retain bot authorship.
 This prevents the publisher from approving their own PR; it does not prevent other task participants from approving it.
 
-Public threads load workspace MCP connections and organization skills.
-Personal MCP connections, user skills, and user custom instructions are available only in a private thread started by its immutable owner.
-The same ownership check applies when a personal MCP tool refreshes its credentials at execution time.
+Public threads load workspace MCP connections, Robin's LangSmith Managed Tools bot kit, and organization skills.
+Personal LangSmith Managed Tools, user skills, and user custom instructions are available only in a private thread started by its immutable owner.
+The same ownership check applies when a personal managed tool refreshes its credentials at execution time.
+Legacy personal MCP connections no longer load or execute; their saved records remain available through the authenticated API.
 
 Private threads use their owner's stored GitHub OAuth token for server-side GitHub operations and PR creation.
 If that token is unavailable, the owner must sign in again; the run does not fall back to the bot.

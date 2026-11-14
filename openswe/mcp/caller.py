@@ -106,7 +106,6 @@ class ToolCaller:
 
     async def tools(self) -> dict[str, tuple[BaseTool, Access]]:
         from openswe.mcp.runtime import load_mcp_tools
-        from openswe.mcp.user import user_mcp_source
         from openswe.mcp.workspace import workspace_mcp_source
         from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -116,11 +115,7 @@ class ToolCaller:
             for name, (tool, access) in _exposed().items()
             if access == "session" or admin
         }
-        sources = (
-            workspace_mcp_source(DEFAULT_WORKSPACE_SLUG),
-            user_mcp_source(self.login),
-        )
-        for tool in await load_mcp_tools(*sources):
+        for tool in await load_mcp_tools(workspace_mcp_source(DEFAULT_WORKSPACE_SLUG)):
             if tool.name in tools:
                 raise ValueError(f"MCP tool name collides with a local tool: {tool.name}")
             tools[tool.name] = (tool, "session")

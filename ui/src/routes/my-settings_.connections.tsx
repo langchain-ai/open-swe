@@ -1,13 +1,8 @@
-import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
-import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
-import {
-  ManagedToolsSection,
-  managedToolsQuery,
-} from "@/features/settings/components/ManagedToolsSection"
+import { ManagedToolsSection } from "@/features/settings/components/ManagedToolsSection"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/my-settings_/connections")({
@@ -16,7 +11,6 @@ export const Route = createFileRoute("/my-settings_/connections")({
 })
 
 function ConnectionsPage() {
-  const managed = useQuery(managedToolsQuery)
   return (
     <SettingsPage
       title="Connections"
@@ -26,10 +20,6 @@ function ConnectionsPage() {
         <>
           <ConnectionsSection user={user} />
           <ManagedToolsSection />
-          <MCPConnectionsSection
-            scope="user"
-            addInLangSmith={managed.data?.configured === true}
-          />
         </>
       )}
     </SettingsPage>
