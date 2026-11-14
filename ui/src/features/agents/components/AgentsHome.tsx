@@ -91,11 +91,13 @@ interface PendingCloudSubmit {
 }
 
 export function AgentsHome({
+  initialPrompt,
   initialProject,
   initialRepo,
   initialLocalRepo,
   initialNoRepo,
 }: {
+  initialPrompt?: string
   /** A project the composer starts in, as from a sidebar folder's compose button. */
   initialProject?: string
   initialRepo?: string
@@ -785,6 +787,11 @@ export function AgentsHome({
                 </Banner>
               )}
               <AgentPromptBar
+                restoreDraft={
+                  initialPrompt
+                    ? { key: 0, text: initialPrompt, images: [] }
+                    : undefined
+                }
                 draftKey={
                   session.data?.user_id
                     ? `${session.data.user_id}:new`

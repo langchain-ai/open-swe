@@ -20,6 +20,30 @@ import {
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {
+  test("prefills an editable handoff without sending it", async ({ page }) => {
+    await loginAs(page, SAME_USER);
+    const editor = page.getByTestId("composer-editor");
+    const prompt =
+      'Fix retries & preserve tool arguments.\n\n<!-- langsmith-issue {"id":"issue-1"} -->';
+    await page.goto(`/agents?prompt=${encodeURIComponent(prompt)}`);
+    await dismissOnboardingIfShown(page);
+    await expect(editor).toContainText(
+      "Fix retries & preserve tool arguments.",
+    );
+    await expect(editor).toContainText(
+      '<!-- langsmith-issue {"id":"issue-1"} -->',
+    );
+    await expect(page).toHaveURL(/\/agents\/?$/);
+    await expect(editor).toHaveAttribute("data-lexical-editor", "true");
+    await editor.press("End");
+    await editor.pressSequentially(" Please investigate first.");
+    const edited = await editor.innerText();
+    await page.getByRole("link", { name: "Automations", exact: true }).click();
+    await expect(page).toHaveURL(/\/agents\/automations/);
+    await page.goBack();
+    await expect(editor).toHaveText(edited, { useInnerText: true });
+  });
+
   test("opens the composer without saving a personal model for a fresh user", async ({
     page,
   }) => {
