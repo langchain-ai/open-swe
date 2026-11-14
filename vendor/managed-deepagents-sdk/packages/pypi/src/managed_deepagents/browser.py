@@ -104,6 +104,14 @@ _INSTRUCTIONS = (
     # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
     "These tools are named browser_run, browser_snapshot and browser_screenshot: "
     "call those wherever this text or an error names run, snapshot or screenshot.\n"
+    "This runtime does not support page.route (including route.fulfill), context.route, "
+    "context.addInitScript, page.on listeners for 'pageerror', 'response' or 'requestfailed', "
+    "or page.emulateMedia. "
+    "Use page.evaluate to wrap window.fetch for in-page request mocks or install "
+    "window.onerror collectors, then read the collected errors with page.evaluate. "
+    "These hooks only cover subsequent activity in that document; reinstall after navigation. "
+    "Set localStorage with page.evaluate after page.goto on the target origin, "
+    "then reload if the app reads it at startup.\n"
     f"Screenshots that run code saves go to {_WORKSPACE} in your files: "
     f"`await page.screenshot({{ path: 'shots/a.png' }})` saves {_WORKSPACE}/shots/a.png."
 )
