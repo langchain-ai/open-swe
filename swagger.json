@@ -1401,6 +1401,13 @@
       },
       "BridgeRequestsResponse": {
         "properties": {
+          "cancelled": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cancelled",
+            "type": "array"
+          },
           "requests": {
             "items": {
               "$ref": "#/components/schemas/ClaimedRequest"

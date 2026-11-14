@@ -4,6 +4,7 @@ export {
   httpStatus,
   type BridgeApi,
   type BridgeClient,
+  type BridgePoll,
   type BridgeReply,
   type BridgeRequest,
   type BridgeSender,

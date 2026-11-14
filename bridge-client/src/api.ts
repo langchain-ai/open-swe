@@ -26,6 +26,12 @@ export interface CreateBridgeInput {
 
 export type BridgeReply = { result: JsonObject } | { error: string }
 
+export interface BridgePoll {
+  requests: BridgeRequest[]
+  /** Held requests the server settled without this machine: stop running them. */
+  cancelled: string[]
+}
+
 export interface PollOptions {
   wait: number
   limit: number
@@ -37,8 +43,11 @@ export interface PollOptions {
 export interface BridgeApi {
   createBridge(input: CreateBridgeInput): Promise<BridgeSession>
   heartbeat(bridgeId: string): Promise<void>
-  /** Long-poll for requests, naming the ones already running so a lost response is re-offered. */
-  pollRequests(bridgeId: string, options: PollOptions): Promise<BridgeRequest[]>
+  /**
+   * Long-poll for requests, naming the ones already running so a lost response
+   * is re-offered and a settled one is reported cancelled.
+   */
+  pollRequests(bridgeId: string, options: PollOptions): Promise<BridgePoll>
   respond(
     bridgeId: string,
     requestId: string,
@@ -112,7 +121,7 @@ export class BridgeHttpApi implements BridgeApi {
   async pollRequests(
     bridgeId: string,
     options: PollOptions
-  ): Promise<BridgeRequest[]> {
+  ): Promise<BridgePoll> {
     const payload = await this.send(
       "POST",
       bridgePath(bridgeId, "requests", "claim"),
@@ -125,7 +134,8 @@ export class BridgeHttpApi implements BridgeApi {
         ...(options.signal ? { signal: options.signal } : {}),
       }
     )
-    const entries = arrayAt(isRecord(payload) ? payload : null, "requests")
+    const body = isRecord(payload) ? payload : null
+    const entries = arrayAt(body, "requests")
     if (entries === null) {
       throw new BridgeProtocolError("poll response is missing a requests array")
     }
@@ -141,7 +151,10 @@ export class BridgeHttpApi implements BridgeApi {
         params: recordAt(entry, "params") ?? {},
       })
     }
-    return requests
+    const cancelled = (arrayAt(body, "cancelled") ?? []).filter(
+      (requestId): requestId is string => typeof requestId === "string"
+    )
+    return { requests, cancelled }
   }
 
   async respond(
