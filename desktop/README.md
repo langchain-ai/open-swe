@@ -145,10 +145,11 @@ pnpm --dir desktop run dist # installer for the current platform
 ```
 
 Neither command builds or embeds the dashboard.
-The dashboard's `ui/public/logo-mark.png` is the shared source for the desktop app icon.
-Electron Builder converts it into platform-specific icon formats during packaging and copies it as `icon.png` for native windows; source launches use the same source image directly.
-Change that source image rather than maintaining desktop-specific icon assets.
-Run `python scripts/branding.py` from the Open SWE root to regenerate browser, PWA, mobile, and environment-specific icons from it; Pillow is a declared project dependency.
+macOS packaging uses the shared iOS Icon Composer asset at `mobile/assets/icon.icon`, with separate bird layers for native light, dark, tinted, and Clear appearances.
+It requires Xcode 26 or later; Electron Builder compiles the asset into `Assets.car` and a legacy `.icns` fallback for older macOS versions.
+Edit that shared asset for native Apple icon changes rather than flattening its appearance layers into a PNG.
+The dashboard's `ui/public/logo-mark.png` remains the source for Windows/Linux app icons, native window icons, and source launches.
+Run `python scripts/branding.py` from the Open SWE root to regenerate browser, PWA, and environment-specific icons from that PNG; Pillow is a declared project dependency.
 Preview and staging retain their pink and green backgrounds to distinguish them from production.
 Installed app icons require a desktop shell release, not a downloaded UI update.
 Build outputs are written to `desktop/dist/`; the bundle is `Robin.app`.

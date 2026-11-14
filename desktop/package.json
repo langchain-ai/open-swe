@@ -58,6 +58,7 @@
       }
     ],
     "mac": {
+      "icon": "../mobile/assets/icon.icon",
       "category": "public.app-category.developer-tools",
       "artifactName": "Robin-${version}-${arch}-mac.${ext}",
       "hardenedRuntime": true,
