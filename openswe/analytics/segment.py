@@ -1,6 +1,7 @@
 """Queue-only, minimized Segment lifecycle delivery."""
 
 import math
+import re
 from datetime import datetime
 from uuid import UUID
 
@@ -133,6 +134,8 @@ class SegmentDelivery:
                     safe[key] = str(UUID(value))
                 except ValueError:
                     continue
+            elif key == "robin_environment" and isinstance(value, str):
+                safe[key] = value if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", value) else "unknown"
             elif key in _ENUMS and isinstance(value, str):
                 safe[key] = value if value in _ENUMS[key] else "unknown"
             elif key in _COUNTS and type(value) is int and 0 <= value <= 2**63 - 1:

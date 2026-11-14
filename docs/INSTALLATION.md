@@ -124,7 +124,19 @@ The backend emits lifecycle events for observed run outcomes, but records in the
 `agents_request_started` distinguishes `human_request`, `automatic_work` and `unknown` using stamped message provenance, not message roles or content.
 `agents_tool_executed` records reported tool results as `agent_work`, with a finite built-in tool name (otherwise `external` or `unknown`) and `is_error`; it does not imply human intent or include arguments/results.
 These events use report receipt time unless a request's signed current invocation supplies its start time.
-Carried reports never borrow a later invocation's owner or start time.
+Carried reports never borrow a later invocation's owner, start time or environment selection.
+
+Runtime activity adds `robin_environment`, the selected Robin environment's slug (for example, `default` or `oss-team`), from the signed current run configuration.
+It is separate from `environment` (the deployment's `DD_ENV`, such as `production`) and `workspace_id` (the deployment-wide analytics ID).
+Only lowercase alphanumeric/hyphen slugs up to 80 characters are exported; environment display names and settings are not included.
+The slug itself is exported, so do not put sensitive information in environment slugs.
+Missing, invalid or unproven selections, including carried reports, are `unknown`, not assumed to be Default.
+This records the selection, not confirmation that its sandbox image loaded or a deleted selection did not fall back.
+
+To see who uses each environment in a Segment destination, select `agents_request_started` in a date range, filter to `activity_kind: human_request`, `attribution_role: actor` and `identity_quality: canonical`, then group distinct `userId` values by `robin_environment`.
+Use existing identify traits to display email or GitHub login where available; keep `unknown` separate and do not treat it as Default.
+Count a person in each environment they used; tool work, automatic work and owner-attributed requests are separate measures, not additional human users.
+These labels apply to newly captured runtime activity after deployment; browser intent and lifecycle events are unchanged, and historical events are not backfilled.
 
 Existing lifecycle events are exported as `agents_<event_name>` with dots replaced by underscores:
 

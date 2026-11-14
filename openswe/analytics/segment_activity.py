@@ -16,6 +16,7 @@ from openswe.analytics.identity import opaque_id
 from openswe.analytics.segment import SegmentDelivery
 from openswe.config import ENV
 from openswe.database.analytics import workspace_id
+from openswe.run_config import RunConfig
 from openswe.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ class SegmentActivity:
             return None
         return user.id if user else None
 
-    def properties(self) -> dict[str, JsonValue]:
+    def properties(self, *, current: bool) -> dict[str, JsonValue]:
         return {
             "thread_id": str(opaque_id("thread", self.run.thread_id)),
             "run_kind": {
@@ -126,6 +127,11 @@ class SegmentActivity:
                 "review-scout": "review_scout",
             }.get(self.run.assistant_id, "unknown"),
             "environment": ENV.DD_ENV.get(),
+            "robin_environment": (
+                RunConfig.parse(self.run.configurable).workspace_slug or "unknown"
+            )
+            if current
+            else "unknown",
         }
 
     async def request_started(self, request: RunStarted, *, carried: bool) -> None:
@@ -168,7 +174,7 @@ class SegmentActivity:
                 parsed = datetime.fromisoformat(started)
                 if parsed.tzinfo is not None:
                     occurred_at = parsed
-            properties = self.properties()
+            properties = self.properties(current=current)
             properties.update(
                 activity_kind={"human": "human_request", "system": "automatic_work"}.get(
                     trigger, "unknown"
@@ -200,7 +206,7 @@ class SegmentActivity:
         try:
             own_run = bool(request.run_id) and request.run_id == self.run.configurable.get("run_id")
             owner = await self.canonical(self.run.configurable.get("user_id")) if own_run else None
-            properties = self.properties()
+            properties = self.properties(current=own_run)
             properties.update(
                 activity_kind="agent_work",
                 attribution_role="owner" if owner else "unknown",
