@@ -51,6 +51,9 @@ def private_thread(monkeypatch, request):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
     serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(
+        tools.THREADS, "get", AsyncMock(return_value=SimpleNamespace(metadata=thread["metadata"]))
+    )
+    monkeypatch.setattr(
         handlers, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"])
     )
     monkeypatch.setattr(
