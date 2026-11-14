@@ -551,6 +551,17 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
             _event(user_id=None, payload={"type": "message", "bot_id": "B1", "app_id": "A9"}),
             SlackMessageFacts(conversation="mda"),
         ),
+        (
+            _event(
+                user_id="UBOT",
+                payload={"type": "message", "bot_id": "B1", "app_id": "A9"},
+            ),
+            SlackMessageFacts(allowed_bot=True, conversation="mda"),
+        ),
+        (
+            _event(user_id=None, payload={"type": "message", "bot_id": "B1", "app_id": "A1"}),
+            SlackMessageFacts(allowed_bot=True, conversation="mda"),
+        ),
         # An allowed bot whose only mention is in a message it forwarded or a link's preview:
         # someone else's words.
         (
@@ -570,6 +581,8 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
         "backend-untagged",
         "mda-broadcast",
         "unlisted-bot",
+        "own-bot-user-even-if-allowed",
+        "own-app-even-if-allowed",
         "forwarded-bot-mention",
         "link-preview-bot-mention",
         "unverified",
