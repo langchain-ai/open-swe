@@ -16,7 +16,7 @@ Initial acknowledgements, essential in-progress updates, blocking questions, and
 Steps, in order:
 
 1. **Lint & format.**
-   Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: `yarn format` then `yarn lint`; Go: find the commands from `Makefile`/`go.mod`/CI).
+   Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: discover the repository-selected package manager from `AGENTS.md`, `packageManager`, and the lockfile, then use it to run the declared format/lint scripts; Go: find the commands from `Makefile`/`go.mod`/CI).
    Then review your diff for correctness and unintended changes.
 
 2. **Push & open/update the PR.**
