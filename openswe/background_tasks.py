@@ -75,22 +75,6 @@ async def _stop_polling(thread_id: str) -> None:
     await queue.cancel_key(_polling_job_key(thread_id))
 
 
-def _notification(task: dict[str, Any]) -> str:
-    task_id = str(task.get("task_id") or "unknown")
-    status = str(task.get("status") or "unknown")
-    exit_code = task.get("exit_code")
-    duration = task.get("duration_seconds")
-    output_path = str(task.get("output_path") or "")
-    return prompt(
-        "runs/background-task-completion",
-        task_id=task_id,
-        status=status,
-        exit_code=exit_code,
-        durations=f"{duration}s",
-        output_path=output_path,
-    )
-
-
 async def completion_configurable(
     thread_id: str, metadata: Mapping[str, object], *, background_task_completion: bool = True
 ) -> dict[str, JsonValue]:
@@ -110,8 +94,12 @@ async def completion_configurable(
 
 
 async def _claim(backend: Any, task_id: str) -> bool:
-    claim = f"{TASK_ROOT}/{task_id}/notify.claim"
-    response = await backend.aexecute(f"mkdir {shlex.quote(claim)} 2>/dev/null", timeout=10)
+    claim = shlex.quote(f"{TASK_ROOT}/{task_id}/notify.claim")
+    done = shlex.quote(f"{TASK_ROOT}/{task_id}/notify.done")
+    response = await backend.aexecute(
+        f"mkdir {claim} 2>/dev/null && {{ test ! -d {done} || {{ rmdir {claim}; false; }}; }}",
+        timeout=10,
+    )
     return getattr(response, "exit_code", None) == 0
 
 
@@ -125,7 +113,8 @@ async def _unclaim(backend: Any, task_id: str) -> None:
 async def _mark_delivered(backend: Any, task_id: str) -> None:
     task_dir = f"{TASK_ROOT}/{task_id}"
     response = await backend.aexecute(
-        f"mv {shlex.quote(task_dir + '/notify.claim')} {shlex.quote(task_dir + '/notify.done')}",
+        f"mkdir -p {shlex.quote(task_dir + '/notify.done')} && "
+        f"rmdir {shlex.quote(task_dir + '/notify.claim')}",
         timeout=10,
     )
     if getattr(response, "exit_code", None) != 0:
@@ -243,14 +232,17 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
             )
     status_context = SourceContext.from_metadata(status_metadata or metadata)
     delivered = 0
+    claimed: list[dict[str, JsonValue]] = []
     for task in terminal:
         task_id = task.get("task_id")
         if not isinstance(task_id, str) or task.get("notification") == "done":
             continue
         if not await _claim(backend, task_id):
             continue
-        message = _notification(task)
+        claimed.append(task)
+    if claimed:
         try:
+            message = prompt("runs/background-task-completion", tasks=claimed)
             configurable = await completion_configurable(thread_id, metadata)
             # A completion run can change task state before delivery finishes.
             status_metadata = None
@@ -266,12 +258,18 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
                 multitask_strategy="enqueue",
                 source_context=status_context,
             )
-            await _mark_delivered(backend, task_id)
-            task["notification"] = "done"
-            delivered += 1
+            for task in claimed:
+                await _mark_delivered(backend, str(task["task_id"]))
+                task["notification"] = "done"
+                delivered += 1
         except Exception:
-            await _unclaim(backend, task_id)
-            logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
+            for task in claimed:
+                await _unclaim(backend, str(task["task_id"]))
+            logger.warning(
+                "Failed to deliver background tasks",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
     pending = sum(task.get("notification") != "done" for task in terminal)
     await refresh_slack_background_status(
         thread_id, metadata=status_metadata, source_context=status_context

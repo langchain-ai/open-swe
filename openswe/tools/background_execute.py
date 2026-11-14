@@ -229,7 +229,8 @@ async def _control(action: str, task_id: str | None) -> dict[str, JsonValue]:
 
 
 async def task_status(task_id: str) -> dict[str, Any]:
-    state = await _control("status", task_id)
+    thread_id, backend = current_backend()
+    state = await execute(backend, "status", task_id=task_id, observer_thread_id=thread_id)
     return {"kind": TASK_KIND, "output_source": "sandbox", **state}
 
 
