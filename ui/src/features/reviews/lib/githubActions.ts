@@ -53,6 +53,20 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       return result.auto_merge === true
     },
   },
+  "disable-auto-merge": {
+    labels: {
+      idle: "Disable auto-merge",
+      pending: "Disabling auto-merge…",
+      done: "Auto-merge disabled",
+      retry: "Retry disabling auto-merge",
+    },
+    succeeded: (subject) => `Auto-merge disabled for ${subject}`,
+    failed: (subject) => `Could not disable auto-merge for ${subject}`,
+    run: async (pr) => {
+      await api.disablePullRequestAutoMerge(pr)
+      return false
+    },
+  },
   close: {
     labels: {
       idle: "Close",

@@ -1202,6 +1202,7 @@ export type MergeMethod = "squash" | "merge" | "rebase"
 
 export type PullRequestActionName =
   | "merge"
+  | "disable-auto-merge"
   | "close"
   | "mark-ready"
   | "update-branch"
@@ -1213,6 +1214,7 @@ export type PullRequestActionRequest =
       merge_method: MergeMethod
       auto_merge?: boolean
     }
+  | { action: "disable-auto-merge" }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
   | { action: "update-branch"; sha: string | null }
@@ -2016,6 +2018,10 @@ export const api = {
       ...(autoMerge ? { auto_merge: true } : {}),
       ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
+  disablePullRequestAutoMerge: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "disable-auto-merge" }),
   closePullRequest: (
     pr: OpenPullRequest,
     reason?: string

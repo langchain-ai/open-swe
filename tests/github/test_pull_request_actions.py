@@ -180,6 +180,38 @@ async def test_auto_merge_requires_github_confirmation(payload: dict[str, object
     assert error.value.status_code == (422 if "errors" in payload else 502)
 
 
+@pytest.mark.parametrize(
+    ("updated", "confirmed"),
+    [
+        ({"autoMergeRequest": None}, True),
+        ({"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}, False),
+        ({}, False),
+    ],
+)
+async def test_disable_auto_merge_requires_confirmation(
+    updated: dict[str, object], confirmed: bool
+):
+    requests: list[dict[str, object]] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return response({"node_id": "PR_1"})
+        requests.append(json.loads(request.content))
+        return response({"data": {"disablePullRequestAutoMerge": {"pullRequest": updated}}})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        action = actions.DisableAutoMergeAction(action="disable-auto-merge")
+        if confirmed:
+            result = await actions.act_on_pull_request(pull, action)
+            assert result.done and not result.auto_merge
+        else:
+            with pytest.raises(HTTPException) as error:
+                await actions.act_on_pull_request(pull, action)
+            assert error.value.status_code == 502
+    assert requests[0]["variables"] == {"input": {"pullRequestId": "PR_1"}}
+
+
 @pytest.mark.parametrize("auto_merge", [False, True])
 async def test_merge_and_auto_merge_fall_back_to_each_other(auto_merge: bool) -> None:
     calls: list[str] = []

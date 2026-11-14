@@ -797,6 +797,31 @@ class PullRequestClient:
         if not isinstance(updated, Mapping) or not updated.get("autoMergeRequest"):
             raise ValueError("GitHub did not confirm auto-merge was enabled.")
 
+    async def disable_auto_merge(self) -> None:
+        """Disable GitHub's auto-merge for this pull request."""
+        pull = await self.pull()
+        node_id = pull.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("GitHub did not return the pull request ID.")
+        data = await self.repo.github.graphql(
+            """
+            mutation DisableAutoMerge($input: DisablePullRequestAutoMergeInput!) {
+              disablePullRequestAutoMerge(input: $input) {
+                pullRequest { autoMergeRequest { enabledAt } }
+              }
+            }
+            """,
+            {"input": {"pullRequestId": node_id}},
+        )
+        disabled = data.get("disablePullRequestAutoMerge")
+        updated = disabled.get("pullRequest") if isinstance(disabled, Mapping) else None
+        if (
+            not isinstance(updated, Mapping)
+            or "autoMergeRequest" not in updated
+            or updated["autoMergeRequest"] is not None
+        ):
+            raise ValueError("GitHub did not confirm auto-merge was disabled.")
+
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
 

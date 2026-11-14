@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, type MutationKey } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import type {
@@ -19,6 +19,7 @@ export function usePullRequestAction({
   apply,
   onDone,
   method,
+  mutationKey,
 }: {
   pr: OpenPullRequest
   action: PullRequestActionName
@@ -26,9 +27,11 @@ export function usePullRequestAction({
   /** `queued` is true when a merge was queued as auto-merge. */
   onDone?: (queued: boolean) => void
   method?: MergeMethod
+  mutationKey?: MutationKey
 }) {
   const { run, succeeded, failed } = githubActions[action]
   return useMutation({
+    mutationKey,
     mutationFn: (input: Omit<GithubActionInput, "method"> | void) =>
       run(pr, { ...input, method }),
     meta: { errorTitle: failed(pullRequestKey(pr)) },

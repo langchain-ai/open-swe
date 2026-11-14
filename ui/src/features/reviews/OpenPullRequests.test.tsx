@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider, useQuery } from "@tanstack/react-query"
 import {
   act,
   cleanup,
@@ -25,6 +25,8 @@ import {
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
 import { OpenPullRequests } from "./OpenPullRequests"
+import { MergePullRequest } from "./components/MergePullRequest"
+import { pullRequestStatusQuery } from "./lib/cache"
 import type { ReviewsSearch } from "./search"
 
 vi.mock("@/lib/api", () => ({
@@ -37,6 +39,7 @@ vi.mock("@/lib/api", () => ({
     fixUpPullRequest: vi.fn(),
     pullRequestThreadStatus: vi.fn(),
     mergePullRequest: vi.fn(),
+    disablePullRequestAutoMerge: vi.fn(),
     closePullRequest: vi.fn(),
     markPullRequestReady: vi.fn(),
     repoMergeMethods: vi.fn(),
@@ -113,7 +116,7 @@ const payload = {
   incomplete: false,
   updatedAt: "2026-09-12T12:00:00Z",
 }
-function mount() {
+function mount(client = makeQueryClient()) {
   function Harness() {
     const [filters, setFilters] = useState<ReviewsSearch>({})
     return (
@@ -127,7 +130,6 @@ function mount() {
       />
     )
   }
-  const client = makeQueryClient()
   client.setDefaultOptions({ queries: { retry: false } })
   return render(
     <QueryClientProvider client={client}>
@@ -463,12 +465,190 @@ describe("My PRs", () => {
     await chooseMergeMethod(1, "Squash merge")
     fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }))
     expect(
-      await screen.findByRole("button", { name: "Auto-merge enabled" })
+      await screen.findByRole("button", { name: "Disable auto-merge" })
     ).toBeTruthy()
     expect(screen.queryByText(/^Merged ·/)).toBeNull()
     expect(toast.success).toHaveBeenCalledWith(
       "Auto-merge enabled for acme/app#1"
     )
+    vi.mocked(api.disablePullRequestAutoMerge).mockResolvedValue({
+      action: "disable-auto-merge",
+      done: true,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Disable auto-merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Enable auto-merge" })
+    ).toBeTruthy()
+    expect(api.disablePullRequestAutoMerge).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 1 })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Enable auto-merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Disable auto-merge" })
+    ).toBeTruthy()
+    expect(api.mergePullRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("shares auto-merge changes between controls and after remounting", async () => {
+    const initial = pull(1, {
+      autoMerge: true,
+      ci: "pending",
+      requiredChecksPassing: false,
+    })
+    const client = makeQueryClient()
+    client.setQueryData(
+      pullRequestStatusQuery("octocat", initial).queryKey,
+      initial
+    )
+    vi.mocked(api.pullRequestStatus).mockResolvedValue(initial)
+    let finishDisable!: (result: PullRequestActionResult) => void
+    vi.mocked(api.disablePullRequestAutoMerge)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishDisable = resolve
+          })
+      )
+      .mockResolvedValue({ action: "disable-auto-merge", done: true })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+      auto_merge: true,
+    })
+    function Controls() {
+      const { data } = useQuery({
+        ...pullRequestStatusQuery("octocat", initial),
+        staleTime: Infinity,
+      })
+      return data ? (
+        <>
+          <MergePullRequest pr={data} />
+          <MergePullRequest pr={data} />
+        </>
+      ) : null
+    }
+    const view = (
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <Controls />
+        </TooltipProvider>
+      </QueryClientProvider>
+    )
+    const rendered = render(view)
+    let finishStatus!: (status: OpenPullRequest) => void
+    vi.mocked(api.pullRequestStatus).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishStatus = resolve
+        })
+    )
+    void client.refetchQueries({
+      queryKey: pullRequestStatusQuery("octocat", initial).queryKey,
+    })
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalled())
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Disable auto-merge" })[0]!
+    )
+    await waitFor(() =>
+      expect(api.disablePullRequestAutoMerge).toHaveBeenCalled()
+    )
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Disable auto-merge",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+    await act(async () => {
+      finishDisable({ action: "disable-auto-merge", done: true })
+    })
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: "Enable auto-merge" })
+      ).toHaveLength(2)
+    )
+    await act(async () => {
+      finishStatus(initial)
+    })
+    expect(
+      screen.getAllByRole("button", { name: "Enable auto-merge" })
+    ).toHaveLength(2)
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Enable auto-merge" })[1]!
+    )
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: "Disable auto-merge" })
+      ).toHaveLength(2)
+    )
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Disable auto-merge" })[0]!
+    )
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: "Enable auto-merge" })
+      ).toHaveLength(2)
+    )
+    rendered.unmount()
+    render(view)
+    expect(
+      screen.getAllByRole("button", { name: "Enable auto-merge" })
+    ).toHaveLength(2)
+  })
+
+  it("keeps the list's cached state after disabling and remounting", async () => {
+    const initial = pull(1, {
+      autoMerge: true,
+      ci: "pending",
+      requiredChecksPassing: false,
+    })
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [initial],
+    })
+    vi.mocked(api.disablePullRequestAutoMerge).mockResolvedValue({
+      action: "disable-auto-merge",
+      done: true,
+    })
+    window.localStorage.setItem("open-swe.reviews.mergeMethod", "squash")
+    const client = makeQueryClient()
+    const rendered = mount(client)
+    await waitFor(() => expect(api.repoMergeMethods).toHaveBeenCalled())
+    await act(async () => {})
+    let finishList!: (result: typeof payload) => void
+    vi.mocked(api.openPullRequests).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishList = resolve
+        })
+    )
+    void client.refetchQueries({ queryKey: ["open-pull-requests"] })
+    await waitFor(() => expect(api.openPullRequests).toHaveBeenCalledTimes(2))
+    const disable = await screen.findByRole("button", {
+      name: "Disable auto-merge",
+    })
+    await waitFor(() =>
+      expect((disable as HTMLButtonElement).disabled).toBe(false)
+    )
+    fireEvent.click(disable)
+    await waitFor(() =>
+      expect(api.disablePullRequestAutoMerge).toHaveBeenCalled()
+    )
+    await screen.findByRole("button", { name: "Enable auto-merge" })
+    await act(async () => {
+      finishList({ ...payload, pullRequests: [initial] })
+    })
+    expect(
+      screen.getByRole("button", { name: "Enable auto-merge" })
+    ).toBeTruthy()
+    rendered.unmount()
+    mount(client)
+    expect(
+      await screen.findByRole("button", { name: "Enable auto-merge" })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "Disable auto-merge" })
+    ).toBeNull()
   })
 
   it("keeps the PR open when GitHub queues auto-merge for a direct merge", async () => {
@@ -486,12 +666,37 @@ describe("My PRs", () => {
     await chooseMergeMethod(1, "Squash merge")
     fireEvent.click(screen.getByRole("button", { name: "Squash and merge" }))
     expect(
-      await screen.findByRole("button", { name: "Auto-merge enabled" })
+      await screen.findByRole("button", { name: "Disable auto-merge" })
     ).toBeTruthy()
     expect(screen.queryByText(/^Merged ·/)).toBeNull()
     expect(toast.success).toHaveBeenCalledWith(
       "Auto-merge enabled for acme/app#1"
     )
+  })
+
+  it("restores enabled auto-merge when disabling an existing request fails", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { autoMerge: true })],
+    })
+    vi.mocked(api.disablePullRequestAutoMerge).mockRejectedValue(
+      new Error("Permission denied")
+    )
+    mount()
+    await screen.findByRole("button", { name: "Disable auto-merge" })
+    await act(async () => {})
+    fireEvent.click(screen.getByRole("button", { name: "Disable auto-merge" }))
+    await waitFor(() =>
+      expect(api.disablePullRequestAutoMerge).toHaveBeenCalled()
+    )
+    await expectReported(
+      "Could not disable auto-merge for acme/app#1",
+      "Permission denied"
+    )
+    expect(
+      screen.getByRole("button", { name: "Disable auto-merge" })
+    ).toBeTruthy()
+    expect(api.mergePullRequest).not.toHaveBeenCalled()
   })
 
   it("rolls a rejected merge back to a retry action", async () => {

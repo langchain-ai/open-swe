@@ -2433,6 +2433,20 @@
         "title": "DesktopHandoffExchange",
         "type": "object"
       },
+      "DisableAutoMergeAction": {
+        "properties": {
+          "action": {
+            "const": "disable-auto-merge",
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "DisableAutoMergeAction",
+        "type": "object"
+      },
       "DocumentModel": {
         "properties": {
           "document": {
@@ -6035,6 +6049,7 @@
           "action": {
             "enum": [
               "merge",
+              "disable-auto-merge",
               "close",
               "mark-ready",
               "update-branch"
@@ -19955,6 +19970,7 @@
                 "discriminator": {
                   "mapping": {
                     "close": "#/components/schemas/CloseAction",
+                    "disable-auto-merge": "#/components/schemas/DisableAutoMergeAction",
                     "mark-ready": "#/components/schemas/MarkReadyAction",
                     "merge": "#/components/schemas/MergeAction",
                     "update-branch": "#/components/schemas/UpdateBranchAction"
@@ -19964,6 +19980,9 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/MergeAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DisableAutoMergeAction"
                   },
                   {
                     "$ref": "#/components/schemas/CloseAction"

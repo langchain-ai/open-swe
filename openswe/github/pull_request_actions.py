@@ -23,7 +23,9 @@ from openswe.github.squash_message import GitHubUser, SquashSource
 
 logger = logging.getLogger(__name__)
 
-PullRequestActionName = Literal["merge", "close", "mark-ready", "update-branch"]
+PullRequestActionName = Literal[
+    "merge", "disable-auto-merge", "close", "mark-ready", "update-branch"
+]
 _COMMENTS_PER_PAGE = 100
 
 # REST cannot clear the draft flag, so marking a PR ready has to go through GraphQL.
@@ -397,8 +399,25 @@ class UpdateBranchAction(_PullRequestActionBase):
             raise self._refusal(response, payload)
 
 
+class DisableAutoMergeAction(_PullRequestActionBase):
+    action: Literal["disable-auto-merge"]
+
+    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        pull = GitHubClient(client).repo(owner, repo).pull_request(number)
+        try:
+            await pull.disable_auto_merge()
+        except GitHubError as exc:
+            raise HTTPException(exc.response.status_code, exc.message) from exc
+        except GraphQLError as exc:
+            raise HTTPException(422, exc.message) from exc
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise HTTPException(
+                502, "Could not confirm auto-merge was disabled. Refresh before retrying."
+            ) from exc
+
+
 PullRequestAction = Annotated[
-    MergeAction | CloseAction | MarkReadyAction | UpdateBranchAction,
+    MergeAction | DisableAutoMergeAction | CloseAction | MarkReadyAction | UpdateBranchAction,
     Field(discriminator="action"),
 ]
 

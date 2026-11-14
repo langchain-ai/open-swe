@@ -1,6 +1,10 @@
-import type { QueryClient } from "@tanstack/react-query"
+import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 
-import { api, type OpenPullRequest } from "@/lib/api"
+import {
+  api,
+  type OpenPullRequest,
+  type OpenPullRequestsPayload,
+} from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 
@@ -62,6 +66,80 @@ export function refreshPullRequest(
   void queryClient.invalidateQueries({
     queryKey: pullRequestStatusQuery(login, pr).queryKey,
   })
+}
+
+export class PullRequestCache {
+  constructor(
+    private readonly queryClient: QueryClient,
+    private readonly pr: PullRequestRef
+  ) {}
+
+  setAutoMerge(autoMerge: boolean): void {
+    const repo = this.pr.repo.toLowerCase()
+    const status = {
+      predicate: ({
+        queryKey: [scope, , name, number],
+      }: {
+        queryKey: readonly unknown[]
+      }) =>
+        scope === PULL_REQUEST_STATUS &&
+        typeof name === "string" &&
+        name.toLowerCase() === repo &&
+        number === this.pr.number,
+    }
+    void this.queryClient.cancelQueries(status)
+    for (const query of this.queryClient.getQueryCache().findAll(status)) {
+      const old = query.state.data as OpenPullRequest | null | undefined
+      if (old && old.autoMerge !== autoMerge) {
+        this.queryClient.setQueryData(
+          query.queryKey,
+          { ...old, autoMerge },
+          {
+            updatedAt: query.state.dataUpdatedAt,
+          }
+        )
+      }
+    }
+    for (const query of this.queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ["open-pull-requests"] })) {
+      const current = query.state.data as
+        | InfiniteData<OpenPullRequestsPayload>
+        | undefined
+      if (
+        !current?.pages.some((page) =>
+          page.pullRequests.some(
+            (row) =>
+              row.repo.toLowerCase() === repo && row.number === this.pr.number
+          )
+        )
+      )
+        continue
+      void this.queryClient.cancelQueries({
+        queryKey: query.queryKey,
+        exact: true,
+      })
+      const old = query.state.data as
+        | InfiniteData<OpenPullRequestsPayload>
+        | undefined
+      if (!old) continue
+      this.queryClient.setQueryData(
+        query.queryKey,
+        {
+          ...old,
+          pages: old.pages.map((page) => ({
+            ...page,
+            pullRequests: page.pullRequests.map((row) =>
+              row.repo.toLowerCase() === repo && row.number === this.pr.number
+                ? { ...row, autoMerge }
+                : row
+            ),
+          })),
+        },
+        { updatedAt: query.state.dataUpdatedAt }
+      )
+    }
+  }
 }
 
 /**

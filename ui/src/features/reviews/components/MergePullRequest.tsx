@@ -1,5 +1,5 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
-import { useQuery } from "@tanstack/react-query"
+import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { ConfirmDialog } from "@/components/ConfirmDialog"
@@ -7,6 +7,7 @@ import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { SplitButton } from "@/components/SplitButton"
+import { PullRequestCache } from "../lib/cache"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
   mergeMethodCopy,
@@ -27,6 +28,8 @@ export function MergePullRequest({
   apply?: () => () => void
   onMerged?: () => void
 }) {
+  const queryClient = useQueryClient()
+  const cache = new PullRequestCache(queryClient, pr)
   const [choice, setChoice] = useState<MergeMethod | null>(null)
   const [preferred] = useState(readPreferredMergeMethod)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -57,19 +60,51 @@ export function MergePullRequest({
         !!candidate && options.includes(candidate)
     ) ?? null
   const autoMerge = mergesLater(pr)
+  const mutationKey = ["pull-request-merge", pr.repo.toLowerCase(), pr.number]
+  const pending = useIsMutating({ mutationKey })
+  const [autoMergeOverride, setAutoMergeOverride] = useState<boolean | null>(
+    null
+  )
   const merge = usePullRequestAction({
     pr,
     action: "merge",
+    mutationKey,
     method: method ?? undefined,
     apply: autoMerge ? undefined : apply,
     onDone: (queued) => {
       if (method) writePreferredMergeMethod(method)
-      if (!queued) onMerged?.()
+      if (queued) {
+        setAutoMergeOverride(true)
+        cache.setAutoMerge(true)
+      } else onMerged?.()
     },
   })
-  const busy = merge.isPending || merge.isSuccess || pr.autoMerge === true
+  const autoMergeEnabled = autoMergeOverride ?? pr.autoMerge === true
+  const disable = usePullRequestAction({
+    pr,
+    action: "disable-auto-merge",
+    mutationKey,
+    apply: () => {
+      const previous = autoMergeOverride
+      setAutoMergeOverride(false)
+      return () => setAutoMergeOverride(previous)
+    },
+    onDone: () => {
+      cache.setAutoMerge(false)
+      merge.reset()
+    },
+  })
+  const [snapshot, setSnapshot] = useState({
+    autoMerge: pr.autoMerge,
+    headSha: pr.headSha,
+  })
+  if (snapshot.autoMerge !== pr.autoMerge || snapshot.headSha !== pr.headSha) {
+    setSnapshot({ autoMerge: pr.autoMerge, headSha: pr.headSha })
+    setAutoMergeOverride(null)
+  }
+  const busy = pending > 0 || (merge.isSuccess && merge.data !== true)
   const labels =
-    autoMerge || merge.data === true
+    autoMerge || (merge.data === true && autoMergeEnabled)
       ? {
           idle: "Enable auto-merge",
           pending: "Enabling auto-merge…",
@@ -77,7 +112,10 @@ export function MergePullRequest({
           retry: "Retry auto-merge",
         }
       : githubActions.merge.labels
-  const state = actionLabel(labels, merge)
+  const state =
+    merge.data === true && !autoMergeEnabled
+      ? labels.idle
+      : actionLabel(labels, merge)
   const rulesUnknown = pr.conversationResolutionRequired == null
   const blocking =
     pr.conversationResolutionRequired === true ||
@@ -86,17 +124,21 @@ export function MergePullRequest({
       : 0
   const conversations = `${blocking} unresolved conversation${blocking === 1 ? "" : "s"}`
   const start = () => {
-    if (!method) setMenuOpen(true)
+    if (queryClient.isMutating({ mutationKey }) > 0) return
+    if (autoMergeEnabled) disable.mutate()
+    else if (!method) setMenuOpen(true)
     else if (blocking > 0) setConfirming(true)
     else merge.mutate()
   }
   return (
     <>
       <SplitButton
-        disabled={!pr.headSha || busy || allowed.isPending}
+        disabled={
+          busy || (!autoMergeEnabled && (!pr.headSha || allowed.isPending))
+        }
         onClick={start}
         menuLabel={`Merge method for PR #${pr.number}`}
-        menuDisabled={busy}
+        menuDisabled={busy || autoMergeEnabled}
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
         menu={
@@ -127,15 +169,17 @@ export function MergePullRequest({
           ))
         }
       >
-        {pr.autoMerge
-          ? "Auto-merge enabled"
-          : allowed.isPending
-            ? "Merge"
-            : !method
-              ? "Choose how to merge"
-              : !autoMerge && state === labels.idle
-                ? mergeMethodCopy[method].button
-                : state}
+        {autoMergeEnabled
+          ? "Disable auto-merge"
+          : disable.isPending
+            ? "Disabling auto-merge…"
+            : allowed.isPending
+              ? "Merge"
+              : !method
+                ? "Choose how to merge"
+                : !autoMerge && state === labels.idle
+                  ? mergeMethodCopy[method].button
+                  : state}
       </SplitButton>
       <ConfirmDialog
         open={confirming}
@@ -145,7 +189,8 @@ export function MergePullRequest({
         confirmLabel={`Resolve and ${autoMerge ? "enable auto-merge" : "merge"}`}
         onConfirm={() => {
           setConfirming(false)
-          merge.mutate({ resolveConversations: true })
+          if (queryClient.isMutating({ mutationKey }) === 0)
+            merge.mutate({ resolveConversations: true })
         }}
       />
     </>
