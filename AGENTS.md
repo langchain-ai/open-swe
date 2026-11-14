@@ -53,7 +53,11 @@ The backend never runs middleware around a model call; the only middleware objec
   Resolve a provider handle (GitHub login, Slack user id, email) to a `User` where it enters from that provider, and turn it back into a handle only to call that provider or to match its own data (a CODEOWNERS entry, a review's author).
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`).
   Open the client as who it acts for, `GitHubClient.as_user(login)` or `GitHubClient.as_app(owner, repo)`; `GitHubClient.connect(token=...)` is only for a token a run was handed.
+- Use `httpx2` for HTTP clients and transports we own; retain `httpx` where an upstream SDK's types or exceptions require it, and keep both exception families in mixed SDK/direct-client paths.
+  CI checks added client and transport constructor calls in `openswe/`, `mda/rt/`, and `scripts/` with `scripts/check_httpx.py`; tests and vendored SDKs are outside its scope.
+  SDK-required constructors may use a trailing `# httpx-sdk: <SDK and required type>` on the call's opening line; an explanation is required and the exception applies only to calls starting on that line.
 - Build a per-call `httpx2.AsyncClient` with `transport=pooled_transport()` (an `aiohttp` session with `connector=pooled_connector(), connector_owner=False`) from `openswe/utils/http_pool.py`, so it reuses the event loop's warm connections instead of opening new ones.
+  Preserve dedicated read/write/stream pools and their limits where isolation is intentional, as in `MdaRuntime`; standalone scripts cannot import the backend pool.
 - Absolute imports across packages; same-package imports may start with one dot.
   Never use parent-relative imports.
 - New dashboard endpoints go in the `router` of the package that owns the feature, never in `openswe/dashboard/routes.py`.
