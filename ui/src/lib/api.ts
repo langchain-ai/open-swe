@@ -1895,6 +1895,19 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
+  gatewaySpend: () =>
+    request<{
+      status: "ready" | "sign_in_required" | "forbidden" | "unavailable"
+      limits: Array<{
+        policy_id: string
+        name: string
+        window: string
+        providers: string[]
+        limit_usd: string
+        spend_usd: string | null
+        resets_at?: string | null
+      }>
+    }>("/analytics/gateway-spend"),
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",
     limit = 10,

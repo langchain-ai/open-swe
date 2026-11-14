@@ -96,6 +96,7 @@ class DashboardPrincipal:
                 "team-settings",
                 "workspaces/options",
                 "organization-skills",
+                "analytics/gateway-spend",
             }:
                 return
             parts = relative.split("/")

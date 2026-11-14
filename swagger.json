@@ -3083,6 +3083,94 @@
         "title": "FixUpIntent",
         "type": "object"
       },
+      "GatewaySpend": {
+        "properties": {
+          "limits": {
+            "items": {
+              "$ref": "#/components/schemas/GatewaySpendWindow"
+            },
+            "title": "Limits",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "sign_in_required",
+              "forbidden",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "GatewaySpend",
+        "type": "object"
+      },
+      "GatewaySpendWindow": {
+        "properties": {
+          "limit_usd": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Limit Usd",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "resets_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resets At"
+          },
+          "spend_usd": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Usd"
+          },
+          "window": {
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "limit_usd",
+          "policy_id",
+          "name",
+          "spend_usd",
+          "resets_at"
+        ],
+        "title": "GatewaySpendWindow",
+        "type": "object"
+      },
       "GitHubEndpointActor": {
         "description": "A ``GitHubActor`` as an endpoint is sent it.",
         "properties": {
@@ -12593,6 +12681,33 @@
           }
         },
         "summary": "Api Telemetry Config",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/gateway-spend": {
+      "get": {
+        "operationId": "api_gateway_spend_dashboard_api_analytics_gateway_spend_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewaySpend"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Gateway Spend",
         "tags": [
           "dashboard",
           "analytics"

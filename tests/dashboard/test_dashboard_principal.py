@@ -61,9 +61,17 @@ def test_a_langsmith_only_session_can_play_trace_flight_but_not_reach_github_fea
         }
     )
     principal.authorize_path("/dashboard/api/trace-flight/runs", "POST")
-    with pytest.raises(HTTPException) as exc:
-        principal.authorize_path("/dashboard/api/workspaces", "POST")
-    assert exc.value.status_code == 403
+    for method in ("GET", "HEAD"):
+        principal.authorize_path("/dashboard/api/analytics/gateway-spend", method)
+    for path, method in (
+        ("workspaces", "POST"),
+        ("analytics/gateway-spend", "POST"),
+        ("analytics/gateway-spend/other", "GET"),
+        ("analytics/pr-merge-rate-by-model", "GET"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            principal.authorize_path(f"/dashboard/api/{path}", method)
+        assert exc.value.status_code == 403
 
 
 def test_github_thread_identity_preserves_attribution(monkeypatch):

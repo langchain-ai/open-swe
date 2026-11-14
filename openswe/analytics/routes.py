@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from openswe.analytics.gateway import GatewaySpend
 from openswe.analytics.queries import (
     InvalidUsageCursor,
     SortDirection,
@@ -14,6 +15,7 @@ from openswe.analytics.queries import (
 )
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.principal import DashboardPrincipal
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,11 @@ async def api_telemetry_config() -> TelemetryConfig:
         posthog=PostHogProject(key=key, host=ENV.POSTHOG_HOST.get()) if key else None,
         segment_write_key=ENV.SEGMENT_BROWSER_WRITE_KEY.get().strip() or None,
     )
+
+
+@router.get("/analytics/gateway-spend")
+async def api_gateway_spend(session: dict[str, object] = SESSION_DEP) -> GatewaySpend:
+    return await GatewaySpend.for_person(DashboardPrincipal.from_session(session))
 
 
 @router.get("/agent-usage-leaderboard")

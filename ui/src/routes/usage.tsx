@@ -37,6 +37,7 @@ import type {
   UsageLeaderboardRow,
   UsageLeaderboardSort,
 } from "@/lib/api"
+import { GatewaySpend } from "@/components/GatewaySpend"
 import { TablePagination } from "@/components/TablePagination"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
@@ -118,6 +119,7 @@ function UsagePage() {
 
   return (
     <AppShell user={session.data} title="Usage" className="max-w-5xl">
+      <GatewaySpend userId={session.data.user_id ?? session.data.login} />
       <div
         className="sticky top-0 -mx-space-4 border-b border-default bg-surface-level-1 px-space-4 py-space-3 sm:-mx-space-6 sm:px-space-6"
         style={{ zIndex: zIndices.dashboardHeader }}
