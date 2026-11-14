@@ -59,6 +59,9 @@ logger = logging.getLogger(__name__)
 _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
+# Each observer holds a thread stream that receives everything the thread's runs publish,
+# so one that never sees its first token must not hold it for as long as the run lives.
+_TTFT_OBSERVER_TIMEOUT_SECONDS = 300.0
 _DISCOVERY_HISTORY_LIMIT = 5
 
 
@@ -136,25 +139,31 @@ async def _observe_dashboard_run_ttft(
         async with langgraph_client().threads.stream(
             thread_id, assistant_id=_ASSISTANT_ID
         ) as thread_stream:
-            async for event in thread_stream.subscribe(
-                ["lifecycle", "messages"], namespaces=[[]], depth=10
-            ):
-                lifecycle = root_lifecycle(event)
-                if (
-                    lifecycle is not None
-                    and lifecycle[0] == run_id
-                    and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
+            async with asyncio.timeout(_TTFT_OBSERVER_TIMEOUT_SECONDS):
+                async for event in thread_stream.subscribe(
+                    ["lifecycle", "messages"], namespaces=[[]], depth=10
                 ):
+                    lifecycle = root_lifecycle(event)
+                    if (
+                        lifecycle is not None
+                        and lifecycle[0] == run_id
+                        and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
+                    ):
+                        return
+                    observation = detector.observe(event)
+                    if observation is None:
+                        continue
+                    await record_dashboard_thread_ttft(
+                        observation,
+                        thread_id=thread_id,
+                        started_at_ms=started_at_ms,
+                    )
                     return
-                observation = detector.observe(event)
-                if observation is None:
-                    continue
-                await record_dashboard_thread_ttft(
-                    observation,
-                    thread_id=thread_id,
-                    started_at_ms=started_at_ms,
-                )
-                return
+    except TimeoutError:
+        logger.info(
+            "Dashboard TTFT observer saw no first token in time",
+            extra={"agent_thread_id": thread_id, "run_id": run_id},
+        )
     except Exception:
         logger.warning(
             "Dashboard TTFT observer closed for run %s on thread %s",

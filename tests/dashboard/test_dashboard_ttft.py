@@ -1,4 +1,11 @@
+import asyncio
+from collections.abc import AsyncIterator
+from types import SimpleNamespace
+
+import pytest
+
 from openswe.dashboard import ttft
+from openswe.threads import proxy as thread_proxy
 
 
 def _event(
@@ -50,3 +57,33 @@ def test_detector_ignores_non_ai_and_correlates_later_runs() -> None:
     assert detector.observe(_message(text_delta, "2-0")) == ttft.AssistantTextObservation(
         run_id="run-2", event_timestamp_ms=2_250
     )
+
+
+class _SilentThreadStream:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aenter__(self) -> _SilentThreadStream:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        self.closed = True
+
+    async def subscribe(self, *_: object, **__: object) -> AsyncIterator[dict[str, object]]:
+        await asyncio.Event().wait()
+        yield {}
+
+
+async def test_observer_closes_its_stream_when_no_first_token_arrives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = _SilentThreadStream()
+    client = SimpleNamespace(threads=SimpleNamespace(stream=lambda *_, **__: stream))
+    monkeypatch.setattr(thread_proxy, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_proxy, "_TTFT_OBSERVER_TIMEOUT_SECONDS", 0.01)
+
+    await asyncio.wait_for(
+        thread_proxy._observe_dashboard_run_ttft("thread", "run", started_at_ms=0), 5
+    )
+
+    assert stream.closed
