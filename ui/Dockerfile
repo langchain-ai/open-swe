@@ -21,7 +21,14 @@ COPY plugins/sdk plugins/sdk
 # from SOURCE_COMMIT, or from GIT_SHA where an image builder passes that instead.
 ARG SOURCE_COMMIT=
 ARG GIT_SHA=
-RUN SOURCE_COMMIT="${SOURCE_COMMIT:-$GIT_SHA}" pnpm --config.verify-deps-before-run=false --filter open-swe-dashboard run build
+# Datadog RUM is baked in at build time (src/lib/datadog.ts) and stays off when these are
+# empty, as in a plain `docker build`. The open-swe-dashboard bake target sets them; the RUM
+# env tag comes from the backend at runtime, so one image serves every deployment.
+ARG VITE_DATADOG_APPLICATION_ID=
+ARG VITE_DATADOG_CLIENT_TOKEN=
+RUN SOURCE_COMMIT="${SOURCE_COMMIT:-$GIT_SHA}" \
+    VITE_DATADOG_VERSION="${SOURCE_COMMIT:-$GIT_SHA}" \
+    pnpm --config.verify-deps-before-run=false --filter open-swe-dashboard run build
 
 FROM node:26-alpine
 
