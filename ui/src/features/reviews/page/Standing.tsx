@@ -158,7 +158,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
     <section
       ref={ref}
       aria-label="Pull request status"
-      className="overflow-hidden rounded-xl border border-default bg-surface-level-1"
+      className="overflow-hidden rounded-xl border border-default bg-code-panel"
     >
       <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2 px-space-4 py-space-4">
         <div className="flex min-w-0 flex-1 items-start gap-space-3">
