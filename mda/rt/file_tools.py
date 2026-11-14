@@ -34,6 +34,7 @@ from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith import get_current_run_tree
@@ -47,6 +48,7 @@ from runtime_api.operations import CHECK_SHELL, ShellCheck
 from rt.auto_review import PATH_ARGUMENTS, AutoReview
 from rt.backend import OpenSweBackend, RunLocal
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
+from rt.managed_sandbox import _written_proxy
 from rt.middleware import reported
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.sandbox_setup import sandbox_setup
@@ -387,12 +389,36 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _reauthorized(
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
-        """``handler``; when GitHub refused the sandbox's token, a fresh one is put there and
-        the result says so.
-
-        The command is not run again: it may have done other things before GitHub refused it.
-        """
+        """Restore GitHub credentials on recognized failures without replaying the command."""
         result = await handler(request)
+        if (
+            request.tool_call["name"] == "execute"
+            and isinstance(result, ToolMessage)
+            and "[Command failed with exit code 4]" in result.text
+            and "To get started with GitHub CLI, please run:  gh auth login" in result.text
+        ):
+            recovered = False
+            try:
+                proxy = _written_proxy(request.runtime)
+                if proxy is not None:
+                    recovered = await proxy.write(request.runtime)
+                if not recovered:
+                    refreshed = await call(
+                        self._backend,
+                        REFRESH_GITHUB_PROXY,
+                        RefreshGitHubProxy(run_id=run_id(), force_refresh=True),
+                    )
+                    recovered = refreshed.expires_at is not None
+            except GraphBubbleUp:
+                raise
+            except Exception:
+                logger.warning("Could not restore the sandbox's GitHub proxy config", exc_info=True)
+            recovery = (
+                "GitHub proxy configuration recovery succeeded."
+                if recovered
+                else "GitHub proxy configuration recovery failed."
+            )
+            return result.model_copy(update={"content": f"{result.text}\n\n{recovery}"})
         if (
             request.tool_call["name"] != "execute"
             or not self._backend.run.catalog.loop.refresh_github_proxy

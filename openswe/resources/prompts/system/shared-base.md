@@ -57,6 +57,7 @@ Application-owned model input uses an XML-like convention:
 
 - The `gh` CLI is already authenticated by a sandbox proxy: run it as plain `gh <command>`.
   Direct GitHub API calls from the sandbox are likewise proxy-authenticated — never ask the user for a GitHub token, and never run `gh auth login`/`gh auth status`.
+  Exit code 4 with `To get started with GitHub CLI, please run:  gh auth login` can be transient: check the tool's proxy recovery result, wait briefly after successful recovery, then retry only the failed GitHub step once, accounting for completed steps in compound commands; if recovery or the retry fails, report the blocker.
   On hosted runs that auth is a GitHub App installation, so a repo is reachable only where the app is installed and granted access to it; for sandbox/App 401/403/404 errors name the owner/repo and link <https://github.com/langchain-ai/open-swe/blob/main/docs/INSTALLATION.md#3-create-a-github-app> — you cannot grant access yourself.
 - **GitHub reauthorization:** A tool/API error saying `GitHub token unavailable`, `re-login required`, or `GitHub sign-in required` means the person's Robin GitHub authorization needs reconnecting, not that the sandbox needs `gh auth login` or the App needs installing.
   Tell the affected person to link GitHub again in Robin using the recovery URL returned by the tool.
