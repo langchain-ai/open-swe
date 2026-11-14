@@ -644,6 +644,16 @@ class SlackAuthorization:
             github_available=github_available,
         )
 
+    @staticmethod
+    async def allows_unlinked_ask(channel_id: str, channel: SlackChannelContext) -> bool:
+        return (
+            channel.allows_operations
+            and not is_dm_channel(channel)
+            and channel.is_mpim is not True
+            and (not channel.id or channel.id == channel_id)
+            and await WORKSPACES.is_ask_channel(channel_id)
+        )
+
     @property
     def needed(self) -> AccountLinkNeeded | None:
         return AccountLinkNeeded(self.slack_user_id, None, self.reason) if self.reason else None
@@ -988,9 +998,24 @@ async def _process_slack_mention_impl(
         sender_profile,
     )
     user_email, user_name, user_timezone = sender.email, sender.name, sender.timezone
+    unlinked_ask = False
     if authorization is not None and (needed := authorization.needed) is not None:
-        await needed.prompt(channel_id, reply_thread_ts or thread_ts)
-        return False
+        unlinked_ask = (
+            needed.reason == "unlinked"
+            and not (
+                request.web_only
+                or concierge_mode
+                or request.by_the_way is not None
+                or request.context_thread_ts
+                or request.move_thread
+            )
+            and await authorization.allows_unlinked_ask(channel_id, channel_context)
+        )
+        if not unlinked_ask:
+            await needed.prompt(channel_id, reply_thread_ts or thread_ts)
+            return False
+        authorization = None
+        user_email = None
     identity = authorization.identity if authorization else None
     mapped_login = authorization.github_login if authorization else None
     if authorization is not None and mapped_login is None:
@@ -998,7 +1023,7 @@ async def _process_slack_mention_impl(
         resolution = common.SlackRepoResolution()
     thread_metadata = thread_record.authorize(
         authorization.subject_for(thread_record.metadata) if authorization else "",
-        bot=allowed_bot is not None,
+        public_opening=allowed_bot is not None or unlinked_ask,
     )
     # A new thread's metadata links back to Slack. Looking that link up here keeps
     # it off the metadata write, which would otherwise wait on it before dispatch.
@@ -1325,7 +1350,7 @@ async def _process_slack_mention_impl(
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
     try:
-        ask_channel = await WORKSPACES.is_ask_channel(channel_id)
+        ask_channel = unlinked_ask or await WORKSPACES.is_ask_channel(channel_id)
     except Exception:
         common.logger.warning(
             "Ask channel lookup failed; retaining normal Slack guidance",
@@ -1471,9 +1496,12 @@ async def _process_slack_mention_impl(
         visibility=visibility,
         owner_login=identity.subject if identity else "",
         identity=identity,
-        owner_type="system" if allowed_bot else "user",
+        owner_type="system"
+        if allowed_bot or (unlinked_ask and not thread_record.started)
+        else "user",
+        public_only=unlinked_ask,
     )
-    if (visibility == "private" or allowed_bot is not None) and not persisted:
+    if (visibility == "private" or allowed_bot is not None or unlinked_ask) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 

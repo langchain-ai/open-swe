@@ -17,7 +17,8 @@ Only an instance admin sets where their browser signs in, the domains and the MC
 An instance admin adds a listed app to everyone's sidebar under **Apps for everyone** in **Defaults** (`/admin`), approving its permissions for them and sharing the repositories they name with each person who can read them; people can't remove it while it's on, and no tool changes it.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work; rename a thread with `manage_thread(action="rename", title=...)` in cloud or desktop.
-  Workspace editors let admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode; Ask channels validate bug reports, propose bot-authored fixes, and identify a human validator.
+  Workspace editors let admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode; Ask channels investigate bug reports, search related work, and recommend next steps without automatically tagging teammates.
+  Ask channels suggest filing a Linear ticket or opening a PR and wait for an explicit human choice; requested PRs are authored as that person, not Robin.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
 - **Bots** (`/agents/bots`): bots allowed to trigger Robin from Slack.

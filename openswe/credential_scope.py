@@ -100,26 +100,20 @@ class GitHubCredentialScope:
 
 
 async def pr_author_login() -> str | None:
-    """The GitHub account a PR is opened as: always the thread's owner.
-
-    Private threads are pinned to their owner, system threads to the App, and a public
-    Ask run is checked against its requester before the PR opens as the App.
-    """
+    """Use the saved owner outside Ask, and the authenticated requester within Ask."""
     cfg, metadata = await _thread_scope()
     if not cfg.github_linked:
         raise PermissionError("GitHub is not linked for this thread")
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
     ask = await GitHubCredentialScope.is_public_ask()
-    if ask and not cfg.background_task_completion:
+    if ask:
         login = (cfg.github_login or "").strip()
         if not login:
             raise RuntimeError("Ask PR creation requires an authenticated requester")
         return login
     owner = metadata.get("owner_login")
     if metadata.get("owner_type") == "system" or not isinstance(owner, str) or not owner.strip():
-        if ask:
-            raise RuntimeError("Ask background completion requires a thread owner")
         if metadata.get("owner_type") == "user":
             raise RuntimeError("User-owned thread has no GitHub owner for PR creation")
         return None

@@ -238,14 +238,6 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         _no_run("another event of this message started its turn", **fields)
         return SlackTurnStarted()
     key_ts = CONCIERGE_TS if turn.concierge else turn.thread_ts
-    declined = await _account_gate(turn, webhook_id, fields)
-    if declined is not None:
-        return declined
-    owner_login = None if turn.bot_id else await service.slack_login(turn.user_id)
-    parsed = ParsedSlackMessage.parse(
-        turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
-    )
-    branch_of = ""
     owned = await mda_forwarding.owned_thread(turn.channel_id, key_ts)
     channel_context = await common.resolve_slack_channel_context(
         turn.channel_id,
@@ -256,6 +248,14 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
             or turn.channel_id.startswith("D")
         ),
     )
+    declined = await _account_gate(turn, webhook_id, fields, channel_context)
+    if declined is not None:
+        return declined
+    owner_login = None if turn.bot_id else await service.slack_login(turn.user_id)
+    parsed = ParsedSlackMessage.parse(
+        turn.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
+    )
+    branch_of = ""
     if turn.kind in {"by_the_way", "web"}:
         # On a thread of its own, whoever holds the Slack thread it was asked in. It starts
         # with what the conversation's thread holds when this channel may read it, or is
@@ -389,14 +389,23 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
 
 
 async def _account_gate(
-    turn: StartSlackTurn, webhook_id: str, fields: dict[str, str]
+    turn: StartSlackTurn,
+    webhook_id: str,
+    fields: dict[str, str],
+    channel_context: SlackChannelContext,
 ) -> SlackTurnStarted | None:
-    """Why a person who can't run starts no new conversation, before it is claimed, so it
-    stays unclaimed for whoever can. An allowed bot links no account."""
+    """Gate account-required turns before claiming; public Ask questions need no linked person."""
     if turn.bot_id:
         return None
     needed = await service.account_link_needed(turn.user_id)
     if needed is None:
+        return None
+    if (
+        needed.reason == "unlinked"
+        and turn.kind in {"turn", "edit"}
+        and not turn.concierge
+        and await service.SlackAuthorization.allows_unlinked_ask(turn.channel_id, channel_context)
+    ):
         return None
     if not await _first_decline(webhook_id, turn):
         _no_run("declined already", **fields)

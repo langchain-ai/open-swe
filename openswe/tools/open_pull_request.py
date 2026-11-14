@@ -23,11 +23,9 @@ from openswe.credential_scope import (
 )
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.approval_policy import PullRequestApproval
-from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.comments import derive_pr_state
 from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
-from openswe.github.repositories import Repository
 from openswe.github.token import GitHubUserAuthRequired
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
@@ -1099,7 +1097,6 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
-        requester = None
         requesters: set[str] = set()
         if kind == "user" and ask_channel:
             requester = await pr_author_login()
@@ -1108,63 +1105,6 @@ async def _open_pull_request(
                 for login in (requester, RunConfig.from_runtime().github_login)
                 if isinstance(login, str) and login
             }
-            token = await get_github_app_installation_token()
-            kind = "bot"
-            if not token:
-                return _failure_payload(
-                    code="no_github_token",
-                    owner=owner,
-                    repo=repo,
-                    head=head,
-                    base=base,
-                    token_kind=kind,
-                    http_status=None,
-                    reason="No GitHub App token was available for the Ask-channel PR",
-                    likely_cause="the GitHub App is not configured",
-                    branch_pushed=True,
-                    failed_step="resolve_pr_author_token",
-                )
-            preflight_failure = await _preflight_pr_access(
-                client=client,
-                token=token,
-                token_kind=kind,
-                owner=owner,
-                repo=repo,
-                head=head,
-                base=base,
-            )
-            if preflight_failure is not None:
-                return preflight_failure
-            if await Repository.requires_approval_check(owner, repo, base) is not True and (
-                (existing := await _find_existing_pr(client, token, owner, repo, head)) is None
-                or (existing.get("user") or {}).get("type") == "Bot"
-                or (existing.get("base") or {}).get("ref") != base
-            ):
-                return _failure_payload(
-                    code="approval_check_not_required",
-                    owner=owner,
-                    repo=repo,
-                    head=head,
-                    base=base,
-                    token_kind=kind,
-                    http_status=None,
-                    reason=(
-                        f"{owner}/{repo} does not require the `{APPROVAL_CHECK_RUN_NAME}` check on "
-                        f"{base}, so Robin will not author this pull request as itself"
-                    ),
-                    likely_cause=(
-                        f"the repository's rulesets do not require `{APPROVAL_CHECK_RUN_NAME}`, "
-                        "so Robin's merge gate couldn't stop the requester approving their own change"
-                    ),
-                    branch_pushed=True,
-                    failed_step="approval_check",
-                )
-            body += (
-                f"\n\nRequested by @{requester} via an Ask channel. "
-                "A human other than the requester must validate and approve this change. "
-                "Bot authorship does not enforce that separation in GitHub; "
-                "repository branch protection and review policy must enforce it."
-            )
         body = await _stamp_attribution_footer(
             await _maybe_append_references(client, token, owner, repo, body),
             state,

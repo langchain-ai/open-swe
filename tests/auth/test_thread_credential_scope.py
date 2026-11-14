@@ -55,9 +55,11 @@ def config(source="dashboard", login="alice"):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["dashboard", "slack", "linear", "github", "schedule"])
 @pytest.mark.parametrize("visibility", ["public", None])
+@pytest.mark.parametrize("login", ["alice", ""])
 async def test_public_threads_never_resolve_personal_github_auth(
     source,
     visibility,
+    login,
     thread_metadata,
     credentials,
 ):
@@ -68,8 +70,11 @@ async def test_public_threads_never_resolve_personal_github_auth(
     thread_token.cache_github_token_for_thread(
         "thread-1", "old-personal-token", principal="login:alice"
     )
-    assert await auth.resolve_github_token(config(source), "thread-1") == ("bot-token", None)
-    assert thread_token.get_github_token(config(source)) == "bot-token"
+    assert await auth.resolve_github_token(config(source, login=login), "thread-1") == (
+        "bot-token",
+        None,
+    )
+    assert thread_token.get_github_token(config(source, login=login)) == "bot-token"
     credentials.assert_not_awaited()
 
 
@@ -429,7 +434,7 @@ async def test_system_thread_pr_opens_as_the_app(monkeypatch, thread_metadata, c
 
 @pytest.mark.parametrize("visibility", ["public", "private"])
 @pytest.mark.parametrize("provider", ["github", "langsmith"])
-async def test_ask_channel_prs_use_bot_without_borrowing_reporter_credentials(
+async def test_ask_channel_prs_require_the_persons_linked_github_credentials(
     monkeypatch, thread_metadata, credentials, visibility, provider
 ):
     opr = importlib.import_module("openswe.tools.open_pull_request")
@@ -457,24 +462,25 @@ async def test_ask_channel_prs_use_bot_without_borrowing_reporter_credentials(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("background", [False, True])
 @pytest.mark.parametrize("owner_type", ["user", "system"])
-async def test_ask_preflight_uses_requester_or_the_owner_on_continuation(
-    monkeypatch, thread_metadata, credentials, background, owner_type
+@pytest.mark.parametrize("login", ["bob", ""])
+async def test_ask_preflight_requires_the_authenticated_requester(
+    monkeypatch, thread_metadata, credentials, background, owner_type, login
 ):
     opr = importlib.import_module("openswe.tools.open_pull_request")
     thread_metadata.update(
         owner_type=owner_type,
         source_context={"slack_thread": {"channel_id": "CASK", "thread_ts": "1.0"}},
     )
-    run_config = config(source="slack", login="bob")
+    run_config = config(source="slack", login=login)
     run_config["configurable"]["background_task_completion"] = background
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
     monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
     credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
-    if background and owner_type == "system":
-        with pytest.raises(RuntimeError, match="requires a thread owner"):
+    if not login:
+        with pytest.raises(RuntimeError, match="authenticated requester"):
             await opr._resolve_pr_author_token()
         return
     assert await opr._resolve_pr_author_token() == (
-        "alice-token" if background else "bob-token",
+        "bob-token",
         "user",
     )

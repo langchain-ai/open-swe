@@ -9,7 +9,9 @@ In a verified sole-writer shared thread, only an acknowledgement is returned; re
   Lists replace the entire list: read the existing configuration first and preserve entries not being changed.
 - `slack_channel_ids` binds Slack channels to the workspace.
   `kitchen_channel_ids` is a subset of those bindings: every human top-level message in a Kitchen channel starts a thread, and replies continue it without a mention.
-  `ask_channel_ids` enables the same delivery for bug-triage channels: reproduce reports, assess whether to fix, propose fixes as Robin, and identify a human validator (preferably the on-call).
+  `ask_channel_ids` enables the same delivery for bug-triage channels: reproduce reports, search related Linear issues and ongoing PRs, and recommend next steps without automatically tagging teammates.
+  Suggest filing a Linear ticket or opening a PR, then wait for an explicit human choice; a bug report alone authorizes neither.
+  Requested PRs are authored as the person choosing them, not Robin.
   Both lists must be subsets of the bound channels and cannot overlap.
   Newly enabled Kitchen or Ask channels must be internal Slack channels Robin has joined.
 - Repository bindings are exclusive across workspaces.

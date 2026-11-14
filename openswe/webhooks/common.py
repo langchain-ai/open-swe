@@ -522,6 +522,7 @@ async def upsert_agent_thread_metadata(
     unlisted: bool = False,
     token_repositories: Sequence[str] | None = None,
     identity: ThreadIdentity | None = None,
+    public_only: bool = False,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -565,11 +566,15 @@ async def upsert_agent_thread_metadata(
         metadata["unlisted"] = True
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
+    snapshot = None
     try:
-        existing = await langgraph_client.threads.get(thread_id)
+        snapshot = await THREADS.get(thread_id)
+        existing = snapshot.as_langgraph() if snapshot is not None else None
     except Exception as exc:  # noqa: BLE001
         if not is_not_found_error(exc):
             logger.exception("Failed to read thread %s for owner metadata", thread_id)
+            if public_only:
+                return False
         existing = None
 
     existing_dict = as_thread_dict(existing) if existing is not None else {}
@@ -577,6 +582,22 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    if public_only:
+        expected_slack = source_context.slack_thread if source_context else None
+        saved_slack = existing_context.slack_thread
+        if existing is not None and not ThreadRecord.is_unowned_placeholder(existing_meta):
+            if (
+                existing_meta.get(PROVISIONAL_VISIBILITY_KEY) is True
+                or existing_meta.get("visibility") != "public"
+                or saved_slack is None
+            ):
+                return False
+        if expected_slack is None or (
+            saved_slack is not None
+            and (saved_slack.team_id, saved_slack.channel_id, saved_slack.thread_ts)
+            != (expected_slack.team_id, expected_slack.channel_id, expected_slack.thread_ts)
+        ):
+            return False
     if existing_meta.get("source") == "incidents_agent":
         for key in ("source", "origin", "thread_category", "trigger_kind"):
             metadata.pop(key, None)
@@ -585,6 +606,7 @@ async def upsert_agent_thread_metadata(
         metadata.pop("trigger_kind", None)
     if (
         owner_type == "system"
+        and not public_only
         and existing_meta
         and not ThreadRecord.is_unowned_placeholder(existing_meta)
     ):
@@ -602,7 +624,7 @@ async def upsert_agent_thread_metadata(
     sender_login = (
         identity.github_login or ""
         if identity is not None
-        else github_login or await User.login_for_email(user_email) or ""
+        else github_login or (await User.login_for_email(user_email) if user_email else "") or ""
     )
     slack_ids = set(slack_participant_user_ids)
     triggering_slack = source_context.slack_thread if source_context else None
@@ -669,6 +691,29 @@ async def upsert_agent_thread_metadata(
                 metadata["owner_user_id"] = ownership["owner_user_id"]
 
     try:
+        if public_only:
+            saved = (
+                await THREADS.create(thread_id, title=title[:80], metadata=metadata)
+                if snapshot is None
+                else await THREADS.update_if_current(
+                    snapshot, metadata=metadata, status=snapshot.status
+                )
+            )
+            expected = {**existing_meta, **metadata}
+            return (
+                saved is not None
+                and expected.get("visibility") == "public"
+                and all(
+                    saved.metadata.get(key) == expected.get(key)
+                    for key in (
+                        "visibility",
+                        "owner_type",
+                        "owner_login",
+                        "owner_user_id",
+                        "source_context",
+                    )
+                )
+            )
         if existing is None:
             await create_thread(
                 langgraph_client,
@@ -852,21 +897,16 @@ class ThreadRecord:
 
     @staticmethod
     def is_unowned_placeholder(metadata: Mapping[str, object]) -> bool:
-        """Whether a thread is a stub MDA's Slack channel claimed with no person as its owner.
+        """Whether MDA claimed an unowned stub whose first public run may settle its visibility."""
+        return (
+            metadata.get(PROVISIONAL_VISIBILITY_KEY) is True
+            and not metadata.get("owner_login")
+            and not metadata.get("owner_user_id")
+        )
 
-        An allow-listed bot may start one like a new thread: its first metadata write
-        replaces the stub's provisional private visibility.
-        """
-        return metadata.get(PROVISIONAL_VISIBILITY_KEY) is True and not metadata.get("owner_login")
-
-    def authorize(self, github_login: str, *, bot: bool = False) -> JsonObject:
-        """Reject a private-thread follow-up from someone who may not prompt it.
-
-        ``bot`` is an allow-listed Slack bot, which may start an unowned placeholder. It
-        reads as the public thread the bot's first metadata write makes it (bots start
-        none in private channels or DMs), so the bot's first turn keeps its Slack context.
-        """
-        if bot and self.is_unowned_placeholder(self.metadata):
+    def authorize(self, github_login: str, *, public_opening: bool = False) -> JsonObject:
+        """Reject unauthorized private follow-ups; verified public openings may claim an unowned stub."""
+        if public_opening and self.is_unowned_placeholder(self.metadata):
             return {**self.metadata, "visibility": "public"}
         if thread_is_private(self.metadata) and not thread_is_promptable(
             self.metadata, github_login

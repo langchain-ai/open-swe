@@ -515,9 +515,16 @@ When they are unset the link is simply hidden.
 **Kitchen and Ask channels.**
 Admins choose Mention-only, Kitchen, or Ask per channel in the workspace editor (**Workspaces → edit workspace → Slack channels**); a channel must be bound to a workspace to use Kitchen or Ask, and Robin must have joined it.
 In a Kitchen or Ask channel, a top-level human message starts a new agent thread and replies continue it without tagging Robin; ordinary untagged replies queue behind an active run.
-Ask channels attempt reproduction before deciding whether to fix a reported bug, distinguish confirmed bugs from expected behavior and unverified reports, and propose a draft PR when appropriate.
-Public Ask-channel PRs open as Robin rather than the reporter, and the agent identifies a human validator—preferably the current on-call—without assuming the reporter owns delivery.
-If no owner can be established, it asks the thread to identify one.
+Ask channels answer ordinary questions without requiring a Robin account; unlinked askers can receive public, workspace-scoped assistance without personal credentials.
+Implementation and PR requests require the requester to sign into Robin and link Slack and their own GitHub account in **Settings → Connections**.
+Ask channels attempt reproduction, distinguish confirmed bugs from expected behavior and unverified reports, and recommend fixes.
+They search available Linear issues and ongoing PRs for related work before proposing new work, linking existing work instead of duplicating it.
+For actionable reports, they offer to file a Linear ticket or implement a fix and open a PR, then wait for an explicit human choice.
+A bug report alone authorizes neither; requesting a ticket does not authorize implementation.
+Public Ask-channel PRs remain drafts and open as the person requesting them, using their linked GitHub authorization and repository access without falling back to Robin.
+Robin does not automatically tag teammates or on-call responders, assign validation ownership, or ask the thread to find an owner; contacting or assigning someone requires an explicit human request.
+Requested PRs still require independent human validation and approval.
+Jev decides whether untagged messages need a response: new reports, questions for Robin, and choices of an offered action continue the work; human-to-human discussion and updates needing no action stay quiet.
 Ordinary Kitchen channels retain their existing behavior.
 
 Other channels still require mentions.
@@ -794,7 +801,8 @@ Alice remains the task owner, and existing PR authors are unchanged.
 If the requester's identity or token is unavailable, PR creation fails without falling back to the task owner or bot.
 The requester must have access to the target repository.
 Public PR creation first verifies that the target repository is accessible through the configured workspace installation.
-System-owned threads, including scheduled automations, open PRs as the GitHub App.
+Ask-channel PRs use the authenticated person who explicitly requests the PR, even in a system-owned Ask thread.
+Other system-owned threads, including scheduled automations, open PRs as the GitHub App.
 Existing threads without recorded ownership retain bot PR authorship.
 Scheduled runs check repository access with the workspace GitHub App.
 They record the automation creator for auditing but do not require that person's OAuth token or inject their GitHub login or email as the agent's execution identity.
@@ -802,15 +810,15 @@ Admin schedules retain their management tools through authorization tied to the 
 The graph and tools recheck the creator's current admin status; later participants do not inherit that authorization.
 Automation management from these system runs also uses workspace credentials.
 
-Authorship is bound to the publishing run, not inferred from conversation text.
-Slack follow-ups carry their own requester identity whether they interrupt or queue behind an active run.
+PR authorship is bound to the saved thread owner outside public Ask channels, never inferred from conversation text.
+Slack follow-ups carry their own requester identity whether they interrupt or queue behind an active run; that identity does not replace the saved owner outside Ask.
 Dashboard messages and Slack edits injected into an existing run do not change its identity.
-A collaborator must start a new run to publish under their own account.
-Workflow push approval starts a run with the authenticated actor's identity.
-Background-task completion runs cannot reliably identify the launching requester, so PR creation from user-owned threads is blocked in those runs.
-Start a direct user-triggered run to publish.
-System-owned and legacy unowned threads retain bot authorship.
-This prevents the publisher from approving their own PR; it does not prevent other task participants from approving it.
+A collaborator outside Ask must start their own thread to publish under their own account.
+Workflow push approval starts a run with the authenticated actor's identity without changing the saved PR owner.
+Public Ask-channel PRs use the authenticated requester's own linked GitHub authorization, including background completions of an existing explicit PR request when that requester identity is available.
+Missing requester authorization blocks the PR rather than borrowing the thread owner's or App's authorization.
+Outside Ask channels, PRs use the saved thread owner's identity, including background completions; system-owned and legacy unowned threads retain bot authorship.
+GitHub prevents the author from approving their own PR; person-authored PRs otherwise follow the repository's review rules.
 
 Public threads load workspace MCP connections, Robin's LangSmith Managed Tools bot kit, and organization skills.
 Personal LangSmith Managed Tools, user skills, and user custom instructions are available only in a private thread started by its immutable owner.

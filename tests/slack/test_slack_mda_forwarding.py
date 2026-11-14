@@ -104,6 +104,7 @@ _SLACK_HEADERS = {
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
+    monkeypatch.setattr(slack_service.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -871,6 +872,34 @@ async def test_a_new_conversation_is_claimed_once_its_sender_passed_the_gate(
     assert slack_api.calls == (
         [] if channel_type == "im" else [("conversations.info", {"channel": channel_id})]
     )
+
+
+async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepared(monkeypatch, prompt=_PROMPT)
+    monkeypatch.setattr(slack_service.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_service,
+        "account_link_needed",
+        AsyncMock(return_value=slack_service.AccountLinkNeeded("U1", None, "unlinked")),
+    )
+    monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value=None))
+    prompt = AsyncMock()
+    monkeypatch.setattr(slack_service.AccountLinkNeeded, "prompt", prompt)
+
+    start = await _start(_start_app(monkeypatch))
+
+    assert start["run"] is not None
+    cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
+        "A1",
+        "T1",
+        "C1",
+        "1.2",
+        owner_login=None,
+        channel_context=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False),
+    )
+    prompt.assert_not_awaited()
 
 
 @pytest.mark.parametrize("needed", ["unlinked", "revoked"])

@@ -1,6 +1,7 @@
 """Unit tests for agent-thread PR-state tracking from PR webhook events."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -8,6 +9,7 @@ import pytest
 
 from openswe.github import pull_requests
 from openswe.tasks.store import SidebarTaskMembership
+from openswe.threads.index import IndexedThread
 from openswe.threads.store import THREADS
 from openswe.webhooks import common as webhook_common
 
@@ -411,8 +413,19 @@ def _follow_up_client(metadata: dict[str, Any]) -> MagicMock:
 
 
 async def _slack_follow_up(fake_client: MagicMock) -> dict[str, Any]:
+    raw = await fake_client.threads.get("t1")
+    now = datetime.now(UTC)
+    snapshot = IndexedThread(
+        thread_id="t1",
+        runtime="mda",
+        metadata=raw["metadata"],
+        status="idle",
+        created_at=now,
+        updated_at=now,
+    )
     with (
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch.object(THREADS, "get", AsyncMock(return_value=snapshot)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.upsert_agent_thread_metadata(
