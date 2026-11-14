@@ -1,6 +1,6 @@
-"""Open SWE's agent tools as a remote MCP server for agents running elsewhere.
+"""Robin's agent tools as a remote MCP server for agents running elsewhere.
 
-A person connects an MCP client (Claude Code, Claude.ai, Cursor) to ``/oswe/mcp``
+A person connects an MCP client (Claude Code, Claude.ai, Cursor) to ``/robin/mcp``
 and signs in with GitHub through the dashboard's GitHub App. Each request lists
 and runs the tools that person's ``ToolCaller`` offers, so the catalog follows
 their admin status and integration MCPs without any session state.
@@ -39,7 +39,7 @@ from openswe.utils.dashboard_links import (
 
 logger = logging.getLogger(__name__)
 
-PREFIX: Final = "/oswe"
+PREFIX: Final = "/robin"
 _MCP_PATH: Final = "/mcp"
 _SERVER_NAME: Final = "Robin"
 _GITHUB_CACHE_SECONDS: Final = 300

@@ -14,7 +14,7 @@ Existing deployments still need these administrator and release checks before ro
 - [ ] Update any required monorepo CI contexts that refer to the renamed `Robin:` jobs or `Robin CI Final Results` before merging
 - [ ] Check integrations that parse PR attribution; new PRs use `Made by [Robin]`, while historical footers remain valid
 - [ ] Disable or uninstall the Claude Code plugin `open-swe@open-swe`, remove the old marketplace (`claude plugin marketplace remove open-swe`), then re-add `langchain-ai/open-swe` to register the `robin` marketplace and install `robin@robin`; use `/robin:connect` and `/robin:thread`, and avoid duplicate hooks or MCP tools.
-      A cached legacy plugin can use the existing endpoint until users switch
+      The previous `/oswe/mcp` endpoint is no longer served; update clients to `/robin/mcp` and sign in again
 
 ## Desktop release and IT
 
@@ -26,7 +26,7 @@ Existing deployments still need these administrator and release checks before ro
 
 ## Compatibility boundaries
 
-- [ ] Leave existing dashboard/deployment URLs, OAuth callbacks, webhook URLs, Universal Link origins, and the `/oswe/mcp` endpoint untouched
+- [ ] Leave existing dashboard/deployment URLs, OAuth callbacks, webhook URLs, and Universal Link origins untouched
 - [ ] Keep repository/export paths (`langchain-ai/langchainplus/open-swe/` and `langchain-ai/open-swe`), package names, environment variables, graph IDs, database schemas, connection slugs, and protocol names unchanged
 - [ ] Keep the genuine legacy bot email when displaying the Robin Git collaborator; preserve the injected coauthor trailer exactly rather than constructing a new identity
 - [ ] Keep the original announcement link as historical context; do not rename external accounts or repoint URLs as part of a display-name change

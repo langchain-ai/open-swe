@@ -16,7 +16,7 @@ import type { Plugin } from "vite"
 const DEPLOYED_PREFIXES = [
   "/dashboard/api",
   "/webhooks",
-  "/oswe",
+  "/robin",
   "/.well-known/oauth-protected-resource",
   "/.well-known/oauth-authorization-server",
 ]

@@ -98,12 +98,20 @@ def test_oidc_accepts_the_canonical_audience_first_then_the_aliases(
 def test_mcp_signs_in_and_verifies_on_the_domain_it_was_reached_through(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    import time
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+
+    from fastmcp.server.auth.auth import AccessToken
+    from fastmcp.server.auth.jwt_issuer import JWTIssuer
+    from fastmcp.server.auth.oauth_proxy.models import JTIMapping, UpstreamTokenSet
     from fastmcp.server.auth.providers.github import GitHubProvider
     from key_value.aio.stores.memory import MemoryStore
 
     from openswe.api import app as app_module
     from openswe.dashboard.oauth import AUTH_PATH, GITHUB_CALLBACK_PATH
     from openswe.mcp import server
+    from openswe.mcp.caller import ToolCaller
 
     monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path))
     monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
@@ -127,7 +135,7 @@ def test_mcp_signs_in_and_verifies_on_the_domain_it_was_reached_through(
 
     def metadata(origin: str | None) -> dict[str, object]:
         headers = {PUBLIC_ORIGIN_HEADER: origin} if origin else {}
-        response = client.get("/.well-known/oauth-protected-resource/oswe/mcp", headers=headers)
+        response = client.get("/.well-known/oauth-protected-resource/robin/mcp", headers=headers)
         assert response.status_code == 200
         return response.json()
 
@@ -137,16 +145,76 @@ def test_mcp_signs_in_and_verifies_on_the_domain_it_was_reached_through(
         ("https://evil.example", CANONICAL),
     ]:
         document = metadata(origin)
-        assert document["resource"] == f"{expected}/oswe/mcp"
+        assert document["resource"] == f"{expected}/robin/mcp"
         assert document["authorization_servers"] == [f"{expected}{AUTH_PATH}"]
 
     challenge = client.post(
-        "/oswe/mcp",
+        "/robin/mcp",
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
         headers={PUBLIC_ORIGIN_HEADER: ALIAS},
     )
     assert challenge.status_code == 401
     assert (
-        f"{ALIAS}/.well-known/oauth-protected-resource/oswe/mcp"
+        f"{ALIAS}/.well-known/oauth-protected-resource/robin/mcp"
         in (challenge.headers["www-authenticate"])
     )
+    assert client.post("/oswe/mcp").status_code == 404
+
+    provider = auth(CANONICAL)
+    provider.set_mcp_path("/mcp")
+    monkeypatch.setattr(provider, "_jti_mapping_store", AsyncMock())
+    provider._jti_mapping_store.get.return_value = JTIMapping(
+        jti="test", upstream_token_id="upstream", created_at=time.time()
+    )
+    monkeypatch.setattr(provider, "_upstream_token_store", AsyncMock())
+    provider._upstream_token_store.get.return_value = UpstreamTokenSet(
+        upstream_token_id="upstream",
+        access_token="github-token",
+        refresh_token=None,
+        refresh_token_expires_at=None,
+        expires_at=time.time() + 3600,
+        token_type="Bearer",
+        scope="user",
+        client_id="test-client",
+        created_at=time.time(),
+    )
+    provider._token_validator.verify_token = AsyncMock(
+        return_value=AccessToken(
+            token="github-token", client_id="test-client", scopes=["user"], claims={"sub": "1"}
+        )
+    )
+    monkeypatch.setattr(server, "_auth", lambda _: provider)
+    monkeypatch.setattr(app_module, "AGENT_MCP", server.build_mount())
+    monkeypatch.setattr(
+        ToolCaller, "for_github_account", AsyncMock(return_value=ToolCaller("user", None))
+    )
+    monkeypatch.setattr(ToolCaller, "tools", AsyncMock(return_value={}))
+    app = app_module.create_app()
+
+    legacy_token = JWTIssuer(
+        issuer=f"{CANONICAL}{AUTH_PATH}",
+        audience=f"{CANONICAL}/oswe/mcp",
+        signing_key=provider._jwt_signing_key,
+    ).issue_access_token(client_id="test-client", scopes=[], jti="test")
+    token = provider.jwt_issuer.issue_access_token(client_id="test-client", scopes=[], jti="test")
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        async with app_module.AGENT_MCP.apps[0].lifespan(app_module.AGENT_MCP.apps[0]):
+            yield
+
+    app.router.lifespan_context = lifespan
+    with TestClient(app) as client:
+        headers = {"Accept": "application/json, text/event-stream"}
+        rejected = client.post(
+            "/robin/mcp",
+            json=payload,
+            headers={**headers, "Authorization": f"Bearer {legacy_token}"},
+        )
+        accepted = client.post(
+            "/robin/mcp", json=payload, headers={**headers, "Authorization": f"Bearer {token}"}
+        )
+    assert rejected.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.json()["result"]["tools"] == []

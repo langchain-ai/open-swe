@@ -7,7 +7,9 @@ Robin uses that to mirror a person's Claude Code sessions into the dashboard: ea
 
 If you already installed `open-swe@open-swe`, disable or uninstall it, then remove the old marketplace with `claude plugin marketplace remove open-swe` before the steps below.
 This avoids duplicate hooks and tools.
-A cached legacy plugin can keep using the existing endpoint until you switch; there is no duplicate legacy entry in the new marketplace.
+The previous `/oswe/mcp` endpoint is no longer served; update existing MCP configurations to `/robin/mcp` and sign in again.
+For manually configured Claude Code servers, rename the local configuration entry to `robin` as well; the displayed server label comes from that entry.
+There is no duplicate legacy entry in the new marketplace.
 
 Install the `robin` Claude Code plugin in `claude-code-plugin/` from the `robin` marketplace (the repository URL is unchanged):
 
@@ -19,7 +21,7 @@ claude plugin install robin@robin
 Then run `/robin:connect` in a session and start a new one.
 It calls the `connect_claude_code` MCP tool, which returns a one-time claim valid for five minutes rather than the token, and a bundled script redeems the claim at `POST /dashboard/api/claude-code/connections` and writes the hooks into `~/.claude/settings.json` itself.
 The token never passes through Claude, so it stays out of the transcript, its mirror and any trace; a claim mints one token, and a second redemption answers 409.
-The plugin also connects Claude Code to the Robin MCP server (configuration key `robin`, existing `/oswe/mcp` endpoint, signed in with GitHub) and adds `/robin:thread`, which prints the thread mirroring the current session.
+The plugin also connects Claude Code to the Robin MCP server (configuration key `robin`, `/robin/mcp` endpoint, signed in with GitHub) and adds `/robin:thread`, which prints the thread mirroring the current session.
 
 Without the plugin:
 
