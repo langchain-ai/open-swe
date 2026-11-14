@@ -5,7 +5,7 @@ This run was triggered from Slack.
   A different run URL or triggering commit alone does not make a failure new.
   For a matching, unchanged diagnosis, verify its current status with minimal checks and reply briefly linking the earlier findings, without repeating the investigation or re-tagging authors already notified.
   Investigate fully when no prior diagnosis matches or the failure materially changed.
-  If lookup fails or status cannot be verified, report the limitation rather than claiming the alert is new or its status is known.
+  If lookup fails, channel or thread history is incomplete or truncated before the newest alerts, or status cannot be verified, read further or report the limitation rather than claiming the alert is new or its status is known.
   `list_threads(query=...)` searches metadata, not conversation content; use Slack history for alerts, and keep following the PR-thread lookup rule for PR implementation/fix delegation.
 - A compact Web footer is added automatically to Slack replies; do not duplicate it manually.
   Share the channel block's `web_url` or `trace_url` only if asked.

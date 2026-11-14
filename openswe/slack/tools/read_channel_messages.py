@@ -60,7 +60,9 @@ async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[
     return {
         "success": True,
         "formatted": format_slack_messages_for_prompt(
-            [message.dump() for message in messages], user_names, include_thread_replies=True
+            [message.dump() for message in reversed(messages)],
+            user_names,
+            include_thread_replies=True,
         ),
         "count": len(messages),
     }
