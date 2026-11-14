@@ -95,7 +95,11 @@ class RunMetadata(BaseModel):
     @classmethod
     def of_run(cls, assistant_id: str, config: LangGraphRunConfig | None) -> Self:
         cfg = RunConfig.from_config(config)
-        if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
+        if (
+            assistant_id not in {*_PULL_REQUEST_GRAPHS, "agent"}
+            or cfg.repo is None
+            or cfg.pr_number is None
+        ):
             return cls()
         return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
 
@@ -453,9 +457,11 @@ async def prepare_durable_run(
     if execution_user_id is not None and (as_sender or channel_of(run_metadata) is not None):
         run_metadata[ACTING_USER_KEY] = execution_user_id
         run_metadata[SENDER_USER_KEY] = execution_user_id
-    billing = await recorded.billing_metadata()
-    if assistant_id in _PULL_REQUEST_GRAPHS and billing is None:
-        billing = {"billing_bucket": "system"}
+    billing = (
+        await recorded.billing_metadata() or {"billing_bucket": "system"}
+        if assistant_id in _PULL_REQUEST_GRAPHS
+        else None
+    )
     if billing is not None:
         for key in BILLING_USER_FIELDS:
             run_metadata.pop(key, None)

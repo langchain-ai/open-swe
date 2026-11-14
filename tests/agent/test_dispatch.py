@@ -7,11 +7,15 @@ from xml.etree import ElementTree
 
 import pytest
 from pydantic import JsonValue
+from sqlalchemy import text
 
+from openswe import completion
 from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
+from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.slack import thinking as slack_thinking
 from openswe.threads import runtimes
+from openswe.ui_invalidations import Topic, outbox
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from tests.conftest import serve_runs_from
@@ -420,6 +424,50 @@ async def test_review_billing_uses_pr_author_not_requester(
     assert unresolved["metadata"][ACTING_USER_KEY] == str(requester_id)
     assert unresolved["configurable"]["user_id"] == str(requester_id)
     assert "billed_robin_user_id" not in unresolved["metadata"]
+
+
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+async def test_pr_agent_completion_invalidates_review_without_a_github_event(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    client = _FakeClient()
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    requester = User(id=uuid7())
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=requester))
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="dashboard",
+        thread_title=None,
+        config={
+            "configurable": {
+                "github_login": "requester",
+                "repo": {"owner": "org", "name": "repo"},
+                "pr_number": 1,
+            }
+        },
+        client=client,
+    )
+    created = client.runs.created[-1]
+    assert created["metadata"]["billed_robin_user_id"] == str(requester.id)
+    topic = Topic.PULL_REQUESTS.keyed("org/repo/1")
+    assert await outbox.invalidated_since({topic: 60}) == {topic}
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("DELETE FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+        )
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "thread-1",
+            "run_id": "run-1",
+            "status": status,
+            "metadata": created["metadata"],
+        }
+    )
+
+    assert await outbox.invalidated_since({topic: 60}) == {topic}
 
 
 @pytest.mark.asyncio

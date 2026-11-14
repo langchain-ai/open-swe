@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -267,7 +268,21 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     setup.client.threads.update.assert_not_awaited()
 
 
-async def test_fix_up_is_announced_as_a_button_click_with_open_findings(setup, monkeypatch):
+async def test_fix_up_is_announced_as_a_button_click_with_open_findings(
+    setup, monkeypatch, langsmith_users
+):
+    from openswe.dashboard import profiles
+    from openswe.threads import runs
+
+    langsmith_users.add("alice")
+    setup.threads["existing"]["metadata"].update(repo_owner="acme", repo_name="app", pr_number=12)
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="github-token"))
+    monkeypatch.setattr(runs, "resolve_run_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        pr_fixes,
+        "_build_dashboard_configurable",
+        partial(runs._build_dashboard_configurable, profile={}),
+    )
     finding = {
         "title": "Off by one",
         "severity": "high",
@@ -291,6 +306,8 @@ async def test_fix_up_is_announced_as_a_button_click_with_open_findings(setup, m
     )
     call = pr_fixes.dispatch_agent_run.await_args
     assert call.args[1] is None
+    assert call.args[2]["pr_number"] == 12
+    assert call.args[2]["repo"] == {"owner": "acme", "name": "app"}
     message = call.kwargs["input"]["messages"][-1]["content"]
     assert 'sender="system:pull-request-fix-up"' in message
     assert "@alice clicked **Fix up**" in message

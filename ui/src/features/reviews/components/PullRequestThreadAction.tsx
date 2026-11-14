@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
+import { pullRequestTopic } from "../lib/cache"
 import { fixUpAction } from "../lib/threadActions"
 
 type PullRequestThreadStatus = Awaited<
@@ -31,6 +32,7 @@ export function PullRequestThreadAction({
     queryKey: key,
     queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
     ...expiresInBrowser,
+    meta: { invalidatedBy: [pullRequestTopic(pr)] },
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
@@ -55,9 +57,11 @@ export function PullRequestThreadAction({
         `${result.already_running ? toasts.running : toasts.queued} ${pr.repo}#${pr.number}`
       ),
   })
-  const label = run.data?.already_running
+  const running = run.data?.already_running && thread.data?.running
+  const queued = run.isSuccess && thread.data?.running
+  const label = running
     ? labels.running
-    : run.isPending || run.isSuccess
+    : run.isPending || queued
       ? labels.queued
       : thread.data?.running
         ? labels.running
@@ -78,8 +82,7 @@ export function PullRequestThreadAction({
           thread.isPending ||
           thread.isError ||
           thread.data?.running === true ||
-          run.isPending ||
-          run.isSuccess
+          run.isPending
         }
         onClick={() => run.mutate()}
       >

@@ -467,7 +467,10 @@ async def start_pull_request_thread(
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
         configurable = await _build_dashboard_configurable(
-            thread_id, login, thread_metadata(current)
+            thread_id,
+            login,
+            thread_metadata(current),
+            overrides={"repo": {"owner": owner, "name": repo}, "pr_number": number},
         )
         system = intent.system
         await dispatch_agent_run(

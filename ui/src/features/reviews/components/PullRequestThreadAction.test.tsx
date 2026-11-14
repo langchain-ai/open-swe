@@ -15,11 +15,13 @@ import {
   type OpenPullRequest,
   type PullRequestThreadResult,
 } from "@/lib/api"
+import { InvalidationTab } from "@/lib/invalidations/client"
 import { PullRequestThreadAction } from "./PullRequestThreadAction"
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 const pr: OpenPullRequest = {
@@ -49,8 +51,8 @@ const pr: OpenPullRequest = {
   conversationResolutionRequired: false,
 }
 
-it("blocks the button on another card as soon as one is queued", async () => {
-  vi.spyOn(api, "pullRequestThreadStatus").mockResolvedValue({
+it("blocks duplicate fixes and enables both cards again when the run stops", async () => {
+  const status = vi.spyOn(api, "pullRequestThreadStatus").mockResolvedValue({
     running: false,
   })
   let finish: (result: PullRequestThreadResult) => void = () => {}
@@ -83,4 +85,42 @@ it("blocks the button on another card as soon as one is queued", async () => {
   await screen.findByRole("button", { name: "Fix up queued" })
   const blocked = screen.getByRole("button", { name: "Fixing up" })
   expect(blocked.hasAttribute("disabled")).toBe(true)
+
+  status.mockResolvedValue({ running: true })
+  await client.invalidateQueries({ queryKey: ["pr-thread-status"] })
+  expect(
+    screen
+      .getAllByRole("button")
+      .every((button) => button.hasAttribute("disabled"))
+  ).toBe(true)
+
+  const channel: { receive?: (event: { data: unknown }) => void } = {}
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      set onmessage(handler: (event: { data: unknown }) => void) {
+        channel.receive = handler
+      }
+      postMessage() {}
+      close() {}
+    }
+  )
+  vi.stubGlobal("navigator", {
+    locks: { request: () => new Promise(() => {}) },
+  })
+  const tab = new InvalidationTab(client, () => {})
+  tab.start()
+  status.mockResolvedValue({ running: false })
+  channel.receive?.({
+    data: { kind: "invalidated", topics: ["pull-requests/acme/app/7"] },
+  })
+  await waitFor(() => {
+    const buttons = screen.getAllByRole("button", { name: "Fix up" })
+    expect(buttons).toHaveLength(2)
+    expect(buttons.every((button) => !button.hasAttribute("disabled"))).toBe(
+      true
+    )
+  })
+  tab.stop()
+  client.clear()
 })
