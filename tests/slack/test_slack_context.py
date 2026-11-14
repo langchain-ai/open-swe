@@ -30,6 +30,7 @@ from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -369,6 +370,52 @@ def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None
 
     assert "Triggered: Webhook delivery failures\n6 deliveries failed" in formatted
     assert "Mute" not in formatted
+
+
+class TestCrossPostedSlackMessages:
+    @pytest.mark.parametrize(
+        ("message", "expected_text"),
+        [
+            (
+                {
+                    "text": "",
+                    "attachments": [{"title": "Triggered: [DEV] API Container Restarts Detected"}],
+                },
+                "Triggered: [DEV] API Container Restarts Detected",
+            ),
+            (
+                {
+                    "text": " \n ",
+                    "blocks": [
+                        {"type": "section", "text": {"type": "mrkdwn", "text": "Alert details"}}
+                    ],
+                },
+                "Alert details",
+            ),
+            ({"text": ""}, "(empty message)"),
+            ({}, "(empty message)"),
+            (
+                {"text": "Ordinary message", "attachments": [{"title": "Card content"}]},
+                "Ordinary message",
+            ),
+        ],
+        ids=["attachment", "blocks", "empty", "missing-text", "ordinary-text"],
+    )
+    async def test_linked_message_content(
+        self, slack_api: SlackAPI, message: dict[str, object], expected_text: str
+    ) -> None:
+        slack_api.respond({"ok": True, "messages": [{"user": "U123", **message}]})
+        url = "https://example.slack.com/archives/C123/p1700000000000100"
+
+        section, image_urls = await slack_utils.resolve_slack_links_in_context(
+            [{"text": url}], {"U123": "alice"}
+        )
+
+        assert section == (
+            f"\n\n## Cross-posted Slack Messages\n**{url}**\n"
+            f"  Author: alice\n  Message: {expected_text}"
+        )
+        assert image_urls == []
 
 
 def _setup_slack_mention_fakes(
