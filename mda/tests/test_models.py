@@ -1,19 +1,25 @@
+import asyncio
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import anthropic
 import pytest
 import rt.gateway as gateway_module
 import runtime_api.models as shared
 from aiohttp import web
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import JsonValue
 from rt.backend import Run, RunContext
 from rt.gateway import GATEWAY_BEARER
+from rt.loop import RunLoop
+from rt.middleware import BackendRunMiddleware, RunState
 from rt.models import _SDK_RETRY_DISABLE, _build, build_model
-from runtime_api.catalog import ModelSpec
+from rt.run_tools import RunSubagentMiddleware, RunToolsets
+from runtime_api.catalog import Catalog, LoopRules, ModelSpec, RoutingRules, RunModels
 from runtime_api.gateway_auth import GatewayChatAnthropic
 from runtime_api.loop import GATEWAY_CREDENTIAL, GatewayCredential
 from runtime_api.models import SUPPORTED_MODELS, model_init_kwargs, provider_model_kwargs
@@ -82,7 +88,7 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
         option["id"], kwargs, use_gateway=use_gateway, gateway=GATEWAY_BEARER
     )
     # Clients that carry the run's credential are built anew for each model.
-    fresh = {"async_client", "client_args"}
+    fresh = {"async_client", "client_args", "http_async_client"}
     assert [
         (model_id, {k: v for k, v in sent.items() if k not in fresh}) for model_id, sent in built
     ] == [(expected_id, {k: v for k, v in expected.items() if k not in fresh})]
@@ -132,22 +138,48 @@ def test_a_baseten_model_goes_to_baseten_with_its_key(monkeypatch: pytest.Monkey
     assert model.openai_api_base == "https://inference.baseten.co/v1"
 
 
+@pytest.mark.parametrize("subagent", [False, True])
+@pytest.mark.parametrize(
+    ("rules", "held_route", "routed"),
+    [
+        (LoopRules(routing=RoutingRules(mode="auto")), "fast", "auto"),
+        (LoopRules(routing=RoutingRules(mode="fast")), "fast", "default"),
+        (LoopRules(routing=RoutingRules(shadow=True)), "fast", "default"),
+        (LoopRules(pinned_model=True, routing=RoutingRules(mode="auto")), "fast", "default"),
+        (LoopRules(routing=RoutingRules(mode="auto")), "performance", "default"),
+    ],
+)
 async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
     monkeypatch: pytest.MonkeyPatch,
+    rules: LoopRules,
+    held_route: str,
+    routed: str,
+    subagent: bool,
 ) -> None:
-    """One model serves every run; each request carries its own run's credential, which
-    the backend is asked for once and the run keeps."""
-    seen: list[str | None] = []
+    """A cached model carries each call's credential and Auto attribution, never its builder's."""
+    seen: list[tuple[str | None, str | None]] = []
 
     async def gateway(request: web.Request) -> web.Response:
-        seen.append(request.headers.get("Authorization"))
+        seen.append(
+            (request.headers.get("Authorization"), request.headers.get("X-Gateway-Model-Route"))
+        )
         return web.json_response({"error": {"message": "stop here"}}, status=401)
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "http://backend.invalid")
     asked: list[str] = []
 
+    spec = _spec("anthropic:claude-haiku-5-5", "medium")
+    catalog = Catalog(
+        loop=rules,
+        models=RunModels(model=spec, subagent_model=spec, use_gateway=True, routes={"fast": spec}),
+    )
+
     def run_for(credential: GatewayCredential) -> Run:
-        run = Run(RunContext.model_validate({"__run_token": "run-token"}))
+        run = Run(
+            RunContext.model_validate(
+                {"__run_token": "run-token", "__catalog": catalog.model_dump(mode="json")}
+            )
+        )
 
         async def post(path: str, body: dict[str, JsonValue], **_: object) -> JsonValue:
             asked.append(path.rsplit("/", 1)[-1])
@@ -168,13 +200,52 @@ async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
     try:
         monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", f"http://127.0.0.1:{port}")
         monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2-deployment-key")
-        model = build_model(_spec("anthropic:claude-haiku-5-5", "medium"), use_gateway=True)
-        for run in (person, person, system):
+        model = build_model(spec, use_gateway=True)
+        monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _: None)
+        monkeypatch.setattr("rt.run_tools.run_id", lambda: "run-1")
+
+        async def invoke(request: ModelRequest) -> ModelResponse:
+            answer = await model.ainvoke(request.messages)
+            return ModelResponse(result=[answer])
+
+        for run, held, expected in (
+            (person, {"model_route": held_route}, routed),
+            (person, {"model_route": held_route, "requested_model": spec.model_id}, "default"),
+            (person, {"model_route": held_route}, routed),
+            (system, {"model_route": "default", "requested_model": spec.model_id}, "default"),
+        ):
             monkeypatch.setattr(gateway_module, "current_run", lambda run=run: run)
+            monkeypatch.setattr("rt.run_tools.current_run", lambda run=run: run)
+            planned = await RunLoop(run.backend).before_model({"open_swe_state": held})
+            assert planned.call is not None
+            request = ModelRequest(
+                model=model,
+                messages=[HumanMessage("hi")],
+                state=cast(RunState, {"open_swe_call": planned.call.model_dump()}),
+            )
+            tools = RunToolsets(run.backend, MagicMock())
+            main = BackendRunMiddleware(run.backend)
+            child = RunSubagentMiddleware(tools, "general-purpose")
+            call = child.awrap_model_call if subagent else main._call_planned
+            before = len(seen)
+            answers = await asyncio.gather(
+                call(request, invoke),
+                model.ainvoke([HumanMessage("summarize")]),
+                return_exceptions=True,
+            )
+            assert all(isinstance(answer, anthropic.AuthenticationError) for answer in answers), (
+                answers
+            )
+            assert sorted(route for _, route in seen[before:] if route is not None) == sorted(
+                [expected, "default"]
+            )
             with pytest.raises(anthropic.AuthenticationError):
-                await model.ainvoke([HumanMessage("hi")])
+                await model.ainvoke([HumanMessage("summarize after failure")])
+            assert seen[-1][1] == "default"
     finally:
         await runner.cleanup()
 
-    assert seen == ["Bearer person-token", "Bearer person-token", "Bearer lsv2-deployment-key"]
+    assert [token for token, _ in seen] == ["Bearer person-token"] * 9 + [
+        "Bearer lsv2-deployment-key"
+    ] * 3
     assert asked == [GATEWAY_CREDENTIAL.name, GATEWAY_CREDENTIAL.name]

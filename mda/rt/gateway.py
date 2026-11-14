@@ -7,17 +7,22 @@ current token, never this deployment's key.
 
 Models are built once for every run (``rt.models``), so the one ``GATEWAY_BEARER``
 every gateway-routed model holds finds, on each request, the run it serves and that
-run's credential.
+run's credential and current model route.
 """
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from typing import Final
 
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.language_models import BaseChatModel
+from runtime_api.catalog import ROUTES, kept_route
 from runtime_api.endpoint import call
 from runtime_api.gateway_auth import GatewayBearer
 from runtime_api.loop import GATEWAY_CREDENTIAL, GatewayCredential
-from runtime_api.models import gateway_api_key
+from runtime_api.models import GatewayModelRoute, gateway_api_key
 from runtime_api.operations import RunRequest
 
 from rt.backend import BackendCallError, Run, RunLocal, current_run
@@ -59,6 +64,38 @@ class RunGateway:
 
     def __init__(self) -> None:
         self._kept = RunLocal(_KeptCredential)
+        self._route: ContextVar[GatewayModelRoute] = ContextVar(
+            "gateway_model_route", default="default"
+        )
+
+    async def call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        *,
+        run: Run,
+        routed_model: BaseChatModel | str | None,
+    ) -> ModelResponse:
+        """Attribute only the routed model call, not fixed-model work or fallbacks."""
+        route: GatewayModelRoute = "default"
+        if routed_model is not None and request.model is routed_model:
+            rules = run.catalog.loop
+            models = run.catalog.models
+            selected = kept_route(run.route)
+            if (
+                not rules.pinned_model
+                and rules.routing is not None
+                and rules.routing.mode == "auto"
+                and selected in ROUTES
+                and models is not None
+                and selected in models.routes
+            ):
+                route = "auto"
+        token = self._route.set(route)
+        try:
+            return await handler(request)
+        finally:
+            self._route.reset(token)
 
     async def credential(self) -> GatewayCredential:
         """The run's credential; this deployment's key outside a run that may ask for one.
@@ -89,6 +126,10 @@ class RunGateway:
         """
         return (await self.credential()).unavailable
 
+    async def route(self) -> GatewayModelRoute:
+        """The current call's attribution, independent of cached models and other tasks."""
+        return self._route.get()
+
     async def token(self) -> str:
         """The bearer for one gateway request."""
         credential = await self.credential()
@@ -103,4 +144,4 @@ class RunGateway:
 
 
 RUN_GATEWAY = RunGateway()
-GATEWAY_BEARER = GatewayBearer(RUN_GATEWAY.token)
+GATEWAY_BEARER = GatewayBearer(RUN_GATEWAY.token, route=RUN_GATEWAY.route)

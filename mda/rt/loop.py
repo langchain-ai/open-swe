@@ -379,18 +379,20 @@ class RunLoop:
             )
         route = await self._route(held, [*visible, *added])
         if route is not None:
+            self._backend.run.route = route.route
             update.update(self._kept(route))
-        current = {**held, **update}
-        # Subagents follow the route too, including on a run resumed without preparing; a
-        # route kept for this run alone is already on the run.
-        if (kept := kept_route(current.get("model_route"))) is not None:
+        elif (
+            self._backend.run.route is None
+            and (kept := kept_route(held.get("model_route"))) is not None
+        ):
             self._backend.run.route = kept
+        current = {**held, **update}
         model = (
             None
             if self._models is None
             else self._models.model
             if self.rules.pinned_model
-            else model_for(self._models, current)
+            else model_for(self._models, {**current, "model_route": self._backend.run.route})
         )
         system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         if self.rules.client_prompt:

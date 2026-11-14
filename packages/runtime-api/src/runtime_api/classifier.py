@@ -17,7 +17,13 @@ import httpx2
 from langchain_typesafe import Choice, ClassifierResponse, Question, State, TypeSafeClassifier
 from langchain_typesafe.client import TypeSafePermissionDeniedError
 
-from runtime_api.models import gateway_api_key, gateway_base_url
+from runtime_api.models import (
+    GATEWAY_MODEL_ROUTE_HEADER,
+    GATEWAY_SERVICE_HEADER,
+    GATEWAY_SERVICE_NAME,
+    gateway_api_key,
+    gateway_base_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +79,12 @@ class Jev:
             async with (
                 asyncio.timeout(timeout),
                 httpx2.AsyncClient(
-                    transport=self.transport() if self.transport else None, timeout=timeout
+                    transport=self.transport() if self.transport else None,
+                    timeout=timeout,
+                    headers={
+                        GATEWAY_SERVICE_HEADER: GATEWAY_SERVICE_NAME,
+                        GATEWAY_MODEL_ROUTE_HEADER: "default",
+                    },
                 ) as client,
             ):
                 classifier = TypeSafeClassifier(

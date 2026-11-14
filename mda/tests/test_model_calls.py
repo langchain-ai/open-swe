@@ -46,7 +46,7 @@ from rt.model_calls import (
 from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
-from runtime_api.catalog import Catalog
+from runtime_api.catalog import Catalog, LoopRules, RoutingRules, RunModels
 from runtime_api.loop import GatewayCredential
 from runtime_api.model_errors import is_model_failure_reply
 
@@ -241,16 +241,32 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
     ]
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    # A run whose catalog names no models of its own, so the call's own decide.
-    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
-    forwarded = await _forwarded(
-        BackendRunMiddleware(run.backend),
-        messages,
-        _ANTHROPIC,
-        state={"messages": messages, "open_swe_call": call.model_dump()},
+    assert call.model is not None
+    catalog = Catalog(
+        loop=LoopRules(routing=RoutingRules(mode="auto")),
+        models=RunModels(
+            model=call.model,
+            subagent_model=call.model,
+            use_gateway=False,
+            routes={"fast": call.model},
+        ),
     )
+    run = Run(RunContext.model_validate({"__catalog": catalog.model_dump(mode="json")}))
+    run.route = "fast"
 
-    assert forwarded.model is (_OPENAI if with_image else _FIREWORKS)
+    async def handler(request: ModelRequest) -> ModelResponse:
+        assert request.model is (_OPENAI if with_image else _FIREWORKS)
+        assert await RUN_GATEWAY.route() == ("default" if with_image else "auto")
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    await BackendRunMiddleware(run.backend).awrap_model_call(
+        ModelRequest(
+            model=_ANTHROPIC,
+            messages=messages,
+            state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+        ),
+        handler,
+    )
 
 
 class _Skills(AgentMiddleware):
@@ -291,12 +307,24 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
     )
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    primary = ModelSpec(model_id="anthropic:opus", kwargs={})
+    catalog = Catalog(
+        loop=LoopRules(routing=RoutingRules(mode="auto")),
+        models=RunModels(
+            model=primary,
+            subagent_model=primary,
+            use_gateway=False,
+            routes={"fast": primary},
+        ),
+    )
+    run = Run(RunContext.model_validate({"__catalog": catalog.model_dump(mode="json")}))
+    run.route = "fast"
     static = SystemMessage(content="The graph's own instructions")
     sent: list[ModelRequest] = []
 
     async def handler(request: ModelRequest) -> ModelResponse:
         sent.append(request)
+        assert await RUN_GATEWAY.route() == ("auto" if request.model is _ANTHROPIC else "default")
         if request.model is _ANTHROPIC:
             raise TimeoutError("overloaded")
         return ModelResponse(result=[AIMessage(content="ok")])

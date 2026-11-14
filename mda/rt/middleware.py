@@ -34,6 +34,7 @@ from collections.abc import (
 )
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import partial
 from typing import Annotated, Final, NotRequired, cast
 
 import httpx
@@ -101,6 +102,7 @@ from rt.backend import (
     since_last_reply,
     subagent_of,
 )
+from rt.gateway import RUN_GATEWAY
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
@@ -638,7 +640,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # here, which first checks the run may call models as whoever it acts for.
         return await call_with_fallback(
             request,
-            handler,
+            partial(
+                RUN_GATEWAY.call,
+                handler=handler,
+                run=self._backend.run,
+                routed_model=request.model if model is planned.model else None,
+            ),
             None
             if fallback is None
             else lambda: build_model(fallback, use_gateway=planned.use_gateway),

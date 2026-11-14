@@ -144,11 +144,13 @@ async def test_gemini_sdk_uses_allowlisted_gateway_path(
 ) -> None:
     paths: list[str] = []
     services: list[str | None] = []
+    routes: list[str | None] = []
     expected_path = "/gemini/v1beta/models/gemini-4-carbon:streamGenerateContent"
 
     async def handler(request: web.Request) -> web.Response:
         paths.append(request.path)
         services.append(request.headers.get(model.GATEWAY_SERVICE_HEADER))
+        routes.append(request.headers.get(model.GATEWAY_MODEL_ROUTE_HEADER))
         if request.path != expected_path:
             return web.json_response({"error": "path not allow-listed by gateway"}, status=501)
         return web.Response(
@@ -170,6 +172,7 @@ async def test_gemini_sdk_uses_allowlisted_gateway_path(
     assert "".join(str(chunk.content) for chunk in chunks) == "ok"
     assert paths == [expected_path]
     assert services == ["robin"]
+    assert routes == ["default"]
 
 
 @pytest.mark.parametrize(
@@ -188,10 +191,16 @@ async def test_gateway_calls_name_robin_as_the_service(
     monkeypatch: pytest.MonkeyPatch, model_id: str, kwargs: dict[str, object]
 ) -> None:
     """Every gateway-routed provider sends the service header, keeping its own request settings."""
-    requests: list[tuple[str | None, bytes]] = []
+    requests: list[tuple[str | None, str | None, bytes]] = []
 
     async def handler(request: web.Request) -> web.Response:
-        requests.append((request.headers.get(model.GATEWAY_SERVICE_HEADER), await request.read()))
+        requests.append(
+            (
+                request.headers.get(model.GATEWAY_SERVICE_HEADER),
+                request.headers.get(model.GATEWAY_MODEL_ROUTE_HEADER),
+                await request.read(),
+            )
+        )
         return web.json_response({"error": {"message": "stop"}}, status=400)
 
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "dummy")
@@ -203,9 +212,9 @@ async def test_gateway_calls_name_robin_as_the_service(
         with pytest.raises(Exception):  # noqa: B017, PT011 - the stub always answers 400
             await chat_model.ainvoke("hi")
 
-    assert [service for service, _ in requests] == ["robin"]
+    assert [(service, route) for service, route, _ in requests] == [("robin", "default")]
     if "model_kwargs" in kwargs:
-        assert b'"reasoning_effort":"high"' in requests[0][1].replace(b" ", b"")
+        assert b'"reasoning_effort":"high"' in requests[0][2].replace(b" ", b"")
 
 
 # --- resolve_gateway_enabled --------------------------------------------------
@@ -289,16 +298,18 @@ def test_make_model_gateway_without_key_falls_back_direct(
 
 
 @pytest.mark.parametrize(
-    ("model_id", "path_prefix"),
+    ("model_id", "path_prefix", "responses"),
     [
-        ("openai:gpt-6-astra", "/openai/v1/responses"),
-        ("anthropic:claude-haiku-5-5", "/anthropic/v1/messages"),
-        ("fireworks:accounts/fireworks/models/glm-5p2", "/fireworks/v1/chat/completions"),
-        ("google_genai:gemini-3.5-flash", "/gemini/v1beta/models/gemini-3.5-flash:"),
+        ("openai:gpt-6-astra", "/openai/v1/responses", True),
+        ("openai:gpt-6-astra", "/openai/v1/chat/completions", False),
+        ("baseten:zai-org/GLM-5", "/baseten/v1/chat/completions", False),
+        ("anthropic:claude-haiku-5-5", "/anthropic/v1/messages", False),
+        ("fireworks:accounts/fireworks/models/glm-5p2", "/fireworks/v1/chat/completions", False),
+        ("google_genai:gemini-3.5-flash", "/gemini/v1beta/models/gemini-3.5-flash:", False),
     ],
 )
 async def test_gateway_bearer_sends_a_fresh_token_per_request(
-    monkeypatch: pytest.MonkeyPatch, model_id: str, path_prefix: str
+    monkeypatch: pytest.MonkeyPatch, model_id: str, path_prefix: str, responses: bool
 ) -> None:
     seen: list[tuple[str, dict[str, str]]] = []
 
@@ -306,28 +317,44 @@ async def test_gateway_bearer_sends_a_fresh_token_per_request(
         seen.append((request.path, {k.lower(): v for k, v in request.headers.items()}))
         return web.json_response({"error": {"message": "stop here"}}, status=401)
 
-    tokens = iter(["person-token-1", "person-token-2"])
+    tokens = iter(["person-token-1", "person-token-2", "person-token-3"])
+    route: model.GatewayModelRoute = "default"
 
     async def token() -> str:
         return next(tokens)
 
+    async def model_route() -> model.GatewayModelRoute:
+        return route
+
     async with _http_server(handler) as base_url:
         monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
         monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2_deployment_key")
+        monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", str(responses).lower())
         chat = model.make_model(
-            model_id, use_gateway=True, gateway=GatewayBearer(token), max_retries=0
+            model_id,
+            use_gateway=True,
+            gateway=GatewayBearer(token, route=model_route),
+            max_retries=0,
         )
-        for _ in range(2):
+        for next_route in ("default", "auto", "default"):
+            route = next_route
             with pytest.raises(Exception):  # noqa: B017 - each SDK raises its own 401 type
                 await chat.ainvoke([HumanMessage("hi")])
 
-    assert [path.startswith(path_prefix) for path, _ in seen] == [True, True]
+    assert [path.startswith(path_prefix) for path, _ in seen] == [True, True, True]
     assert [headers.get("authorization") for _, headers in seen] == [
         "Bearer person-token-1",
         "Bearer person-token-2",
+        "Bearer person-token-3",
     ]
     assert [headers.get(model.GATEWAY_SERVICE_HEADER.lower()) for _, headers in seen] == [
         "robin",
         "robin",
+        "robin",
+    ]
+    assert [headers.get(model.GATEWAY_MODEL_ROUTE_HEADER.lower()) for _, headers in seen] == [
+        "default",
+        "auto",
+        "default",
     ]
     assert not any("x-api-key" in h or "x-goog-api-key" in h for _, h in seen)

@@ -372,6 +372,8 @@ DEFAULT_GATEWAY_BASE_URL: Final = "https://gateway.smith.langchain.com"
 # gateway traffic.
 GATEWAY_SERVICE_HEADER: Final = "X-Gateway-Service"
 GATEWAY_SERVICE_NAME: Final = "robin"
+GATEWAY_MODEL_ROUTE_HEADER: Final = "X-Gateway-Model-Route"
+GatewayModelRoute = Literal["auto", "default"]
 
 # Provider prefix -> base-URL suffix appended to the gateway host. Each suffix
 # matches the SDK's own path handling: the OpenAI SDK appends
@@ -488,7 +490,7 @@ def gateway_overrides(
         )
         return None
     overrides["base_url"] = base_url
-    headers = {GATEWAY_SERVICE_HEADER: GATEWAY_SERVICE_NAME}
+    headers = {GATEWAY_SERVICE_HEADER: GATEWAY_SERVICE_NAME, GATEWAY_MODEL_ROUTE_HEADER: "default"}
     if provider == "openai":
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.

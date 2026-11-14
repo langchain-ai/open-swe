@@ -40,6 +40,7 @@ from runtime_api.provenance import Provenance
 
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run, harness_message
 from rt.file_tools import FileToolsMiddleware
+from rt.gateway import RUN_GATEWAY
 from rt.loop import latest_with_id, visible_messages
 from rt.mcp import McpTools
 from rt.models import build_model
@@ -353,7 +354,7 @@ class RunSubagentMiddleware(AgentMiddleware):
             request = request.override(system_message=SystemMessage(content=text))
         if (model := tools.subagent_model_for(current_run().route)) is not None:
             request = request.override(model=model)
-        return await handler(request)
+        return await RUN_GATEWAY.call(request, handler, run=current_run(), routed_model=model)
 
 
 class RunCodeInterpreter(CodeInterpreterMiddleware):

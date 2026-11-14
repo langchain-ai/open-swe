@@ -601,12 +601,21 @@ async def test_a_route_kept_for_one_run_still_reaches_its_subagents(
 ) -> None:
     backend, _ = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(mode="auto")))
     loop = RunLoop(backend)
-    # An unsure answer routed this run to Balanced without keeping it for the thread.
-    backend.run.route = "balanced"
 
-    await loop.before_model(_state(HumanMessage(content="Add a flag", id="human-1")))
+    async def classify(_self: RouteClassifier, messages: list[BaseMessage]) -> Route:
+        return Route("fast", persist=False)
 
-    assert backend.run.route == "balanced"
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    human = HumanMessage(content="Add a flag", id="human-1")
+    first = await loop.before_model(_state(human, model_route="default"))
+    assert first.call is not None and first.call.model == _FAST
+    assert "model_route" not in first.update
+    assert backend.run.route == "fast"
+
+    second = await loop.before_model(_state(human, model_route="default", **first.update))
+
+    assert second.call is not None and second.call.model == _FAST
+    assert backend.run.route == "fast"
 
 
 def test_a_subagent_call_takes_the_runs_route(monkeypatch: pytest.MonkeyPatch) -> None:

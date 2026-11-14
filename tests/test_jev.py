@@ -88,6 +88,8 @@ async def test_classification_accepts_only_confident_valid_answers(
     def handle(request: httpx2.Request) -> httpx2.Response:
         assert request.url == "https://gateway.example.com/v1/systemone"
         assert request.headers["Authorization"] == "Bearer test-key"
+        assert request.headers["X-Gateway-Service"] == "robin"
+        assert request.headers["X-Gateway-Model-Route"] == "default"
         payload = json.loads(request.read())
         assert payload["state"] == "Fix the bug"
         assert payload["model"] == "typesafe/jev-1.13.0"

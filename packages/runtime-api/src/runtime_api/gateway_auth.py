@@ -16,10 +16,13 @@ from functools import cached_property
 import anthropic
 import httpx
 import httpx2
+import openai
 from fireworks import AsyncFireworks
 from fireworks import DefaultAsyncHttpxClient as FireworksAsyncHttpxClient
 from langchain_anthropic import ChatAnthropic
 from pydantic import ConfigDict, Field
+
+from runtime_api.models import GATEWAY_MODEL_ROUTE_HEADER, GatewayModelRoute
 
 type GatewayToken = Callable[[], Awaitable[str]]
 """The bearer credential for one gateway request, asked for again before each one."""
@@ -30,16 +33,25 @@ _PROVIDER_KEY_HEADERS = ("x-api-key", "x-goog-api-key")
 
 
 class GatewayBearer:
-    """Authenticates each gateway request with the token ``token`` returns just before it."""
+    """Resolve the credential and model route just before each gateway request."""
 
-    def __init__(self, token: GatewayToken) -> None:
+    def __init__(
+        self,
+        token: GatewayToken,
+        *,
+        route: Callable[[], Awaitable[GatewayModelRoute]] | None = None,
+    ) -> None:
         self.token = token
+        self.route = route
 
     async def authorize(self, headers: httpx.Headers | httpx2.Headers) -> None:
         token = await self.token()
         for name in _PROVIDER_KEY_HEADERS:
             headers.pop(name, None)
         headers["Authorization"] = f"Bearer {token}"
+        headers[GATEWAY_MODEL_ROUTE_HEADER] = (
+            await self.route() if self.route is not None else "default"
+        )
 
     def sdk_overrides(
         self, provider: str, base_url: str, *, timeout: float | None
@@ -50,8 +62,12 @@ class GatewayBearer:
         """
         match provider:
             case "openai" | "baseten":
-                # The OpenAI SDK awaits a callable key before each request.
-                return {"api_key": self.token}
+                return {
+                    "api_key": PLACEHOLDER_API_KEY,
+                    "http_async_client": openai.DefaultAsyncHttpxClient(
+                        timeout=timeout, auth=_Httpx2BearerAuth(self)
+                    ),
+                }
             case "fireworks":
                 # ChatFireworks keeps a client it is given; it retries itself, so the SDK must not.
                 client = AsyncFireworks(
@@ -76,7 +92,7 @@ class GatewayBearer:
 
     def authenticates(self, model_kwargs: dict[str, object]) -> bool:
         """Whether ``sdk_overrides`` set up these kwargs, so the model was routed this way."""
-        return model_kwargs.get("api_key") in (PLACEHOLDER_API_KEY, self.token)
+        return model_kwargs.get("api_key") == PLACEHOLDER_API_KEY
 
     def chat_anthropic(self, model: str, kwargs: dict[str, object]) -> ChatAnthropic:
         return GatewayChatAnthropic.model_validate({**kwargs, "model": model, "gateway": self})
@@ -99,7 +115,7 @@ class _HttpxBearerAuth(httpx.Auth):
 
 
 class _Httpx2BearerAuth(httpx2.Auth):
-    """Anthropic's client (httpx2)."""
+    """OpenAI's and Anthropic's clients (httpx2)."""
 
     def __init__(self, bearer: GatewayBearer) -> None:
         self._bearer = bearer
