@@ -72,6 +72,20 @@ const FIELDS: Record<
   ],
 }
 
+const HOSTS: Record<
+  Exclude<Cloud, "azure">,
+  { placeholder: string; hint: string }
+> = {
+  aws: {
+    placeholder: "sts.amazonaws.com, *.s3.us-east-1.amazonaws.com",
+    hint: "Hosts under amazonaws.com the proxy signs. Leave empty to sign every AWS host.",
+  },
+  gcp: {
+    placeholder: "bigquery.googleapis.com, storage.googleapis.com",
+    hint: "Hosts under googleapis.com that get tokens. Leave empty for every Google API. Leave out storage.googleapis.com so downloads from Cloud Storage bypass the proxy.",
+  },
+}
+
 export function WorkspaceCloudIdentityFields({
   cloud,
   rule,
@@ -109,6 +123,27 @@ export function WorkspaceCloudIdentityFields({
         value={typeof rule.name === "string" ? rule.name : ""}
         onChange={(name) => onChange({ ...rule, name })}
       />
+      {cloud !== "azure" && (
+        <Input
+          size="sm"
+          label="Hosts (Optional, Comma-Separated)"
+          placeholder={HOSTS[cloud].placeholder}
+          hintText={HOSTS[cloud].hint}
+          value={
+            Array.isArray(rule.match_hosts) ? rule.match_hosts.join(", ") : ""
+          }
+          onChange={(value) => {
+            const hosts = value
+              .split(",")
+              .map((host) => host.trim())
+              .filter(Boolean)
+            const next = { ...rule }
+            if (hosts.length) next.match_hosts = hosts
+            else delete next.match_hosts
+            onChange(next)
+          }}
+        />
+      )}
       <p className="text-xs text-secondary">
         The proxy uses short-lived cloud credentials outside the sandbox. Grant
         only the permissions this environment needs; cloud trust must pin the
