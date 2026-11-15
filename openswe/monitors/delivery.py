@@ -189,13 +189,14 @@ class ThreadMonitorDelivery:
         )
         matches: list[EventMatch] = []
         for monitor in monitors:
+            monitor_config = {**run_config, "origin": monitor.origin or "automation"}
             matches.extend(
                 EventMatch(
                     thread_id=self._thread_id,
                     source="sandbox",
                     delivery_id=f"{monitor.monitor_id}:{event.seq}",
                     content=_event_content(monitor, event),
-                    run_config=run_config,
+                    run_config=monitor_config,
                 )
                 for event in monitor.events_pending
             )
@@ -206,7 +207,7 @@ class ThreadMonitorDelivery:
                         source="sandbox",
                         delivery_id=f"{monitor.monitor_id}:end",
                         content=_end_content(monitor),
-                        run_config=run_config,
+                        run_config=monitor_config,
                     )
                 )
         async with postgres.session() as session:

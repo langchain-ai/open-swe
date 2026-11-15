@@ -34,6 +34,7 @@ from openswe.client_tools import ClientToolSpec
 from openswe.invocation import resolve_invocation_id
 from openswe.page_commands.offers import PageSession
 from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
+from openswe.trace_metadata import RunOrigin
 
 if TYPE_CHECKING:
     from openswe.users import User
@@ -121,6 +122,7 @@ class RunConfig(BaseModel):
     # The dashboard page the message came from, which the run queues page commands for.
     page: PageSession | None = None
     source: str | None = None
+    origin: RunOrigin | None = None
     task: str | None = None
     environment: str | None = None
     workspace: str | None = None

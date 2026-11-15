@@ -57,6 +57,7 @@ from openswe.threads.workflow_approval import (
     workflow_push_approval_responses,
 )
 from openswe.tools.mcp_exposure import expose_mcp
+from openswe.trace_metadata import RunOrigin
 from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAY_RUN_ID_KEY, RELAYED_FROM_KEY
 from openswe.utils.dashboard_links import (
@@ -1095,13 +1096,15 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
-    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
+    caller = RunConfig.from_config(_config())
+    caller_thread_id = caller.thread_id
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
-        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
+        relayed_from=caller_thread_id,
+        relayed_origin=RunOrigin.resolve(caller.origin, fallback=caller.source),
     )
     try:
         reply = _CommandReply.model_validate_json(content or b"{}")

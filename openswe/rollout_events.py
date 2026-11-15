@@ -399,6 +399,7 @@ async def ask_to_monitor_rollout(
             _ask_to_monitor(sha),
             config,
             source=source if isinstance(source, str) else "github",
+            origin="github",
             thread_title=None,
             context=_ROLLOUT_ASK_CONTEXT,
             systems=[_ROLLOUT_ASK],

@@ -136,9 +136,11 @@ async def test_result_uses_completed_payload_and_invocation_not_newer_thread_sta
     client.threads.get_state.assert_not_awaited()
 
 
+@pytest.mark.parametrize("unreadable", [False, True])
 async def test_worker_failure_details_return_to_its_task_coordinator(
     worker_context: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
+    unreadable: bool,
 ) -> None:
     from openswe.tasks import service
 
@@ -148,14 +150,24 @@ async def test_worker_failure_details_return_to_its_task_coordinator(
         _WORKER,
         "run",
         "error",
-        {"error": {"error": "SandboxGoneError", "message": "Shared sandbox deleted"}},
+        {
+            "metadata": None,
+            "kwargs": {"context": {"origin": "github"}},
+            "error": {"error": "SandboxGoneError", "message": "Shared sandbox deleted"},
+            **({"values": "unreadable checkpoint"} if unreadable else {}),
+        },
     )
     task, recipient, delivery_id, content = notify.await_args.args
     display = notify.await_args.kwargs["task_event"]
     assert isinstance(display, TaskEventMetadata)
     assert recipient == _COORDINATOR
     assert delivery_id == f"finished:{_WORKER}:run"
-    assert display.content == "SandboxGoneError: Shared sandbox deleted"
+    assert notify.await_args.kwargs["origin"] == "github"
+    assert display.content == (
+        "The worker finished, but its final answer could not be read. Inspect the worker thread."
+        if unreadable
+        else "SandboxGoneError: Shared sandbox deleted"
+    )
     assert display.kind == "completion"
     assert display.status == "error"
     assert display.sender_role == "worker"
@@ -302,8 +314,9 @@ async def test_cancelled_worker_only_reports_interruption_without_restarting_owe
 
 
 @pytest.mark.parametrize("busy", [False, True])
+@pytest.mark.parametrize("native_worker", [False, True])
 async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_coordinator(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch, busy: bool
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, busy: bool, native_worker: bool
 ) -> None:
     from openswe.tasks import service
 
@@ -332,6 +345,8 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
         assert kwargs["multitask_strategy"] == "enqueue"
         config = kwargs["config"]
         assert isinstance(config, dict)
+        assert config["configurable"]["origin"] == "github"
+        assert config["configurable"]["source"] == "slack"
         attempted_turns.append(config["configurable"]["transcript_turn_id"])
         if fail_first_wake:
             fail_first_wake = False
@@ -343,10 +358,25 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     monkeypatch.setattr(task_messages, "dispatch_client", lambda: client)
     monkeypatch.setattr(task_messages, "create_durable_run", dispatch)
     monkeypatch.setattr(
-        service, "recipient_config", AsyncMock(return_value={"transcript_turn_id": inherited_turn})
+        service,
+        "recipient_config",
+        AsyncMock(
+            return_value={
+                "transcript_turn_id": inherited_turn,
+                "source": "slack",
+                "origin": "slack",
+            }
+        ),
     )
     monkeypatch.setattr(events.EventSubscription, "deliver_to", AsyncMock())
-    payload = {"values": {"messages": [{"type": "ai", "content": _RESULT}]}}
+    payload = {
+        **(
+            {"kwargs": {"context": {"origin": "github"}}}
+            if native_worker
+            else {"metadata": {"origin": "github"}}
+        ),
+        "values": {"messages": [{"type": "ai", "content": _RESULT}]},
+    }
     if not busy:
         with pytest.raises(ConnectionError, match="temporary dispatch failure"):
             await events.worker_finished(_WORKER, "run", "success", payload)
@@ -354,6 +384,7 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     (original,) = await TaskMessage.owed(_COORDINATOR)
     assert "Login passes" in original.content
+    assert original.run_config["origin"] == "github"
     assert len(dispatched) == (0 if busy else 1)
 
     async with postgres.session() as session:
@@ -365,6 +396,7 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     (retried,) = await TaskMessage.owed(_COORDINATOR)
     assert retried.id == original.id
+    assert retried.run_config["origin"] == "github"
     assert len(dispatched) == (0 if busy else 1)
 
     if busy:

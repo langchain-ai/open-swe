@@ -38,7 +38,8 @@ class _Harness:
         self.review_error: str | None = None
         self.diff_unchanged = True
 
-    async def notify_agent(self, prompt: str, *, title: str) -> bool:
+    async def notify_agent(self, prompt: str, *, title: str, origin: str) -> bool:
+        assert origin == "slack"
         self.agent_prompts.append(prompt)
         return self.wake_succeeds
 

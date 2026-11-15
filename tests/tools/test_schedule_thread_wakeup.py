@@ -410,6 +410,7 @@ async def test_queued_wakeups_run_even_when_late(
                     "source": "slack",
                     "github_login": "alice",
                     "invocation_id": "wakeup-invocation",
+                    "origin": "github",
                 }
             },
             "metadata": {"kind": "thread_wakeup", "thread_id": "t1"},
@@ -430,6 +431,8 @@ async def test_queued_wakeups_run_even_when_late(
     assert run["metadata"] == prepared["metadata"]
     assert prepared["metadata"].items() >= actor.billing_trace_metadata().items()
     assert prepared["metadata"]["kind"] == "thread_wakeup"
+    assert prepared["metadata"]["origin"] == "github"
+    assert prepared["configurable"]["source"] == "slack"
     assert run["multitask_strategy"] == "enqueue"
     assert run["webhook"] == "https://example.com/complete"
     run_input = wakeup_tool._run_input.validate_python(run["input"])

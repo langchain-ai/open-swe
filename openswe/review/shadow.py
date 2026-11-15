@@ -174,6 +174,7 @@ class ReviewShadow(Base):
             None,
             configurable,
             source=control.source or "review_shadow",
+            origin=control.origin,
             thread_title=None,
             input=build_run_input(
                 kickoff,

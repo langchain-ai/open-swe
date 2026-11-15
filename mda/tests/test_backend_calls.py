@@ -2457,6 +2457,7 @@ async def _launch_worker(
         context={  # ty: ignore[invalid-argument-type]
             "graph": "agent",
             "__run_token": "coordinator-token",
+            "origin": "github",
             "owner_ls_user_id": "original-owner",
         },
     )
@@ -2494,6 +2495,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
         "graph": "agent",
         "__worker_grant": "worker-grant",
         "__catalog": KINDS["agent"].applied(COORDINATOR_CATALOG).model_dump(mode="json"),
+        "origin": "github",
         "owner_ls_user_id": "original-owner",
     }
     assert launch["input"] == {

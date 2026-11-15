@@ -43,9 +43,15 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
         return active
 
     monkeypatch.setattr(launch.ReviewScoutTarget, "active_run", active_run)
-    monkeypatch.setattr(launch, "create_durable_run", AsyncMock(return_value={"run_id": "new-run"}))
+    create = AsyncMock(return_value={"run_id": "new-run"})
+    monkeypatch.setattr(launch, "create_durable_run", create)
 
-    assert await target.start() == (active or "new-run")
+    assert await target.start(origin="github") == (active or "new-run")
+    if active:
+        create.assert_not_awaited()
+    else:
+        assert create.await_args.kwargs["source"] == "review-scout"
+        assert create.await_args.kwargs["origin"] == "github"
 
 
 async def test_scout_refuses_a_repository_outside_the_allowed_orgs(

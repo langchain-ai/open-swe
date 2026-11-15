@@ -1108,8 +1108,18 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
     assert sent["recipient_thread_id"] == "thread-1"
 
 
+@pytest.mark.parametrize(
+    ("caller_config", "origin"),
+    [
+        ({"origin": "slack", "source": "dashboard"}, "slack"),
+        ({"source": "github_push"}, "github"),
+        ({}, "automation"),
+    ],
+)
 async def test_manage_thread_starts_idle_message_with_fixed_command(
     monkeypatch: pytest.MonkeyPatch,
+    caller_config: dict[str, str],
+    origin: str,
 ) -> None:
     proxy = AsyncMock(
         return_value=(
@@ -1126,7 +1136,9 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
     monkeypatch.setattr(
-        threads_tool, "_config", lambda: {"configurable": {"thread_id": "coordinator"}}
+        threads_tool,
+        "_config",
+        lambda: {"configurable": {"thread_id": "coordinator", **caller_config}},
     )
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
@@ -1141,6 +1153,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert command["method"] == "run.start"
     assert "plan_mode" not in command["params"]["config"]["configurable"]
     assert awaited.kwargs["relayed_from"] == "coordinator"
+    assert awaited.kwargs["relayed_origin"] == origin
 
 
 async def test_manage_thread_rejects_plan_format_conversion(

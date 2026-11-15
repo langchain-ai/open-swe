@@ -32,11 +32,11 @@ async def worker_result(
         return parsed.failure(status, _MAX_RESULT_CHARS)
     if parsed.values is not None and (answer := parsed.values.answer(_MAX_RESULT_CHARS)):
         return answer
-    invocation_id = parsed.metadata.invocation()
+    invocation_id = parsed.metadata.invocation() if parsed.metadata is not None else None
     client = langgraph_client()
     if invocation_id is None:
         run = RunPayload.parse(await client.runs.get(thread_id, run_id))
-        invocation_id = run.metadata.invocation()
+        invocation_id = run.metadata.invocation() if run.metadata is not None else None
     history = await client.threads.get_history(
         thread_id,
         limit=1,
@@ -126,6 +126,7 @@ async def worker_finished(
             status=cast(TaskEventStatus, status),
             content=result,
         ),
+        origin=RunPayload.origin(payload),
     )
     delegation = await store.TaskDelegation.get(thread_id)
     if status != "interrupted" and delegation is not None and not delegation.cancelled:

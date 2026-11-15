@@ -39,6 +39,7 @@ from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.threads.runtimes import MdaRuntime
+from openswe.trace_metadata import RunOrigin
 from openswe.utils.datadog_spans import DatadogSpans
 from openswe.utils.langsmith import (
     async_langsmith_client,
@@ -150,6 +151,7 @@ class DashboardSendTrace:
         started_at_ms: int,
         received_at_ms: int,
         inputs: Mapping[str, object],
+        origin: RunOrigin = RunOrigin.DASHBOARD,
     ) -> DashboardSendTrace | None:
         """Start the trace as the send arrives, before its run is built, or ``None`` when
         this backend does not trace or cannot. :meth:`adopt` names the run's invocation
@@ -158,7 +160,9 @@ class DashboardSendTrace:
         if not api_key or not tracing_is_enabled():
             return None
         try:
-            return cls._started(api_key, thread_id, client, started_at_ms, received_at_ms, inputs)
+            return cls._started(
+                api_key, thread_id, client, started_at_ms, received_at_ms, inputs, origin
+            )
         except Exception:
             logger.warning("Could not open a dashboard send's trace", exc_info=True)
             return None
@@ -172,6 +176,7 @@ class DashboardSendTrace:
         started_at_ms: int,
         received_at_ms: int,
         inputs: Mapping[str, object],
+        origin: RunOrigin,
     ) -> DashboardSendTrace:
         trace_id = uuid.uuid7()
         root = RunTree(
@@ -187,6 +192,7 @@ class DashboardSendTrace:
                 "metadata": {
                     "thread_id": thread_id,
                     "dashboard_client": client.value,
+                    "origin": origin.value,
                 }
             },
         )

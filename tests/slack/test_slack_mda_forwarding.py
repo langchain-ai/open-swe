@@ -814,9 +814,11 @@ async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(
 
     token = verify_runtime_token(start["run"]["context"]["__run_token"])
     assert token.metadata["ls_attribution_identifier"] == "ada"
+    assert token.metadata["origin"] == "slack"
     # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
     metadata = mda_starts({key: value for key, value in start["run"].items() if value})["metadata"]
     assert metadata["channel"] == "slack"
+    assert metadata["origin"] == "slack"
     assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 

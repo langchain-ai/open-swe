@@ -126,6 +126,7 @@ async def _dispatch_or_queue_slack_run(
             None,
             configurable,
             source="web" if configurable.get("source") == "web" else "slack",
+            origin=str(configurable.get("origin") or "slack"),
             thread_title=None,
             input=run_input,
             metadata={
@@ -1411,6 +1412,7 @@ async def _process_slack_mention_impl(
         "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
+        "origin": request.origin.value,
         "slack_kickoff_eligible": False,
         "slack_action_token": request.action_token,
         "slack_search_message_ts": request.original_message_ts,

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from openswe.dashboard.options import default_model_pair
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.database import postgres
+from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
     Finding,
@@ -134,6 +135,7 @@ async def test_a_sampled_pull_requests_shadow_follows_its_reviews_from_its_own_c
     )
     client = MagicMock()
     client.threads.update = AsyncMock()
+    client.runs.create = AsyncMock(return_value={"run_id": "shadow-run"})
 
     def control(number: int, **configurable: object) -> RunConfig:
         return RunConfig.parse(
@@ -150,7 +152,9 @@ async def test_a_sampled_pull_requests_shadow_follows_its_reviews_from_its_own_c
         patch("openswe.review.shadow.cached_workspace_settings", AsyncMock(return_value=settings)),
         patch("openswe.review.shadow.dispatch_client", return_value=client),
         patch("openswe.review.shadow.ensure_titled_thread", AsyncMock()),
-        patch("openswe.review.shadow.dispatch_agent_run", AsyncMock()) as dispatch,
+        patch(
+            "openswe.review.shadow.dispatch_agent_run", AsyncMock(wraps=dispatch_agent_run)
+        ) as dispatch,
     ):
         # A pull request is sampled only when its first review starts.
         await ReviewShadow.follow(
@@ -162,7 +166,7 @@ async def test_a_sampled_pull_requests_shadow_follows_its_reviews_from_its_own_c
 
         await ReviewShadow.follow(control(1, head_sha="h1"), kickoff="Review", pr_title="Title")
         await ReviewShadow.follow(
-            control(1, head_sha="h2", re_review=True, last_reviewed_sha="h1"),
+            control(1, source="github_push", head_sha="h2", re_review=True, last_reviewed_sha="h1"),
             kickoff="Re-review",
             pr_title="Title",
         )
@@ -171,11 +175,25 @@ async def test_a_sampled_pull_requests_shadow_follows_its_reviews_from_its_own_c
             assert shadow is not None
             shadow.last_reviewed_sha = "h0"
         await ReviewShadow.follow(
-            control(1, head_sha="h3", re_review=True, last_reviewed_sha="h2"),
+            control(
+                1,
+                source="review_shadow",
+                origin="slack",
+                head_sha="h3",
+                re_review=True,
+                last_reviewed_sha="h2",
+            ),
             kickoff="Re-review",
             pr_title="Title",
         )
 
+    started = [call.kwargs for call in client.runs.create.await_args_list]
+    assert [run["metadata"]["origin"] for run in started] == ["github", "github", "slack"]
+    assert [run["config"]["configurable"]["origin"] for run in started] == [
+        "github",
+        "github",
+        "slack",
+    ]
     configurables = [call.args[2] for call in dispatch.await_args_list]
     assert [call.args[0] for call in dispatch.await_args_list] == [shadow.reviewer_thread_id] * 3
     assert all(

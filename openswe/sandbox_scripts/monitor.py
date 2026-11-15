@@ -165,6 +165,7 @@ class Monitor:
     def summary(self, state):
         keys = (
             "monitor_id",
+            "origin",
             "description",
             "command",
             "filter",
@@ -389,6 +390,7 @@ class Runner:
             {
                 "monitor_id": self.monitor.id,
                 "owner_thread_id": self.config["owner_thread_id"],
+                "origin": self.config.get("origin"),
                 "description": self.config["description"],
                 "command": self.config["command"],
                 "filter": self.config["filter"],
@@ -732,6 +734,7 @@ def start(request):
             monitor.config_path,
             {
                 "owner_thread_id": owner,
+                "origin": request.get("origin"),
                 "command": request["command"],
                 "filter": request.get("filter") or "",
                 "description": request["description"],

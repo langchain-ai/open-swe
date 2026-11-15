@@ -53,7 +53,7 @@ from openswe.invocation import new_invocation_id, resolve_invocation_id, with_in
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
-from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
+from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
 from openswe.ui_invalidations import Topic
 from openswe.users import User
 
@@ -364,6 +364,9 @@ def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
+    *,
+    source: str | None = None,
+    origin: str | None = None,
 ) -> LangGraphRunConfig:
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
@@ -374,6 +377,13 @@ def prepare_run_config(
         merged_metadata.pop(key, None)
     if metadata is not None:
         merged_metadata.update(metadata)
+    run_origin = RunOrigin.resolve(
+        origin or source,
+        inherited=configurable.get("origin") or merged_metadata.get("origin"),
+        fallback=configurable.get("source") if source is None else None,
+    ).value
+    configurable["origin"] = run_origin
+    merged_metadata["origin"] = run_origin
     merged_metadata.update(_slack_channel_metadata(configurable))
     merged_metadata["ls_repo_provider"] = "github"
     merged_metadata["created_by"] = None
@@ -437,10 +447,13 @@ async def prepare_durable_run(
     metadata: Mapping[str, object] | None,
     *,
     source: str,
+    origin: str | None = None,
     as_sender: bool = False,
 ) -> LangGraphRunConfig:
     """The config and metadata a durable run starts with, wherever it is created.
 
+    Origin names this trigger, or the captured cause of deferred work, never the thread.
+    ``origin`` overrides an execution source inherited from another turn.
     Reviews are attributed to the PR author; other runs to the config's person.
     A run acts as the config's person (``ACTING_USER_KEY``) only when they started it:
     ``as_sender`` for a message they
@@ -471,7 +484,7 @@ async def prepare_durable_run(
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
-    run_config = prepare_run_config(config, run_metadata)
+    run_config = prepare_run_config(config, run_metadata, source=source, origin=origin)
     if execution_user_id is None:
         configurable = run_config["configurable"]
         if isinstance(configurable, dict):
@@ -494,6 +507,7 @@ async def create_durable_run(
     if_not_exists: str = "create",
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    origin: str | None = None,
     as_sender: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
@@ -508,7 +522,7 @@ async def create_durable_run(
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     run_config = await prepare_durable_run(
-        assistant_id, config, metadata, source=source, as_sender=as_sender
+        assistant_id, config, metadata, source=source, origin=origin, as_sender=as_sender
     )
     recorded = RunMetadata.of_run(assistant_id, config)
     create_kwargs: dict[str, Any] = {
@@ -563,6 +577,7 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
+    origin: str | None = None,
     as_sender: bool = False,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
@@ -600,5 +615,6 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
+        origin=origin,
         as_sender=as_sender,
     )

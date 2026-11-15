@@ -18,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.input_messages import RunMessage
+from openswe.trace_metadata import RunOrigin
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject
 
@@ -133,6 +134,18 @@ class QueuedMessage(Base):
         if payload.surface != "web" or payload.sender is None:
             return None
         return payload.sender.dashboard_login
+
+    @property
+    def origin(self) -> RunOrigin:
+        """The captured cause of a follow-up that needs a new run."""
+        if message := self.run_message:
+            provenance = Provenance.of(message)
+            return RunOrigin.resolve(provenance.surface if provenance else None)
+        if isinstance(self.content, dict):
+            return RunOrigin.resolve(
+                self.content.get("origin"), fallback=self.content.get("surface")
+            )
+        return RunOrigin.AUTOMATION
 
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""

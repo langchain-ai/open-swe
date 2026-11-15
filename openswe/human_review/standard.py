@@ -776,7 +776,7 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
         extra={"request_id": str(request.id), "user_id": str(user.id), "reason": reason},
     )
     trigger = PickTrigger("declined", tuple(p.github_login for p in dropped), reason)
-    await start_auto_assign(request, asked=True, trigger=trigger)
+    await start_auto_assign(request, asked=True, trigger=trigger, origin="slack")
     return Outcome("Review declined; Robin will find another reviewer.")
 
 
@@ -1291,7 +1291,11 @@ class Suggestion:
 
 
 async def start_auto_assign(
-    request: HumanReviewRequest, *, asked: bool = False, trigger: PickTrigger | None = None
+    request: HumanReviewRequest,
+    *,
+    asked: bool = False,
+    trigger: PickTrigger | None = None,
+    origin: str | None = None,
 ) -> AutoAssignResult:
     """Pick a reviewer, waking an agent when nobody qualifies.
 
@@ -1306,7 +1310,7 @@ async def start_auto_assign(
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
-        else await _auto_assign(request, asked=asked, trigger=trigger)
+        else await _auto_assign(request, asked=asked, trigger=trigger, origin=origin)
     )
     await request.log_event(
         "assignment.finished",
@@ -1331,7 +1335,11 @@ async def start_auto_assign(
 
 
 async def _auto_assign(
-    request: HumanReviewRequest, *, asked: bool, trigger: PickTrigger | None
+    request: HumanReviewRequest,
+    *,
+    asked: bool,
+    trigger: PickTrigger | None,
+    origin: str | None = None,
 ) -> AutoAssignResult:
     request = await HumanReviewRequest.get(request.id) or request
     # A decline or expiry leaves other code owners' reviewers in place; only that code needs one.
@@ -1352,7 +1360,7 @@ async def _auto_assign(
         return AutoAssignResult("failed")
     if trigger is not None:
         woken = await _wake_picker(
-            request, asked=asked, trigger=trigger, suggestions=[Suggestion(choice)]
+            request, asked=asked, trigger=trigger, suggestions=[Suggestion(choice)], origin=origin
         )
         return AutoAssignResult("woken" if woken else "failed")
     if isinstance(choice, Pick):
@@ -1369,7 +1377,7 @@ async def _auto_assign(
                 "error": result.error,
             },
         )
-    woken = await _wake_picker(request, asked=asked, trigger=None, suggestions=[])
+    woken = await _wake_picker(request, asked=asked, trigger=None, suggestions=[], origin=origin)
     return AutoAssignResult("woken" if woken else "failed")
 
 
@@ -1407,7 +1415,9 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
         },
     )
     trigger = PickTrigger("approved", tuple(approvers))
-    if not await _wake_picker(request, asked=False, trigger=trigger, suggestions=suggestions):
+    if not await _wake_picker(
+        request, asked=False, trigger=trigger, suggestions=suggestions, origin="github"
+    ):
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is not None:
                 row.run_config = {
@@ -1423,6 +1433,7 @@ async def _wake_picker(
     asked: bool,
     trigger: PickTrigger | None,
     suggestions: list[Suggestion],
+    origin: str | None = None,
 ) -> bool:
     pr = request.pull_request
     text = prompt(
@@ -1440,7 +1451,11 @@ async def _wake_picker(
     if requester is not None and requester.slack_user_id and request.slack_channel_id and thread_ts:
         try:
             await wake_thread_owner(
-                request.slack_channel_id, thread_ts, requester.slack_user_id, text
+                request.slack_channel_id,
+                thread_ts,
+                requester.slack_user_id,
+                text,
+                origin=origin or str(request.run_config.get("origin") or "automation"),
             )
         except Exception:
             logger.warning(
@@ -1454,7 +1469,7 @@ async def _wake_picker(
         await request.log_event("assignment.wake", sent=True, asked=asked)
         return True
     sent = await ReviewCard(request).notify_agent(
-        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True
+        text, title=f"Pick a reviewer for {pr.repo}#{pr.number}", unlisted=True, origin=origin
     )
     await request.log_event("assignment.wake", sent=sent, asked=asked)
     return sent

@@ -11,6 +11,7 @@ from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
 from openswe.threads.identity import ThreadIdentity
+from openswe.trace_metadata import RunOrigin
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -177,13 +178,24 @@ class RunError(BaseModel):
 
 
 class RunPayload(BaseModel):
-    metadata: RunMetadata = Field(default_factory=RunMetadata)
+    metadata: RunMetadata | None = None
     values: ThreadState | None = None
     error: RunError | str | None = None
 
     @classmethod
     def parse(cls, value: object) -> Self:
         return cls.model_validate(value)
+
+    @staticmethod
+    def origin(payload: Mapping[str, object]) -> RunOrigin:
+        """The ended run's cause, independent of whether its result can be parsed."""
+        metadata = payload.get("metadata")
+        kwargs = payload.get("kwargs")
+        context = kwargs.get("context") if isinstance(kwargs, dict) else None
+        return RunOrigin.resolve(
+            metadata.get("origin") if isinstance(metadata, dict) else None,
+            inherited=context.get("origin") if isinstance(context, dict) else None,
+        )
 
     def failure(self, status: str, limit: int) -> str:
         error = self.error

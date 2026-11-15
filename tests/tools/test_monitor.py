@@ -61,12 +61,14 @@ async def test_filter_picks_events_while_raw_output_keeps_every_line(
         command="echo starting; echo 'ERROR one'; echo between; echo 'ERROR two'; exit 3",
         filter="grep ERROR",
         description="errors",
+        origin="github",
         timeout=30,
         callback=False,
     )
 
     ended = await _ended(monitors)
 
+    assert ended.origin == "github"
     assert (ended.status, ended.exit_code, ended.filter_exit_code) == ("failed", 3, 0)
     assert [
         line for event in ended.events_pending for burst in event.bursts for line in burst.lines
@@ -297,6 +299,7 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
     )
     ended = PendingMonitor(
         monitor_id="mon-1",
+        origin="github",
         description="errors",
         status="failed",
         exit_code=1,
@@ -306,13 +309,17 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
     delivery = ThreadMonitorDelivery("thread-1", {}, SandboxMonitors(LocalShell(), "thread-1"))
 
     # The callback and the polling job can both read a monitor before either acks it.
-    await delivery._record([ended])
-    await delivery._record([ended])
+    running = PendingMonitor(
+        monitor_id="mon-2", origin="dashboard", status="running", events_pending=[event]
+    )
+    await delivery._record([ended, running])
+    await delivery._record([ended, running])
 
     owed = await EventMatch.owed("thread-1")
-    assert [match.delivery_id for match in owed] == ["mon-1:1", "mon-1:end"]
+    assert [match.delivery_id for match in owed] == ["mon-1:1", "mon-1:end", "mon-2:1"]
     assert "ERROR one" in owed[0].content and "Raw line 9:\n\n```text\nERROR two" in owed[0].content
     assert "the command failed" in owed[1].content
+    assert [match.run_config["origin"] for match in owed] == ["github", "github", "dashboard"]
 
 
 @pytest.mark.usefixtures("registry_db")

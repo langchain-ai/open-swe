@@ -25,6 +25,7 @@ def dispatch_run_config(
     """The configurable a durable watch stores to wake this thread later."""
     allowed = (
         "source",
+        "origin",
         "slack_thread",
         "linear_issue",
         "github_issue",

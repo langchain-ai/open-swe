@@ -502,6 +502,7 @@ async def dispatch_pull_request_prompt(
     title: str,
     before_dispatch: Callable[[str], Awaitable[None]],
     unlisted: bool = False,
+    origin: str = "dashboard",
 ) -> str:
     """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
 
@@ -525,6 +526,7 @@ async def dispatch_pull_request_prompt(
             prompt,
             configurable,
             source="dashboard",
+            origin=origin,
             thread_title=None,
             client=client,
             multitask_strategy="enqueue",

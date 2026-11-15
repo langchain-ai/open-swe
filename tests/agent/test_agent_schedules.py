@@ -453,6 +453,7 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     )
     cron_delete.assert_awaited_with(uuid.UUID(created["cronId"]))
     assert (await schedules.trigger_agent_schedule(created["id"]))["status"] == "started"
+    assert fake_client.runs.created[-1]["metadata"]["origin"] == "dashboard"
 
 
 async def test_a_test_run_is_refused_when_repo_access_is_revoked(
@@ -519,6 +520,7 @@ async def test_github_issue_automations_match_the_repo_and_run_the_channels_prom
     # The backend starts nothing itself: MDA's channel starts the run, on its own thread.
     assert fake_client.runs.created == []
     assert planning.adopted.keys() == {str(run.thread_id)}
+    assert run.metadata["origin"] == "github"
     # The run carries the prompt MDA's channel wrote.
     prompt = ElementTree.fromstring(_prompt(run))
     assert (prompt.text or "").strip() == "Triage the newly opened issue"
@@ -1287,6 +1289,7 @@ async def test_automation_spend_is_credited_to_its_creator_without_acting_as_the
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
 
     run = fake_client.runs.created[0]
+    assert run["metadata"]["origin"] == "schedule"
     assert run["metadata"]["billing_bucket"] == "user"
     assert run["metadata"]["billed_robin_user_id"] == str(alice.id)
     assert run["metadata"]["billed_user_email"] == "alice@example.com"

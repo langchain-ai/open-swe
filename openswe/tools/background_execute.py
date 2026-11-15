@@ -62,6 +62,7 @@ async def _launch(
         timeout=timeout,
         callback=callback,
         owner_thread_id=owner_thread_id,
+        origin=RunConfig.from_runtime().origin,
         tools_url_env=TOOLS_URL_ENV,
         tools_url_file=TOOLS_URL_FILE,
     )

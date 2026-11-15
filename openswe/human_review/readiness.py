@@ -110,6 +110,7 @@ class ReadinessCard(BaseModel):
                 event,
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                origin="slack",
                 thread_title=None,
                 context={
                     "sender_id": "system:human-review-ready",

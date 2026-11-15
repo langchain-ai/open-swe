@@ -145,7 +145,9 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
         identity = await _identity()
         if identity is None:
             return {"ok": False, "error": "A linked GitHub account is required"}
-        result = await schedules.trigger_agent_schedule(automation_id, login=identity[0])
+        result = await schedules.trigger_agent_schedule(
+            automation_id, login=identity[0], origin=configurable().origin or "automation"
+        )
     except Exception as exc:
         return _error(exc)
     return {"ok": True, **result}

@@ -1140,6 +1140,7 @@ async def _launch_agent_schedule_record(
     test_run: bool = False,
     prompt: str | None = None,
     token_repositories: list[str] | None = None,
+    origin: str = "schedule",
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -1212,6 +1213,7 @@ async def _launch_agent_schedule_record(
             systems=[await _automation_identity(record)],
         ),
         source="schedule",
+        origin=origin,
         thread_title=None,
         config=run_config,
         client=client,
@@ -1618,7 +1620,10 @@ async def launch_slack_automations(
             continue
         try:
             result = await _launch_agent_schedule_record(
-                record, repo=None, prompt=_slack_event_prompt(record, channel, event, text)
+                record,
+                repo=None,
+                prompt=_slack_event_prompt(record, channel, event, text),
+                origin="slack",
             )
         except Exception:
             logger.exception(
@@ -1772,6 +1777,7 @@ async def _planned_channel_automation(
         run_config,
         {CHANNEL_METADATA_KEY: channel},
         source="schedule",
+        origin=channel,
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id,
@@ -1828,7 +1834,9 @@ async def launch_scheduled_agent_run(
     return await _launch_agent_schedule_record(record, repo=None)
 
 
-async def trigger_agent_schedule(schedule_id: str, *, login: str | None = None) -> dict[str, Any]:
+async def trigger_agent_schedule(
+    schedule_id: str, *, login: str | None = None, origin: str = "dashboard"
+) -> dict[str, Any]:
     record = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(record)
     assert record is not None
@@ -1837,7 +1845,9 @@ async def trigger_agent_schedule(schedule_id: str, *, login: str | None = None) 
             await AutomationPolicy.for_login(login)
         )
 
-    result = await _launch_agent_schedule_record(record, repo=_test_run_repo(record), test_run=True)
+    result = await _launch_agent_schedule_record(
+        record, repo=_test_run_repo(record), test_run=True, origin=origin
+    )
     status = result.get("status")
     if status == "started":
         return result

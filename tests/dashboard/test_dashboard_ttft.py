@@ -10,6 +10,7 @@ import pytest
 from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
 
 from openswe.dashboard import ttft
+from openswe.trace_metadata import RunOrigin
 
 SENT_AT = 1_767_225_600_000  # 2026-01-01T00:00:00Z
 
@@ -144,8 +145,11 @@ def langsmith(monkeypatch: pytest.MonkeyPatch) -> _RecordingClient:
     return client
 
 
+@pytest.mark.parametrize(
+    "origin", [RunOrigin.DASHBOARD, RunOrigin.SLACK, RunOrigin.API, RunOrigin.AUTOMATION]
+)
 async def test_send_trace_traces_the_commands_request_as_it_runs(
-    monkeypatch: pytest.MonkeyPatch, langsmith: _RecordingClient
+    monkeypatch: pytest.MonkeyPatch, langsmith: _RecordingClient, origin: RunOrigin
 ) -> None:
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
     messages = {"messages": [{"type": "human", "content": "Fix login"}]}
@@ -155,6 +159,7 @@ async def test_send_trace_traces_the_commands_request_as_it_runs(
         started_at_ms=SENT_AT - 300,
         received_at_ms=SENT_AT,
         inputs=messages,
+        origin=origin,
     )
     assert trace is not None
 
@@ -176,6 +181,7 @@ async def test_send_trace_traces_the_commands_request_as_it_runs(
     assert root["extra"]["metadata"] == {  # type: ignore[index]
         "thread_id": "thread-1",
         "dashboard_client": "desktop",
+        "origin": origin.value,
         "invocation_id": "invocation-1",
         "owner_ls_user_id": "ls-user-1",
     }
@@ -214,6 +220,7 @@ async def test_a_send_whose_run_is_never_built_posts_its_trace_closed(
 
     (root,) = [run for run in langsmith.runs if run["name"] == "dashboard.send"]
     assert root["error"] == "The run could not be built (HTTPException)"
+    assert trace.root.metadata["origin"] == "dashboard"
     assert root["end_time"] is not None
     commands = next(run for run in langsmith.runs if run["name"] == "commands")
     (ended,) = _updates_of(langsmith, commands["id"])

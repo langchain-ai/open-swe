@@ -720,6 +720,7 @@ async def _prepare_run(
             "slack_concierge_message_ts": prepared.concierge_message_ts,
         },
         source="slack",
+        origin=request.origin,
     )
     indexed = await index.get(thread_id)
     rewritten = await RUNTIMES.mda_runtime.run_payload(

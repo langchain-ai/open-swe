@@ -659,7 +659,9 @@ class ReviewCard:
                 row.slack_copy_ts = ""
         request.slack_copy_ts = ""
 
-    async def notify_agent(self, prompt: str, *, title: str, unlisted: bool = False) -> bool:
+    async def notify_agent(
+        self, prompt: str, *, title: str, unlisted: bool = False, origin: str | None = None
+    ) -> bool:
         """Wake the agent thread that asked for the review, or start one for whoever asked; whether it was queued."""
         request = self.request
         pr = request.pull_request
@@ -687,6 +689,7 @@ class ReviewCard:
                 title=title,
                 before_dispatch=record_thread,
                 unlisted=unlisted,
+                origin=origin or str(request.run_config.get("origin") or "automation"),
             )
             return True
         configurable = dict(request.run_config)
@@ -703,6 +706,7 @@ class ReviewCard:
                 prompt,
                 configurable,
                 source=str(configurable["source"]),
+                origin=origin or str(configurable.get("origin") or "automation"),
                 thread_title=None,
                 context=_AGENT_WAKE_CONTEXT,
                 systems=[_AGENT_WAKER],

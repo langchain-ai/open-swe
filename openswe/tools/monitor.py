@@ -10,6 +10,7 @@ from pydantic import JsonValue
 from openswe.monitors.budget import ThreadMonitorBudget
 from openswe.monitors.delivery import ensure_monitor_polling
 from openswe.monitors.sandbox import ID_PREFIX, MonitorError, SandboxMonitors
+from openswe.run_config import RunConfig
 from openswe.tools.background_execute import current_backend, uses_completion_callback
 from openswe.utils.background_task_state import RUNNING_MONITORS_KEY, update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
@@ -98,6 +99,7 @@ async def monitor(
             timeout=min(timeout, window),
             callback=await uses_completion_callback(),
             interval=interval,
+            origin=RunConfig.from_runtime().origin,
         )
         started = state.model_dump(mode="json")
         if window < timeout:

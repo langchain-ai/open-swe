@@ -37,6 +37,7 @@ _CARRIED_CONFIG_KEYS = frozenset(
     {
         "thread_id",
         "source",
+        "origin",
         "workspace",
         "environment",
         "github_login",

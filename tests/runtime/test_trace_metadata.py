@@ -43,16 +43,21 @@ async def test_run_starts_with_stored_owners_langsmith_identity(
         side_effect=RuntimeError("unavailable") if state == "unavailable" else None,
     )
     monkeypatch.setattr(THREADS, "get", get_thread)
-    monkeypatch.setattr(runtimes, "remote_run_context", AsyncMock(return_value={"graph": "agent"}))
+    start = AsyncMock(return_value={"graph": "agent"})
+    monkeypatch.setattr(runtimes, "remote_run_context", start)
     rewritten = await runtimes.MdaRuntime("http://mda.test").run_payload(
         "original-thread",
         {
             "assistant_id": "agent",
-            "metadata": {"owner_ls_user_id": "caller", "user_id": str(uuid4())},
-            "config": {"metadata": {"owner_ls_user_id": "caller"}},
+            "metadata": {"owner_ls_user_id": "caller", "user_id": str(uuid4()), "origin": "github"},
+            "config": {"configurable": {"source": "slack", "origin": "slack"}},
         },
-        thread_metadata={},
+        thread_metadata={"source": "slack", "origin": "slack"},
     )
+    assert rewritten["metadata"]["origin"] == "github"
+    assert rewritten["config"]["metadata"]["origin"] == "github"
+    assert start.await_args.args[0]["origin"] == "github"
+    assert start.await_args.kwargs["metadata"]["origin"] == "github"
     expected = str(ls_user_id) if state == "linked" else None
     assert rewritten["metadata"]["owner_ls_user_id"] == expected
     assert rewritten["config"]["metadata"]["owner_ls_user_id"] == expected

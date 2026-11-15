@@ -26,6 +26,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from openswe.dispatch import dispatch_agent_run
 from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.store import SidebarTaskMembership
@@ -40,6 +41,7 @@ from openswe.threads import store as thread_store
 from openswe.threads.index import Runtime
 from openswe.threads.runtimes import RUNTIMES, MdaRun
 from openswe.threads.summary import TRANSCRIPT_VERSION
+from openswe.trace_metadata import RunOrigin
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User
@@ -646,6 +648,7 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
                 "user_email": "first@example.com",
                 "ls_attribution_identifier": "first-gh",
                 SENDER_USER_KEY: str(first),
+                "origin": "slack",
             },
             "config": {
                 "metadata": {
@@ -666,7 +669,10 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
             "owner_login": "first-gh",
             "source_context": {"slack_thread": {"triggering_user_id": "U123"}},
         },
+        relayed_origin=RunOrigin.SLACK,
     )
+    assert enriched["params"]["metadata"]["origin"] == "dashboard"
+    assert enriched["params"]["config"]["configurable"]["origin"] == "dashboard"
     assert enriched["params"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
     # Whoever sent it is whom its model calls bill, never whom the caller names.
@@ -698,9 +704,19 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         assert enriched["params"]["config"]["metadata"]["user_email"] == "second@example.com"
 
 
-@pytest.mark.parametrize("relayed", [False, True])
+@pytest.mark.parametrize(
+    ("relayed", "relayed_origin", "origin"),
+    [
+        (False, RunOrigin.GITHUB, "dashboard"),
+        (True, RunOrigin.GITHUB, "github"),
+        (True, None, "automation"),
+    ],
+)
 async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
-    monkeypatch: pytest.MonkeyPatch, relayed: bool
+    monkeypatch: pytest.MonkeyPatch,
+    relayed: bool,
+    relayed_origin: RunOrigin | None,
+    origin: str,
 ) -> None:
     async def canonical(person: dict[str, str]) -> dict[str, str]:
         return person
@@ -717,7 +733,11 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
         params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
 
     enriched = await thread_runs._enrich_run_start_command(
-        "existing-tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+        "existing-tid",
+        "octocat",
+        {"method": "run.start", "params": params},
+        metadata=metadata,
+        relayed_origin=relayed_origin,
     )
 
     texts = "".join(str(message["content"]) for message in enriched["params"]["input"]["messages"])
@@ -730,11 +750,26 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     source = "slack" if relayed else "dashboard"
     assert enriched["params"]["config"]["configurable"]["source"] == source
     assert cast(dict[str, object], created["metadata"])["source"] == source
+    assert enriched["params"]["metadata"]["origin"] == origin
+    assert enriched["params"]["config"]["metadata"]["origin"] == origin
+    assert enriched["params"]["config"]["configurable"]["origin"] == origin
 
 
-@pytest.mark.parametrize("relayed", [False, True])
+@pytest.mark.parametrize(
+    ("relayed", "relayed_origin", "origin"),
+    [
+        (False, RunOrigin.GITHUB, "dashboard"),
+        (True, RunOrigin.GITHUB, "github"),
+        (True, None, "automation"),
+    ],
+)
+@pytest.mark.parametrize("race", [False, True])
 async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
-    monkeypatch: pytest.MonkeyPatch, relayed: bool
+    monkeypatch: pytest.MonkeyPatch,
+    relayed: bool,
+    relayed_origin: RunOrigin | None,
+    origin: str,
+    race: bool,
 ) -> None:
     metadata = {
         "source": "slack",
@@ -742,26 +777,64 @@ async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
     }
     created: dict[str, object] = {"metadata": dict(metadata)}
     _patch_new_thread_deps(monkeypatch, profile={})
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    create = AsyncMock(return_value={"run_id": "queued-run"})
+    client = _new_thread_client(created)
+    monkeypatch.setattr(client, "runs", SimpleNamespace(create=create), raising=False)
+    gets = 0
+
+    class Threads(ThreadStoreOverClient):
+        async def get(self, thread_id: str) -> thread_index.IndexedThread | None:
+            nonlocal gets
+            gets += 1
+            thread = await super().get(thread_id)
+            assert thread is not None
+            thread.status = "idle" if race and gets == 1 else "busy"
+            return thread
+
+        async def command(
+            self,
+            thread_id: str,
+            body: bytes,
+            *,
+            user_id: str | None = None,
+            trace_headers: Mapping[str, str] | None = None,
+        ) -> thread_proxy.CommandReply:
+            assert json.loads(body)["params"]["metadata"]["origin"] == origin
+            return thread_proxy.CommandReply(200, _REFUSED_START, "application/json")
+
+    patch_thread_module(monkeypatch, "THREADS", Threads())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr("openswe.slack.thinking.sync_slack_background_status", AsyncMock())
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     posted = AsyncMock(return_value=True)
     monkeypatch.setattr(thread_runs, "post_slack_thread_reply", posted)
-    monkeypatch.setattr(
-        thread_runs, "create_durable_run", AsyncMock(return_value={"run_id": "queued-run"})
-    )
-    params: dict[str, object] = {
-        "input": {"messages": [{"type": "human", "content": "Also fix this"}]}
+    params = {
+        "input": {"messages": [{"type": "human", "content": "Also fix this"}]},
+        "multitask_strategy": "enqueue",
+        thread_runs.RELAYED_FROM_KEY: "spoofed-thread",
+        "metadata": {"origin": "schedule"},
+        "config": {"configurable": {"origin": "schedule"}},
+        "relayed_origin": "schedule",
     }
-    if relayed:
-        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
-
-    result = await thread_runs.queue_follow_up_run(
-        "tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    status, body, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid",
+        "octocat",
+        json.dumps({"method": "run.start", "params": params}).encode(),
+        relayed_from="coordinator-tid" if relayed else None,
+        relayed_origin=relayed_origin,
     )
 
-    assert result["result"]["queued"] is True
-    assert posted.await_count == (0 if relayed else 1)
-    if not relayed:
+    assert status == 200
+    assert json.loads(body)["result"]["queued"] is True
+    run = create.await_args.kwargs
+    assert run["metadata"]["origin"] == origin
+    assert run["config"]["metadata"]["origin"] == origin
+    assert run["config"]["configurable"]["origin"] == origin
+    assert (SENDER_USER_KEY in run["metadata"]) is not relayed
+    if relayed:
+        posted.assert_not_awaited()
+    elif not race:
+        posted.assert_awaited_once()
         assert posted.call_args.args[:2] == ("C1", "1.0")
         assert "https://dashboard.example/agents/tid" in posted.call_args.args[2]
 
@@ -2098,11 +2171,16 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     assert exc_info.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    ("relayed", "relayed_origin", "origin"),
+    [(False, None, "dashboard"), (True, RunOrigin.SLACK, "slack"), (True, None, "automation")],
+)
 async def test_steer_running_thread_records_and_delivers_the_follow_up(
-    monkeypatch, registry_db: None
+    monkeypatch, registry_db: None, relayed: bool, relayed_origin: RunOrigin | None, origin: str
 ) -> None:
     updates: list[dict[str, object]] = []
     turn = uuid7()
+    create = AsyncMock(return_value={"run_id": "pickup"})
 
     class FakeThreads:
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
@@ -2115,6 +2193,8 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     class FakeRuns:
         async def get(self, thread_id: str, run_id: str) -> dict[str, str]:
             return {"run_id": run_id, "status": "running"}
+
+    monkeypatch.setattr(FakeRuns, "create", create, raising=False)
 
     class FakeClient:
         threads = FakeThreads()
@@ -2140,7 +2220,8 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
             "params": {
                 "input": {
                     "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
-                }
+                },
+                **({thread_runs.RELAYED_FROM_KEY: "coordinator"} if relayed else {}),
             },
         },
         metadata={
@@ -2152,6 +2233,7 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
         },
         turn=OpenTurn(turn_id=turn, run_id="run-1"),
         email="teammate@example.com",
+        relayed_origin=relayed_origin,
     )
 
     assert result == {
@@ -2180,28 +2262,31 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     assert command.event.sender.login == "teammate"
     assert "also check the tests" in command.event.text
     assert updates[-1]["participant_logins"] == {"teammate": True}
-
-    # Had the run ended before reading it, the run that picks it up answers the
-    # teammate as them, whoever's run completion starts it.
-    started: list[tuple[object, dict[str, object]]] = []
+    create.assert_not_awaited()
 
     async def fake_configurable(thread_id: str, login: str, *args: object) -> dict[str, object]:
         return {"login": login}
 
-    async def fake_dispatch(*args: object, **kwargs: object) -> dict[str, str]:
-        started.append((args[2], kwargs))
-        return {"run_id": "pickup"}
-
+    dispatch = AsyncMock(wraps=dispatch_agent_run)
     patch_thread_module(monkeypatch, "_build_dashboard_configurable", fake_configurable)
-    patch_thread_module(monkeypatch, "dispatch_agent_run", fake_dispatch)
+    patch_thread_module(monkeypatch, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr("openswe.slack.thinking.sync_slack_background_status", AsyncMock())
     await thread_runs.dispatch_pending_follow_ups("tid", "owner", {}, client=FakeClient())
     # A Slack edit queued after it is no one's own web message: the pickup acts as no one.
     await QueuedMessage.put("tid", [{"type": "text", "text": "edited in Slack"}])
     await thread_runs.dispatch_pending_follow_ups("tid", "owner", {}, client=FakeClient())
 
-    assert [(configurable, kwargs["as_sender"]) for configurable, kwargs in started] == [
-        ({"login": "teammate"}, True),
+    assert [(call.args[2], call.kwargs["as_sender"]) for call in dispatch.await_args_list] == [
+        ({"login": "owner" if relayed else "teammate"}, not relayed),
         ({"login": "owner"}, False),
+    ]
+    assert [call.kwargs["metadata"]["origin"] for call in create.await_args_list] == [
+        origin,
+        "automation",
+    ]
+    assert [call.kwargs["config"]["configurable"]["origin"] for call in create.await_args_list] == [
+        origin,
+        "automation",
     ]
 
 

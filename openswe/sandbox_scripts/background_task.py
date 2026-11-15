@@ -179,6 +179,7 @@ class Runner:
             {
                 "task_id": self.task.id,
                 "owner_thread_id": self.config["owner_thread_id"],
+                "origin": self.config.get("origin"),
                 "command": self.config["command"],
                 "status": status,
                 "pid": self.process.pid if self.process else None,
@@ -332,6 +333,7 @@ def launch(request):
                 "timeout": int(request["timeout"]),
                 "callback": callback,
                 "owner_thread_id": request["owner_thread_id"],
+                "origin": request.get("origin"),
                 "tools_url_env": tools_url[0],
                 "tools_url_file": tools_url[1],
             },

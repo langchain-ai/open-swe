@@ -133,6 +133,8 @@ async def test_a_key_starts_a_system_thread_with_no_person_on_it(machine: _FakeC
     assert configurable["workspace"] == configurable["environment"] == "core"
     assert configurable["repo"] == {"owner": "acme", "name": "api"}
     assert configurable["invocation_id"]
+    assert configurable["origin"] == "api"
+    assert enriched["params"]["metadata"]["origin"] == "api"
     assert "github_login" not in configurable
     assert "user_email" not in configurable
     assert "admin_thread" not in configurable

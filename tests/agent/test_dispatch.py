@@ -58,8 +58,30 @@ class _FakeClient:
         self.threads = _FakeThreads()
 
 
-@pytest.mark.asyncio
-async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("source", "captured", "override", "expected"),
+    [
+        ("slack", None, None, "slack"),
+        ("github_review_reply", "slack", None, "github"),
+        ("dashboard", "slack", None, "dashboard"),
+        ("schedule", "github", None, "schedule"),
+        ("api", "slack", None, "api"),
+        ("claude_code", None, None, "claude_code"),
+        ("incidents_agent", None, None, "incidents_agent"),
+        ("eval", None, None, "eval"),
+        ("task", "github", None, "github"),
+        ("wakeup", "dashboard", None, "dashboard"),
+        ("sandbox", None, None, "automation"),
+        ("slack", "slack", "github", "github"),
+    ],
+)
+async def test_create_durable_run_applies_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    captured: str | None,
+    override: str | None,
+    expected: str,
+) -> None:
     client = _FakeClient()
     monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
 
@@ -67,17 +89,20 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         "thread-1",
         "agent",
         input={"messages": [{"role": "user", "content": "hi"}]},
-        source="test",
+        source=source,
+        origin=override,
         thread_title=None,
         config={
             "configurable": {
                 "thread_id": "thread-1",
+                "source": "slack",
+                "origin": captured,
                 "slack_thread": {
                     "channel_id": "C123",
                     "channel_context": {"name": "team-openswe"},
                 },
             },
-            "metadata": {"kind": "test"},
+            "metadata": {"kind": "test", "channel": "slack"},
         },
         client=client,
     )
@@ -113,6 +138,10 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         }.items()
     )
     assert created["metadata"] == created["config"]["metadata"]
+    assert created["metadata"]["origin"] == expected
+    assert created["config"]["configurable"]["origin"] == expected
+    assert created["config"]["configurable"]["source"] == "slack"
+    assert created["metadata"]["channel"] == "slack"
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
     assert "prepare_run_id" not in created["config"]["configurable"]
     assert "prepare_run_id" not in created["metadata"]
@@ -297,6 +326,7 @@ async def test_billing_survives_service_principal_and_failed_run(
             "created_by": None,
             "owner_ls_user_id": None,
             "kind": "preserved",
+            "origin": "automation",
         }
     }
 
@@ -312,6 +342,7 @@ async def test_billing_survives_service_principal_and_failed_run(
         thread_metadata={"channel": channel} if channel else {},
     )
     assert unattributed["metadata"] == {
+        "origin": "automation",
         "billing_bucket": "channel" if channel else "system",
         "created_by": None,
         "owner_ls_user_id": None,

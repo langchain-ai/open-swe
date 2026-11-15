@@ -473,18 +473,29 @@ async def test_a_new_thread_runs_on_mda(
     assert harness.runtimes.local.threads == {}
     [(_, sent)] = harness.forwarded
     assert sent["assistant_id"] == graph
-    # Nothing the remote graph is handed carries the configurable but the signed token.
-    assert "config" not in sent
+    assert sent["config"] == {
+        "metadata": {
+            "origin": "automation",
+            "billing_bucket": "system",
+            "owner_ls_user_id": None,
+            "created_by": None,
+        }
+    }
     # Traced once, into the MDA deployment's own project.
     assert "langsmith_tracer" not in sent
     context = sent["context"]
     assert isinstance(context, dict) and context["__event_streaming_v2"] is True
     assert isinstance(token := context["__run_token"], str)
     signed = verify_runtime_token(token)
-    assert signed.configurable == {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}
+    assert signed.configurable == {
+        "github_login": "ada",
+        "repo": {"owner": "a", "name": "b"},
+        "origin": "automation",
+    }
     # The hooks see the run metadata an in-process run would, e.g. which delivered
     # task messages the transcript records; a task message acts as no one.
     assert run_config(signed)["metadata"] == {
+        "origin": "automation",
         "event_match_ids": ["match-1"],
         "ls_attribution_identifier": "trigger",
         "billing_bucket": "system",
@@ -522,7 +533,9 @@ async def test_runs_include_the_current_slack_thread_link(
 
     assert status == 200
     [(_, sent)] = harness.forwarded
-    expected: dict[str, JsonValue] = {"slack_thread_url": permalink} if permalink else {}
+    expected: dict[str, JsonValue] = {"origin": "automation"}
+    if permalink:
+        expected["slack_thread_url"] = permalink
     assert sent["metadata"] == {
         "kind": "follow_up",
         "created_by": None,

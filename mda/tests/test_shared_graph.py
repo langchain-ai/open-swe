@@ -114,6 +114,7 @@ def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
     _CATALOGS[token] = catalog
     return {
         "graph": graph,
+        "origin": catalog.trace_metadata.get("origin", "automation"),
         "__run_token": token,
         "invocation_id": f"invocation-{token}",
         "__catalog": catalog.names_only().model_dump(mode="json"),
@@ -353,18 +354,24 @@ async def test_cached_graph_starts_each_native_root_with_ordinary_owner_metadata
     graphs = []
     with tracing_context(enabled=True):
         for index, owner in enumerate(("alice", "bob", None)):
-            context = _context("reviewer", f"owner-{index}", _catalog("lookup", "grant"))
+            catalog = _catalog("lookup", "grant").model_copy(
+                update={"trace_metadata": {"origin": ("github", "dashboard", "schedule")[index]}}
+            )
+            context = _context("reviewer", f"owner-{index}", catalog)
             context["owner_ls_user_id"] = owner
             graphs.append(await _run(store, f"owner-{index}", context))
     assert graphs[0].nodes["model"] is graphs[1].nodes["model"]
     roots = [run for run in created if not run.get("parent_run_id")]
     assert len(roots) == 3
     owners = []
+    origins = []
     for run in roots:
         extra = run["extra"]
         assert isinstance(extra, dict)
         owners.append(extra["metadata"].get("owner_ls_user_id"))
+        origins.append(extra["metadata"].get("origin"))
     assert owners == ["alice", "bob", None]
+    assert origins == ["github", "dashboard", "schedule"]
 
 
 async def test_each_run_on_the_shared_graph_works_in_its_own_threads_sandbox(

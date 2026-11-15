@@ -185,7 +185,7 @@ class ReviewScoutTarget(BaseModel):
             return "The review scout run timed out."
         return await thread_run_error(thread_id) or "The review scout run ended with an error."
 
-    async def start(self) -> str:
+    async def start(self, *, origin: str = "automation") -> str:
         """The scout run for this head, started when none is already running.
 
         A newer head interrupts a scout still working on an older one, so only
@@ -232,6 +232,7 @@ class ReviewScoutTarget(BaseModel):
                 ],
             ),
             source="review-scout",
+            origin=origin,
             thread_title=None,
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             metadata={_HEAD_METADATA_KEY: self.head_sha},

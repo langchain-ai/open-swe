@@ -5,11 +5,13 @@ from pydantic import BaseModel, Field
 from openswe.input_messages import SystemIdentity
 from openswe.slack.failures import SlackRequestTarget
 from openswe.slack.payloads import SlackChannelContext
+from openswe.trace_metadata import RunOrigin
 from openswe.utils.json_types import JsonObject
 
 
 class SlackRequest(BaseModel):
     channel_id: str
+    origin: RunOrigin = RunOrigin.SLACK
     thread_ts: str
     event_ts: str = ""
     original_message_ts: str = ""

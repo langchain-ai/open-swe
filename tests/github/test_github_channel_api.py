@@ -462,10 +462,12 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     assert context["graph"] == "agent"
     # The attribution the run's hooks read rides in its token.
     assert token.metadata["ls_attribution_identifier"] == "ada"
+    assert token.metadata["origin"] == "github"
     # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
     metadata = mda_starts({"input": ISSUE_RUN_INPUT, **run.model_dump()})["metadata"]
     assert metadata == run.metadata
     assert metadata["channel"] == "github"
+    assert metadata["origin"] == "github"
     assert metadata["github_delivery"] == "delivery-1"
     assert metadata["LANGSMITH_AGENT_VERSION"] == "v1"
     assert "invocation_id" in metadata

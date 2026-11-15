@@ -26,6 +26,7 @@ class MonitorError(SandboxScriptError):
 
 class MonitorState(BaseModel):
     monitor_id: str
+    origin: str | None = None
     description: str = ""
     command: str = ""
     filter: str = ""
@@ -102,6 +103,7 @@ class SandboxMonitors:
         timeout: int,
         callback: bool,
         interval: int | None = None,
+        origin: str | None = None,
     ) -> MonitorState:
         """Start ``command``; with ``interval``, as a check run that often until it passes.
 
@@ -117,6 +119,7 @@ class SandboxMonitors:
             description=description,
             timeout=timeout,
             callback=callback,
+            origin=origin,
             tools_url_env=TOOLS_URL_ENV,
             tools_url_file=TOOLS_URL_FILE,
         )

@@ -17,6 +17,7 @@ from runtime_api.catalog import Catalog
 from openswe.agent_api.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.config import ENV
 from openswe.run_config import RunConfig
+from openswe.trace_metadata import RunOrigin
 
 # The graph id `mda build` derives from the project's agent name.
 MDA_GRAPH_ID: Final = "open-swe"
@@ -47,6 +48,7 @@ RemoteRunContext = TypedDict(
         "__run_token": str,
         "__catalog": dict[str, JsonValue],
         "invocation_id": NotRequired[str],
+        "origin": str,
     },
 )
 
@@ -106,6 +108,7 @@ class StartedRun:
     def context(self) -> RemoteRunContext:
         context: RemoteRunContext = {
             "graph": self.graph,
+            "origin": RunOrigin.resolve(self.catalog.trace_metadata.get("origin")).value,
             "__run_token": self.token,
             # Its tools by name alone; the run reads their specs from the backend.
             "__catalog": _json_object.validate_python(

@@ -83,6 +83,7 @@ def _launch(script: Path, task_id: str, command: str, timeout: int, *, callback:
         timeout=timeout,
         callback=callback,
         owner_thread_id="thread-a",
+        origin="github",
         tools_url_env=tool_access.TOOLS_URL_ENV,
         tools_url_file=tool_access.TOOLS_URL_FILE,
     )
@@ -112,6 +113,7 @@ def test_runner_calls_back_on_completion_until_accepted(
 
         assert state["status"] == "completed"
         assert state["owner_thread_id"] == "thread-a"
+        assert state["origin"] == "github"
         url = f"{TOOLS_URL}/background-tasks/{task_id}/complete"
         calls_file = fake_curl / "calls"
         deadline = time.monotonic() + 5
@@ -214,6 +216,7 @@ async def test_completion_callback_asks_runner_to_retry_until_delivered(
         "owner_thread_id": "thread-b",
         "status": "completed",
         "notification": "pending",
+        "origin": "github",
     }
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
@@ -425,6 +428,10 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
     launches = [{"task_id": "cmd-1", "status": "running"}]
     with (
         patch(
+            "openswe.tools.background_execute.RunConfig.from_runtime",
+            return_value=SimpleNamespace(origin="github"),
+        ),
+        patch(
             "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=callback),
         ),
@@ -451,6 +458,10 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
 
     with (
+        patch(
+            "openswe.tools.background_execute.RunConfig.from_runtime",
+            return_value=SimpleNamespace(origin="github"),
+        ),
         patch(
             "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=False),
@@ -493,6 +504,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
         "duration_seconds": 1,
         "output_path": "/tmp/output.log",
         "notification": "pending",
+        "origin": "github",
     }
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
@@ -552,6 +564,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
     assert configurable["source"] == source
     assert configurable["background_task_completion"] is True
     assert dispatch.await_args.kwargs["source"] == source
+    assert dispatch.await_args.kwargs["origin"] == "github"
     if private:
         from openswe.credential_scope import private_owner_login
         from openswe.run_config import RunConfig
@@ -772,6 +785,10 @@ async def test_a_callback_launch_is_tracked_exactly_while_it_runs(
         return {"task_id": fields["task_id"], "status": "running"}
 
     with (
+        patch(
+            "openswe.tools.background_execute.RunConfig.from_runtime",
+            return_value=SimpleNamespace(origin="github"),
+        ),
         patch(
             "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=True),

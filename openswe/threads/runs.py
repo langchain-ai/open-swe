@@ -90,6 +90,7 @@ from openswe.threads.summary import (
     thread_is_promptable,
     thread_source,
 )
+from openswe.trace_metadata import RunOrigin
 from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
@@ -1060,6 +1061,7 @@ async def _enrich_run_start_command(
     metadata: dict[str, Any],
     creating: bool = False,
     email: str | None = None,
+    relayed_origin: RunOrigin | None = None,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
@@ -1409,6 +1411,9 @@ async def _enrich_run_start_command(
         invocation_id,
     )
 
+    origin = RunOrigin.resolve(relayed_origin) if relayed_from else RunOrigin.DASHBOARD
+    merged_configurable["origin"] = origin.value
+    run_metadata["origin"] = origin.value
     if offloading:
         merged_configurable["offload_conversation"] = True
         params["input"] = {}
@@ -1464,6 +1469,7 @@ async def steer_running_thread(
     metadata: dict[str, Any],
     turn: OpenTurn | None,
     email: str | None = None,
+    relayed_origin: RunOrigin | None = None,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
@@ -1557,6 +1563,7 @@ async def steer_running_thread(
     }
     if relayed_from:
         payload[RELAYED_FROM_KEY] = relayed_from
+        payload["origin"] = RunOrigin.resolve(relayed_origin).value
     elif metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE
     if not await queue_message_for_thread(thread_id, payload):
@@ -1631,6 +1638,7 @@ async def queue_follow_up_run(
     *,
     metadata: dict[str, Any],
     email: str | None = None,
+    relayed_origin: RunOrigin | None = None,
 ) -> dict[str, Any]:
     """Hold a ``run.start`` sent while a run is live until that run ends.
 
@@ -1644,7 +1652,12 @@ async def queue_follow_up_run(
     relayed = isinstance(params, dict) and bool(params.get(RELAYED_FROM_KEY))
     handoff = _SlackWebHandoff(thread_id, metadata)
     enriched = await _enrich_run_start_command(
-        thread_id, login, command, metadata=metadata, email=email
+        thread_id,
+        login,
+        command,
+        metadata=metadata,
+        email=email,
+        relayed_origin=relayed_origin,
     )
     enriched_params: dict[str, Any] = enriched["params"]
     configurable: dict[str, Any] = enriched_params["config"]["configurable"]
@@ -1665,6 +1678,7 @@ async def queue_follow_up_run(
             # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
             metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
             source=DASHBOARD_SOURCE,
+            origin=configurable["origin"],
             thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
@@ -1764,6 +1778,7 @@ async def dispatch_pending_follow_ups(
         None,
         configurable,
         source=DASHBOARD_SOURCE,
+        origin=queued[-1].origin.value,
         thread_title=None,
         input={"messages": []},
         metadata={"kind": FOLLOW_UP_PICKUP_KIND},
@@ -2013,6 +2028,7 @@ async def _enrich_system_run_start_command(
         {
             "thread_id": thread_id,
             "source": API_SOURCE,
+            "origin": API_SOURCE,
             "workspace": principal.workspace,
             "environment": principal.workspace,
             STARTED_BY_ID: principal.started_by_id,
@@ -2031,6 +2047,8 @@ async def _enrich_system_run_start_command(
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": configurable}
-    params["metadata"] = with_invocation_id({**agent_version_metadata()}, invocation_id)
+    params["metadata"] = with_invocation_id(
+        {**agent_version_metadata(), "origin": API_SOURCE}, invocation_id
+    )
     command["params"] = params
     return command

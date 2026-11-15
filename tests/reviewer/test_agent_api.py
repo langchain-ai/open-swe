@@ -1697,7 +1697,10 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     from openswe.prompts import prompt
 
     coordinator = RemoteRun(
-        thread_id="coordinator", assistant_id="agent", configurable={"github_login": "owner"}
+        thread_id="coordinator",
+        assistant_id="agent",
+        configurable={"github_login": "owner", "source": "slack", "origin": "github"},
+        metadata={"origin": "github"},
     )
     grant = WorkerGrant(coordinator=coordinator, request_id="call-1")
     register = AsyncMock(return_value={"success": True})
@@ -1724,6 +1727,8 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
+    assert adopted.metadata["origin"] == "github"
+    assert adopted.configurable["origin"] == "github"
     # Planned as the worker's own run.
     assert reply.catalog == planned
     assert starting.await_args.args[1].thread_id == "worker"
@@ -1879,7 +1884,12 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
 
     # Its webhook came before the worker existed, so registering settles it.
     client.runs.get = AsyncMock(
-        return_value={"run_id": "run-1", "status": "error", "error": "boom"}
+        return_value={
+            "run_id": "run-1",
+            "status": "error",
+            "error": "boom",
+            "kwargs": {"context": {"origin": "github"}},
+        }
     )
     await async_workers.launched(coordinator, body)
     settle.assert_awaited_once_with(
@@ -1888,6 +1898,7 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
             "run_id": "run-1",
             "status": "error",
             "metadata": None,
+            "kwargs": {"context": {"origin": "github"}},
             "error": "boom",
         }
     )

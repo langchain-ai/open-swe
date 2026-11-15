@@ -496,7 +496,7 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     )
     try:
         if await target.walkthrough() is None:
-            await target.start()
+            await target.start(origin="github")
     except Exception:
         common.logger.exception("Could not start the PR walkthrough", extra=target.log_extra)
 

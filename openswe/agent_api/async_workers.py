@@ -59,6 +59,7 @@ _INSTRUCTIONS_MARK: Final = "\x00instructions\x00"
 class _Run(BaseModel):
     status: str
     metadata: JsonValue = None
+    kwargs: dict[str, JsonValue] = {}
     error: JsonValue = None
 
     @property
@@ -154,6 +155,8 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         {
             "configurable": {
                 **await service.recipient_config(body.thread_id),
+                "origin": grant.coordinator.metadata.get("origin")
+                or grant.coordinator.configurable.get("origin"),
                 "transcript_turn_id": str(uuid7()),
             }
         },
@@ -214,6 +217,7 @@ class LaunchedRun:
                     "run_id": self.run_id,
                     "status": run.status,
                     "metadata": run.metadata,
+                    "kwargs": run.kwargs,
                     "error": run.error,
                 }
             )

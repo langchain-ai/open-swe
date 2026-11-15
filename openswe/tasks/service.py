@@ -37,6 +37,7 @@ from openswe.threads.status import refresh_thread_status
 from openswe.threads.summary import assert_thread_postable, assert_thread_readable
 from openswe.tools.schedule_thread_wakeup import cancel_thread_wakeups
 from openswe.tools.threads import resolve_thread_actor
+from openswe.trace_metadata import RunOrigin
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
@@ -65,18 +66,22 @@ class Actor:
     thread_id: str
     login: str | None = None
     email: str | None = None
+    origin: RunOrigin | None = None
 
     @classmethod
     async def resolve(cls, state: Actor | dict[str, object]) -> Actor:
         if isinstance(state, Actor):
             return state
-        thread_id = get_config().get("configurable", {}).get("thread_id")
+        config = RunConfig.from_config(get_config())
+        thread_id = config.thread_id
         if not isinstance(thread_id, str) or not thread_id:
             raise PermissionError("Task operations require the run's thread")
         person = await resolve_thread_actor(state)
         if person is None:
-            return cls(thread_id=thread_id)
-        return cls(thread_id=thread_id, login=person.login, email=person.email)
+            return cls(thread_id=thread_id, origin=config.origin)
+        return cls(
+            thread_id=thread_id, login=person.login, email=person.email, origin=config.origin
+        )
 
     async def authorize_owner(
         self, thread_id: str, metadata: ThreadMetadata, *, allow_participants: bool = False
@@ -271,9 +276,11 @@ async def record_event(
     content: str,
     *,
     task_event: TaskEventMetadata | None = None,
+    origin: str | None = None,
 ) -> bool:
     """Record a message for the recipient; false when its sender was silenced and owes nothing."""
     config = await recipient_config(recipient_thread_id)
+    config["origin"] = RunOrigin.resolve(origin).value
     workspace = config.get("workspace")
     if workspace and workspace != task.workspace.slug:
         raise PermissionError("The recipient no longer belongs to the task's workspace")
@@ -320,8 +327,11 @@ async def notify(
     content: str,
     *,
     task_event: TaskEventMetadata | None = None,
+    origin: str | None = None,
 ) -> None:
-    if await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event):
+    if await record_event(
+        task, recipient_thread_id, delivery_id, content, task_event=task_event, origin=origin
+    ):
         await TaskMessage.deliver(recipient_thread_id, "enqueue")
 
 
@@ -698,6 +708,7 @@ async def message_task_thread(
             kind="message",
             content=message,
         ),
+        origin=actor.origin,
     )
     try:
         await TaskMessage.deliver(recipient, "enqueue")

@@ -48,7 +48,7 @@ from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
-from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS
+from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
 
@@ -65,6 +65,7 @@ _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks
 # as, which decides whether its catalog names that person's connections, and the person
 # whose message started it, whom its model calls bill to.
 _TOKEN_METADATA_KEYS: Final = (
+    "origin",
     "event_match_ids",
     "ls_attribution_identifier",
     ACTING_USER_KEY,
@@ -551,6 +552,19 @@ class MdaRuntime:
             }
         raw_configurable = config.pop("configurable", None)
         configurable = dict(raw_configurable) if isinstance(raw_configurable, dict) else {}
+        config_metadata = config.get("metadata")
+        origin = RunOrigin.resolve(
+            run_metadata.get("origin"),
+            inherited=configurable.get("origin")
+            or (config_metadata.get("origin") if isinstance(config_metadata, dict) else None),
+            fallback=configurable.get("source"),
+        ).value
+        configurable["origin"] = origin
+        run_metadata["origin"] = origin
+        config["metadata"] = {
+            **(config_metadata if isinstance(config_metadata, dict) else {}),
+            "origin": origin,
+        }
         streaming = configurable.pop(_V3_STREAMING_KEY, None)
         assistant_id = payload.get("assistant_id")
         if not isinstance(assistant_id, str):

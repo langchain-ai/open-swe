@@ -235,6 +235,7 @@ class ConnectCard(BaseModel):
             prompt("runs/managed-tools-connected", services=", ".join(services)),
             configurable,
             source=str(configurable.get("source") or "dashboard"),
+            origin="dashboard",
             thread_title=None,
             context=_CONTEXT,
             systems=[_SENDER],

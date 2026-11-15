@@ -46,6 +46,7 @@ from openswe.threads.summary import (
     _now_ms,
     chats_beside_plugin,
 )
+from openswe.trace_metadata import RunOrigin
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
 from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
@@ -133,6 +134,7 @@ async def proxy_dashboard_thread_commands(
     content_type: str = "application/json",
     principal: Principal | None = None,
     relayed_from: str | None = None,
+    relayed_origin: RunOrigin | None = None,
     client: DashboardClient = DashboardClient.OTHER,
     submitted_at: str | None = None,
 ) -> tuple[int, bytes, str | None]:
@@ -217,10 +219,23 @@ async def proxy_dashboard_thread_commands(
         turn = await steer_target(thread_id) if transcribed and not enqueue else None
         handled = await (
             steer_running_thread(
-                thread_id, login, parsed, metadata=metadata, turn=turn, email=email
+                thread_id,
+                login,
+                parsed,
+                metadata=metadata,
+                turn=turn,
+                email=email,
+                relayed_origin=relayed_origin,
             )
             if not enqueue and (turn is not None or not transcribed)
-            else queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
+            else queue_follow_up_run(
+                thread_id,
+                login,
+                parsed,
+                metadata=metadata,
+                email=email,
+                relayed_origin=relayed_origin,
+            )
         )
         mentions.dispatch()
         return 200, json.dumps(handled).encode(), "application/json"
@@ -241,6 +256,13 @@ async def proxy_dashboard_thread_commands(
             started_at_ms=submitted_at_ms or received_at_ms,
             received_at_ms=received_at_ms,
             inputs=run_input if isinstance(run_input, dict) else {},
+            origin=(
+                RunOrigin.API
+                if principal.machine
+                else RunOrigin.resolve(relayed_origin)
+                if relayed_from
+                else RunOrigin.DASHBOARD
+            ),
         )
     try:
         with send_trace.stage("build_run") if send_trace is not None else nullcontext():
@@ -260,6 +282,7 @@ async def proxy_dashboard_thread_commands(
                     metadata=metadata,
                     creating=creating,
                     email=email,
+                    relayed_origin=relayed_origin,
                 )
     except BaseException as exc:
         if send_trace is not None:
@@ -348,7 +371,9 @@ async def proxy_dashboard_thread_commands(
         else:
             send_trace.fail(f"The run did not start (HTTP {reply.status})")
     if requeueable is not None and not run_start_succeeded:
-        requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
+        requeued = await _queue_if_thread_turned_busy(
+            thread_id, login, requeueable, email=email, relayed_origin=relayed_origin
+        )
         if requeued is not None:
             mentions.dispatch()
             return 200, json.dumps(requeued).encode(), "application/json"
@@ -405,7 +430,12 @@ async def _sender_user_id(
 
 
 async def _queue_if_thread_turned_busy(
-    thread_id: str, login: str, command: dict[str, Any], *, email: str | None
+    thread_id: str,
+    login: str,
+    command: dict[str, Any],
+    *,
+    email: str | None,
+    relayed_origin: RunOrigin | None = None,
 ) -> dict[str, Any] | None:
     """Queue a start that a run begun after the busy check made LangGraph refuse.
 
@@ -424,7 +454,12 @@ async def _queue_if_thread_turned_busy(
     if thread is None or thread.status != "busy":
         return None
     return await queue_follow_up_run(
-        thread_id, login, command, metadata=dict(thread.metadata), email=email
+        thread_id,
+        login,
+        command,
+        metadata=dict(thread.metadata),
+        email=email,
+        relayed_origin=relayed_origin,
     )
 
 

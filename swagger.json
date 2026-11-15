@@ -4245,6 +4245,17 @@
             "title": "Monitor Id",
             "type": "string"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
           "raw_lines": {
             "default": 0,
             "title": "Raw Lines",

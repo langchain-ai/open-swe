@@ -9,6 +9,7 @@ from openswe.slack import webhook
 from openswe.slack.channels import SlackChannel
 from openswe.slack.records import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
+from openswe.trace_metadata import RunOrigin
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,9 @@ class ThreadOwnerWakeError(Exception):
     """The Slack thread's agent was not started, so nothing will act on the event."""
 
 
-async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str, event: str) -> str:
+async def wake_thread_owner(
+    channel_id: str, thread_ts: str, slack_user_id: str, event: str, *, origin: str = "slack"
+) -> str:
     """Start a run for the thread's owning agent, acting for ``slack_user_id``, about ``event``."""
     thread_id = await resolve_slack_thread_id(channel_id, thread_ts)
     channel_context = await SlackChannel.context_for(channel_id)
@@ -51,6 +54,7 @@ async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str,
             event_ts=f"{time.time():.6f}",
             user_id=slack_user_id,
             trigger_system=_BACKGROUND_EVENT,
+            origin=RunOrigin.resolve(origin),
             text=prompt("slack/thread-owner-event", event=event),
             bot_user_id=common.SLACK_BOT_USER_ID,
             thread_id=thread_id,

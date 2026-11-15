@@ -511,8 +511,9 @@ def _setup_slack_mention_fakes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_choice", [None, ("anthropic:claude-opus-5-5", "max")])
+@pytest.mark.parametrize("origin", ["slack", "github"])
 async def test_web_question_keeps_context_without_slack_delivery(
-    monkeypatch, model_choice: tuple[str, str] | None
+    monkeypatch, model_choice: tuple[str, str] | None, origin: str
 ):
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -527,6 +528,7 @@ async def test_web_question_keeps_context_without_slack_delivery(
         thread_ts="1700000000.000100",
         event_ts="1700000000.000200",
         thread_id="web-question",
+        origin=origin,
         user_id="U123",
         text="quick question",
         bot_user_id="UBOT",
@@ -537,6 +539,8 @@ async def test_web_question_keeps_context_without_slack_delivery(
     assert isinstance(run, dict)
     config = run["kwargs"]["config"]["configurable"]
     assert config["source"] == "web"
+    assert config["origin"] == origin
+    assert run["kwargs"]["metadata"]["origin"] == origin
     assert "slack_thread" not in config
     assert "slack_breakout" not in config
     if model_choice is not None:

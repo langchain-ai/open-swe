@@ -50,6 +50,7 @@ from openswe.server import (
     runtime_runs,
 )
 from openswe.threads.access import agent_version_metadata
+from openswe.trace_metadata import RunOrigin
 from openswe.utils.thread_reads import shared_thread_reads
 
 # The model a person picked, which the planner records on the run's config.
@@ -273,6 +274,11 @@ class RunCatalog:
             update={
                 "trace_metadata": {
                     **trace_actor(self.config),
+                    "origin": RunOrigin.resolve(
+                        metadata.get("origin"),
+                        inherited=self.run.configurable.get("origin"),
+                        fallback=self.run.configurable.get("source"),
+                    ).value,
                     **agent_version_metadata(),
                     **{key: metadata[key] for key in _ROUTING_TRACE_KEYS if key in metadata},
                     # The tags' values again, so traces group by them too.

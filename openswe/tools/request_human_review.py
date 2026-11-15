@@ -370,7 +370,9 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
         return _failure("This pull request has no open review request to assign a reviewer to.")
     if refusal := await _repository_refusal(pr_ref, RunConfig.from_config(get_config())):
         return _failure(refusal)
-    started = await start_auto_assign(request, asked=True)
+    started = await start_auto_assign(
+        request, asked=True, origin=RunConfig.from_config(get_config()).origin or "automation"
+    )
     if started.status == "failed":
         return _failure("Robin could not start picking a reviewer for this pull request.")
     if started.status == "picked":

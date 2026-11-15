@@ -259,6 +259,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
                 message,
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                origin=str(task.get("origin") or "automation"),
                 thread_title=None,
                 context=_BACKGROUND_TASK_CONTEXT,
                 systems=[_BACKGROUND_TASK_SENDER],
