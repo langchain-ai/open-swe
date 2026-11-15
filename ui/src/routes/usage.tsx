@@ -6,7 +6,7 @@ import {
 import { Text } from "@langchain/macaw-components/Text"
 import { Card } from "@langchain/macaw-components/Card"
 import { createFileRoute } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { Fragment, useState } from "react"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Badge } from "@langchain/macaw-components/Badge"
@@ -36,6 +36,7 @@ import type {
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
   UsageLeaderboardSort,
+  UsageHealthPayload,
 } from "@/lib/api"
 import { GatewaySpend } from "@/components/GatewaySpend"
 import { TablePagination } from "@/components/TablePagination"
@@ -244,9 +245,19 @@ function UsageAnalyticsPeriod({
     isAdmin,
     setReportError
   )
-  const refreshing = leaderboard.isFetching || report.isFetching
+  const health = useQuery({
+    queryKey: ["usageHealth", activePeriod, login, isAdmin],
+    queryFn: () => api.usageHealth(activePeriod),
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status >= 400) && count < 2,
+  })
+  const refreshing =
+    leaderboard.isFetching || report.isFetching || health.isFetching
   const refreshNow = () => {
     void leaderboard.refetch()
+    void health.refetch()
     // refetch() resolves on failure too, so the error has to come off the result.
     void report.refetch().then((result) => {
       const error = result.error
@@ -262,6 +273,7 @@ function UsageAnalyticsPeriod({
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
     report.isError ? undefined : report.data?.payload,
+    health.isError ? undefined : health.data,
   ].filter((data): data is NonNullable<typeof data> => data != null)
 
   return (
@@ -413,6 +425,7 @@ function UsageAnalyticsPeriod({
           </div>
         )}
       </SettingsSection>
+      <UsageHealthSection health={health} />
       <AnalyticsCoverage
         reports={metadata}
         reportPayload={report.data?.payload ?? null}
@@ -424,6 +437,95 @@ function UsageAnalyticsPeriod({
         reportRefreshError={report.isError && !report.data ? null : reportError}
       />
     </>
+  )
+}
+
+function UsageHealthSection({
+  health,
+}: {
+  health: UseQueryResult<UsageHealthPayload, Error>
+}) {
+  const data = health.isError ? undefined : health.data
+
+  return (
+    <SettingsSection
+      title="Usage Health"
+      description="Organization-wide metrics for the selected date range, independent of the leaderboard’s Threads / Invocations view."
+    >
+      {health.isPending ? (
+        <div
+          role="status"
+          aria-label="Loading usage health"
+          className="p-space-4"
+        >
+          <Skeleton className="h-32 w-full" />
+        </div>
+      ) : health.isError ? (
+        <div className="p-space-4">
+          <Banner
+            intent="error"
+            title="Usage health is unavailable"
+            action={
+              <Button
+                variant="outlined"
+                size="sm"
+                disabled={health.isFetching}
+                onClick={() => void health.refetch()}
+              >
+                Retry usage health
+              </Button>
+            }
+          />
+        </div>
+      ) : data ? (
+        <>
+          <div className="p-space-4">
+            <div
+              className="flex min-w-0 flex-col gap-space-2"
+              aria-label="Prompt cache hit rate"
+            >
+              <Text as="h3" variant="sm" weight="medium">
+                Prompt Cache Hit Rate
+              </Text>
+              <Text variant="h3" className="tabular-nums">
+                {data.cache.hit_rate === null
+                  ? "No data"
+                  : formatPercent(data.cache.hit_rate)}
+              </Text>
+              <Text variant="sm" color="secondary">
+                Cache-read tokens ÷ total prompt tokens, including cache reads
+                and writes.
+              </Text>
+              {data.cache.prompt_tokens !== null &&
+                data.cache.cache_read_tokens !== null && (
+                  <Text variant="xs" color="secondary" className="tabular-nums">
+                    {formatNumber(data.cache.cache_read_tokens)} cached /{" "}
+                    {formatNumber(data.cache.prompt_tokens)} prompt tokens
+                  </Text>
+                )}
+              <Text variant="xs" color="secondary">
+                Runs with both counters:{" "}
+                {formatNumber(data.cache.observed_runs)}. Excluded for missing
+                or inconsistent counters:{" "}
+                {formatNumber(data.cache.missing_usage_runs)}.
+              </Text>
+            </div>
+          </div>
+          <div className="px-space-4 py-space-3">
+            <Banner
+              intent="info"
+              title={
+                data.cache.period_predates_fix
+                  ? "Historical cache coverage is incomplete"
+                  : "Cache coverage reflects reported usage"
+              }
+            >
+              {data.cache.data_note}
+            </Banner>
+          </div>
+        </>
+      ) : null}
+    </SettingsSection>
   )
 }
 

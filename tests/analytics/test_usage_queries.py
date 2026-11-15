@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from openswe.analytics import directory, queries
+from openswe.analytics.health import UsageHealthPayload
 from openswe.database import analytics as database
 from openswe.database import postgres
 from tests.analytics.conftest import initialize_database
@@ -505,3 +506,128 @@ async def test_review_only_members_are_included_and_sortable(usage_db):
     assert result["rows"][0]["user"]["github_login"] == "reviewer"
     assert result["rows"][0]["prs_reviewed"] == 1
     assert result["rows"][1]["prs_reviewed"] == 0
+
+
+class TestUsageHealth:
+    now = datetime(2026, 11, 14, 12, tzinfo=UTC)
+
+    async def record_run(
+        self,
+        *,
+        started_at: datetime,
+        input_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        workspace_id: UUID | None = None,
+    ) -> None:
+        await insert(
+            "run_projection",
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+            started_at=started_at,
+            input_tokens=input_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=200,
+        )
+
+    async def test_cache_uses_paired_inclusive_inputs_and_workspace_bounds(self, usage_db):
+        for _ in range(3):
+            await self.record_run(
+                started_at=datetime(2026, 11, 9, 23, 59, tzinfo=UTC),
+                input_tokens=1000,
+                cache_read_tokens=600,
+            )
+        await self.record_run(
+            started_at=self.now,
+            input_tokens=1000,
+            cache_read_tokens=0,
+        )
+        for prompt, cached in [
+            (10000, None),
+            (None, 10000),
+            (None, None),
+            (-1, 0),
+            (1000, -1),
+            (1000, 1001),
+        ]:
+            await self.record_run(
+                started_at=self.now,
+                input_tokens=prompt,
+                cache_read_tokens=cached,
+            )
+        for started, workspace in [
+            (self.now + timedelta(seconds=1), usage_db),
+            (self.now - timedelta(days=8), usage_db),
+            (self.now, uuid4()),
+        ]:
+            await self.record_run(
+                started_at=started,
+                workspace_id=workspace,
+                input_tokens=1000000,
+                cache_read_tokens=1000000,
+            )
+        result = await UsageHealthPayload.read("7d", as_of=self.now)
+        assert result.cache.prompt_tokens == 4000
+        assert result.cache.cache_read_tokens == 1800
+        assert result.cache.hit_rate == 0.45
+        assert result.cache.observed_runs == 4
+        assert result.cache.missing_usage_runs == 6
+        assert result.cache.period_predates_fix
+
+    async def test_cache_unknown_and_old_observations_never_become_zero_rates(self, usage_db):
+        empty = await UsageHealthPayload.read("24h", as_of=self.now)
+        assert empty.cache.hit_rate is None
+        assert empty.cache.prompt_tokens is None
+        assert empty.cache.cache_read_tokens is None
+        assert empty.cache.missing_usage_runs == 0
+        await self.record_run(started_at=self.now - timedelta(hours=1), input_tokens=1000)
+        missing = await UsageHealthPayload.read("24h", as_of=self.now)
+        assert missing.cache.hit_rate is None
+        assert missing.cache.prompt_tokens is None
+        assert missing.cache.missing_usage_runs == 1
+        assert not missing.cache.period_predates_fix
+        await self.record_run(
+            started_at=datetime(2026, 11, 9, 23, 59, tzinfo=UTC),
+            input_tokens=1000,
+        )
+        old = await UsageHealthPayload.read("7d", as_of=self.now)
+        assert old.cache.hit_rate is None
+        assert old.cache.prompt_tokens is None
+        assert old.cache.cache_read_tokens is None
+        assert old.cache.observed_runs == 0
+        assert old.cache.missing_usage_runs == 2
+        assert old.cache.period_predates_fix
+        assert old.cache.preservation_added_at == datetime(2026, 11, 10, 3, 9, 59, tzinfo=UTC)
+        await self.record_run(started_at=self.now, input_tokens=0, cache_read_tokens=0)
+        zero = await UsageHealthPayload.read("24h", as_of=self.now)
+        assert zero.cache.hit_rate is None
+        assert zero.cache.prompt_tokens == 0
+        assert zero.cache.cache_read_tokens == 0
+        assert zero.cache.observed_runs == 1
+        assert zero.cache.missing_usage_runs == 1
+
+    async def test_cache_respects_reporting_cutover(self, usage_db):
+        cutover = self.now - timedelta(hours=2)
+        await self.record_run(
+            started_at=cutover - timedelta(seconds=1),
+            input_tokens=1000,
+            cache_read_tokens=1000,
+        )
+        await self.record_run(
+            started_at=cutover,
+            input_tokens=1000,
+            cache_read_tokens=0,
+        )
+        async with postgres.transaction() as conn:
+            await conn.execute(
+                text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
+                {"cutover": cutover},
+            )
+        result = await UsageHealthPayload.read("all", as_of=self.now)
+        assert result.cache.hit_rate == 0
+        assert result.cache.prompt_tokens == 1000
+        assert result.cache.missing_usage_runs == 0
+        assert result.reporting_cutover_at == cutover
+        async with postgres.transaction() as conn:
+            await conn.execute(text("UPDATE deployment_metadata SET reporting_cutover_at = NULL"))
+        with pytest.raises(RuntimeError, match="not been activated"):
+            await UsageHealthPayload.read("all", as_of=self.now)

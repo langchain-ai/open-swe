@@ -705,6 +705,20 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   reviewer_stats: ReviewerStatsPayload
 }
 
+export interface UsageHealthPayload extends AnalyticsMetadata {
+  period: UsageLeaderboardPeriod
+  cache: {
+    hit_rate: number | null
+    prompt_tokens: number | null
+    cache_read_tokens: number | null
+    preservation_added_at: string
+    period_predates_fix: boolean
+    missing_usage_runs: number
+    observed_runs: number
+    data_note: string
+  }
+}
+
 export interface PRMergeRateEffort {
   effort: string | null
   merged: number
@@ -1841,6 +1855,10 @@ export const api = {
           row.avg_invocation_seconds ?? row.avg_run_seconds ?? 0,
       })),
     })),
+  usageHealth: (period: UsageLeaderboardPeriod = "7d") =>
+    request<UsageHealthPayload>(
+      `/analytics/usage-health?period=${encodeURIComponent(period)}`
+    ),
   prMergeRateByModel: (
     period: UsageLeaderboardPeriod = "7d",
     maturityDays?: number

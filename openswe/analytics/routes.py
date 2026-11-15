@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from openswe.analytics.gateway import GatewaySpend
+from openswe.analytics.health import UsageHealthPayload
 from openswe.analytics.queries import (
     InvalidUsageCursor,
     SortDirection,
@@ -46,6 +47,24 @@ async def api_telemetry_config() -> TelemetryConfig:
 @router.get("/analytics/gateway-spend")
 async def api_gateway_spend(session: dict[str, object] = SESSION_DEP) -> GatewaySpend:
     return await GatewaySpend.for_person(DashboardPrincipal.from_session(session))
+
+
+@router.get("/analytics/usage-health")
+async def api_usage_health(
+    period: str | None = "30d",
+    _session: dict[str, object] = SESSION_DEP,
+) -> UsageHealthPayload:
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        return await UsageHealthPayload.read(period)
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Usage health report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "Usage analytics is unavailable on this deployment.") from exc
 
 
 @router.get("/agent-usage-leaderboard")

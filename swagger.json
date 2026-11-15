@@ -1451,6 +1451,76 @@
         "title": "BundleResponse",
         "type": "object"
       },
+      "CacheHealth": {
+        "properties": {
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "data_note": {
+            "default": "Older runs and some providers may omit cache counters. Only runs reporting both counters are included; run summaries may still contain partially reported messages.",
+            "title": "Data Note",
+            "type": "string"
+          },
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "missing_usage_runs": {
+            "title": "Missing Usage Runs",
+            "type": "integer"
+          },
+          "observed_runs": {
+            "title": "Observed Runs",
+            "type": "integer"
+          },
+          "period_predates_fix": {
+            "title": "Period Predates Fix",
+            "type": "boolean"
+          },
+          "preservation_added_at": {
+            "format": "date-time",
+            "title": "Preservation Added At",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          }
+        },
+        "required": [
+          "hit_rate",
+          "prompt_tokens",
+          "cache_read_tokens",
+          "preservation_added_at",
+          "period_predates_fix",
+          "missing_usage_runs",
+          "observed_runs"
+        ],
+        "title": "CacheHealth",
+        "type": "object"
+      },
       "ChallengeResponse": {
         "properties": {
           "challenge": {
@@ -10104,6 +10174,93 @@
         "title": "UpdateBranchAction",
         "type": "object"
       },
+      "UsageHealthPayload": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/CacheHealth"
+          },
+          "collection_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Started At"
+          },
+          "completeness": {
+            "enum": [
+              "not_started",
+              "observed_events_only"
+            ],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "data_source": {
+            "const": "event_projections",
+            "title": "Data Source",
+            "type": "string"
+          },
+          "has_failed_events": {
+            "title": "Has Failed Events",
+            "type": "boolean"
+          },
+          "has_pending_events": {
+            "title": "Has Pending Events",
+            "type": "boolean"
+          },
+          "last_processed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Processed At"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "reporting_cutover_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporting Cutover At"
+          }
+        },
+        "required": [
+          "reporting_cutover_at",
+          "collection_started_at",
+          "last_processed_at",
+          "data_source",
+          "completeness",
+          "has_pending_events",
+          "has_failed_events",
+          "period",
+          "as_of",
+          "cache"
+        ],
+        "title": "UsageHealthPayload",
+        "type": "object"
+      },
       "UserInstructionsUpdate": {
         "properties": {
           "instructions": {
@@ -12861,6 +13018,62 @@
           }
         ],
         "summary": "Api Analytics Readiness",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/usage-health": {
+      "get": {
+        "operationId": "api_usage_health_dashboard_api_analytics_usage_health_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "30d",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageHealthPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Usage Health",
         "tags": [
           "dashboard",
           "analytics"

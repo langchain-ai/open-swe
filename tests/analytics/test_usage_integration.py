@@ -12,11 +12,11 @@ from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy import text
 
 from openswe import agent_cost
-from openswe.analytics import directory, emitter, ingestion, outbox, queries, usage
+from openswe.analytics import directory, emitter, health, ingestion, outbox, queries, usage
 from openswe.analytics.events import EventEnvelope
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.utils.langsmith import LangSmithThreadCost
-from openswe.utils.run_usage import RunUsageSummary
+from openswe.utils.run_usage import RunUsageSummary, summarize_run_usage
 from tests.analytics.helpers import DAY
 
 
@@ -25,7 +25,8 @@ async def usage_storage(analytics_db, monkeypatch):
     _, transaction = analytics_db
     for module in (directory, ingestion, outbox):
         monkeypatch.setattr(module, "transaction", transaction)
-    monkeypatch.setattr(queries, "connection", transaction)
+    for module in (queries, health):
+        monkeypatch.setattr(module, "connection", transaction)
     current = [DAY]
 
     class Clock(datetime):
@@ -115,6 +116,35 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
         cost = (await conn.execute(text("SELECT * FROM latest_cost_projection"))).mappings().one()
         assert cost["observation_revision"] > 2**31
         assert cost["cost_usd"] == Decimal("1.25")
+
+
+async def test_cache_health_preserves_normalized_message_inputs(analytics_db):
+    _, transaction = analytics_db
+    await _start()
+    messages = [
+        AIMessage(
+            content="",
+            response_metadata={"open_swe_invocation_id": "run", "model_name": model},
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+                "input_token_details": {"cache_read": 80, "cache_creation": 10},
+            },
+        )
+        for model in ("anthropic:claude", "openai:gpt", "google_genai:gemini")
+    ]
+    summary = summarize_run_usage({"messages": messages}, invocation_id="run")
+    assert summary is not None
+    assert summary.total_tokens == 210
+    assert await usage.record_agent_invocation_completion(invocation_id="run", usage=summary)
+    await _deliver(transaction)
+    result = await health.UsageHealthPayload.read("all", as_of=DAY + timedelta(seconds=1))
+    assert result.cache.prompt_tokens == 300
+    assert result.cache.cache_read_tokens == 240
+    assert result.cache.hit_rate == 0.8
+    assert result.cache.observed_runs == 1
+    assert result.cache.missing_usage_runs == 0
 
 
 async def test_concurrent_duplicate_completion_and_cost_schedule(analytics_db):
