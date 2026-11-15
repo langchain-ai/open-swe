@@ -409,8 +409,9 @@ class DashboardRunTimeline:
     def of_run(cls, run: Mapping[str, object]) -> DashboardRunTimeline | None:
         """The send a finished run's metadata names, marked from the run's replies.
 
-        ``None`` when no dashboard send started the run, or when the run was created so
-        long after the send it names that it inherited the send's metadata.
+        ``None`` when no dashboard send started the run: the run was created so long
+        after the send it names that it inherited the send's metadata, or a Slack message
+        came after the send and started this run.
         """
         metadata = run.get("metadata")
         run_id = run.get("run_id")
@@ -421,6 +422,11 @@ class DashboardRunTimeline:
             return None
         created = DashboardSendTrace.time_of(run.get("created_at"))
         if created is not None and created - DashboardSendTrace.at(received) > cls._MAX_START_DELAY:
+            return None
+        from openswe.slack.run_timing import TRIGGER_TS_KEY, SlackRunTimeline
+
+        posted = SlackRunTimeline.ts_ms(metadata.get(TRIGGER_TS_KEY))
+        if posted is not None and posted > received:
             return None
         submitted = cls.epoch_ms(metadata.get(cls.SUBMITTED_AT_KEY))
         client = metadata.get(cls.CLIENT_KEY)
@@ -444,24 +450,52 @@ class DashboardRunTimeline:
         return timeline
 
     def read(self, messages: Sequence[object]) -> None:
-        """Mark the earliest output and text the agent's replies gave since the send.
+        """Mark the earliest output and text the agent's replies gave since the send."""
+        for name, at in self.output_marks(messages, since_ms=self.received_at_ms).items():
+            self.marks[name] = min(self.marks.get(name, at), at)
 
-        Messages come as the run's state serialized them, plain or as LangChain's
-        constructor form; a reply from before the send is an earlier run's.
+    @classmethod
+    def output_marks(cls, messages: Sequence[object], *, since_ms: int) -> dict[str, int]:
+        """The earliest opening and text the agent's replies stamped at or after ``since_ms``.
+
+        A reply from before it is an earlier run's.
         """
+        marks: dict[str, int] = {}
         for message in messages:
-            if not isinstance(message, Mapping):
-                continue
-            kwargs = message.get("kwargs")
-            stamps = message.get("response_metadata") or (
-                kwargs.get("response_metadata") if isinstance(kwargs, Mapping) else None
+            stamps = (
+                cls.message_field(message, "response_metadata")
+                if isinstance(message, Mapping)
+                else None
             )
             if not isinstance(stamps, Mapping):
                 continue
-            for name, key in self._STAMPS.items():
-                at = self.epoch_ms(stamps.get(key))
-                if at is not None and at >= self.received_at_ms:
-                    self.marks[name] = min(self.marks.get(name, at), at)
+            for name, key in cls._STAMPS.items():
+                at = cls.epoch_ms(stamps.get(key))
+                if at is not None and at >= since_ms:
+                    marks[name] = min(marks.get(name, at), at)
+        return marks
+
+    @classmethod
+    def message_type(cls, message: Mapping[str, object]) -> object:
+        """A message's type (``ai``, ``tool``, ...), plain or from LangChain's constructor
+        form, whose own ``type`` names the envelope."""
+        if message.get("type") != "constructor":
+            return message.get("type")
+        path = message.get("id")
+        kind = path[-1] if isinstance(path, list) and path else None
+        if not isinstance(kind, str):
+            return None
+        kind = kind.removesuffix("Chunk").removesuffix("Message")
+        return "ai" if kind == "AI" else kind.lower()
+
+    @staticmethod
+    def message_field(message: Mapping[str, object], name: str) -> object:
+        """A field of a message as a run's state serialized it, plain or as LangChain's
+        constructor form."""
+        if name in message:
+            return message[name]
+        kwargs = message.get("kwargs")
+        return kwargs.get(name) if isinstance(kwargs, Mapping) else None
 
     @classmethod
     def settle_in_background(cls, run: Mapping[str, object], *, failed: bool) -> None:
@@ -507,26 +541,29 @@ class DashboardRunTimeline:
             await timeline.trace.close(run, failed=failed)
 
     @classmethod
-    def timed_already(cls, thread: Mapping[str, object], run_id: str) -> bool:
+    def timed_already(
+        cls, thread: Mapping[str, object], run_id: str, *, key: str | None = None
+    ) -> bool:
         """Whether the thread records ``run_id``'s timing as reported already."""
-        runs = thread.get(cls.TIMED_RUNS_KEY)
+        runs = thread.get(key or cls.TIMED_RUNS_KEY)
         return isinstance(runs, list) and run_id in runs
 
     @classmethod
-    async def mark_timed(cls, thread_id: str, thread: Mapping[str, object], run_id: str) -> None:
+    async def mark_timed(
+        cls, thread_id: str, thread: Mapping[str, object], run_id: str, *, key: str | None = None
+    ) -> None:
         """Record on the thread that ``run_id``'s timing is reported, among its latest."""
         from openswe.threads.store import THREADS
 
-        runs = thread.get(cls.TIMED_RUNS_KEY)
+        key = key or cls.TIMED_RUNS_KEY
+        runs = thread.get(key)
         kept: list[JsonValue] = (
             [r for r in runs if isinstance(r, str) and r != run_id]
             if isinstance(runs, list)
             else []
         )
         try:
-            await THREADS.update(
-                thread_id, {cls.TIMED_RUNS_KEY: [*kept, run_id][-cls._TIMED_RUNS_KEPT :]}
-            )
+            await THREADS.update(thread_id, {key: [*kept, run_id][-cls._TIMED_RUNS_KEPT :]})
         except Exception:
             logger.warning(
                 "Could not record a run's timing as reported",
@@ -604,6 +641,20 @@ class DashboardRunTimeline:
         )
 
     def _record_histograms(self, seconds: Mapping[str, float], sandbox: DashboardSandbox) -> None:
+        self.record_latencies(
+            {self._METRICS[name]: value for name, value in seconds.items()},
+            attributes={
+                "source": "dashboard",
+                "client": self.client.value,
+                "sandbox": sandbox.value,
+            },
+        )
+
+    @classmethod
+    def record_latencies(
+        cls, seconds: Mapping[str, float], *, attributes: Mapping[str, str]
+    ) -> None:
+        """Record each latency, in seconds, to the OTLP histogram its metric name names."""
         from langgraph_api.metrics_otlp import (
             METRIC_TIER_INFO,
             def_latency,
@@ -611,14 +662,11 @@ class DashboardRunTimeline:
         )
 
         reporter = get_otlp_metrics_reporter()
-        attributes = {"source": "dashboard", "client": self.client.value, "sandbox": sandbox.value}
         for name, value in seconds.items():
-            metric = self._definitions.get(name)
+            metric = cls._definitions.get(name)
             if metric is None:
-                metric = self._definitions[name] = def_latency(
-                    self._METRICS[name], METRIC_TIER_INFO
-                )
-            reporter.record_latency(metric, value, attributes=attributes)
+                metric = cls._definitions[name] = def_latency(name, METRIC_TIER_INFO)
+            reporter.record_latency(metric, value, attributes=dict(attributes))
 
     def _points(self) -> list[tuple[str, int]]:
         """The send's points in the order they happen, none earlier than the one before.

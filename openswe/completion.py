@@ -44,6 +44,7 @@ from openswe.slack.client import (
     remove_slack_reaction,
 )
 from openswe.slack.routed_work import RoutedWork
+from openswe.slack.run_timing import SlackRunTimeline
 from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
@@ -450,6 +451,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         DashboardRunTimeline.settle_in_background(
             payload, failed=status in _TERMINAL_FAILURE_STATUSES
         )
+        await SlackRunTimeline.settle(payload)
     try:
         await refresh_thread_status(thread_id)
     except Exception:
