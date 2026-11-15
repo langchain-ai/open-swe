@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -37,6 +37,39 @@ function Harness({
 }
 
 describe("ComposerPromptEditor", () => {
+  it("releases focus when Command is tapped without changing the draft", () => {
+    render(<Harness initialValue="keep this draft" />)
+    const editor = screen.getByRole("textbox", { name: "Message" })
+    act(() => editor.focus())
+
+    fireEvent.keyDown(editor, { key: "Meta", metaKey: true })
+    expect(document.activeElement).toBe(editor)
+    fireEvent.keyUp(editor, { key: "Meta" })
+
+    expect(document.activeElement).not.toBe(editor)
+    expect(editor.textContent).toBe("keep this draft")
+  })
+
+  it("keeps focus for Command shortcuts and composition", () => {
+    render(<Harness initialValue="keep editing" />)
+    const editor = screen.getByRole("textbox", { name: "Message" })
+    act(() => editor.focus())
+
+    fireEvent.keyDown(editor, { key: "Meta", metaKey: true })
+    fireEvent.keyDown(editor, { key: "c", metaKey: true })
+    fireEvent.keyUp(editor, { key: "c", metaKey: true })
+    fireEvent.keyUp(editor, { key: "Meta" })
+    expect(document.activeElement).toBe(editor)
+
+    fireEvent.keyDown(editor, {
+      key: "Meta",
+      metaKey: true,
+      isComposing: true,
+    })
+    fireEvent.keyUp(editor, { key: "Meta", isComposing: true })
+    expect(document.activeElement).toBe(editor)
+  })
+
   it("renders plain text as text", () => {
     render(<Harness initialValue="rename the handler" />)
     expect(screen.getByTestId("composer-editor").textContent).toBe(

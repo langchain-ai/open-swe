@@ -681,6 +681,7 @@ function ComposerPromptEditorInner({
   onPaste,
 }: ComposerPromptEditorProps) {
   const [editor] = useLexicalComposerContext()
+  const commandTapRef = useRef(false)
   const onChangeRef = useRef(onChange)
   const skillNamesKey = [...skillNames].sort().join("\0")
   const snapshotRef = useRef({ value, cursor: value.length, skillNamesKey })
@@ -792,6 +793,26 @@ function ComposerPromptEditorInner({
               className
             )}
             data-testid="composer-editor"
+            onBlur={() => {
+              commandTapRef.current = false
+            }}
+            onKeyDownCapture={(event) => {
+              if (event.repeat) return
+              commandTapRef.current =
+                event.key === "Meta" &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+            }}
+            onKeyUp={(event) => {
+              const releaseFocus =
+                commandTapRef.current &&
+                event.key === "Meta" &&
+                !event.nativeEvent.isComposing
+              commandTapRef.current = false
+              if (releaseFocus) event.currentTarget.blur()
+            }}
             onPaste={onPaste}
             placeholder={<span />}
           />
