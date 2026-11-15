@@ -16,7 +16,7 @@ from typing import Self
 
 import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue, ValidationError
 
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
@@ -24,7 +24,7 @@ from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_d
 from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.walkthrough.diff import Carry, DiffIndex, LineMaps
-from openswe.walkthrough.lines import LineSet
+from openswe.walkthrough.lines import LinePoint, LineSet, Sign
 
 GIT_TIMEOUT_SECONDS = 300
 HEAD_REF = "refs/walkthrough/head"
@@ -35,6 +35,21 @@ _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 class CheckoutError(RuntimeError):
     """A git step in the walkthrough checkout failed."""
+
+
+class ReadFile(BaseModel):
+    """A file to read: its heading, and each hunk's first changed line, heading and whether
+    to show it."""
+
+    path: str
+    heading: str
+    marks: list[tuple[Sign, int, str, bool]]
+
+
+class _ReadPage(BaseModel):
+    text: str
+    # ``(path, sign, lineno)`` of the changed line the next page starts at.
+    next: tuple[str, Sign, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +179,28 @@ class PinnedCheckout:
         if not isinstance(codes, list) or not all(isinstance(code, str) for code in codes):
             raise CheckoutError("the sandbox rendered no chunks")
         return [str(code) for code in codes]
+
+    async def read(
+        self, files: list[ReadFile], *, start: LinePoint | None, budget: int
+    ) -> tuple[str, LinePoint | None]:
+        """``files``' diffs with each changed line named, up to about ``budget`` characters,
+        and the changed line to resume at when more follows."""
+        found = await self._ask(
+            {
+                "op": "read",
+                "files": [file.model_dump() for file in files],
+                "start": [start.path, start.sign, start.lineno] if start else None,
+                "budget": budget,
+            }
+        )
+        try:
+            page = _ReadPage.model_validate(found)
+        except ValidationError as exc:
+            raise CheckoutError("the sandbox read no diff") from exc
+        if page.next is None:
+            return page.text, None
+        path, sign, lineno = page.next
+        return page.text, LinePoint(path=path, sign=sign, lineno=lineno)
 
     async def wordless(self, sets: Sequence[LineSet]) -> list[bool]:
         """Which of ``sets`` hold only braces, punctuation or blank lines."""

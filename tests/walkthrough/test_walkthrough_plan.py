@@ -489,6 +489,106 @@ async def test_a_missing_checkout_is_reported_unless_allowed(tmp_path: Path) -> 
     assert await missing.pinned(allow_missing=True) is None
 
 
+async def test_reading_names_each_hunk_and_line_as_the_planning_tools_take_them(
+    repo: Path, checkout: PinnedCheckout
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(
+        repo,
+        {
+            "core.py": "import os\n\ndef a():\n    return 2\n",
+            "cli.py": "print(a())\n",
+            "pnpm-lock.yaml": "lock: 1\n",
+            # Read as a git pathspec, `[d].py` would match `d.py` too.
+            "[d].py": "x = 1\n",
+            "d.py": "y = 1\n",
+        },
+        "return 2",
+    )
+    index = await _pin(checkout, base, head)
+    plan = Plan.start(head, index)
+    _place(
+        plan,
+        index,
+        "Print it",
+        FileHunks(path="cli.py", hunks=["+1"]),
+        FileHunks(path="d.py", hunks=["+1"]),
+    )
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, base, index, plan)
+
+    unplanned = await workspace.read()
+
+    assert unplanned == (
+        "### [d].py\n"
+        "@@ -0,0 +1 @@\n"
+        "── hunk +1 (+1): unplanned\n"
+        "+1     | x = 1\n"
+        "\n"
+        "### core.py\n"
+        "@@ -1,4 +1,4 @@\n"
+        "       | import os\n"
+        "       | \n"
+        "       | def a():\n"
+        "── hunk -4 (+1/-1): unplanned\n"
+        "-4     |     return 1\n"
+        "+4     |     return 2\n"
+        "\n"
+        "Lockfiles not shown (pass a path to read one): pnpm-lock.yaml +1 (+1)."
+    )
+    assert "── hunk +1 (+1): chunk 1\n+1     | print(a())" in await workspace.read(["*.py"])
+    # Where a read stopped in a file planned since, the next read goes on with the next file.
+    resumed = await workspace.read(start="cli.py +1")
+    assert resumed == "### core.py" + unplanned.partition("### core.py")[2]
+    with pytest.raises(RangeError, match="not where an earlier read stopped"):
+        await workspace.read(start="core.py +40")
+
+
+async def test_reading_a_large_diff_pages_through_every_changed_line_once(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.walkthrough import planner
+
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(
+        repo,
+        {
+            "big.txt": "".join(f"line {n}\n" for n in range(1, 101)),
+            "core.py": "import os\n\ndef a():\n    return 2\n",
+            "min.js": "x" * 50_000 + "\n",
+        },
+        "add",
+    )
+    index = await _pin(checkout, base, head)
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, base, index, Plan.start(head, index))
+    monkeypatch.setattr(planner, "READ_BUDGET_CHARS", 400)
+
+    pages: list[str] = []
+    start: str | None = None
+    while True:
+        page = await workspace.read(start=start)
+        pages.append(page)
+        resume = page.rpartition('`start: "')[2].partition('"')[0]
+        if "More follows" not in page:
+            break
+        start = resume
+
+    named = [
+        line.split(" ", 1)[0]
+        for page in pages
+        for line in page.splitlines()
+        if line[:1] in "+-" and "|" in line
+    ]
+    big = [f"+{n}" for n in range(1, 101)]
+    assert len(pages) > 3
+    assert named == [*big, "-4", "+4", "+1"]
+    # A page that resumes inside a hunk says which hunk it is in.
+    assert all("── hunk +1 (+100): unplanned" in page for page in pages[:-2])
+    # A minified line is clipped rather than pushing its page past the budget.
+    assert max(len(page) for page in pages) < 3_000
+
+
 async def test_a_head_change_during_planning_ends_the_scout(
     repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
 ) -> None:

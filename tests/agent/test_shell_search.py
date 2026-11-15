@@ -39,6 +39,21 @@ async def test_the_agent_applies_the_shared_search_policy(
     assert set(surface.loop.hidden_tools) >= SHELL_SEARCH_EXCLUDED_TOOLS
 
 
+async def test_the_scouts_subagent_only_reads(saved_thread_scope: dict[str, object]) -> None:
+    # With the scout's own tools, a subagent could place hunks and overwrite the
+    # people's-input summary with its brief.
+    surface = await _planned("review-scout")
+
+    (subagent,) = surface.subagents
+    assert subagent.tools is not None
+    assert not {
+        "record_human_input",
+        "walkthrough_plan_chunk",
+        "walkthrough_split_hunks",
+        "walkthrough_move_to_other",
+    } & set(subagent.tools)
+
+
 @pytest.mark.parametrize("kind", _PLANNERS)
 async def test_a_planned_run_leaves_the_file_and_shell_tools_to_mda(
     kind: str, saved_thread_scope: dict[str, object]

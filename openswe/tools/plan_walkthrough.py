@@ -69,6 +69,22 @@ async def _planned(workspace: PlanWorkspace, **result: object) -> dict[str, obje
     }
 
 
+async def walkthrough_read(
+    scout: ScoutPlanning,
+    tool_call_id: CallId,
+    paths: list[str] | None = None,
+    start: str | None = None,
+) -> str | dict[str, object] | Command:
+    """Implement the `walkthrough_read` tool."""
+    try:
+        workspace = await _workspace(scout=scout)
+        return await workspace.read(paths or (), start)
+    except PlanMovedError as exc:
+        return _moved(exc, scout, tool_call_id)
+    except PLANNING_ERRORS as exc:
+        return {"success": False, "error": str(exc)}
+
+
 async def walkthrough_plan_chunk(
     scout: ScoutPlanning,
     tool_call_id: CallId,

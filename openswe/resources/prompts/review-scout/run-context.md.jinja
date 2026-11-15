@@ -3,7 +3,7 @@
 <pr_title>{{ pr_title }}</pr_title>
 
 The repository is checked out at the pull request head in `{{ repo_dir }}`.
-Read the change with `git diff --no-renames refs/walkthrough/merge-base refs/walkthrough/head` (add `--stat` or paths as you need, but never `-U0`: the plan's hunks are the ones the default context prints), and files at the head with `git show refs/walkthrough/head:<path>` or from the checkout.
+Read the change with `walkthrough_read`, which names every hunk and changed line as the planning tools take them, and files at the head with `git show refs/walkthrough/head:<path>` or from the checkout.
 
 {% if carried %}
 The pull request moved since the plan was made, and the plan below was carried over.

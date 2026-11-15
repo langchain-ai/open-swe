@@ -149,6 +149,10 @@ class Hunks:
     def get(self, path: str, name: str) -> Hunk | None:
         return self._named.get((path, name))
 
+    def in_file(self, path: str) -> list[Hunk]:
+        """``path``'s hunks in diff order."""
+        return self._by_path.get(path, [])
+
     def holding(self, point: LinePoint) -> Hunk | None:
         parts = self.within(LineSet.point(point))
         return parts[0][0] if parts else None

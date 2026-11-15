@@ -10,6 +10,7 @@ change. Added lines are numbered at the head and deleted lines at the merge base
 
 from bisect import bisect_right
 from functools import cached_property
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel
 
@@ -19,6 +20,21 @@ from openswe.walkthrough.lines import LinePoint, LineRange, LineSet, Ranges, Sig
 # length of zero, the start is the line just before the change.
 Block = tuple[int, int, int, int]
 Segment = tuple[Sign, int, int]
+_LOCKFILES = frozenset(
+    {
+        "Cargo.lock",
+        "Gemfile.lock",
+        "bun.lock",
+        "bun.lockb",
+        "composer.lock",
+        "go.sum",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "uv.lock",
+        "yarn.lock",
+    }
+)
 
 
 def segments(blocks: list[Block]) -> list[Segment]:
@@ -41,6 +57,19 @@ class FileDiff(BaseModel):
     deleted: bool = False
     # Hash of the file's diff header, whose blob ids and modes change with its content.
     fingerprint: str = ""
+
+    @property
+    def is_lockfile(self) -> bool:
+        return PurePosixPath(self.path).name in _LOCKFILES
+
+    def matches(self, pattern: str) -> bool:
+        """Whether the file is ``pattern``, sits under it as a directory, or matches it as a glob."""
+        pattern = pattern.strip().strip("/")
+        return (
+            self.path == pattern
+            or self.path.startswith(pattern + "/")
+            or PurePosixPath(self.path).full_match(pattern)
+        )
 
     def sides(self) -> dict[Sign, Ranges]:
         """The file's added and deleted lines."""

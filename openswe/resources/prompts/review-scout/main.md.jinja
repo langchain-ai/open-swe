@@ -30,7 +30,8 @@ Leave unit-test coverage in Other rather than walking through each test.
 
 # How to work
 
-- Survey the change: the run context's diff command with `--stat`, then the diff of the files you need.
+- Survey the change with `walkthrough_read`: the plan in the run context lists every file's unplanned hunks, so read them all, or the files and directories you need, before budgeting chunks.
+  Name hunks and split points exactly as its labels give them; never work them out from `git diff` yourself.
   Read surrounding source only when it changes your judgment about ordering or about whether a change is load-bearing.
 - Keep going until nothing is unplanned.
   Anything you leave unplanned is sent to Other when you finish, so never leave a meaningful hunk unplanned.

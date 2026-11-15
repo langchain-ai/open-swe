@@ -10,6 +10,8 @@ names an ``op``:
   pinned ones, so line sets can be carried to the new head.
 - ``render``: line sets as a reader sees them, at real line numbers.
 - ``wordless``: which line sets hold only braces, punctuation or blank lines.
+- ``read``: files' diffs with every changed line named as planners name it, and a
+  heading the backend writes before the first line of each hunk, paged to a size.
 """
 
 import base64
@@ -27,6 +29,7 @@ GIT = ["git", "-c", "core.quotePath=false"]
 DIFF = [*GIT, "diff", "--no-color", "--no-ext-diff", "--no-renames", "--full-index"]
 CONTEXT_LINES = 2
 PATHS_PER_CALL = 500
+MAX_LINE_CHARS = 2_000
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 WORD_RE = re.compile(r"\w")
 LANGUAGES = {
@@ -344,7 +347,134 @@ def wordless(request):
     }
 
 
-OPS = {"index": index, "maps": maps, "render": render, "wordless": wordless}
+def git_hunks(paths):
+    """Each of ``paths``' git hunks in diff order, as ``(path, header, lines)``.
+
+    A line is ``(sign, lineno, text)``: ``+`` numbered at the head, ``-`` at the merge
+    base, and `` `` for an unchanged line, numbered at the head.
+    """
+    for at in range(0, len(paths), PATHS_PER_CALL):
+        path = ""
+        hunk = None
+        old = new = 0
+        # Literal pathspecs, so a name such as `src/[id]/page.tsx` matches no other file.
+        diff = [
+            "git",
+            "--literal-pathspecs",
+            *DIFF[1:],
+            MERGE_BASE_REF,
+            HEAD_REF,
+            "--",
+            *paths[at : at + PATHS_PER_CALL],
+        ]
+        for line in git_lines(diff):
+            if line.startswith("diff --git "):
+                if hunk is not None:
+                    yield hunk
+                hunk = None
+                path = line.rpartition(" b/")[2]
+                continue
+            match = HUNK_RE.match(line)
+            if match:
+                if hunk is not None:
+                    yield hunk
+                hunk = (path, line, [])
+                old, new = int(match.group(1)), int(match.group(3))
+                # A side of length zero is numbered from the line before it.
+                old += match.group(2) == "0"
+                new += match.group(4) == "0"
+                continue
+            if hunk is None:
+                if line.startswith("+++ b/"):
+                    path = line[6:]
+                continue
+            if line.startswith("-"):
+                hunk[2].append(("-", old, line[1:]))
+                old += 1
+            elif line.startswith("+"):
+                hunk[2].append(("+", new, line[1:]))
+                new += 1
+            elif not line.startswith("\\"):
+                hunk[2].append((" ", new, line[1:]))
+                old += 1
+                new += 1
+        if hunk is not None:
+            yield hunk
+
+
+def labelled(sign, lineno, text):
+    # Minified bundles and one-line fixtures would otherwise put one line past a page's budget.
+    if len(text) > MAX_LINE_CHARS:
+        text = f"{text[:MAX_LINE_CHARS]} … ({len(text) - MAX_LINE_CHARS} more chars)"
+    return f"{sign + str(lineno) if sign != ' ' else '':<7}| {text}"
+
+
+def read(request):
+    """The requested files' git hunks, each changed line named and each hunk headed.
+
+    ``files`` lists, in diff order, each file's ``heading`` and its hunks as
+    ``[sign, lineno, heading, show]`` by first changed line. A git hunk is shown
+    when any hunk it holds is. Output stops near ``budget`` characters at a git hunk,
+    or within one too large to show whole, and ``next`` names the changed line to
+    resume at with ``start``.
+    """
+    files = {found["path"]: found for found in request["files"]}
+    budget = request["budget"]
+    start = tuple(request["start"]) if request.get("start") else None
+    out = []
+    size = 0
+    headed = set()
+    for path, header, lines in git_hunks(list(files)):
+        marks = {
+            (sign, lineno): (heading, show) for sign, lineno, heading, show in files[path]["marks"]
+        }
+        changed = [(sign, lineno) for sign, lineno, _ in lines if sign != " "]
+        if start is not None:
+            if start[0] != path or (start[1], start[2]) not in changed:
+                continue
+            at = changed.index((start[1], start[2]))
+            if at:
+                # Resuming inside this git hunk: from the named line, under its hunk's heading.
+                first = next(i for i, line in enumerate(lines) if (line[0], line[1]) == changed[at])
+                owner = next(point for point in reversed(changed[: at + 1]) if point in marks)
+                lines = lines[first:]
+                marks = {**marks, changed[at]: marks[owner]}
+                header = "@@ (continued) @@"
+            start = None
+        if not any(marks[point][1] for point in changed if point in marks):
+            continue
+        # Each entry is output and the changed line a page may stop before it; a hunk's
+        # heading and its first line are one entry, so the budget counts both.
+        entries = [] if path in headed else [("", None), (f"### {files[path]['heading']}", None)]
+        entries.append((header, None))
+        for sign, lineno, text in lines:
+            point = (sign, lineno) if sign != " " else None
+            line = labelled(sign, lineno, text)
+            if point in marks:
+                line = f"── hunk {marks[point][0]}\n{line}"
+            entries.append((line, point))
+        text = "\n".join(line for line, _ in entries)
+        if size + len(text) > budget and out:
+            return {"text": "\n".join(out), "next": [path, *changed[0]]}
+        if size + len(text) > budget:
+            # One git hunk too large for a page: show what fits, and stop before a changed line.
+            kept = []
+            used = 0
+            progressed = False
+            for line, point in entries:
+                if point is not None and progressed and used + len(line) > budget:
+                    out.append("\n".join(kept))
+                    return {"text": "\n".join(out), "next": [path, *point]}
+                kept.append(line)
+                used += len(line) + 1
+                progressed = progressed or point is not None
+        out.append(text)
+        size += len(text) + 1
+        headed.add(path)
+    return {"text": "\n".join(out), "next": None}
+
+
+OPS = {"index": index, "maps": maps, "render": render, "wordless": wordless, "read": read}
 
 
 def read_request(argument):

@@ -48,6 +48,7 @@ from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSu
 from openswe.tools.plan_walkthrough import (
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
+    walkthrough_read,
     walkthrough_split_hunks,
 )
 from openswe.tools.record_human_input import record_human_input
@@ -267,7 +268,7 @@ def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> 
 
 
 async def scout_models(cfg: RunConfig) -> SurfaceModels:
-    """The model the workspace picked for its review scout, which plans without subagents."""
+    """The model the workspace picked for its review scout and the subagent it reads with."""
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
@@ -291,6 +292,7 @@ def scout_tools() -> list[BaseTool]:
     """The scout's tools, wherever the graph that calls them runs."""
     return apply_tool_descriptions(
         [
+            walkthrough_read,
             walkthrough_plan_chunk,
             walkthrough_split_hunks,
             walkthrough_move_to_other,
@@ -317,10 +319,14 @@ async def review_scout_catalog(config: RunnableConfig, surface: ToolSurface) -> 
 
     surface.base_tools = scout_tools()
     surface.models = models
+    # Of the scout's own tools, a subagent gets only the reader: with the planning tools
+    # and `record_human_input` it would place hunks while the scout plans and record its
+    # own brief as the people's input. MDA gives it the file and shell tools regardless.
     surface.subagents = [
         SurfaceSubagent(
             name=GENERAL_PURPOSE_SUBAGENT["name"],
             description=GENERAL_PURPOSE_SUBAGENT["description"],
             system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+            tools=(walkthrough_read.__name__,),
         )
     ]
