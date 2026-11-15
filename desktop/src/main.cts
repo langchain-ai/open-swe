@@ -70,7 +70,7 @@ const {
   listWorkspaceFiles,
   readWorkspacePath,
 } = require("./workspace-files.cjs");
-const { isDesktopCommandId } = require("./commands.cjs");
+const { MenuCommands, isDesktopCommandId } = require("./commands.cjs");
 const { PREVIEW_SCHEME, PreviewFiles } = require("./preview-files.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
 const { DesktopEnvironments } = require("./desktop-environments.cjs");
@@ -173,6 +173,10 @@ const desktopUi = {
   },
 };
 let mainWindow = null;
+const menuCommands = new MenuCommands((commandId, viaShortcut) => {
+  if (mainWindow && !mainWindow.isDestroyed())
+    mainWindow.webContents.send("desktop:menu-command", commandId, viaShortcut);
+});
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
 const rendererConsole = new ConsoleLogBuffer(2000);
@@ -685,6 +689,12 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:set-menu-commands", (event, commands) => {
+    requireTrustedDesktopIpc(event);
+    if (event.sender !== mainWindow?.webContents) return [];
+    if (menuCommands.publish(commands)) createMenu();
+    return menuCommands.nativeShortcutIds();
+  });
   ipcMain.handle("desktop:write-clipboard", (event, value) => {
     requireTrustedDesktopIpc(event);
     if (typeof value === "string") clipboard.writeText(value);
@@ -1565,12 +1575,14 @@ function createMenu() {
   const backendItems = environmentItem
     ? [backendSettingsItem, environmentItem]
     : [backendSettingsItem];
-  const settingsItem = {
-    id: "open-settings",
-    label: "Settings…",
-    accelerator: "CmdOrCtrl+,",
-    click: () => sendDesktopCommand("open-settings"),
-  };
+  const settingsItems = menuCommands.items("app", [
+    {
+      id: "open-settings",
+      label: "Settings…",
+      accelerator: "CmdOrCtrl+,",
+      click: () => sendDesktopCommand("open-settings"),
+    },
+  ]);
   const checkForUpdatesItem = {
     label: "Check for Updates…",
     enabled: app.isPackaged,
@@ -1583,7 +1595,7 @@ function createMenu() {
             label: app.name,
             submenu: [
               { role: "about" },
-              settingsItem,
+              ...settingsItems,
               checkForUpdatesItem,
               ...backendItems,
               { type: "separator" },
@@ -1609,20 +1621,23 @@ function createMenu() {
     {
       label: "File",
       submenu: [
-        {
-          id: "new-thread",
-          label: "New Thread",
-          click: () => sendDesktopCommand("new-thread"),
-        },
-        {
-          id: "show-command-palette",
-          label: "Search Commands and Threads…",
-          accelerator: "CmdOrCtrl+K",
-          click: () => sendDesktopCommand("show-command-palette"),
-        },
+        ...menuCommands.items("file", [
+          {
+            id: "new-thread",
+            label: "New Thread",
+            accelerator: "CmdOrCtrl+N",
+            click: () => sendDesktopCommand("new-thread"),
+          },
+          {
+            id: "show-command-palette",
+            label: "Search Commands and Threads…",
+            accelerator: "CmdOrCtrl+K",
+            click: () => sendDesktopCommand("show-command-palette"),
+          },
+        ]),
         ...(process.platform === "darwin"
           ? []
-          : [{ type: "separator" }, settingsItem, ...backendItems]),
+          : [{ type: "separator" }, ...settingsItems, ...backendItems]),
         { type: "separator" },
         ...(process.platform === "darwin"
           ? [
@@ -1649,17 +1664,21 @@ function createMenu() {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" },
+        { type: "separator" },
+        ...menuCommands.items("edit"),
       ],
     },
     {
       label: "View",
       submenu: [
-        {
-          id: "toggle-sidebar",
-          label: "Toggle Sidebar",
-          accelerator: "CmdOrCtrl+B",
-          click: () => sendDesktopCommand("toggle-sidebar"),
-        },
+        ...menuCommands.items("view", [
+          {
+            id: "toggle-sidebar",
+            label: "Toggle Sidebar",
+            accelerator: "CmdOrCtrl+B",
+            click: () => sendDesktopCommand("toggle-sidebar"),
+          },
+        ]),
         { type: "separator" },
         {
           label: "Reload",
@@ -1685,6 +1704,7 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
+    ...menuCommands.commandMenus(),
     process.platform === "darwin"
       ? { role: "windowMenu" }
       : {
@@ -1694,12 +1714,14 @@ function createMenu() {
     {
       role: "help",
       submenu: [
-        {
-          id: "show-keyboard-shortcuts",
-          label: "Keyboard Shortcuts",
-          accelerator: "CmdOrCtrl+/",
-          click: () => sendDesktopCommand("show-keyboard-shortcuts"),
-        },
+        ...menuCommands.items("help", [
+          {
+            id: "show-keyboard-shortcuts",
+            label: "Keyboard Shortcuts",
+            accelerator: "CmdOrCtrl+/",
+            click: () => sendDesktopCommand("show-keyboard-shortcuts"),
+          },
+        ]),
         { type: "separator" },
         {
           label: `${appRuntime.name} on GitHub`,
@@ -2044,7 +2066,9 @@ function createWindow(initialUrl = APP_URL) {
 
   window.once("ready-to-show", () => window.show());
   window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow !== window) return;
+    mainWindow = null;
+    if (menuCommands.reset()) createMenu();
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
     const target =
@@ -2074,6 +2098,9 @@ function createWindow(initialUrl = APP_URL) {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
+  window.webContents.on("did-navigate", () => {
+    if (mainWindow === window && menuCommands.reset()) createMenu();
+  });
   window.webContents.on("did-finish-load", () =>
     window.webContents.send("desktop:fullscreen-change", window.isFullScreen()),
   );

@@ -240,6 +240,7 @@ export function AppCommandPalette({
           label="Search commands, threads, and pull requests"
           loop
           shouldFilter={false}
+          vimBindings={false}
         >
           <CommandInput
             autoFocus

@@ -321,6 +321,8 @@ export function AgentsSidebar({
               label: "Add repository",
               aliases: ["open folder", "add folder", "repository", "repo"],
               group: "Workspace",
+              menu: "file" as const,
+              menuLabel: "Add Repository…",
               run: async () => {
                 await addLocalRepo()
               },
@@ -1638,6 +1640,7 @@ export function AgentsShell({
         run: layout.toggle,
         desktopId: "toggle-sidebar" as const,
         desktopShortcuts: ["mod+b"],
+        enableInFormFields: true,
       },
     ]
     if (!activeThread) return commands

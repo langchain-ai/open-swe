@@ -13,6 +13,26 @@ export type DesktopCommandId =
   | "show-keyboard-shortcuts"
   | "toggle-sidebar"
 
+/** A native menu the shell puts dashboard commands in; `app` is the macOS app menu, File elsewhere. */
+export type DesktopMenu =
+  | "app"
+  | "file"
+  | "edit"
+  | "view"
+  | "go"
+  | "thread"
+  | "pull-request"
+  | "help"
+
+export interface DesktopMenuCommand {
+  id: string
+  label: string
+  group: string
+  menu: DesktopMenu
+  /** Registered as the item's native accelerator when it has a modifier. */
+  shortcut?: string
+}
+
 export interface DesktopProject {
   cwd: string
   name: string
@@ -176,6 +196,17 @@ declare global {
       /** Missing before desktop builds that open app pages in the system browser. */
       openInBrowser?: (path: string) => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
+      /**
+       * Missing before desktop builds that list the dashboard's commands in their
+       * menus; resolves to the ids whose shortcut the menu registered.
+       */
+      setMenuCommands?: (
+        commands: ReadonlyArray<DesktopMenuCommand>
+      ) => Promise<Array<string>>
+      /** `viaShortcut` is true when the item's accelerator, not a click, chose it. */
+      onMenuCommand?: (
+        callback: (commandId: string, viaShortcut: boolean) => void
+      ) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
         current: string | null

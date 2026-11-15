@@ -20,6 +20,16 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:command", listener);
     return () => ipcRenderer.removeListener("desktop:command", listener);
   },
+  setMenuCommands: (commands) =>
+    ipcRenderer.invoke("desktop:set-menu-commands", commands),
+  onMenuCommand: (callback) => {
+    const listener = (_event, commandId, viaShortcut) => {
+      if (typeof commandId === "string")
+        callback(commandId, viaShortcut === true);
+    };
+    ipcRenderer.on("desktop:menu-command", listener);
+    return () => ipcRenderer.removeListener("desktop:menu-command", listener);
+  },
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) =>
     ipcRenderer.invoke("desktop:project-branches", cwd),
