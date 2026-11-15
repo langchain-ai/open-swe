@@ -149,7 +149,9 @@ macOS packaging uses the shared iOS Icon Composer asset at `mobile/assets/icon.i
 It requires Xcode 26 or later; Electron Builder compiles the asset into `Assets.car` and a legacy `.icns` fallback for older macOS versions.
 Edit that shared asset for native Apple icon changes rather than flattening its appearance layers into a PNG.
 The dashboard's `ui/public/logo-mark.png` remains the source for Windows/Linux app icons, native window icons, and source launches.
-Run `python scripts/branding.py` from the Open SWE root to regenerate browser, PWA, and environment-specific icons from that PNG; Pillow is a declared project dependency.
+The shared logo background is the sRGB `Branding.LOGO_BACKGROUND` constant in `scripts/branding.py`, separate from theme-dependent UI action colors.
+Run `python scripts/branding.py` from the Open SWE root to apply it to the PNG's solid background, convert it to Display-P3 for the Apple asset, and regenerate browser, PWA, and environment-specific icons; Pillow is a declared project dependency.
+The PNG remains the artwork source; the generator identifies its background as the most common opaque color, preserving the bird and native Apple appearance layers.
 Preview and staging retain their pink and green backgrounds to distinguish them from production.
 Installed app icons require a desktop shell release, not a downloaded UI update.
 Build outputs are written to `desktop/dist/`; the bundle is `Robin.app`.
