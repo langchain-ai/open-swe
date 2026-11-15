@@ -8,8 +8,12 @@ typed channel API in ``runtime_api`` (``ask_backend``). MDA signs every call wit
 the deployment's ``MDA_SERVICE_SECRET``, and the backend verifies it.
 """
 
+import logging
 import os
 from typing import Final
+
+import httpx
+from langsmith.run_helpers import get_current_run_tree
 
 # The client MDA calls a channel's endpoints with: it signs each call and bounds the answer.
 from managed_deepagents._channels.http.endpoint import (  # noqa: PLC2701
@@ -20,6 +24,9 @@ from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 
 from rt.backend import BACKEND_URL_ENV
+from rt.tracing import span_headers
+
+logger = logging.getLogger(__name__)
 
 # MDA reads the channels to build the deployment, without its environment.
 _UNCONFIGURED: Final = "https://open-swe-backend.invalid"
@@ -50,8 +57,17 @@ async def ask_backend[Request: BaseModel, Response: BaseModel](
     Signed as webhook ``msg_id``, which a call sent again keeps, so the backend
     acts on a delivery once. A refused or failed call raises, and the channel
     reports the failure in the conversation; the provider doesn't send it again.
+    A call made in a traced step, such as one of a Slack message's
+    (``rt.send_trace``), carries the step's trace headers, so the backend traces its
+    answer under it.
     """
-    client = EndpointClient(backend_endpoint(endpoint.path), endpoint.name, endpoint.name)
+    url = backend_endpoint(endpoint.path)
+    headers = _trace_headers()
+    client = EndpointClient(
+        httpx.Request("POST", url, headers=headers) if headers else url,
+        endpoint.name,
+        endpoint.name,
+    )
     delays = (
         _ROLLOUT_RETRY_DELAYS_SECONDS
         if endpoint.delivery == "idempotent"
@@ -61,3 +77,13 @@ async def ask_backend[Request: BaseModel, Response: BaseModel](
         msg_id, request.model_dump_json().encode(), EndpointLimits(endpoint.seconds, delays)
     )
     return endpoint.response.model_validate(answer)
+
+
+def _trace_headers() -> dict[str, str]:
+    """The running span's trace headers, or none outside one."""
+    try:
+        span = get_current_run_tree()
+        return span_headers(span) if span is not None else {}
+    except Exception:
+        logger.warning("Could not read the running span's trace headers", exc_info=True)
+        return {}

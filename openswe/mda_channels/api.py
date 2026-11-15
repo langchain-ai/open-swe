@@ -19,6 +19,7 @@ from runtime_api.endpoint import (
     UnknownEndpointError,
 )
 
+from openswe.agent_api.caller_trace import traced_under
 from openswe.mda_channels.auth import require_mda_channel
 
 router = APIRouter(dependencies=[Depends(require_mda_channel)])
@@ -83,7 +84,11 @@ def _handlers() -> Handlers[ChannelCall]:
 async def channel_api(
     endpoint: str, request: Request, background_tasks: BackgroundTasks
 ) -> JsonValue:
-    """What ``endpoint`` answers the channel's call with."""
+    """What ``endpoint`` answers the channel's call with.
+
+    A call made under a trace, such as a Slack message's (``SlackSendTrace``), has
+    Datadog's spans of its work posted under it.
+    """
     try:
         body = _body.validate_json(await request.body())
     except ValidationError:
@@ -91,7 +96,10 @@ async def channel_api(
             status_code=422, detail="The request body must be a JSON object"
         ) from None
     try:
-        return await _handlers().dispatch(endpoint, ChannelCall(request, background_tasks), body)
+        with traced_under(request.headers):
+            return await _handlers().dispatch(
+                endpoint, ChannelCall(request, background_tasks), body
+            )
     except UnknownEndpointError:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint {endpoint}") from None
     except InvalidRequestError as exc:

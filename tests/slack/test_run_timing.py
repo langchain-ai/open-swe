@@ -1,5 +1,6 @@
 import json
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -358,3 +359,106 @@ async def test_a_slack_run_that_inherited_a_dashboard_sends_metadata_is_timed_as
         "open_swe_slack_thread_first_generation": 3.0,
         "open_swe_slack_thread_first_reply": 5.0,
     }
+
+
+class _LangSmith:
+    """LangSmith as the completion reaches the message's trace: stages posted, root closed."""
+
+    def __init__(self) -> None:
+        self.runs: list[dict[str, object]] = []
+        self.updates: list[tuple[str, dict[str, object]]] = []
+
+    def create_run(self, **run: object) -> None:
+        self.runs.append(run)
+
+    def update_run(self, run_id: str, **fields: object) -> None:
+        self.updates.append((run_id, fields))
+
+
+async def test_run_completion_adds_the_runs_stages_to_the_messages_trace_and_closes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Recorded(monkeypatch)
+    client = _LangSmith()
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    monkeypatch.setattr(ttft, "tracing_is_enabled", lambda: True)
+    monkeypatch.setattr(ttft, "sync_langsmith_client", lambda *_: client)
+    # LangSmith holds the root, still open.
+    retrieve = AsyncMock(return_value=SimpleNamespace(end_time=None))
+    monkeypatch.setattr(
+        ttft,
+        "async_langsmith_client",
+        lambda *_: SimpleNamespace(runs=SimpleNamespace(retrieve=retrieve)),
+    )
+    monkeypatch.setattr(ttft, "resolve_project_id_by_name", AsyncMock(return_value="project-id"))
+    trace_id = "0194a9b2-0000-7000-8000-000000000002"
+    run = _finished_run(
+        [
+            _reply("", output_at=POSTED_MS + 183_000, calls=("c1",)),
+            _posted("c1", "1767225785.123456"),
+        ],
+        slack_send_trace_id=trace_id,
+        slack_send_dotted_order=f"20260101T000000123456Z{trace_id}",
+        slack_send_project="open-swe-mda-preview-production",
+        # Created three minutes after the message: one the channel handed its trace to
+        # is the message's run however late.
+        created_at="2026-01-01T00:03:01+00:00",
+        started_at="2026-01-01T00:03:01+00:00",
+    )
+    run["run_ended_at"] = "2026-01-01T00:03:30+00:00"
+
+    await SlackRunTimeline.settle(run, failed=False)
+
+    # The channel traced everything before the run was created as it ran; the completion
+    # adds the run's own stages, from its creation at 00:03:01.
+    assert [(span["name"], span["outputs"]) for span in client.runs] == [
+        ("first_generation", {"elapsed_ms": 2_123}),
+        ("first_reply", {"elapsed_ms": 2_000}),
+    ]
+    assert all(str(span["trace_id"]) == trace_id for span in client.runs)
+    # In the project MDA opened the trace in, not the one this backend traces runs in.
+    assert {span["session_name"] for span in client.runs} == {"open-swe-mda-preview-production"}
+    assert all(
+        span["extra"]["metadata"]  # type: ignore[index]
+        == {
+            "thread_id": "thread-1",
+            "invocation_id": "inv-1",
+            "agent_run_id": "run-1",
+            "sandbox_kind": "cloud",
+        }
+        for span in client.runs
+    )
+    ((closed, fields),) = client.updates
+    assert closed == trace_id
+    assert fields["end_time"] == ttft.DashboardSendTrace.at(POSTED_MS - 123 + 210_000)
+    assert fields["error"] is None
+    assert fields["session_name"] == "open-swe-mda-preview-production"
+    retrieve.assert_awaited_once()
+
+
+async def test_a_closed_trace_is_not_closed_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Recorded(monkeypatch)
+    client = _LangSmith()
+    monkeypatch.setenv("LANGSMITH_API_KEY", "deployment-key")
+    monkeypatch.setattr(ttft, "tracing_is_enabled", lambda: True)
+    monkeypatch.setattr(ttft, "sync_langsmith_client", lambda *_: client)
+    ended = SimpleNamespace(end_time="2026-01-01T00:00:30+00:00")
+    monkeypatch.setattr(
+        ttft,
+        "async_langsmith_client",
+        lambda *_: SimpleNamespace(runs=SimpleNamespace(retrieve=AsyncMock(return_value=ended))),
+    )
+    monkeypatch.setattr(ttft, "resolve_project_id_by_name", AsyncMock(return_value="project-id"))
+    trace_id = "0194a9b2-0000-7000-8000-000000000002"
+
+    await SlackRunTimeline.settle(
+        _finished_run(
+            [_reply("", output_at=POSTED_MS + 3_000)],
+            slack_send_trace_id=trace_id,
+            slack_send_dotted_order=f"20260101T000000123456Z{trace_id}",
+        ),
+        failed=False,
+    )
+
+    assert client.runs == []
+    assert client.updates == []

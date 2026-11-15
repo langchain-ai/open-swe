@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping
+from contextlib import nullcontext
 from typing import Any
 
 import httpx
@@ -231,26 +232,41 @@ async def proxy_dashboard_thread_commands(
         else None
     )
 
-    if principal.machine:
-        enriched = await _enrich_system_run_start_command(
-            thread_id,
-            principal,
-            parsed,
-            metadata=metadata,
-            creating=creating,
+    send_trace: DashboardSendTrace | None = None
+    if method == "run.start":
+        run_input = start_params.get("input")
+        send_trace = await DashboardSendTrace.open(
+            thread_id=thread_id,
+            client=client,
+            started_at_ms=submitted_at_ms or received_at_ms,
+            received_at_ms=received_at_ms,
+            inputs=run_input if isinstance(run_input, dict) else {},
         )
-    else:
-        enriched = await _enrich_run_start_command(
-            thread_id,
-            login,
-            parsed,
-            metadata=metadata,
-            creating=creating,
-            email=email,
-        )
+    try:
+        with send_trace.stage("build_run") if send_trace is not None else nullcontext():
+            if principal.machine:
+                enriched = await _enrich_system_run_start_command(
+                    thread_id,
+                    principal,
+                    parsed,
+                    metadata=metadata,
+                    creating=creating,
+                )
+            else:
+                enriched = await _enrich_run_start_command(
+                    thread_id,
+                    login,
+                    parsed,
+                    metadata=metadata,
+                    creating=creating,
+                    email=email,
+                )
+    except BaseException as exc:
+        if send_trace is not None:
+            send_trace.fail(f"The run could not be built ({type(exc).__name__})")
+        raise
     outgoing = json.dumps(enriched).encode()
 
-    send_trace: DashboardSendTrace | None = None
     if method == "run.start":
         params = enriched.get("params")
         if isinstance(params, dict):
@@ -263,16 +279,12 @@ async def proxy_dashboard_thread_commands(
             run_metadata[DashboardRunTimeline.CLIENT_KEY] = client.value
             if submitted_at_ms is not None:
                 run_metadata[DashboardRunTimeline.SUBMITTED_AT_KEY] = submitted_at_ms
-            invocation_id = run_metadata.get("invocation_id")
-            run_input = params.get("input")
-            send_trace = await DashboardSendTrace.open(
-                thread_id=thread_id,
-                invocation_id=invocation_id if isinstance(invocation_id, str) else None,
-                client=client,
-                started_at_ms=submitted_at_ms or received_at_ms,
-                inputs=run_input if isinstance(run_input, dict) else {},
-            )
             if send_trace is not None:
+                invocation_id = run_metadata.get("invocation_id")
+                await send_trace.adopt(
+                    thread_id=thread_id,
+                    invocation_id=invocation_id if isinstance(invocation_id, str) else None,
+                )
                 run_metadata.update(send_trace.run_metadata())
             outgoing = json.dumps(enriched).encode()
 
@@ -282,12 +294,13 @@ async def proxy_dashboard_thread_commands(
         else None
     )
     try:
-        reply = await THREADS.command(
-            thread_id,
-            outgoing,
-            user_id=sender,
-            trace_headers=send_trace.headers() if send_trace is not None else None,
-        )
+        with send_trace.stage("start_run") if send_trace is not None else nullcontext():
+            reply = await THREADS.command(
+                thread_id,
+                outgoing,
+                user_id=sender,
+                trace_headers=send_trace.headers() if send_trace is not None else None,
+            )
     except Exception as exc:
         logger.exception(
             "Delivering a thread command failed",
@@ -329,8 +342,11 @@ async def proxy_dashboard_thread_commands(
         reply.status >= 400
         or (isinstance(response_payload, dict) and response_payload.get("type") == "error")
     )
-    if send_trace is not None and not run_start_succeeded:
-        send_trace.fail(f"The run did not start (HTTP {reply.status})")
+    if send_trace is not None:
+        if run_start_succeeded:
+            send_trace.end_commands()
+        else:
+            send_trace.fail(f"The run did not start (HTTP {reply.status})")
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:

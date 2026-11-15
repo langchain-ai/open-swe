@@ -29,6 +29,14 @@ from pydantic import BaseModel, Field, JsonValue
 from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 from runtime_api.operations import RunRequest
 
+# The run metadata naming the LangSmith trace of the Slack message that started the run.
+# The channel's handler opens the trace as the message arrives, and the run's completion
+# webhook adds the run's stages to it and closes it.
+SEND_TRACE_ID_KEY: Final = "slack_send_trace_id"
+SEND_DOTTED_ORDER_KEY: Final = "slack_send_dotted_order"
+# The project the channel traced it in, which may not be the one the backend traces runs in.
+SEND_PROJECT_KEY: Final = "slack_send_project"
+
 
 class SlackMessage(BaseModel):
     """A Slack message the channel received, on its conversation's thread."""

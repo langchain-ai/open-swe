@@ -7,12 +7,15 @@ from contextlib import contextmanager
 from langsmith import tracing_context
 from langsmith.run_trees import RunTree
 
+from openswe.utils.datadog_spans import DatadogSpans
+
 logger = logging.getLogger(__name__)
 
 
 @contextmanager
 def traced_under(headers: Mapping[str, str]) -> Iterator[None]:
-    """Trace the block under the span ``headers`` name, when they name one.
+    """Trace the block under the span ``headers`` name, when they name one, with
+    Datadog's spans of its work.
 
     Without it every hook would start a trace of its own, apart from the run's turn.
     """
@@ -27,5 +30,5 @@ def traced_under(headers: Mapping[str, str]) -> Iterator[None]:
     if parent is None:
         yield
         return
-    with tracing_context(parent=parent):
+    with tracing_context(parent=parent), DatadogSpans.under(parent):
         yield

@@ -10,14 +10,20 @@ Every mark is measured from when the person posted the message, by Slack's own c
   Slack shows no streamed text, so this is the first text the person sees.
 
 The run's completion webhook reads both from the run's own replies, and each goes to an
-OTLP latency histogram labelled by sandbox, once per run.
+OTLP latency histogram labelled by sandbox, once per run. When MDA's Slack channel opened a
+LangSmith trace for the message (``SlackSendTrace``), the webhook also adds a span per stage
+the run went through and closes the trace.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
-from typing import Final
+from itertools import pairwise
+from typing import ClassVar, Final
+
+from runtime_api.slack import SEND_DOTTED_ORDER_KEY, SEND_PROJECT_KEY, SEND_TRACE_ID_KEY
 
 from openswe.dashboard.ttft import DashboardRunTimeline, DashboardSandbox, DashboardSendTrace
 from openswe.invocation import resolve_invocation_id
@@ -38,15 +44,54 @@ _METRICS: Final[dict[str, str]] = {
 }
 
 
+class SlackSendTrace(DashboardSendTrace):
+    """A Slack message's LangSmith trace, from its posting to the end of the run it starts.
+
+    MDA's Slack channel opens it as the message arrives, with a span for each step its
+    handler takes (``rt.slack``); the backend's answers to the handler nest under those.
+    The run's completion webhook takes it up from the run's metadata, adds the run's
+    stages and closes it.
+    """
+
+    NAME = "slack.send"
+    TRACE_ID_KEY = SEND_TRACE_ID_KEY
+    DOTTED_ORDER_KEY = SEND_DOTTED_ORDER_KEY
+    _SPAN_KEYS = ("thread_id", "invocation_id")
+
+    @classmethod
+    def project_of(cls, metadata: Mapping[str, object]) -> str:
+        """The project MDA's deployment opened the trace in, which its own runs trace to."""
+        project = metadata.get(SEND_PROJECT_KEY)
+        return project if isinstance(project, str) and project else super().project_of(metadata)
+
+
 class SlackRunTimeline:
     """One Slack message's marks, read from the run it started."""
 
-    def __init__(self, posted_at_ms: int, *, run_id: str, started_at_ms: int | None = None) -> None:
+    # Each span the completion adds to the message's trace, named after the point it ends at.
+    # The channel traced what came before the run was created itself, as it ran.
+    _STAGES: Final[dict[str, str]] = {
+        "first_generation": "first_generation",
+        "first_reply": "first_reply",
+    }
+    _settling: ClassVar[set[asyncio.Task[None]]] = set()
+
+    def __init__(
+        self,
+        posted_at_ms: int,
+        *,
+        run_id: str,
+        started_at_ms: int | None = None,
+        created_at_ms: int | None = None,
+        trace: SlackSendTrace | None = None,
+    ) -> None:
         self.posted_at_ms = posted_at_ms
         self.run_id = run_id
         # Output before the run started is an earlier run's: a message sent while one
         # worked queues a run that starts only once that one ends.
         self._since_ms = max(posted_at_ms, started_at_ms or 0)
+        self.created_at_ms = created_at_ms
+        self.trace = trace
         self.marks: dict[str, int] = {}
 
     @staticmethod
@@ -65,7 +110,8 @@ class SlackRunTimeline:
 
         ``None`` when no Slack message started the run: none is named, the run was
         created so long after it that it inherited the metadata, or a dashboard send
-        came after it and started this run.
+        came after it and started this run. A run MDA's Slack channel handed the
+        message's trace to was started by it, however late.
         """
         metadata = run.get("metadata")
         run_id = run.get("run_id")
@@ -74,9 +120,17 @@ class SlackRunTimeline:
         posted = cls.ts_ms(metadata.get(TRIGGER_TS_KEY))
         if posted is None:
             return None
+        thread_id = run.get("thread_id")
+        trace = SlackSendTrace.of_run(
+            metadata,
+            thread_id=thread_id if isinstance(thread_id, str) else None,
+            started_at_ms=posted,
+        )
         created = DashboardSendTrace.time_of(run.get("created_at"))
-        if created is not None and created.timestamp() * 1000 - posted > (
-            _MAX_START_DELAY.total_seconds() * 1000
+        if (
+            trace is None
+            and created is not None
+            and created.timestamp() * 1000 - posted > _MAX_START_DELAY.total_seconds() * 1000
         ):
             return None
         sent = DashboardRunTimeline.epoch_ms(metadata.get(DashboardRunTimeline.RECEIVED_AT_KEY))
@@ -87,6 +141,8 @@ class SlackRunTimeline:
             posted,
             run_id=run_id,
             started_at_ms=round(started.timestamp() * 1000) if started is not None else None,
+            created_at_ms=round(created.timestamp() * 1000) if created is not None else None,
+            trace=trace,
         )
         values = run.get("values")
         messages = values.get("messages") if isinstance(values, Mapping) else None
@@ -161,26 +217,57 @@ class SlackRunTimeline:
         return {name: (at - self.posted_at_ms) / 1000 for name, at in self.marks.items()}
 
     @classmethod
-    async def settle(cls, run: Mapping[str, object]) -> None:
-        """Time the Slack message a finished run names; it never raises."""
+    def settle_in_background(cls, run: Mapping[str, object], *, failed: bool) -> None:
+        """Settle a finished run's message without holding up the rest of its completion."""
+        task = asyncio.create_task(cls.settle(run, failed=failed))
+        cls._settling.add(task)
+        task.add_done_callback(cls._settling.discard)
+
+    @classmethod
+    async def settle(cls, run: Mapping[str, object], *, failed: bool = False) -> None:
+        """Time the Slack message a finished run names, and close its trace; it never raises."""
         try:
             timeline = cls.of_run(run)
         except Exception:
             logger.warning("Could not read a Slack message's run timing", exc_info=True)
             return
         thread_id = run.get("thread_id")
-        if timeline is None or not timeline.marks or not isinstance(thread_id, str):
+        if timeline is None or not isinstance(thread_id, str):
             return
         thread = await DashboardRunTimeline.thread_metadata(thread_id, timeline.run_id)
-        # A completion delivered again was timed the first time.
-        if thread is None or DashboardRunTimeline.timed_already(
-            thread, timeline.run_id, key=TIMED_RUNS_KEY
+        sandbox = DashboardSandbox.of_thread(thread) if thread is not None else None
+        # A completion delivered again was timed the first time, and closed the trace.
+        if (
+            thread is not None
+            and sandbox is not None
+            and timeline.marks
+            and not DashboardRunTimeline.timed_already(thread, timeline.run_id, key=TIMED_RUNS_KEY)
         ):
-            return
-        timeline.record(thread_id=thread_id, sandbox=DashboardSandbox.of_thread(thread))
-        await DashboardRunTimeline.mark_timed(
-            thread_id, thread, timeline.run_id, key=TIMED_RUNS_KEY
-        )
+            timeline.record(thread_id=thread_id, sandbox=sandbox)
+            await DashboardRunTimeline.mark_timed(
+                thread_id, thread, timeline.run_id, key=TIMED_RUNS_KEY
+            )
+        if timeline.trace is not None and not await timeline.trace.ended():
+            try:
+                timeline.trace.record_stages(
+                    timeline.stages(), run_id=timeline.run_id, sandbox=sandbox
+                )
+            except Exception:
+                logger.warning("Failed to trace a Slack message's stages", exc_info=True)
+            await timeline.trace.close(run, failed=failed)
+
+    def stages(self) -> list[tuple[str, int, int]]:
+        """Each stage the run went through, as ``(span name, began, ended)`` in epoch ms,
+        from its creation on; none ends before it starts, whatever a host's clock says."""
+        if self.created_at_ms is None:
+            return []
+        points: list[tuple[str, int]] = [("created", self.created_at_ms)]
+        for name in self._STAGES:
+            if name in self.marks:
+                points.append((name, max(self.marks[name], points[-1][1])))
+        return [
+            (self._STAGES[name], began, ended) for (_, began), (name, ended) in pairwise(points)
+        ]
 
     def record(self, *, thread_id: str, sandbox: DashboardSandbox) -> None:
         seconds = self.seconds()

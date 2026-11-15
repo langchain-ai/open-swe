@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import json
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
@@ -2261,3 +2262,40 @@ async def test_proxy_commands_leaves_a_sends_timing_for_the_run_it_started(monke
     # The run's completion times the send only if it is this run, not a later one that
     # inherited the send's metadata.
     assert any(update.get("dashboard_send_runs") == {"1000000": "run-1"} for update in updates)
+
+
+async def test_proxy_commands_closes_the_send_trace_when_the_run_cannot_be_built(
+    monkeypatch,
+) -> None:
+    class Trace:
+        def __init__(self) -> None:
+            self.failed: list[str] = []
+
+        def stage(self, name: str) -> contextlib.AbstractContextManager[object]:
+            return contextlib.nullcontext()
+
+        def fail(self, error: str) -> None:
+            self.failed.append(error)
+
+    class IdleThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "status": "idle", "metadata": {"owner_login": "ada"}}
+
+    async def refuse(*_: object, **__: object) -> dict[str, object]:
+        raise HTTPException(401, "Sign in with LangSmith to use Robin")
+
+    trace = Trace()
+    monkeypatch.setattr(thread_proxy.DashboardSendTrace, "open", AsyncMock(return_value=trace))
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
+    )
+    patch_thread_module(monkeypatch, "THREADS", ThreadStoreOverClient())
+    monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", refuse)
+
+    with pytest.raises(HTTPException):
+        await thread_proxy.proxy_dashboard_thread_commands(
+            "tid", "ada", b'{"method": "run.start", "params": {}}'
+        )
+
+    # A trace left open would show the send as still running.
+    assert trace.failed == ["The run could not be built (HTTPException)"]

@@ -144,30 +144,47 @@ def langsmith(monkeypatch: pytest.MonkeyPatch) -> _RecordingClient:
     return client
 
 
-async def test_send_trace_nests_the_run_without_its_metadata(
-    langsmith: _RecordingClient,
+async def test_send_trace_traces_the_commands_request_as_it_runs(
+    monkeypatch: pytest.MonkeyPatch, langsmith: _RecordingClient
 ) -> None:
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
     messages = {"messages": [{"type": "human", "content": "Fix login"}]}
     trace = await ttft.DashboardSendTrace.open(
         thread_id="thread-1",
-        invocation_id="invocation-1",
         client=ttft.DashboardClient.DESKTOP,
         started_at_ms=SENT_AT - 300,
+        received_at_ms=SENT_AT,
         inputs=messages,
     )
     assert trace is not None
 
-    # The root stands for the turn in the thread's view and in cost lookups.
-    (root,) = langsmith.runs
-    assert root["name"] == "dashboard.send"
+    # The span of the request that starts the run opens as the send arrives.
+    (commands,) = langsmith.runs
+    assert commands["name"] == "commands"
+    assert commands["parent_run_id"] == trace.root.id
+    assert commands["start_time"] == ttft.DashboardSendTrace.at(SENT_AT)
+    with trace.stage("build_run"):
+        pass
+    (build,) = [run for run in langsmith.runs if run["name"] == "build_run"]
+    assert build["parent_run_id"] == commands["id"]
+
+    # Once the run is built, the root is posted naming it for the thread view, cost
+    # lookups and personal trace access. Any update would end it, so it gets none.
+    await trace.adopt(thread_id="thread-1", invocation_id="invocation-1")
+    (root,) = [run for run in langsmith.runs if run["name"] == "dashboard.send"]
     assert root["inputs"] == messages
     assert root["extra"]["metadata"] == {  # type: ignore[index]
         "thread_id": "thread-1",
-        "invocation_id": "invocation-1",
         "dashboard_client": "desktop",
-        # Personal trace access reads the root's owner.
+        "invocation_id": "invocation-1",
         "owner_ls_user_id": "ls-user-1",
     }
+    assert root.get("end_time") is None
+    assert _updates_of(langsmith, trace.trace_id) == []
+
+    trace.end_commands()
+    (ended,) = _updates_of(langsmith, commands["id"])
+    assert ended["end_time"] is not None
     assert trace.run_metadata() == {
         "dashboard_send_trace_id": trace.trace_id,
         "dashboard_send_dotted_order": trace.root.dotted_order,
@@ -179,6 +196,32 @@ async def test_send_trace_nests_the_run_without_its_metadata(
         "langsmith-metadata=" + quote(json.dumps({"ls_nest_under_parent": True}))
     )
     assert "thread-1" not in headers["baggage"]
+
+
+async def test_a_send_whose_run_is_never_built_posts_its_trace_closed(
+    langsmith: _RecordingClient,
+) -> None:
+    trace = await ttft.DashboardSendTrace.open(
+        thread_id="thread-1",
+        client=ttft.DashboardClient.WEB,
+        started_at_ms=SENT_AT,
+        received_at_ms=SENT_AT,
+        inputs={},
+    )
+    assert trace is not None
+
+    trace.fail("The run could not be built (HTTPException)")
+
+    (root,) = [run for run in langsmith.runs if run["name"] == "dashboard.send"]
+    assert root["error"] == "The run could not be built (HTTPException)"
+    assert root["end_time"] is not None
+    commands = next(run for run in langsmith.runs if run["name"] == "commands")
+    (ended,) = _updates_of(langsmith, commands["id"])
+    assert ended["error"] == "The run could not be built (HTTPException)"
+
+
+def _updates_of(langsmith: _RecordingClient, run_id: object) -> list[dict[str, object]]:
+    return [fields for updated, fields in langsmith.updates if str(updated) == str(run_id)]
 
 
 async def test_run_completion_times_the_send_from_its_replies_and_closes_its_trace(
@@ -207,9 +250,9 @@ async def test_run_completion_times_the_send_from_its_replies_and_closes_its_tra
     assert timing.dashboard_sandbox == "bridge"  # type: ignore[attr-defined]
 
     trace_id = "0194a9b2-0000-7000-8000-000000000001"
+    # ``commands`` is the request's own span, traced as it ran.
     assert [(span["name"], span["outputs"]) for span in langsmith.runs] == [
         ("client.request", {"elapsed_ms": 300}),
-        ("commands", {"elapsed_ms": 1_500}),
         ("first_generation", {"elapsed_ms": 7_500}),
         ("first_text", {"elapsed_ms": 21_000}),
     ]
@@ -246,7 +289,7 @@ async def test_a_run_that_gave_no_output_traces_only_its_request_stages(
     )
 
     assert recorded.histograms == []
-    assert [span["name"] for span in langsmith.runs] == ["client.request", "commands"]
+    assert [span["name"] for span in langsmith.runs] == ["client.request"]
     ((_, fields),) = langsmith.updates
     assert fields["error"] == "RuntimeError('boom')"
 
@@ -397,8 +440,7 @@ async def test_a_completion_delivered_again_does_only_what_the_first_did_not(
         []
         if closed
         else [
-            uuid5(trace_id, name)
-            for name in ("client.request", "commands", "first_generation", "first_text")
+            uuid5(trace_id, name) for name in ("client.request", "first_generation", "first_text")
         ]
     )
 

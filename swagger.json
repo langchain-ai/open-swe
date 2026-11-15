@@ -28659,7 +28659,7 @@
     },
     "/mda/channel-api/{endpoint}": {
       "post": {
-        "description": "What ``endpoint`` answers the channel's call with.",
+        "description": "What ``endpoint`` answers the channel's call with.\n\nA call made under a trace, such as a Slack message's (``SlackSendTrace``), has\nDatadog's spans of its work posted under it.",
         "operationId": "channel_api_mda_channel_api__endpoint__post",
         "parameters": [
           {

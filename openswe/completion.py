@@ -448,10 +448,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
     if status in _TERMINAL_RUN_STATUSES:
-        DashboardRunTimeline.settle_in_background(
-            payload, failed=status in _TERMINAL_FAILURE_STATUSES
-        )
-        await SlackRunTimeline.settle(payload)
+        failed = status in _TERMINAL_FAILURE_STATUSES
+        DashboardRunTimeline.settle_in_background(payload, failed=failed)
+        SlackRunTimeline.settle_in_background(payload, failed=failed)
     try:
         await refresh_thread_status(thread_id)
     except Exception:

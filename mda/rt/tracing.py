@@ -21,6 +21,21 @@ _SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
 _ENDING: Final[set[asyncio.Task[None]]] = set()
 
 
+def span_headers(span: RunTree) -> dict[str, str]:
+    """Distributed-tracing headers that nest a call's spans under ``span``.
+
+    Only the trace position and destination travel: the span's metadata and tags stay
+    out, since the receiver sets its own and they can outgrow a header.
+    """
+    headers = span.to_headers()
+    headers["baggage"] = ",".join(
+        item
+        for item in headers.get("baggage", "").split(",")
+        if item and not item.startswith(_SPAN_ONLY_BAGGAGE)
+    )
+    return headers
+
+
 def _ended(task: asyncio.Task[None]) -> None:
     _ENDING.discard(task)
     if task.cancelled():
@@ -160,13 +175,7 @@ class TurnTrace:
                     or not span.trace_id
                 ):
                     return {}
-                headers = span.to_headers()
-                headers["baggage"] = ",".join(
-                    item
-                    for item in headers.get("baggage", "").split(",")
-                    if item and not item.startswith(_SPAN_ONLY_BAGGAGE)
-                )
-                return headers
+                return span_headers(span)
         except Exception:
             logger.warning("Could not read the running span's trace headers", exc_info=True)
         return {}

@@ -20,6 +20,7 @@ handler replies with it in the Slack thread.
 import logging
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Final, Literal, cast
 
@@ -55,6 +56,7 @@ from runtime_api.slack import (
 from rt import slack_prompt
 from rt.input_messages import ChannelIdentity
 from rt.intake import ask_backend
+from rt.send_trace import SlackSendTrace
 from rt.slack_message import Breakout, ParsedSlackMessage, SlackAction
 
 EXTERNAL_CHANNEL: Final = "Robin does not operate in channels with external participants."
@@ -130,7 +132,11 @@ async def start_turn(
     event: SlackMessageEvent, thread: SlackChannelThread
 ) -> ChannelRunResult | ChannelReplyResult | None:
     """The run a message starts on its conversation's thread, the reply that says why
-    it starts none, or ``None``."""
+    it starts none, or ``None``.
+
+    A message that starts a turn is traced from its posting (``rt.send_trace``).
+    """
+    received_at = datetime.now(UTC)
     raw = event.payload
     nested = raw.get("assistant_thread")
     grant_holder = nested if isinstance(nested, dict) else {}
@@ -186,11 +192,13 @@ async def start_turn(
     if not message.team_id or not message.app_id:
         return None
     parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
+    facts_began = datetime.now(UTC)
     facts = await ask_backend(
         SLACK_MESSAGE_FACTS,
         SlackMessageFactsRequest(**message.model_dump(), workspace_tag=parsed.workspace or ""),
         msg_id=f"facts_{event.delivery_id}",
     )
+    facts_ended = datetime.now(UTC)
     decided = _decide(message, facts, parsed, bot_user_id, is_message=_is_message(raw))
     if isinstance(decided, str):
         return reply(decided)
@@ -211,14 +219,45 @@ async def start_turn(
     if decided is None:
         return None
     kind, turn = decided
-    if kind != "turn":
-        start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
-        if start.declined is not None:
-            return reply(decline_text(start.declined))
-        return run_result(start, await _branch_seed(start, thread))
-    return await _start_turn(
-        event, thread, message, facts, parsed, turn, (bot_user_id, bot_username)
+    # Only a message that starts a turn is traced, so the channel's chatter isn't.
+    send = SlackSendTrace.open(
+        thread_id=str(thread.id),
+        channel_id=message.channel_id,
+        message_ts=message.message_ts,
+        text=text,
+        received_at=received_at,
+        facts=(facts_began, facts_ended),
     )
+    try:
+        if kind != "turn":
+            with send.step("start_slack_turn"):
+                start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
+            if start.declined is not None:
+                send.no_run(f"declined: {start.declined.reason}")
+                return reply(decline_text(start.declined))
+            with send.step("branch_seed"):
+                seed = await _branch_seed(start, thread)
+            return _handed(send, start, thread, seed)
+        return await _start_turn(
+            event, thread, message, facts, parsed, turn, (bot_user_id, bot_username), send
+        )
+    except BaseException as exc:
+        send.no_run("failed", error=f"{type(exc).__name__}: {exc}")
+        raise
+
+
+def _handed(
+    send: SlackSendTrace,
+    start: SlackTurnStart,
+    thread: SlackChannelThread,
+    seed: Mapping[str, JsonValue] | None = None,
+) -> ChannelRunResult | None:
+    """The run the backend built, as the channel starts it, carrying the message's trace."""
+    if start.run is not None:
+        send.started(start.run, thread_id=str(start.thread_id or thread.id))
+    else:
+        send.no_run("no run")
+    return run_result(start, seed)
 
 
 def _attachments(value: object) -> list[dict[str, JsonValue]]:
@@ -346,60 +385,69 @@ async def _start_turn(
     parsed: ParsedSlackMessage,
     turn: StartSlackTurn,
     bot: tuple[str, str],
+    send: SlackSendTrace,
 ) -> ChannelRunResult | ChannelReplyResult | None:
     """Read the Slack thread, ask the backend for the turn, and build its prompt."""
     bot_user_id, bot_username = bot
     root_ts = CONCIERGE_TS if facts.concierge else message.thread_ts
     context_ts = message.reply_thread_ts or root_ts
-    history = await slack_prompt.slack_history(message.channel_id, context_ts)
-    current = next((item for item in history if str(item.get("ts")) == message.message_ts), None)
-    if current is None:
-        history.append(
-            {
-                "ts": message.message_ts,
-                "text": message.text,
-                "user": message.user_id,
-                "attachments": message.attachments,
-                **(
-                    {"bot_id": message.bot_id, "bot_profile": {"name": facts.bot_name}}
-                    if message.bot_id
-                    else {}
-                ),
-            }
+    with send.step("read_slack_thread"):
+        history = await slack_prompt.slack_history(message.channel_id, context_ts)
+        current = next(
+            (item for item in history if str(item.get("ts")) == message.message_ts), None
         )
-    elif message.attachments and not current.get("attachments"):
-        current["attachments"] = message.attachments
-    await slack_prompt.await_link_unfurls(
-        message.channel_id,
-        context_ts,
-        current if current is not None else history[-1],
-    )
-    # What the conversation's thread holds. A concierge DM's runs go on another thread,
-    # whose state the handler can't read.
-    state = None if facts.concierge else await thread.get_state()
-    context, _ = slack_prompt.select_context_messages(
-        history,
-        message.message_ts,
-        bot_user_id,
-        bot_username,
-        treat_all_messages_as_mentions=turn.treat_all_messages_as_mentions,
-        held_timestamps=None if facts.concierge else _held_timestamps(state),
-    )
-    context_user_ids = [user for item in context if (user := _text(item.get("user")))]
-    texts = [
-        message.text,
-        slack_prompt.format_messages_for_prompt(context + context, {}, bot_user_id, bot_username),
-    ]
-    names = await slack_prompt.user_names(
-        [*context_user_ids, *(m for text in texts for m in slack_prompt.mentioned_user_ids(text))]
-    )
-    channel_names = await slack_prompt.public_channel_names(
-        [m for text in texts for m in slack_prompt.mentioned_channel_ids(text)]
-    )
-    links_section, link_images = await slack_prompt.resolved_links(
-        context, names, channel_id=message.channel_id
-    )
-    image_urls = slack_prompt.image_urls(context, link_images)
+        if current is None:
+            history.append(
+                {
+                    "ts": message.message_ts,
+                    "text": message.text,
+                    "user": message.user_id,
+                    "attachments": message.attachments,
+                    **(
+                        {"bot_id": message.bot_id, "bot_profile": {"name": facts.bot_name}}
+                        if message.bot_id
+                        else {}
+                    ),
+                }
+            )
+        elif message.attachments and not current.get("attachments"):
+            current["attachments"] = message.attachments
+        await slack_prompt.await_link_unfurls(
+            message.channel_id,
+            context_ts,
+            current if current is not None else history[-1],
+        )
+        # What the conversation's thread holds. A concierge DM's runs go on another thread,
+        # whose state the handler can't read.
+        state = None if facts.concierge else await thread.get_state()
+        context, _ = slack_prompt.select_context_messages(
+            history,
+            message.message_ts,
+            bot_user_id,
+            bot_username,
+            treat_all_messages_as_mentions=turn.treat_all_messages_as_mentions,
+            held_timestamps=None if facts.concierge else _held_timestamps(state),
+        )
+        context_user_ids = [user for item in context if (user := _text(item.get("user")))]
+        texts = [
+            message.text,
+            slack_prompt.format_messages_for_prompt(
+                context + context, {}, bot_user_id, bot_username
+            ),
+        ]
+        names = await slack_prompt.user_names(
+            [
+                *context_user_ids,
+                *(m for text in texts for m in slack_prompt.mentioned_user_ids(text)),
+            ]
+        )
+        channel_names = await slack_prompt.public_channel_names(
+            [m for text in texts for m in slack_prompt.mentioned_channel_ids(text)]
+        )
+        links_section, link_images = await slack_prompt.resolved_links(
+            context, names, channel_id=message.channel_id
+        )
+        image_urls = slack_prompt.image_urls(context, link_images)
     performance = turn.performance_command
     # A known workspace tag is taken out of a new thread's first message.
     tagged = bool(parsed.workspace) and facts.workspace_known
@@ -420,79 +468,83 @@ async def _start_turn(
             for item in history
         )
     )
-    start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
+    with send.step("start_slack_turn"):
+        start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
     if start.declined is not None:
+        send.no_run(f"declined: {start.declined.reason}")
         return reply(decline_text(start.declined))
     if start.run is None or start.prompt is None:
+        send.no_run("no run")
         return None
-    prompt = start.prompt
-    if not prompt.first_turn and tagged:
-        # Only the opening message picks the workspace: a later tag stays in the text.
-        turn.clean_text = _clean_text(
-            parsed, bot, names, channel_names, performance=performance, workspace=False
-        )
-    if prompt.sender_name and message.user_id not in names:
-        names[message.user_id] = prompt.sender_name
-    if prompt.promptable_user_ids is not None:
-        # A private thread's prompt quotes, links and shows only what its people wrote, and
-        # Robin's notices.
-        allowed = set(prompt.promptable_user_ids)
-        quoted = SlackNotice.private_thread_messages(
-            context, lambda item: _text(item.get("user")) in allowed, bot_user_id=bot_user_id
-        )
-        if len(quoted) != len(context):
-            context = quoted
-            links_section, link_images = await slack_prompt.resolved_links(
-                context, names, channel_id=message.channel_id
+    with send.step("build_prompt"):
+        prompt = start.prompt
+        if not prompt.first_turn and tagged:
+            # Only the opening message picks the workspace: a later tag stays in the text.
+            turn.clean_text = _clean_text(
+                parsed, bot, names, channel_names, performance=performance, workspace=False
             )
-            image_urls = slack_prompt.image_urls(context, link_images)
-    images = await slack_prompt.image_blocks(image_urls)
-    # The model has what earlier runs on this thread handed it; a concierge DM's runs go
-    # on another thread, whose state the handler can't read, so its context may repeat.
-    if start.thread_id not in {None, thread.id}:
-        state = None
-    elif facts.concierge:
-        state = await thread.get_state()
-    visible, dispatched = slack_prompt.dispatched_context(state)
-    described = {message.user_id} if prompt.first_turn else set(prompt.person_ids)
-    run_input = slack_prompt.build_input(
-        context,
-        names,
-        prompt.logins,
-        person_ids_by_user_id=prompt.person_ids,
-        channel_names_by_id=channel_names,
-        channel=cast(ChannelIdentity, prompt.channel),
-        bot_user_id=bot_user_id,
-        event_ts=message.message_ts,
-        source_message_ts=message.message_ts,
-        trigger_user_id=message.user_id,
-        request_text=turn.clean_text,
-        request_blocks=[
-            cast(dict[str, Any], create_text_block(turn.clean_text)),
-            *cast(list[dict[str, Any]], images),
-        ],
-        turn_context=slack_prompt.thread_turn_context(
-            request="\n\n".join(prompt.turn_sections), resolved_links=links_section
-        ),
-        constant_context=slack_prompt.thread_constant_context(
-            concierge=facts.concierge,
-            kitchen=turn.kitchen_channel,
-            ask=prompt.ask_channel,
-        ),
-        dispatched_timestamps=dispatched,
-        run_described_person_ids={
-            person for slack_id in described if (person := prompt.person_ids.get(slack_id))
-        },
-        visible_context_hashes=visible,
-        trigger_system=slack_prompt.bot_system_identity(message.bot_id, facts.bot_name)
-        if message.bot_id
-        else None,
-        explicit_mention=message.explicit_mention
-        or slack_prompt.mentions_open_swe(message.text, bot_user_id, bot_username),
-        bot_username=bot_username,
-    )
-    start.run.input = cast(dict[str, JsonValue], dict(run_input))
-    return run_result(start)
+        if prompt.sender_name and message.user_id not in names:
+            names[message.user_id] = prompt.sender_name
+        if prompt.promptable_user_ids is not None:
+            # A private thread's prompt quotes, links and shows only what its people wrote, and
+            # Robin's notices.
+            allowed = set(prompt.promptable_user_ids)
+            quoted = SlackNotice.private_thread_messages(
+                context, lambda item: _text(item.get("user")) in allowed, bot_user_id=bot_user_id
+            )
+            if len(quoted) != len(context):
+                context = quoted
+                links_section, link_images = await slack_prompt.resolved_links(
+                    context, names, channel_id=message.channel_id
+                )
+                image_urls = slack_prompt.image_urls(context, link_images)
+        images = await slack_prompt.image_blocks(image_urls)
+        # The model has what earlier runs on this thread handed it; a concierge DM's runs go
+        # on another thread, whose state the handler can't read, so its context may repeat.
+        if start.thread_id not in {None, thread.id}:
+            state = None
+        elif facts.concierge:
+            state = await thread.get_state()
+        visible, dispatched = slack_prompt.dispatched_context(state)
+        described = {message.user_id} if prompt.first_turn else set(prompt.person_ids)
+        run_input = slack_prompt.build_input(
+            context,
+            names,
+            prompt.logins,
+            person_ids_by_user_id=prompt.person_ids,
+            channel_names_by_id=channel_names,
+            channel=cast(ChannelIdentity, prompt.channel),
+            bot_user_id=bot_user_id,
+            event_ts=message.message_ts,
+            source_message_ts=message.message_ts,
+            trigger_user_id=message.user_id,
+            request_text=turn.clean_text,
+            request_blocks=[
+                cast(dict[str, Any], create_text_block(turn.clean_text)),
+                *cast(list[dict[str, Any]], images),
+            ],
+            turn_context=slack_prompt.thread_turn_context(
+                request="\n\n".join(prompt.turn_sections), resolved_links=links_section
+            ),
+            constant_context=slack_prompt.thread_constant_context(
+                concierge=facts.concierge,
+                kitchen=turn.kitchen_channel,
+                ask=prompt.ask_channel,
+            ),
+            dispatched_timestamps=dispatched,
+            run_described_person_ids={
+                person for slack_id in described if (person := prompt.person_ids.get(slack_id))
+            },
+            visible_context_hashes=visible,
+            trigger_system=slack_prompt.bot_system_identity(message.bot_id, facts.bot_name)
+            if message.bot_id
+            else None,
+            explicit_mention=message.explicit_mention
+            or slack_prompt.mentions_open_swe(message.text, bot_user_id, bot_username),
+            bot_username=bot_username,
+        )
+        start.run.input = cast(dict[str, JsonValue], dict(run_input))
+    return _handed(send, start, thread)
 
 
 async def start_edit(

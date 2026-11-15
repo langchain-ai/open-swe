@@ -22,13 +22,15 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from itertools import pairwise
-from typing import TYPE_CHECKING, ClassVar, Final
+from typing import TYPE_CHECKING, ClassVar, Final, Self
 from urllib.parse import quote
 
+from langsmith.run_helpers import trace, tracing_context
 from langsmith.run_trees import RunTree
 from langsmith.utils import tracing_is_enabled
 from pydantic import JsonValue
@@ -37,6 +39,7 @@ from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.threads.runtimes import MdaRuntime
+from openswe.utils.datadog_spans import DatadogSpans
 from openswe.utils.langsmith import (
     async_langsmith_client,
     resolve_project_id_by_name,
@@ -95,8 +98,9 @@ class DashboardSandbox(StrEnum):
 class DashboardSendTrace:
     """One send's LangSmith trace, from the click to the end of the run it starts.
 
-    The backend opens it as the send arrives and hands its trace headers to the run's
-    start, so Managed Deep Agents nests the run inside it. The run's completion webhook
+    The backend opens it as the send arrives, with a live ``commands`` span for the
+    request that starts the run, and hands its trace headers to the run's start, so
+    Managed Deep Agents nests the run inside it. The run's completion webhook
     takes it up again from the run's metadata (:meth:`of_run`), adds a span per stage the
     send went through, and closes it with the run's end, last message and error
     (:meth:`close`). It carries the thread and invocation the run's root would, so the
@@ -105,16 +109,25 @@ class DashboardSendTrace:
 
     # The baggage metadata key Managed Deep Agents adopts trace headers on.
     _NEST_UNDER_PARENT: Final = "ls_nest_under_parent"
+    # The trace's root span.
+    NAME: ClassVar[str] = "dashboard.send"
     # The run metadata that names the send's trace, for its completion to close.
-    TRACE_ID_KEY: Final = "dashboard_send_trace_id"
-    DOTTED_ORDER_KEY: Final = "dashboard_send_dotted_order"
+    TRACE_ID_KEY: ClassVar[str] = "dashboard_send_trace_id"
+    DOTTED_ORDER_KEY: ClassVar[str] = "dashboard_send_dotted_order"
     # How long a close waits to learn whether the root is already closed.
     _ENDED_TIMEOUT_S: Final = 5
     # The root's metadata each stage span repeats, so stages chart by client on their own.
-    _SPAN_KEYS: Final = ("thread_id", "invocation_id", "dashboard_client")
+    _SPAN_KEYS: ClassVar[tuple[str, ...]] = ("thread_id", "invocation_id", "dashboard_client")
 
-    def __init__(self, root: RunTree) -> None:
+    def __init__(
+        self, root: RunTree, commands: RunTree | None = None, *, posted: bool = True
+    ) -> None:
         self.root = root
+        # The span of the request that starts the run, open until the run is started.
+        self.commands = commands
+        # Whether LangSmith holds the root: a send's root waits for its run to be built,
+        # since any update to a posted run also ends it.
+        self._posted = posted
 
     @staticmethod
     def at(epoch_ms: int) -> datetime:
@@ -133,21 +146,19 @@ class DashboardSendTrace:
         cls,
         *,
         thread_id: str,
-        invocation_id: str | None,
         client: DashboardClient,
         started_at_ms: int,
+        received_at_ms: int,
         inputs: Mapping[str, object],
     ) -> DashboardSendTrace | None:
-        """Start the trace, or ``None`` when this backend does not trace or cannot."""
+        """Start the trace as the send arrives, before its run is built, or ``None`` when
+        this backend does not trace or cannot. :meth:`adopt` names the run's invocation
+        and owner once the run is built."""
         api_key = ENV.LANGSMITH_API_KEY.optional()
         if not api_key or not tracing_is_enabled():
             return None
         try:
-            # Personal trace access reads the root's owner, and the run now nests below it.
-            owner = await MdaRuntime.owner_ls_user_id(thread_id)
-            return cls._started(
-                api_key, thread_id, invocation_id, client, started_at_ms, inputs, owner
-            )
+            return cls._started(api_key, thread_id, client, started_at_ms, received_at_ms, inputs)
         except Exception:
             logger.warning("Could not open a dashboard send's trace", exc_info=True)
             return None
@@ -157,15 +168,14 @@ class DashboardSendTrace:
         cls,
         api_key: str,
         thread_id: str,
-        invocation_id: str | None,
         client: DashboardClient,
         started_at_ms: int,
+        received_at_ms: int,
         inputs: Mapping[str, object],
-        owner_ls_user_id: str | None,
     ) -> DashboardSendTrace:
         trace_id = uuid.uuid7()
         root = RunTree(
-            name="dashboard.send",
+            name=cls.NAME,
             id=trace_id,
             trace_id=trace_id,
             run_type="chain",
@@ -177,13 +187,79 @@ class DashboardSendTrace:
                 "metadata": {
                     "thread_id": thread_id,
                     "dashboard_client": client.value,
-                    **({"invocation_id": invocation_id} if invocation_id else {}),
-                    **({"owner_ls_user_id": owner_ls_user_id} if owner_ls_user_id else {}),
                 }
             },
         )
-        root.post()
-        return cls(root)
+        commands = root.create_child(
+            "commands",
+            run_id=cls.stage_id(trace_id, "commands"),
+            start_time=cls.at(received_at_ms),
+        )
+        commands.post()
+        return cls(root, commands, posted=False)
+
+    @staticmethod
+    def stage_id(trace_id: uuid.UUID, name: str) -> uuid.UUID:
+        """A stage span's id, from its trace and name, so tracing it again rewrites it."""
+        return uuid.uuid5(trace_id, name)
+
+    async def adopt(self, *, thread_id: str, invocation_id: str | None) -> None:
+        """Post the root, naming the built run's invocation and owner, which the thread
+        view, cost lookups and personal trace access read; it stays open."""
+        try:
+            owner = await MdaRuntime.owner_ls_user_id(thread_id)
+            self.root.add_metadata(
+                {
+                    **({"invocation_id": invocation_id} if invocation_id else {}),
+                    **({"owner_ls_user_id": owner} if owner else {}),
+                }
+            )
+        except Exception:
+            logger.warning(
+                "Could not name a dashboard send's run on its trace",
+                extra={"dashboard_send_trace_id": self.trace_id},
+                exc_info=True,
+            )
+        self._post_root()
+
+    def _post_root(self) -> None:
+        if self._posted:
+            return
+        self._posted = True
+        try:
+            self.root.post()
+        except Exception:
+            logger.warning(
+                "Could not post a dashboard send's trace",
+                extra={"dashboard_send_trace_id": self.trace_id},
+                exc_info=True,
+            )
+
+    @contextmanager
+    def stage(self, name: str) -> Generator[None]:
+        """A span of the ``commands`` request while it is open, with Datadog's spans of
+        the request's work under it."""
+        if self.commands is None:
+            yield
+            return
+        # The send is traced, whatever this process last read of the tracing setting.
+        with (
+            tracing_context(enabled=True),
+            trace(name, parent=self.commands, client=self.root.client) as run,
+            DatadogSpans.under(run),
+        ):
+            yield
+
+    def end_commands(self, error: str | None = None) -> None:
+        """Close the ``commands`` span: the run has started, or will not."""
+        commands, self.commands = self.commands, None
+        if commands is None:
+            return
+        try:
+            commands.end(error=error)
+            commands.patch()
+        except Exception:
+            logger.warning("Could not close a dashboard send's commands span", exc_info=True)
 
     @property
     def trace_id(self) -> str:
@@ -194,10 +270,15 @@ class DashboardSendTrace:
         return {self.TRACE_ID_KEY: self.trace_id, self.DOTTED_ORDER_KEY: self.root.dotted_order}
 
     @classmethod
+    def project_of(cls, metadata: Mapping[str, object]) -> str:
+        """The project a run's trace is in: this backend opened it in the runs' own."""
+        return tracing_project()
+
+    @classmethod
     def of_run(
         cls, metadata: Mapping[str, object], *, thread_id: str | None, started_at_ms: int
-    ) -> DashboardSendTrace | None:
-        """The send trace a run's metadata names, to add to and close; its root is not posted again."""
+    ) -> Self | None:
+        """The trace a run's metadata names, to add to and close; its root is not posted again."""
         trace_id = metadata.get(cls.TRACE_ID_KEY)
         dotted_order = metadata.get(cls.DOTTED_ORDER_KEY)
         api_key = ENV.LANGSMITH_API_KEY.optional()
@@ -210,13 +291,13 @@ class DashboardSendTrace:
             return None
         try:
             root = RunTree(
-                name="dashboard.send",
+                name=cls.NAME,
                 id=uuid.UUID(trace_id),
                 trace_id=uuid.UUID(trace_id),
                 dotted_order=dotted_order,
                 run_type="chain",
                 start_time=cls.at(started_at_ms),
-                project_name=tracing_project(),
+                project_name=cls.project_of(metadata),
                 ls_client=sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get()),
                 extra={
                     "metadata": {
@@ -238,7 +319,8 @@ class DashboardSendTrace:
     async def ended(self) -> bool:
         """Whether the trace is closed already: a webhook delivered again has closed it."""
         api_key = ENV.LANGSMITH_API_KEY.optional()
-        project_id = await resolve_project_id_by_name(tracing_project()) if api_key else None
+        project = self.root.session_name
+        project_id = await resolve_project_id_by_name(project) if api_key and project else None
         if not api_key or not project_id:
             return False
         client: AsyncLangSmithClient = async_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get())
@@ -291,9 +373,13 @@ class DashboardSendTrace:
 
     def fail(self, error: str) -> None:
         """Close the trace of a send whose run did not start."""
+        self.end_commands(error)
         try:
             self.root.end(error=error)
-            self.root.patch()
+            if self._posted:
+                self.root.patch()
+            else:
+                self._post_root()
         except Exception:
             logger.warning("Could not close a dashboard send's trace", exc_info=True)
 
@@ -313,7 +399,7 @@ class DashboardSendTrace:
         for name, began, ended in stages:
             self.root.create_child(
                 name,
-                run_id=uuid.uuid5(uuid.UUID(self.trace_id), name),
+                run_id=self.stage_id(uuid.UUID(self.trace_id), name),
                 start_time=self.at(began),
                 end_time=self.at(ended),
                 outputs={"elapsed_ms": ended - began},
@@ -614,8 +700,10 @@ class DashboardRunTimeline:
         """Span each stage of the send on its trace, even when the run gave no output."""
         if self.trace is None:
             return
+        # The request that started the run traced ``commands`` itself, as it ran.
+        stages = [stage for stage in self.stages() if stage[0] != "commands"]
         try:
-            self.trace.record_stages(self.stages(), run_id=self.run_id, sandbox=sandbox)
+            self.trace.record_stages(stages, run_id=self.run_id, sandbox=sandbox)
         except Exception:
             logger.warning("Failed to trace a dashboard send's stages", exc_info=True)
 

@@ -68,8 +68,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
+    from openswe.utils.datadog_spans import DatadogSpans
 
     pin_single_event_loop()
+    # Before any request: a LangSmith detailed trace takes Datadog's spans from here on.
+    DatadogSpans.install()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
