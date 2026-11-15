@@ -646,6 +646,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const failureReleased = new Promise<void>((resolve) => {
       releaseFailure = resolve;
     });
+    let releaseAutomations: () => void = () => {};
+    const automationsReleased = new Promise<void>((resolve) => {
+      releaseAutomations = resolve;
+    });
     let threadId = "";
     await page.route("**/dashboard/api/threads/*/commands", async (route) => {
       threadId =
@@ -655,6 +659,14 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         status: 503,
         json: { detail: "Startup failed after navigation" },
       });
+    });
+    // While the next route's code loads, the URL has moved but Home is still
+    // mounted; holding that code makes the failure land in that window.
+    let automationsHeld = false;
+    await page.route("**/assets/automations-*.js", async (route) => {
+      automationsHeld = true;
+      await automationsReleased;
+      await route.continue();
     });
     try {
       await typeIntoComposer(page, "Do not take me away if startup fails.");
@@ -667,17 +679,23 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         .getByRole("link", { name: "Automations", exact: true })
         .click();
       await expect(page).toHaveURL(/\/agents\/automations/);
+      await expect.poll(() => automationsHeld).toBe(true);
       releaseFailure();
+      await expect(row).toHaveCount(0);
+      releaseAutomations();
+      await expect(
+        page.getByRole("heading", { name: "Automations", level: 1 }),
+      ).toBeVisible();
       await expect(
         page.getByText("Could not start the Robin agent", { exact: true }),
       ).toBeVisible();
       await expect(
         page.getByText("Startup failed after navigation", { exact: true }),
       ).toBeVisible();
-      await expect(row).toHaveCount(0);
       await expect(page).toHaveURL(/\/agents\/automations/);
     } finally {
       releaseFailure();
+      releaseAutomations();
     }
   });
 

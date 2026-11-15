@@ -660,7 +660,16 @@ export function AgentsHome({
         // A run that never started has nothing left to cancel, and the page
         // already went back to the empty composer when Stop was pressed.
         const stopping = pendingThreadStarts.get(threadId)?.phase === "stopping"
-        if (!stopping && pendingThreadStarts.read().submissionId === threadId) {
+        // Home shows the failure inline only while the person is still on it.
+        // A navigation away moves the router's location at once but keeps Home
+        // mounted, and attached, until the next route has loaded.
+        const pathname = router.state.location.pathname
+        const onHome = pathname.replace(/\/$/, "") === "/agents"
+        if (
+          !stopping &&
+          onHome &&
+          pendingThreadStarts.read().submissionId === threadId
+        ) {
           setLocalError(
             error instanceof Error
               ? error.message
@@ -669,7 +678,7 @@ export function AgentsHome({
         } else if (!stopping) {
           reportError({ title: "Could not start the Robin agent", error })
         }
-        if (router.state.location.pathname === `/agents/${threadId}`)
+        if (pathname === `/agents/${threadId}`)
           await navigate({ to: "/agents" })
         pendingThreadStarts.remove(threadId)
         return
