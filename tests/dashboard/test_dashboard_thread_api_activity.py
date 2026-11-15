@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -208,6 +208,42 @@ class TestThreadReadState:
             action == "mark_read"
         )
         assert (await thread_api.get_dashboard_thread("tid", "other"))["viewed"] is True
+
+    async def test_owner_id_is_stable_in_detail_and_lists(self) -> None:
+        owner = await User.for_login("github", "octocat")
+        assert owner is not None
+        detail = await thread_api.get_dashboard_thread("tid", "octocat")
+        assert detail["ownerId"] == str(owner.id)
+        thread = self.client.threads.thread
+        variants: list[dict[str, object]] = [
+            {"owner_login": "octocat"},
+            {"owner_login": "OCTOCAT"},
+            {"owner_login": "missing"},
+            {"owner_login": f"user:{owner.id}"},
+            {"owner_user_id": str(owner.id), "owner_login": "renamed-owner"},
+            {"owner_type": "system", "owner_user_id": str(owner.id), "owner_login": "octocat"},
+        ]
+        with (
+            patch.object(User, "for_github_logins", wraps=User.for_github_logins) as batch,
+            patch.object(User, "for_login", wraps=User.for_login) as individual,
+        ):
+            summaries = await listing._summarize_threads(
+                self.client,
+                [{**thread, "metadata": {**thread["metadata"], **variant}} for variant in variants],
+            )
+        assert [summary["ownerId"] for summary in summaries] == [
+            str(owner.id),
+            str(owner.id),
+            None,
+            str(owner.id),
+            str(owner.id),
+            None,
+        ]
+        assert batch.await_count == 1
+        individual.assert_not_awaited()
+        thread["metadata"]["owner_type"] = "system"
+        detail = await thread_api.get_dashboard_thread("tid", "octocat")
+        assert detail["ownerId"] is None
 
     async def test_only_eligible_response_is_unread_in_detail_and_lists(self) -> None:
         await routes.api_set_thread_read_state(

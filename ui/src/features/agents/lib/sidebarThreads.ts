@@ -18,6 +18,7 @@ export interface SidebarThreadItem {
   repoLabel: string | null
   model: string
   source?: AgentSource
+  ownerId?: string | null
   threadCategory?: string
   status: AgentStatus
   viewed: boolean
@@ -93,6 +94,7 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
     repoLabel,
     model: thread.model,
     source: thread.source,
+    ownerId: thread.ownerId,
     threadCategory: thread.threadCategory,
     status: thread.status,
     viewed: thread.viewed,

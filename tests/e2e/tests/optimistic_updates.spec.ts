@@ -231,6 +231,7 @@ async function seedThread(request: APIRequestContext) {
       if_exists: "raise",
       metadata: {
         participant_logins: { [SAME_USER.login]: true },
+        owner_login: SAME_USER.login,
         title: THREAD_TITLE,
         source: "dashboard",
         origin: "dashboard",

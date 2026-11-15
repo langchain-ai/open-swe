@@ -10,6 +10,7 @@ from starlette.types import Message
 from openswe.dashboard.oauth import decode_upload_ticket, issue_upload_ticket
 from openswe.threads import session_upload
 from openswe.threads.summary import assert_thread_postable
+from tests.conftest import LangSmithUsers
 
 _TRANSCRIPT = (
     json.dumps({"type": "user", "uuid": "u1", "parentUuid": None, "message": {"content": "hi"}})
@@ -27,7 +28,8 @@ def _request() -> Request:
 
 
 @pytest.fixture
-def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def reserved(monkeypatch: pytest.MonkeyPatch, langsmith_users: LangSmithUsers) -> dict[str, object]:
+    langsmith_users.add("alice")
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
     metadata: dict[str, object] = {
         "source": "dashboard",

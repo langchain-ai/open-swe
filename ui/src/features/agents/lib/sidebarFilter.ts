@@ -25,6 +25,7 @@ export const CLAUDE_CODE_SOURCE: AgentSource = "claude_code"
 interface FilterableThread {
   id?: string
   source?: AgentSource
+  ownerId?: string | null
   threadCategory?: string
   resolved?: boolean
   taskWorkers?: Array<FilterableThread>
@@ -45,23 +46,31 @@ function isAutomationThread(thread: FilterableThread): boolean {
 export function filterThreads<T extends FilterableThread>(
   threads: Array<T>,
   filters: SidebarFilters,
-  activeThreadId?: string
+  activeThreadId?: string,
+  viewerId?: string | null
 ): Array<T> {
-  const matches = (thread: FilterableThread) =>
+  const visible = (thread: FilterableThread) =>
     (filters.includeResolved || !thread.resolved) &&
-    ((Boolean(activeThreadId) && thread.id === activeThreadId) ||
-      ((filters.includeAutomations ||
-        !isAutomationThread(thread) ||
-        filters.sources.includes("schedule")) &&
-        (filters.includeSlack || threadSource(thread) !== "slack") &&
-        (filters.includeClaudeCode ||
-          threadSource(thread) !== CLAUDE_CODE_SOURCE) &&
-        (filters.sources.length === 0 ||
-          filters.sources.includes(threadSource(thread)))))
+    (filters.includeSlack || threadSource(thread) !== "slack") &&
+    (filters.includeClaudeCode ||
+      threadSource(thread) !== CLAUDE_CODE_SOURCE) &&
+    (filters.includeAutomations ||
+      !isAutomationThread(thread) ||
+      filters.sources.includes("schedule")) &&
+    (!filters.ownedOnly || (Boolean(viewerId) && thread.ownerId === viewerId))
+  const matchesSource = (thread: FilterableThread) =>
+    (Boolean(activeThreadId) && thread.id === activeThreadId) ||
+    filters.sources.length === 0 ||
+    filters.sources.includes(threadSource(thread))
   return threads.flatMap((thread) => {
-    if (matches(thread)) return [thread]
-    const taskWorkers = thread.taskWorkers?.filter(matches)
-    return taskWorkers?.length ? [{ ...thread, taskWorkers }] : []
+    if (!visible(thread)) return []
+    const matches = matchesSource(thread)
+    const taskWorkers = thread.taskWorkers?.filter(
+      (worker) => visible(worker) && (matches || matchesSource(worker))
+    )
+    return matches || taskWorkers?.length
+      ? [taskWorkers ? { ...thread, taskWorkers } : thread]
+      : []
   })
 }
 

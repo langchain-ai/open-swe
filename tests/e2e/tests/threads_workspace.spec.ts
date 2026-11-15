@@ -416,6 +416,21 @@ test.describe("threads workspace", () => {
     await page.goto(`/agents/${THREAD_IDS.shared}`);
 
     const row = page.getByRole("link", { name: TITLES.shared }).first();
+    await expect(
+      page.getByRole("button", { name: "Rename thread" }),
+    ).toHaveText(TITLES.shared);
+    await expect(row).toHaveCount(0);
+    await page
+      .locator("aside")
+      .getByRole("button", { name: "Projects options" })
+      .click();
+    const ownedOnly = page.getByRole("menuitemcheckbox", {
+      name: "Only my threads",
+      exact: true,
+    });
+    await expect(ownedOnly).toBeChecked();
+    await ownedOnly.click();
+    await page.keyboard.press("Escape");
     await expect(row).toBeVisible();
     await row.click({ button: "right" });
     const pinResponse = page.waitForResponse(

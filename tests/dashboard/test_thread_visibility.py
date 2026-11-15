@@ -20,7 +20,7 @@ from openswe.threads import (
 from openswe.tools import threads as tools
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import ThreadLike
-from tests.conftest import serve_threads_from
+from tests.conftest import LangSmithUsers, serve_threads_from
 
 _ADMINS = {"admin", "admin@example.com"}
 
@@ -130,8 +130,13 @@ def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
     [(True, "0", False), (True, "123.456", True), (False, "0", True)],
 )
 async def test_only_concierge_dms_are_unlisted(
-    is_im: bool, thread_ts: str, listed: bool, monkeypatch: pytest.MonkeyPatch
+    is_im: bool,
+    thread_ts: str,
+    listed: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    langsmith_users: LangSmithUsers,
 ):
+    langsmith_users.add("alice")
     metadata = {
         "source": "slack",
         "visibility": "private",

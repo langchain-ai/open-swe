@@ -616,6 +616,7 @@ export interface AgentThread {
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
+  ownerId?: string | null
   visibility?: "public" | "private"
   id: string
   /** Set on a PR review listed in the sidebar: its row opens this review page. */

@@ -556,6 +556,7 @@ async def _thread_summary(
     bridge_status: bool = True,
     viewer_login: str | None = None,
     read_states: Mapping[str, JsonObject] | None = None,
+    owner_ids: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     workflow_review = WorkflowReview(WorkflowReview.parse(metadata))
@@ -610,6 +611,17 @@ async def _thread_summary(
         else None
     )
 
+    owner_id = None
+    if metadata.get("owner_type") != "system":
+        owner_id = _metadata_string(metadata, "owner_user_id")
+        if owner_id is None and (owner_login := _metadata_string(metadata, "owner_login")):
+            identity = ThreadIdentity(owner_login)
+            if identity.user_id is not None:
+                owner_id = str(identity.user_id)
+            elif owner_ids is not None:
+                owner_id = owner_ids.get(owner_login.lower())
+            elif owner_user := await identity.user():
+                owner_id = str(owner_user.id)
     run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
@@ -638,6 +650,7 @@ async def _thread_summary(
             TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
         ),
         "ownerLogin": metadata.get("owner_login"),
+        "ownerId": owner_id,
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
         "workspace": metadata.get("workspace") or metadata.get("environment"),

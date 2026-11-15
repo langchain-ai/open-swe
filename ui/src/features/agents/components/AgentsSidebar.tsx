@@ -445,7 +445,8 @@ export function AgentsSidebar({
   const filteredPinnedItems = filterThreads(
     pinnedItems,
     { ...prefs.filters, includeResolved: true },
-    activeThreadId
+    activeThreadId,
+    user.user_id
   )
   const hydrateRepoThreads = (threads: Array<AgentThread>) => {
     const items = threads
@@ -454,7 +455,7 @@ export function AgentsSidebar({
     return items.flatMap((item) =>
       startingIds.has(item.id)
         ? [item]
-        : filterThreads([item], prefs.filters, activeThreadId)
+        : filterThreads([item], prefs.filters, activeThreadId, user.user_id)
     )
   }
   const recentItems = hydrateRepoThreads(recentThreads)

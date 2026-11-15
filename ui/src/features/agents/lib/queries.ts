@@ -1481,7 +1481,7 @@ export function optimisticThread(
   }
   return {
     id: threadId,
-    ...(owner ? { ownerLogin: owner.login } : {}),
+    ...(owner ? { ownerLogin: owner.login, ownerId: owner.user_id } : {}),
     visibility: vars.visibility ?? "public",
     ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",

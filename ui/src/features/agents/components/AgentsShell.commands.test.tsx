@@ -25,6 +25,7 @@ const stub = vi.hoisted(() => {
     activeThread: {
       id: "thread-1",
       title: "Thread",
+      ownerId: "019abf10-0000-7000-8000-000000000001",
       status: "idle",
       resolved: false,
       repoFullName: "langchain-ai/open-swe",
@@ -149,6 +150,7 @@ afterEach(() => {
 const RENDER_BUDGET = 25
 const USER: SessionUser = {
   login: "alice",
+  user_id: "019abf10-0000-7000-8000-000000000001",
   email: null,
   avatar_url: null,
   is_admin: false,

@@ -20,6 +20,7 @@ from openswe.slack.routed_work import RoutedWork
 from openswe.source_context import SourceContext
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
+from openswe.threads.identity import ThreadIdentity
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.store import THREADS
@@ -48,6 +49,7 @@ from openswe.threads.summary import (
     thread_updated_ms,
 )
 from openswe.transcript.subagents import attach_subagents
+from openswe.users import User
 from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from openswe.utils.search import FuzzySearch
@@ -471,6 +473,7 @@ async def _summarize_thread(
     *,
     viewer_login: str | None = None,
     read_states: Mapping[str, JsonObject] | None = None,
+    owner_ids: Mapping[str, str] | None = None,
     refresh_active_run: bool = True,
     minimal_run_update: bool = False,
 ) -> dict[str, Any]:
@@ -487,6 +490,7 @@ async def _summarize_thread(
         bridge_status=False,
         viewer_login=viewer_login,
         read_states=read_states,
+        owner_ids=owner_ids,
     )
 
 
@@ -504,6 +508,17 @@ async def _summarize_threads(
         if viewer_login
         else {}
     )
+    owner_logins = {
+        login.lower()
+        for thread in threads
+        if (metadata := _thread_metadata(thread)).get("owner_type") != "system"
+        and _metadata_string(metadata, "owner_user_id") is None
+        and (login := _metadata_string(metadata, "owner_login"))
+        and ThreadIdentity(login).user_id is None
+    }
+    owner_ids = {
+        login: str(user.id) for login, user in (await User.for_github_logins(owner_logins)).items()
+    }
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
     async def summarize(thread: ThreadLike) -> dict[str, Any]:
@@ -515,6 +530,7 @@ async def _summarize_threads(
                 minimal_run_update=minimal_run_update,
                 viewer_login=viewer_login,
                 read_states=read_states,
+                owner_ids=owner_ids,
             )
 
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
