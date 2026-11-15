@@ -28,6 +28,8 @@ export function SortableThreadList({
   )
   const [announcement, setAnnouncement] = useState("")
 
+  const reorderableItems = items.filter((item) => threadIds.includes(item.id))
+
   const move = (id: string, targetId: string, after: boolean) => {
     if (disabled || id === targetId) return
     const ids = threadIds.filter((entry) => entry !== id)
@@ -51,15 +53,20 @@ export function SortableThreadList({
         Drag to reorder {label}, or press Alt and the up or down arrow while a
         thread is focused.
       </span>
-      {items.map((item, index) => (
+      {items.map((item) => (
         <div
           key={item.key}
-          draggable={!disabled && items.length > 1}
-          aria-describedby={helpId}
+          draggable={
+            !disabled &&
+            threadIds.includes(item.id) &&
+            reorderableItems.length > 1
+          }
+          aria-describedby={threadIds.includes(item.id) ? helpId : undefined}
           className={cn("relative", draggedId === item.id && "opacity-50")}
           onDragStart={(event) => {
             if (
               disabled ||
+              !threadIds.includes(item.id) ||
               (event.target !== event.currentTarget &&
                 (!(event.target instanceof Element) ||
                   event.target.closest("a") !==
@@ -81,7 +88,7 @@ export function SortableThreadList({
             setDraggedId(item.id)
           }}
           onDragOver={(event) => {
-            if (!draggedId || disabled) return
+            if (!draggedId || disabled || !threadIds.includes(item.id)) return
             if (draggedId === item.id) {
               setTarget(null)
               return
@@ -125,13 +132,16 @@ export function SortableThreadList({
             if (
               !event.altKey ||
               disabled ||
+              !threadIds.includes(item.id) ||
               !(event.target instanceof Element) ||
               event.target.closest("a") !==
                 event.currentTarget.querySelector("a") ||
               (event.key !== "ArrowUp" && event.key !== "ArrowDown")
             )
               return
-            const neighbor = items[index + (event.key === "ArrowUp" ? -1 : 1)]
+            const index = reorderableItems.indexOf(item)
+            const neighbor =
+              reorderableItems[index + (event.key === "ArrowUp" ? -1 : 1)]
             if (!neighbor) return
             event.preventDefault()
             event.stopPropagation()

@@ -26,7 +26,12 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
@@ -54,6 +59,7 @@ import { SidebarGroupHeading } from "@/features/agents/components/SidebarGroupHe
 import { ThreadDragDrop } from "@/features/agents/components/ThreadDragDrop"
 import { SortableThreadList } from "@/features/agents/components/SortableThreadList"
 import {
+  PendingSidebarThreadRow,
   SidebarThreadHoverProvider,
   SidebarThreadRow,
 } from "@/features/agents/components/SidebarThreadRow"
@@ -121,6 +127,10 @@ import {
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 import { usePendingVariables } from "@/lib/optimistic"
+import {
+  pendingThreadStarts,
+  usePendingThreadStarts,
+} from "@/features/agents/lib/pendingThreadStarts"
 
 interface AgentsSidebarProps {
   user: SessionUser
@@ -169,6 +179,24 @@ export function AgentsSidebar({
   activeThreadId,
   layout,
 }: AgentsSidebarProps) {
+  const pendingStarts = usePendingThreadStarts().entries.filter(
+    (entry) => entry.userId === user.user_id
+  )
+  const pendingDetails = useQueries({
+    queries: pendingStarts.map(({ thread }): UseQueryOptions<AgentThread> => ({
+      queryKey: agentThreadKeys.detail(thread.id),
+      enabled: false,
+      staleTime: Infinity,
+    })),
+  })
+  const pendingThreads = pendingStarts.map((entry, index) =>
+    entry.phase === "accepted"
+      ? (pendingDetails[index]?.data ?? entry.thread)
+      : entry.thread
+  )
+  const placeholderActiveThread = pendingStarts.some(
+    (entry) => entry.thread.id === activeThreadId
+  )
   const pinnedSectionRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
   const profile = useProfile()
@@ -308,13 +336,24 @@ export function AgentsSidebar({
   })
   const [creatingProject, setCreatingProject] = useState(false)
   useLinkDesktopFolders(localRepos, localThreadsQuery.data, isDesktop)
+  useEffect(() => {
+    pendingThreadStarts.reconcile([
+      ...(pinnedQuery.data ?? []),
+      ...recentsQuery.items,
+    ])
+  }, [pendingStarts, pinnedQuery.data, recentsQuery.items])
+  const startingIds = new Set(
+    pendingStarts
+      .filter((entry) => entry.phase !== "accepted")
+      .map((entry) => entry.thread.id)
+  )
   const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
-  const pageThreads = recentsQuery.items.filter(
-    (thread) => !cloudPinnedIds.has(thread.id)
-  )
+  const pageThreads = pendingThreadStarts
+    .merge(recentsQuery.items, pendingThreads)
+    .filter((thread) => !cloudPinnedIds.has(thread.id))
   const activeThread = useSidebarActiveThread({
-    activeThreadId,
+    activeThreadId: placeholderActiveThread ? undefined : activeThreadId,
     loadedThreads: [...pinnedThreads, ...pageThreads],
     enabled: true,
   })
@@ -350,7 +389,10 @@ export function AgentsSidebar({
       : []),
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
-  useSeedAgentThreadDetails(visibleThreads, activeThreadId)
+  useSeedAgentThreadDetails(
+    [...pinnedThreads, ...recentsQuery.items],
+    activeThreadId
+  )
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
   const serverFolders = sidebarReposQuery.data ?? []
@@ -362,26 +404,31 @@ export function AgentsSidebar({
       folder.projectId ? [[folder.projectId, folder.updatedAt] as const] : []
     )
   )
-  const activeRepo: SidebarRepo | undefined =
-    !activeProjectId && activeThread?.repoFullName.trim()
-      ? {
-          repoFullName: activeThread.repoFullName,
-          name: activeThread.repo,
-          updatedAt: activeThread.updatedAt,
-          // The server repo list hasn't caught up with this thread yet;
-          // it is re-grouped correctly as soon as `sidebarReposQuery` refetches.
-          workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
-        }
-      : undefined
-  const cloudRepos =
-    activeRepo &&
-    !serverRepos.some(
-      (repo) =>
-        repo.repoFullName.toLowerCase() ===
-        activeRepo.repoFullName.toLowerCase()
-    )
-      ? [activeRepo, ...serverRepos]
-      : serverRepos
+  const cloudRepos = [
+    ...serverRepos,
+    ...[...recentThreads, ...(activeThread ? [activeThread] : [])].flatMap(
+      (thread) =>
+        thread.repoFullName.trim() &&
+        !projectIds.has(thread.projectId ?? "") &&
+        !projectOfRepo.has(thread.repoFullName.toLowerCase())
+          ? [
+              {
+                repoFullName: thread.repoFullName,
+                name: thread.repo,
+                updatedAt: thread.updatedAt,
+                workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
+              },
+            ]
+          : []
+    ),
+  ].filter(
+    (repo, index, repos) =>
+      repos.findIndex(
+        (candidate) =>
+          candidate.repoFullName.toLowerCase() ===
+          repo.repoFullName.toLowerCase()
+      ) === index
+  )
   // A repo whose repository name is blank has no stable key, which is what
   // `sidebarRepoKey` reports with a null; it cannot be grouped or pinned.
   const keyedCloudRepos = cloudRepos.flatMap((repo) => {
@@ -398,21 +445,43 @@ export function AgentsSidebar({
     { ...prefs.filters, includeResolved: true },
     activeThreadId
   )
-  const filteredRecents = filterThreads(
-    threadItems,
-    prefs.filters,
-    activeThreadId
-  )
+  const hydrateRepoThreads = (threads: Array<AgentThread>) => {
+    const items = threads
+      .filter((thread) => !cloudPinnedIds.has(thread.id))
+      .map(cloudSidebarThread)
+    return items.flatMap((item) =>
+      startingIds.has(item.id)
+        ? [item]
+        : filterThreads([item], prefs.filters, activeThreadId)
+    )
+  }
+  const recentItems = hydrateRepoThreads(recentThreads)
   const recents = repoMode
-    ? filteredRecents
-    : sortSidebarThreads(
-        filteredRecents,
-        sortByActivity ? "updated" : "created"
-      )
+    ? recentItems
+    : sortSidebarThreads(recentItems, sortByActivity ? "updated" : "created")
   // The folder each of this Mac's threads runs in, to file the ones without a
   // repository under their folder rather than under "No project".
   const macFolderOf = new Map(
     (localThreadsQuery.data ?? []).map((thread) => [thread.id, thread.cwd])
+  )
+  const groupOf = new Map(
+    recents.map((item) => {
+      const projectId = projectIds.has(item.thread.projectId ?? "")
+        ? item.thread.projectId
+        : projectOfRepo.get(item.thread.repoFullName.toLowerCase())
+      const cwd = macFolderOf.get(item.id)
+      const folder = localRepos.find((repo) => repo.cwd === cwd)
+      return [
+        item.id,
+        projectId
+          ? `project:${projectId}`
+          : (item.repoKey ??
+            (folder &&
+              (aliases.get(folder.name.trim().toLowerCase()) ??
+                sidebarRepoKey(folder.cwd))) ??
+            NO_REPO_GROUP_KEY),
+      ]
+    })
   )
   const repoGroups: Array<HydratedRepoGroup> = repoMode
     ? [
@@ -429,7 +498,9 @@ export function AgentsSidebar({
             projectActivity.get(project.id) ?? Date.parse(project.updated_at),
           activeThread:
             activeProjectId === project.id ? activeThread : undefined,
-          threads: [],
+          threads: recents.filter(
+            (item) => groupOf.get(item.id) === `project:${project.id}`
+          ),
         })),
         ...keyedCloudRepos.map(({ repo, key }) => {
           return {
@@ -444,7 +515,7 @@ export function AgentsSidebar({
                 repo.repoFullName.toLowerCase()
                 ? activeThread
                 : undefined,
-            threads: [],
+            threads: recents.filter((item) => groupOf.get(item.id) === key),
           }
         }),
         // "This Mac" projects with no cloud repo of the same name yet still
@@ -540,15 +611,6 @@ export function AgentsSidebar({
 
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
-  const hydrateRepoThreads = (threads: Array<AgentThread>) =>
-    filterThreads(
-      threads
-        .filter((thread) => !cloudPinnedIds.has(thread.id))
-        .map(cloudSidebarThread),
-      prefs.filters,
-      activeThreadId
-    )
-
   // Repositories and Recents share one menu: both control the same list.
   const removeProjectItems = isDesktop && localRepos.length > 0 && (
     <>
@@ -641,13 +703,8 @@ export function AgentsSidebar({
   const recentGroups = threadGroups.length
     ? threadGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
-  const macFolders = new Set(
-    repoGroups.flatMap((group) =>
-      group.localRepoPath ? [group.localRepoPath] : []
-    )
-  )
   const unfiledRecents = recents.filter(
-    (item) => !macFolders.has(macFolderOf.get(item.id) ?? "")
+    (item) => groupOf.get(item.id) === NO_REPO_GROUP_KEY
   )
   const noRepoGroup: HydratedRepoGroup = {
     key: NO_REPO_GROUP_KEY,
@@ -663,11 +720,44 @@ export function AgentsSidebar({
     (isDesktop && localThreadsQuery.isPending)
   const noRepoPinned = pinnedRepoKeys.has(NO_REPO_GROUP_KEY)
 
+  const renderRow = (
+    item: SidebarThreadItem,
+    live?: PullRequestSnapshot,
+    indent = false
+  ) => {
+    const pending = pendingStarts.find((entry) => entry.thread.id === item.id)
+    return pending && pending.phase !== "accepted" ? (
+      <PendingSidebarThreadRow
+        key={item.key}
+        item={item}
+        isActive={item.key === activeKey}
+        stopRequested={pending.phase === "stopping"}
+        indent={indent}
+        onNavigate={layout.closeOnMobile}
+      />
+    ) : (
+      <SidebarThreadRow
+        key={item.key}
+        {...rowProps(item, live)}
+        indent={indent}
+      />
+    )
+  }
+
   const renderRepoGroup = (group: HydratedRepoGroup) => (
     <RepoGroup
       key={group.key}
       group={group}
-      ownerlessIds={recents.map((item) => item.id)}
+      ownerlessIds={pendingThreadStarts.reorderableIds(
+        recentsQuery.items.filter((thread) => !cloudPinnedIds.has(thread.id))
+      )}
+      listed={Boolean(
+        group.project ||
+        serverRepos.some(
+          (repo) => sidebarRepoKey(repo.repoFullName) === group.key
+        ) ||
+        group.localRepoPath
+      )}
       activeKey={activeKey}
       collapsed={prefs.collapsedRepoKeys.includes(group.key)}
       expanded={prefs.expandedRepoKeys.includes(group.key)}
@@ -704,9 +794,7 @@ export function AgentsSidebar({
           isDesktop &&
           localThreadsQuery.isPending)
       }
-      renderRow={(item, live) => (
-        <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
-      )}
+      renderRow={(item, live) => renderRow(item, live, true)}
     />
   )
 
@@ -725,6 +813,7 @@ export function AgentsSidebar({
     recentsQuery.isError ||
     (repoMode && sidebarReposQuery.isError)
   const isEmpty =
+    pendingStarts.length === 0 &&
     !cloudPending &&
     filteredPinnedItems.length === 0 &&
     repoGroups.length === 0 &&
@@ -732,9 +821,10 @@ export function AgentsSidebar({
 
   const recentSections = (() => {
     if (repoMode) return []
-    const groups = recentsQuery.isPending
-      ? [{ key: "recents", label: "Recents", threads: [] }]
-      : recentGroups
+    const groups =
+      recentsQuery.isPending && recents.length === 0
+        ? [{ key: "recents", label: "Recents", threads: [] }]
+        : recentGroups
     return groups.map((group, index) => ({
       key: group.key,
       content: (
@@ -773,9 +863,7 @@ export function AgentsSidebar({
 
           {!sectionCollapsed(group.key) && (
             <>
-              {group.threads.map((item) => (
-                <SidebarThreadRow key={item.key} {...rowProps(item)} />
-              ))}
+              {group.threads.map((item) => renderRow(item))}
               {index === 0 && recentsQuery.isPending && (
                 <ThreadListSkeleton label="Loading recent threads" />
               )}
@@ -913,6 +1001,9 @@ export function AgentsSidebar({
               "sidebar-content scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
               user && profile.isPending && "invisible"
             )}
+            data-sidebar-retained-starts={
+              pendingStarts.length > 0 ? "" : undefined
+            }
           >
             <SidebarNav
               className={cn(
@@ -949,18 +1040,22 @@ export function AgentsSidebar({
                   <>
                     <SortableThreadList
                       label="pinned threads"
-                      items={pinnedPending ? [] : filteredPinnedItems}
-                      threadIds={pinnedThreads.map((thread) => thread.id)}
+                      items={
+                        pinnedPending && pendingStarts.length === 0
+                          ? []
+                          : filteredPinnedItems
+                      }
+                      threadIds={pendingThreadStarts.reorderableIds(
+                        pinnedThreads
+                      )}
                       disabled={reorderPins.isPending || pendingPins.length > 0}
                       onReorder={(ids) => reorderPins.mutate(ids)}
-                      renderRow={(item) => (
-                        <SidebarThreadRow {...rowProps(item)} />
-                      )}
+                      renderRow={(item) => renderRow(item)}
                     />
                     {pinnedPending && (
                       <ThreadListSkeleton label="Loading pinned threads" />
                     )}
-                    {!pinnedPending && (
+                    {(!pinnedPending || pendingStarts.length > 0) && (
                       <div className="sidebar-groups">
                         {pinnedGroups.map(renderRepoGroup)}
                         {repoMode &&
@@ -1006,33 +1101,37 @@ export function AgentsSidebar({
                     />
                   }
                 />
-                {(workspaceMode || !sectionCollapsed("repos")) &&
-                  (foldersPending ? (
-                    <ThreadListSkeleton label="Loading projects" />
-                  ) : (
-                    <div className="sidebar-groups">
-                      {workspaceMode
-                        ? workspaceGroups.map((workspace) => (
-                            <WorkspaceGroupSection
-                              key={workspace.slug}
-                              workspace={workspace}
-                              collapsed={sectionCollapsed(
-                                `workspace:${workspace.slug}`
-                              )}
-                              onToggleCollapsed={() =>
-                                toggleSectionCollapsed(
+                {(workspaceMode || !sectionCollapsed("repos")) && (
+                  <>
+                    {foldersPending && (
+                      <ThreadListSkeleton label="Loading projects" />
+                    )}
+                    {(!foldersPending || pendingStarts.length > 0) && (
+                      <div className="sidebar-groups">
+                        {workspaceMode
+                          ? workspaceGroups.map((workspace) => (
+                              <WorkspaceGroupSection
+                                key={workspace.slug}
+                                workspace={workspace}
+                                collapsed={sectionCollapsed(
                                   `workspace:${workspace.slug}`
-                                )
-                              }
-                              renderRepoGroup={renderRepoGroup}
-                            />
-                          ))
-                        : unpinnedGroups.map(renderRepoGroup)}
-                      {!noRepoPinned &&
-                        noRepoAvailable &&
-                        renderRepoGroup(noRepoGroup)}
-                    </div>
-                  ))}
+                                )}
+                                onToggleCollapsed={() =>
+                                  toggleSectionCollapsed(
+                                    `workspace:${workspace.slug}`
+                                  )
+                                }
+                                renderRepoGroup={renderRepoGroup}
+                              />
+                            ))
+                          : unpinnedGroups.map(renderRepoGroup)}
+                        {!noRepoPinned &&
+                          noRepoAvailable &&
+                          renderRepoGroup(noRepoGroup)}
+                      </div>
+                    )}
+                  </>
+                )}
               </section>
             )}
 
@@ -1155,6 +1254,7 @@ function WorkspaceGroupSection({
 
 function RepoGroup({
   group,
+  listed,
   ownerlessIds,
   activeKey,
   collapsed,
@@ -1180,6 +1280,7 @@ function RepoGroup({
   renderRow,
 }: {
   group: HydratedRepoGroup
+  listed: boolean
   ownerlessIds: Array<string>
   activeKey?: string
   collapsed: boolean
@@ -1221,6 +1322,9 @@ function RepoGroup({
     // A This Mac folder has no repository to ask for: its threads are filed in.
     enabled: !collapsed && Boolean(group.project || group.repoFullName),
   })
+  useEffect(() => {
+    if (listed) pendingThreadStarts.reconcile(repo.items)
+  }, [listed, group.threads, repo.items])
   const cloudThreads = withoutNestedWorkers([
     ...(group.project || group.repoFullName ? repo.items : []).map((thread) =>
       thread.id === group.activeThread?.id ? group.activeThread : thread
@@ -1232,7 +1336,14 @@ function RepoGroup({
   ])
   useSeedAgentThreadDetails(cloudThreads, activeThreadId)
   useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
-  const threads = [...hydrate(cloudThreads), ...group.threads]
+  const threads = hydrate(
+    withoutNestedWorkers(
+      pendingThreadStarts.merge(
+        cloudThreads,
+        group.threads.map((item) => item.thread)
+      )
+    )
+  )
   const reorderChats = useReorderSidebarThreads(
     group.project
       ? { project: group.project.id }
@@ -1330,7 +1441,7 @@ function RepoGroup({
             items={shown}
             threadIds={
               group.project || group.repoFullName
-                ? threads.map((thread) => thread.id)
+                ? pendingThreadStarts.reorderableIds(repo.items)
                 : ownerlessIds
             }
             disabled={reorderChats.isPending}
@@ -1492,6 +1603,12 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const startingActiveThread = usePendingThreadStarts().entries.some(
+    (entry) =>
+      entry.thread.id === activeThreadId &&
+      entry.userId === user.user_id &&
+      entry.phase !== "accepted"
+  )
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1499,9 +1616,12 @@ export function AgentsShell({
   const pinnedThreads = useSidebarPinnedThreads({
     enabled: Boolean(activeThreadId),
   })
-  const activeThread = useActiveAgentThread(activeThreadId, {
-    enabled: Boolean(activeThreadId),
-  })
+  const activeThread = useActiveAgentThread(
+    startingActiveThread ? undefined : activeThreadId,
+    {
+      enabled: Boolean(activeThreadId) && !startingActiveThread,
+    }
+  )
   const sidebarCommands = useMemo(() => {
     const commands = [
       {

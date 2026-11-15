@@ -378,6 +378,43 @@ function TreeBranch() {
   )
 }
 
+export function PendingSidebarThreadRow({
+  item,
+  isActive,
+  stopRequested,
+  indent = false,
+  onNavigate,
+}: {
+  item: SidebarThreadItem
+  isActive: boolean
+  stopRequested: boolean
+  indent?: boolean
+  onNavigate: () => void
+}) {
+  return (
+    <div data-sidebar-thread-row className="group/row relative mb-0.5">
+      <Link
+        to="/agents/$threadId"
+        params={{ threadId: item.id }}
+        aria-current={isActive ? "page" : undefined}
+        onClick={onNavigate}
+        draggable={false}
+        {...sidebarRowProps({
+          active: isActive,
+          archived: false,
+          indent,
+          depth: 0,
+        })}
+      >
+        <SidebarRowTitle title={item.title} />
+        <RunningIndicator
+          label={stopRequested ? "Stopping after startup" : "Starting chat"}
+        />
+      </Link>
+    </div>
+  )
+}
+
 export function SidebarThreadRow({
   item,
   isActive,

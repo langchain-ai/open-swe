@@ -10,13 +10,12 @@ import {
   useSyncExternalStore,
 } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate, useRouterState } from "@tanstack/react-router"
+import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { toast } from "sonner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
   pickComposerWorkspace,
@@ -71,6 +70,11 @@ import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import { productAnalytics } from "@/lib/analytics"
 import {
+  pendingThreadStarts,
+  usePendingThreadStarts,
+} from "@/features/agents/lib/pendingThreadStarts"
+import { reportError } from "@/lib/errorReporting"
+import {
   requestNotificationPermission,
   setNotificationsPref,
 } from "@/lib/notifications"
@@ -82,13 +86,6 @@ const NEW_AGENT_PANEL_ID = "new-agent"
 const NEW_AGENT_PANEL_REF = {
   scope: "cloud" as const,
   threadId: NEW_AGENT_PANEL_ID,
-}
-
-/** A cloud submission whose `run.start` has not come back yet. */
-interface PendingCloudSubmit {
-  threadId: string
-  /** Stop was pressed before the run was accepted; cancel it once it is. */
-  stopRequested: boolean
 }
 
 export function AgentsHome({
@@ -107,6 +104,7 @@ export function AgentsHome({
 }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const router = useRouter()
   const session = useSession()
   const routePending = useRouterState({
     select: (state) => state.status === "pending",
@@ -152,11 +150,11 @@ export function AgentsHome({
   )
   // A project brings its workspace and repository; picking a repository leaves it.
   const selectedProject = projects.find((project) => project.id === projectId)
-  const [submitted, setSubmitted] = useState<{
-    draft: CreateAgentThreadVariables
-    sentAt: number
-  } | null>(null)
-  const submittedDraft = submitted?.draft ?? null
+  const { entries, submissionId } = usePendingThreadStarts()
+  const startingThread = entries.find(
+    (entry) =>
+      entry.thread.id === submissionId && entry.userId === session.data?.user_id
+  )?.thread
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
   )
@@ -327,23 +325,11 @@ export function AgentsHome({
       ? null
       : (selection ?? defaultSelection)
 
-  // The thread id is minted here: the first `run.start` posted against it is
-  // what creates the thread server-side.
-  const [pendingThreadId, setPendingThreadId] = useState<string | null>(null)
-  // Identity of the submission in flight, so its continuation can tell whether
-  // it is still the one this page is waiting for.
-  const pendingRun = useRef<PendingCloudSubmit | null>(null)
-  useEffect(
-    () => () => {
-      pendingRun.current = null
-    },
-    []
-  )
+  useEffect(() => () => pendingThreadStarts.detach(), [])
 
   useEffect(() => {
-    if (pendingThreadId)
-      writeStoredPanelCollapsed(pendingThreadId, panelCollapsed)
-  }, [panelCollapsed, pendingThreadId])
+    if (submissionId) writeStoredPanelCollapsed(submissionId, panelCollapsed)
+  }, [panelCollapsed, submissionId])
 
   useEffect(() => {
     if (!isDesktop || !localReposLoaded || profileQuery.isPending) return
@@ -387,7 +373,7 @@ export function AgentsHome({
       setLocalRepoBranches(branches)
     }
     return result?.branches ?? []
-  }, [])
+  }, [setLocalRepoBranch, setLocalRepoBranches])
 
   const selectedLocalRef = localRepoBranches.find(
     (ref) => ref.name === localRepoBranch
@@ -427,7 +413,7 @@ export function AgentsHome({
         )
       }
     },
-    [localRepoBranches, localWorkspaceMode]
+    [localRepoBranches, localWorkspaceMode, setLocalError, setLocalRepoBranch]
   )
 
   // A base branch chosen for a worktree was never checked out, so going back to
@@ -440,7 +426,7 @@ export function AgentsHome({
       if (next === "local") setLocalRepoBranch(null)
       void refreshLocalRepoBranch()
     },
-    [refreshLocalRepoBranch]
+    [refreshLocalRepoBranch, setLocalError, setLocalRepoBranch]
   )
 
   useEffect(() => {
@@ -516,33 +502,24 @@ export function AgentsHome({
     }
   }
 
-  const resetPendingSubmit = () => {
-    pendingRun.current = null
-    setPendingThreadId(null)
-    setSubmitted(null)
-  }
-
   const cancelPendingThread = async (threadId: string) => {
     try {
       const cancelled = await agentsApi.cancelThread(threadId)
       queryClient.setQueryData(agentThreadKeys.detail(threadId), cancelled)
       invalidateAgentThreadLists(queryClient)
+      return cancelled
     } catch (error) {
-      console.warn("Could not cancel the thread being created", error)
+      reportError({ title: "Could not stop the new chat", error })
+      return null
     }
   }
 
-  /**
-   * Stop while the thread is still being created. The start request is left to
-   * finish: aborting it would not stop the server from creating the thread and
-   * dispatching the run, and cancelling before the run exists either 404s or
-   * finds nothing to cancel. So the run is only marked for cancellation here,
-   * and the request's own continuation cancels it once it was accepted.
-   */
   const stopPendingSubmit = () => {
-    const pending = pendingRun.current
-    if (pending) pending.stopRequested = true
-    resetPendingSubmit()
+    if (!submissionId) return
+    if (pendingThreadStarts.get(submissionId)?.phase === "accepted")
+      void cancelPendingThread(submissionId)
+    else pendingThreadStarts.stop(submissionId)
+    pendingThreadStarts.detach()
   }
 
   const handleSubmit = async ({ text: prompt, images }: ComposerSubmission) => {
@@ -592,7 +569,6 @@ export function AgentsHome({
           effort: activeSelection?.effort ?? null,
         }
     const sentAt = Date.now()
-    setSubmitted({ draft, sentAt })
     setLocalError(null)
 
     const configurable: Record<string, unknown> =
@@ -608,26 +584,24 @@ export function AgentsHome({
         visibility === "private" ? "private" : "workspace"
       if (selectedWorkspace) configurable.workspace = selectedWorkspace
     }
-    // A This Mac thread is filed in its folder's project, linked first if the
-    // folder is new.
-    const runProjectId =
-      localRun && localCheckout
-        ? await folderProject(localCheckout, localThreads.data).catch(
-            (error: unknown) => {
-              action.failed(error)
-              throw error
-            }
-          )
-        : selectedProject?.id
-    if (runProjectId) configurable.project_id = runProjectId
-
     const threadId = crypto.randomUUID()
-    const pending: PendingCloudSubmit = { threadId, stopRequested: false }
-    pendingRun.current = pending
-    setPendingThreadId(threadId)
+    const thread: AgentThread = {
+      ...optimisticThread(threadId, draft, {
+        recorded: session.data?.transcript_recording === true,
+        owner: session.data,
+        sentAt,
+      }),
+      ...(localRun ? { sandboxBridgeClient: "desktop" as const } : {}),
+      projectId: selectedProject?.id ?? null,
+    }
+    pendingThreadStarts.add(thread, userId)
     void (async () => {
       let prepared = false
+      let runProjectId: string | null = selectedProject?.id ?? null
       try {
+        if (localRun && localCheckout)
+          runProjectId = await folderProject(localCheckout, localThreads.data)
+        if (runProjectId) configurable.project_id = runProjectId
         if (localRun && desktop) {
           // Fresh refs, not this render's: a folder whose branches had not loaded
           // yet would otherwise skip the chosen worktree and run in the checkout.
@@ -685,14 +659,19 @@ export function AgentsHome({
             )
         // A run that never started has nothing left to cancel, and the page
         // already went back to the empty composer when Stop was pressed.
-        if (!pending.stopRequested) {
-          resetPendingSubmit()
+        const stopping = pendingThreadStarts.get(threadId)?.phase === "stopping"
+        if (!stopping && pendingThreadStarts.read().submissionId === threadId) {
           setLocalError(
             error instanceof Error
               ? error.message
               : "Could not start the Robin agent"
           )
+        } else if (!stopping) {
+          reportError({ title: "Could not start the Robin agent", error })
         }
+        if (router.state.location.pathname === `/agents/${threadId}`)
+          await navigate({ to: "/agents" })
+        pendingThreadStarts.remove(threadId)
         return
       }
       action.accepted()
@@ -706,28 +685,19 @@ export function AgentsHome({
       )
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
-      const thread: AgentThread = {
-        ...optimisticThread(threadId, draft, {
-          recorded: session.data?.transcript_recording === true,
-          owner: session.data,
-          sentAt,
-        }),
-        // So the seeded thread already reads as This Mac, not Cloud, until
-        // the server's record replaces it.
-        ...(localRun ? { sandboxBridgeClient: "desktop" as const } : {}),
-        projectId: runProjectId ?? null,
-      }
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
-      seedAgentThreadLists(queryClient, thread)
+      const acceptedThread = { ...thread, projectId: runProjectId ?? null }
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), acceptedThread)
+      seedAgentThreadLists(queryClient, acceptedThread)
       invalidateAgentThreadLists(queryClient)
-      if (pending.stopRequested) {
-        await cancelPendingThread(threadId)
+      if (pendingThreadStarts.get(threadId)?.phase === "stopping") {
+        const stopped = await cancelPendingThread(threadId)
+        pendingThreadStarts.accept(stopped ?? acceptedThread)
+        if (stopped && router.state.location.pathname === `/agents/${threadId}`)
+          void navigate({ to: "/agents" })
         return
       }
-      // The user moved on (another submission, or another thread opened) while
-      // this was in flight: the thread is seeded either way, but only the
-      // submission this page is still waiting for may navigate.
-      if (pendingRun.current !== pending) return
+      pendingThreadStarts.accept(acceptedThread)
+      if (pendingThreadStarts.read().submissionId !== threadId) return
       await navigate({ to: "/agents/$threadId", params: { threadId } })
     })()
   }
@@ -741,12 +711,6 @@ export function AgentsHome({
     runTarget === "local"
       ? localRepos.find((checkout) => checkout.cwd === localRepoPath)
       : undefined
-  const startingThread = submitted
-    ? optimisticThread("pending", submitted.draft, {
-        owner: session.data,
-        sentAt: submitted.sentAt,
-      })
-    : null
   // What the thread's page shows on arrival, so the handover moves nothing:
   // the prompt as its pending message, and a run target only where that page
   // offers moving the thread (a private thread in the desktop app).
@@ -779,7 +743,7 @@ export function AgentsHome({
               : undefined
           }
           onVisibilityChange={
-            submittedDraft ? undefined : setVisibilityOverride
+            startingThread ? undefined : setVisibilityOverride
           }
         />
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -819,7 +783,7 @@ export function AgentsHome({
                 }
                 activeRun={
                   startingThread
-                    ? { threadId: pendingThreadId ?? "", running: true }
+                    ? { threadId: startingThread.id, running: true }
                     : undefined
                 }
                 autoFocus
@@ -827,7 +791,7 @@ export function AgentsHome({
                 placeholder="Describe a task or ask a question…"
                 onSubmit={handleSubmit}
                 onStop={startingThread ? stopPendingSubmit : undefined}
-                disabled={Boolean(submittedDraft) || modelsLoading}
+                disabled={Boolean(startingThread) || modelsLoading}
                 busy={Boolean(startingThread)}
                 models={models}
                 modelSelectionEnabled={modelSelectionEnabled}

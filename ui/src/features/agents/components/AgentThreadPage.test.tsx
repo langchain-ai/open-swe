@@ -7,7 +7,7 @@ import {
   useQuery,
 } from "@tanstack/react-query"
 import { useState, type ReactNode } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AgentThreadPage } from "./AgentThreadPage"
 import { LoadError } from "@/components/LoadError"
@@ -48,10 +48,15 @@ vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
     children,
 }))
 
+let client: QueryClient
+
+beforeEach(() => {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(["session"], null)
+})
+
 const wrapper = ({ children }: { children: ReactNode }) => (
-  <QueryClientProvider client={new QueryClient()}>
-    {children}
-  </QueryClientProvider>
+  <QueryClientProvider client={client}>{children}</QueryClientProvider>
 )
 
 const threadQuery = {
@@ -62,6 +67,7 @@ const threadQuery = {
 
 afterEach(() => {
   cleanup()
+  client.clear()
   messageLoad.failed = false
   document.title = "Robin"
 })

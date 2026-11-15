@@ -16,6 +16,15 @@ import {
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
 import { pageTitle } from "@/lib/pageTitle"
+import { useSession } from "@/lib/session"
+import {
+  pendingThreadStarts,
+  usePendingThreadStarts,
+} from "@/features/agents/lib/pendingThreadStarts"
+import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
+import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { Messages } from "@/features/agents/components/messages"
 
 export function AgentThreadPage(props: {
   threadId: string
@@ -28,7 +37,51 @@ export function AgentThreadPage(props: {
 }) {
   const [attempt, setAttempt] = useState(0)
   const retry = () => setAttempt((current) => current + 1)
-
+  const session = useSession()
+  const pending = usePendingThreadStarts().entries.find(
+    (entry) =>
+      entry.thread.id === props.threadId &&
+      entry.userId === session.data?.user_id &&
+      entry.phase !== "accepted"
+  )
+  if (pending)
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <AgentThreadHeader
+          startingThread={pending.thread}
+          target={
+            pending.thread.sandboxBridgeClient === "desktop"
+              ? "This Mac"
+              : "Cloud"
+          }
+          panelCollapsed
+        />
+        <Messages
+          messages={pending.thread.messages}
+          isStreaming
+          contentWidthClass="max-w-3xl"
+        />
+        <AgentComposerDock>
+          <AgentPromptBar
+            compact
+            disabled
+            busy
+            activeRun={{ threadId: props.threadId, running: true }}
+            onStop={
+              pending.phase === "stopping"
+                ? undefined
+                : () => pendingThreadStarts.stop(props.threadId)
+            }
+            stoppable={pending.phase !== "stopping"}
+            placeholder={
+              pending.phase === "stopping"
+                ? "Stopping after startup…"
+                : "Starting Robin…"
+            }
+          />
+        </AgentComposerDock>
+      </div>
+    )
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}

@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
 import { localThreadKeys } from "./desktopLocal"
+import { pendingThreadStarts } from "./pendingThreadStarts"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
@@ -1566,6 +1567,7 @@ export function useDeleteAgentThread() {
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
     meta: { errorTitle: "Couldn't delete thread" },
     onSuccess: (_, threadId) => {
+      pendingThreadStarts.remove(threadId)
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
       // A "This Mac" thread also leaves a worktree and a bridge on this machine.

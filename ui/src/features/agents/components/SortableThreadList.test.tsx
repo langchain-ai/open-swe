@@ -88,6 +88,31 @@ it("drops a dragged pin only while its destination is still hovered", () => {
   expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(3)
 })
 
+it("keeps unaccepted chats out of drag and keyboard reordering", () => {
+  const onReorder = vi.fn()
+  render(
+    <SortableThreadList
+      items={items}
+      threadIds={["first", "third"]}
+      disabled={false}
+      onReorder={onReorder}
+      renderRow={(item) => <a href={`/agents/${item.id}`}>{item.title}</a>}
+    />
+  )
+  const pending = screen.getByRole("link", { name: "second" })
+  expect(pending.parentElement?.getAttribute("draggable")).toBe("false")
+  const setData = vi.fn()
+  fireEvent.dragStart(pending, { dataTransfer: { setData } })
+  fireEvent.keyDown(pending, { key: "ArrowDown", altKey: true })
+  expect(setData).not.toHaveBeenCalled()
+  expect(onReorder).not.toHaveBeenCalled()
+  fireEvent.keyDown(screen.getByRole("link", { name: "first" }), {
+    key: "ArrowDown",
+    altKey: true,
+  })
+  expect(onReorder).toHaveBeenCalledWith(["third", "first"])
+})
+
 it("blocks reordering while an earlier change is saving", () => {
   const onReorder = vi.fn()
   render(
