@@ -11,6 +11,7 @@ import httpx2
 from runtime_api import sandbox_setup
 
 from openswe.analytics.identity import DisplayNameSource
+from openswe.config import ENV
 from openswe.input_messages import PersonIdentity
 from openswe.utils import ttl_cache
 
@@ -49,9 +50,11 @@ def build_pr_attribution_footer(
     model_id: str | None = None,
     reasoning_effort: str | None = None,
 ) -> str:
-    """Build the Open SWE PR footer with the run's model details."""
+    """Build the Robin PR footer with deployment and model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
     footer = PR_ATTRIBUTION_FOOTER
+    if environment := ENV.OPENSWE_ENV.optional():
+        footer += f" ({environment})"
     if url:
         footer += f" · [view thread]({url})"
     model = _normalize_text(model_id).replace("`", "")
