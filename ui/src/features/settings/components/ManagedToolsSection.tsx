@@ -253,7 +253,7 @@ export function ManagedToolsSection() {
               />
             ))
           )}
-          <p className="px-space-4 pb-space-4 text-xs text-secondary">
+          <p className="p-space-4 text-xs text-secondary">
             A LangSmith workspace admin adds services to the kit in LangSmith;
             they show up here to connect.
           </p>
@@ -320,7 +320,7 @@ export function BotToolsSection() {
               />
             ))
           )}
-          <p className="px-space-4 pb-space-4 text-xs text-secondary">
+          <p className="p-space-4 text-xs text-secondary">
             The kit and the profile&apos;s credentials are managed in LangSmith.
           </p>
         </>
