@@ -1712,6 +1712,21 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    const threadId = "75000000-0000-4000-8000-000000000021";
+    await page.request.delete(`/threads/${threadId}`);
+    await page.request.post("/threads", {
+      data: {
+        thread_id: threadId,
+        metadata: {
+          owner_login: SAME_USER.login,
+          title: "Concierge navigation",
+          concierge: true,
+        },
+      },
+    });
+    await page.route("**/dashboard/api/slack/concierge", (route) =>
+      route.fulfill({ json: { thread_id: threadId, channel_id: "DTEST" } }),
+    );
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -1739,8 +1754,23 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       await expect(page.getByText("Concierge", { exact: true })).toBeVisible();
       await expect(navigation).toBeVisible();
       expect((await newThread.boundingBox())!.y).toBe(newThreadY);
+      const documentRequests: string[] = [];
+      page.on("request", (request) => {
+        if (
+          request.isNavigationRequest() &&
+          request.frame() === page.mainFrame()
+        ) {
+          documentRequests.push(request.url());
+        }
+      });
+      await page.getByRole("link", { name: "Concierge", exact: true }).click();
+      await expect(page).toHaveURL(`/agents/${threadId}`);
+      await expect(newThread).toBeVisible();
+      expect(documentRequests).toEqual([]);
+      expect((await newThread.boundingBox())!.y).toBe(newThreadY);
     } finally {
       release();
+      await page.request.delete(`/threads/${threadId}`);
     }
   });
 

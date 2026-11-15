@@ -935,33 +935,38 @@ export function AgentsSidebar({
             {newThreadShortcut}
           </Kbd>
         </Link>
-        {profile.data?.concierge_mode && (
-          <a
-            href={
-              concierge.data?.thread_id
-                ? `/agents/${concierge.data.thread_id}`
-                : concierge.data?.channel_id
+        {profile.data?.concierge_mode &&
+          (concierge.data?.thread_id ? (
+            <Link
+              to="/agents/$threadId"
+              params={{ threadId: concierge.data.thread_id }}
+              onClick={layout.closeOnMobile}
+              aria-current={
+                activeThreadId === concierge.data.thread_id ? "page" : undefined
+              }
+              className={cn(
+                NAV_ROW_CLASS,
+                activeThreadId === concierge.data.thread_id &&
+                  "bg-selected hover:bg-selected-hover"
+              )}
+            >
+              <ChatCircleIcon size={16} weight="regular" />
+              Concierge
+            </Link>
+          ) : (
+            <a
+              href={
+                concierge.data?.channel_id
                   ? SlackLinks.open(concierge.data.channel_id)
                   : undefined
-            }
-            onClick={layout.closeOnMobile}
-            aria-current={
-              !!concierge.data?.thread_id &&
-              activeThreadId === concierge.data.thread_id
-                ? "page"
-                : undefined
-            }
-            className={cn(
-              NAV_ROW_CLASS,
-              !!concierge.data?.thread_id &&
-                activeThreadId === concierge.data.thread_id &&
-                "bg-selected hover:bg-selected-hover"
-            )}
-          >
-            <ChatCircleIcon size={16} weight="regular" />
-            Concierge
-          </a>
-        )}
+              }
+              onClick={layout.closeOnMobile}
+              className={NAV_ROW_CLASS}
+            >
+              <ChatCircleIcon size={16} weight="regular" />
+              Concierge
+            </a>
+          ))}
       </div>
 
       <SidebarThreadSelection>
