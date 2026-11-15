@@ -5,7 +5,7 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote, unquote, urlsplit
 
@@ -25,6 +25,9 @@ _PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 _PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
 _TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
 _PROJECT_AGENT_CACHE: dict[tuple[tuple[str, str], str], str] = {}
+# How far a dashboard send's trace root can start before its invocation: the client
+# clock lead it is trusted for, plus the request that reaches the enrichment.
+_SEND_ROOT_LEAD = timedelta(minutes=2)
 
 
 def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
@@ -142,7 +145,7 @@ async def resolve_tenant_id() -> str | None:
     return _TENANT_ID_CACHE.get(workspace)
 
 
-async def _resolve_project_id_by_name(project_name: str) -> str | None:
+async def resolve_project_id_by_name(project_name: str) -> str | None:
     """Resolve a LangSmith project id from its name, caching definitive results."""
     cache_key = (_workspace_key(), project_name)
     if cache_key in _PROJECT_ID_CACHE:
@@ -191,7 +194,7 @@ async def _compose_langsmith_project_url(project_name: str | None = None) -> str
     tenant_id = await resolve_tenant_id()
     if not tenant_id:
         return None
-    project_id = await _resolve_project_id_by_name(project_name or tracing_project())
+    project_id = await resolve_project_id_by_name(project_name or tracing_project())
     if not project_id:
         return None
     agent_id = await _resolve_project_agent_id(project_id)
@@ -253,7 +256,7 @@ async def get_langsmith_error_url(
         return fallback
     try:
         async with asyncio.timeout(5):
-            project_id = await _resolve_project_id_by_name(tracing_project())
+            project_id = await resolve_project_id_by_name(tracing_project())
             if not project_id:
                 return fallback
             lookup_start = await _project_lookup_start(project_id)
@@ -271,9 +274,13 @@ async def get_langsmith_error_url(
                 failed_runs = [run async for run in runs]
                 if not failed_runs:
                     continue
-                roots = [
-                    run for run in failed_runs if run.dotted_order and "." not in run.dotted_order
+                # The shallowest failure: the run's own root, or the dashboard send it
+                # nests in when the send was traced.
+                depths = [
+                    (run.dotted_order.count("."), run) for run in failed_runs if run.dotted_order
                 ]
+                shallowest = min((depth for depth, _ in depths), default=0)
+                roots = [run for depth, run in depths if depth == shallowest]
                 if len(roots) != 1:
                     return fallback
                 root = failed_run = roots[0]
@@ -379,7 +386,7 @@ async def get_open_swe_thread_id_from_langsmith(locator: str) -> str | None:
     client = _build_langsmith_client()
     if client is None:
         return None
-    project_id = parsed.project_id or await _resolve_project_id_by_name(tracing_project())
+    project_id = parsed.project_id or await resolve_project_id_by_name(tracing_project())
     if not project_id:
         return None
     try:
@@ -435,10 +442,13 @@ async def get_langsmith_thread_cost(
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project_id = await _resolve_project_id_by_name(tracing_project())
+    project_id = await resolve_project_id_by_name(tracing_project())
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
+        # A dashboard send's root starts at the click, before the invocation is stamped.
+        if (started := _parse_langsmith_time(lookup_start)) is not None:
+            lookup_start = started - _SEND_ROOT_LEAD
         lookup_start = lookup_start or await _project_lookup_start(project_id)
         matched_roots: dict[str, datetime] = {}
         for field in ("invocation_id", "prepare_run_id"):
@@ -560,7 +570,7 @@ async def create_langsmith_thread_feedback(
     if client is None:
         logger.warning("No LangSmith API key configured, skipping thread feedback")
         return False
-    project_id = await _resolve_project_id_by_name(tracing_project())
+    project_id = await resolve_project_id_by_name(tracing_project())
     if not project_id:
         logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
         return False

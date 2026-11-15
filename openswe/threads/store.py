@@ -322,12 +322,18 @@ class ThreadStore:
         return thread.model_copy(update={"metadata": {**thread.metadata, **latest}})
 
     async def command(
-        self, thread_id: str, body: bytes, *, user_id: str | None = None
+        self,
+        thread_id: str,
+        body: bytes,
+        *,
+        user_id: str | None = None,
+        trace_headers: Mapping[str, str] | None = None,
     ) -> CommandReply:
         """Answer one protocol v2 command as the thread's runtime does.
 
         ``user_id`` is the Open SWE user who sent it, which a run or an answer on a
         channel's thread acts as; without one it is the channel's own, for no person.
+        ``trace_headers`` name a LangSmith trace a ``run.start``'s run nests in.
         """
         try:
             command = _object.validate_json(body)
@@ -378,6 +384,7 @@ class ThreadStore:
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
                 write=write,
+                trace_headers=trace_headers,
             )
             if reply.get("type") == "success":
                 try:

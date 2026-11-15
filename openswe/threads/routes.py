@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
+from openswe.dashboard.ttft import SUBMITTED_AT_HEADER, DashboardClient
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
@@ -818,6 +819,8 @@ async def api_thread_commands(
         email=principal.email,
         content_type=request.headers.get("content-type", "application/json"),
         principal=principal,
+        client=DashboardClient.of_user_agent(request.headers.get("user-agent")),
+        submitted_at=request.headers.get(SUBMITTED_AT_HEADER),
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
 

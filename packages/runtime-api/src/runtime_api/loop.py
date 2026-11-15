@@ -31,6 +31,12 @@ from runtime_api.operations import RunRequest
 # Held state a call carries once summarization replaced the conversation's start: the
 # index of the first message the model still sees.
 VISIBLE_FROM: Final = "visible_from"
+# Where an agent's reply says when its model call first streamed, in epoch ms: its
+# opening (the first chunk, sent as the provider opens its message), and its first text.
+# A call that streamed nothing gave both as it returned. The run-complete webhook times a
+# dashboard send by them.
+FIRST_OUTPUT_AT_KEY: Final = "open_swe_first_output_at_ms"
+FIRST_TEXT_AT_KEY: Final = "open_swe_first_text_at_ms"
 
 
 class RunCall(RunRequest):

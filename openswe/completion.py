@@ -30,6 +30,7 @@ from runtime_api.model_errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
+from openswe.dashboard.ttft import DashboardRunTimeline
 from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
@@ -445,6 +446,10 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    if status in _TERMINAL_RUN_STATUSES:
+        DashboardRunTimeline.settle_in_background(
+            payload, failed=status in _TERMINAL_FAILURE_STATUSES
+        )
     try:
         await refresh_thread_status(thread_id)
     except Exception:

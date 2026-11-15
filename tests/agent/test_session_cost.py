@@ -55,7 +55,7 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+        ls_utils, "resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )
 
     result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1")
@@ -76,6 +76,27 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     ]
 
 
+async def test_langsmith_cost_finds_a_send_root_that_starts_before_its_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A dashboard send's root starts at the click, before the invocation is stamped.
+    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
+    client = _LangSmithClient(
+        [SimpleNamespace(id="trace-1", end_time=root_end)],
+        SimpleNamespace(total_cost=1.0, last_end_time=root_end),
+    )
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
+    monkeypatch.setattr(
+        ls_utils, "resolve_project_id_by_name", AsyncMock(return_value="project-id")
+    )
+
+    await ls_utils.get_langsmith_thread_cost(
+        "thread-1", "invocation-1", lookup_start="2026-08-18T21:59:00.500000+00:00"
+    )
+
+    assert client.runs.calls[0]["min_start_time"] < datetime(2026, 8, 18, 21, 58, tzinfo=UTC)
+
+
 async def test_cost_lookup_combines_legacy_metadata_matches(monkeypatch):
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
     earlier = SimpleNamespace(id="trace-1", end_time=root_end)
@@ -86,7 +107,7 @@ async def test_cost_lookup_combines_legacy_metadata_matches(monkeypatch):
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+        ls_utils, "resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )
     result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", run_only=True)
     assert result is not None
@@ -108,7 +129,7 @@ async def test_langsmith_cost_waits_for_thread_stats_freshness(
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+        ls_utils, "resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )
 
     assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
@@ -130,7 +151,7 @@ async def test_cost_lookup_distinguishes_rejected_requests_from_retryable_failur
     client.threads.stats = AsyncMock(side_effect=error)
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
     monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+        ls_utils, "resolve_project_id_by_name", AsyncMock(return_value="project-id")
     )
 
     if status in {400, 401, 403}:

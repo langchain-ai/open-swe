@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -1139,7 +1139,12 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
 
     class UndeliverableThreads(ThreadStoreOverClient):
         async def command(
-            self, thread_id: str, body: bytes, *, user_id: str | None = None
+            self,
+            thread_id: str,
+            body: bytes,
+            *,
+            user_id: str | None = None,
+            trace_headers: Mapping[str, str] | None = None,
         ) -> thread_proxy.CommandReply:
             if isinstance(refusal, Exception):
                 raise refusal
@@ -2197,3 +2202,62 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
         ({"login": "teammate"}, True),
         ({"login": "owner"}, False),
     ]
+
+
+async def test_proxy_commands_leaves_a_sends_timing_for_the_run_it_started(monkeypatch) -> None:
+    sent: list[dict[str, object]] = []
+    updates: list[Mapping[str, object]] = []
+
+    class StartingThreads(ThreadStoreOverClient):
+        async def command(
+            self,
+            thread_id: str,
+            body: bytes,
+            *,
+            user_id: str | None = None,
+            trace_headers: Mapping[str, str] | None = None,
+        ) -> thread_proxy.CommandReply:
+            sent.append(json.loads(body))
+            return thread_proxy.CommandReply(
+                200,
+                json.dumps({"type": "success", "id": 1, "result": {"run_id": "run-1"}}).encode(),
+                "application/json",
+            )
+
+        async def update(self, thread_id: str, metadata: Mapping[str, object]) -> None:
+            updates.append(metadata)
+
+    class IdleThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "status": "idle", "metadata": {"owner_login": "ada"}}
+
+    async def enrich(thread_id: str, login: str, command: dict[str, object], **kwargs) -> dict:
+        return {"method": "run.start", "params": {"metadata": {}}}
+
+    monkeypatch.setattr(thread_proxy.ThreadMentions, "notify", AsyncMock())
+    monkeypatch.setattr(thread_proxy._SlackWebHandoff, "notify", AsyncMock())
+    monkeypatch.setattr(thread_proxy, "_now_ms", lambda: 1_000_000)
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
+    )
+    patch_thread_module(monkeypatch, "THREADS", StartingThreads())
+    monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
+
+    status, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid",
+        "ada",
+        b'{"method": "run.start", "params": {}}',
+        client=thread_proxy.DashboardClient.WEB,
+        submitted_at="999700",
+    )
+
+    assert status == 200
+    (command,) = sent
+    assert command["params"]["metadata"] == {  # type: ignore[index]
+        "dashboard_ttft_started_at_ms": 1_000_000,
+        "dashboard_client": "web",
+        "dashboard_submitted_at_ms": 999_700,
+    }
+    # The run's completion times the send only if it is this run, not a later one that
+    # inherited the send's metadata.
+    assert any(update.get("dashboard_send_runs") == {"1000000": "run-1"} for update in updates)

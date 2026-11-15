@@ -104,12 +104,17 @@ class ThreadStoreOverClient(ThreadStore):
         return TypeAdapter(dict[str, JsonValue]).validate_python(dict(state))
 
     async def command(
-        self, thread_id: str, body: bytes, *, user_id: str | None = None
+        self,
+        thread_id: str,
+        body: bytes,
+        *,
+        user_id: str | None = None,
+        trace_headers: Mapping[str, str] | None = None,
     ) -> CommandReply:
         response = await proxy.langgraph_client().http.client.post(
             f"/threads/{thread_id}/commands",
             content=body,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **(trace_headers or {})},
         )
         return CommandReply(
             response.status_code, response.content, response.headers.get("content-type")

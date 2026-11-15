@@ -505,7 +505,8 @@ class MdaRuntime:
             active += sorted(_runs.validate_python(response.json()), key=lambda run: run.created_at)
         return active
 
-    async def _owner_ls_user_id(self, thread_id: str) -> str | None:
+    @staticmethod
+    async def owner_ls_user_id(thread_id: str) -> str | None:
         from openswe.tasks.schemas import ThreadMetadata
         from openswe.threads.store import THREADS
 
@@ -588,7 +589,7 @@ class MdaRuntime:
         sender = run_metadata.get(SENDER_USER_KEY)
         if sender is not None and (sender != billed or actor not in (None, sender)):
             run_metadata.pop(SENDER_USER_KEY)
-        owner_ls_user_id = await self._owner_ls_user_id(thread_id)
+        owner_ls_user_id = await self.owner_ls_user_id(thread_id)
         run_metadata["owner_ls_user_id"] = owner_ls_user_id
         raw_config_metadata = config.get("metadata")
         if isinstance(raw_config_metadata, dict):
@@ -635,12 +636,14 @@ class MdaRuntime:
         thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
         write: ChannelWrite | None = None,
+        trace_headers: Mapping[str, str] | None = None,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
         On a channel's thread, ``write`` (:meth:`channel_write`) starts the run in its
         conversation, as the person it names; without one the run is the backend's own.
+        ``trace_headers`` name the LangSmith trace the run nests in.
         """
         write = write or ChannelWrite()
         starting_ms = now_ms()
@@ -677,7 +680,9 @@ class MdaRuntime:
         )
         async with self.http as client:
             response = await client.post(
-                f"/threads/{thread_id}/runs", json=rewritten, headers=write.headers
+                f"/threads/{thread_id}/runs",
+                json=rewritten,
+                headers={**(trace_headers or {}), **write.headers},
             )
         if response.is_error:
             logger.warning(

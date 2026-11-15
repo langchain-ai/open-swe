@@ -35,6 +35,8 @@ export function dashboardApiUrl(path: string): string {
 }
 
 export const REQUEST_ID_HEADER = "X-Request-ID"
+/** When the person sent a command, in epoch ms, so the backend can time it from the click. */
+export const SUBMITTED_AT_HEADER = "X-Robin-Submitted-At"
 
 export function newRequestId(): string {
   return `req_${crypto.randomUUID()}`

@@ -44,8 +44,8 @@ async def test_resolve_project_id_retries_transient_failure(
 
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
 
-    assert await ls_utils._resolve_project_id_by_name("my-deployment") is None
-    assert await ls_utils._resolve_project_id_by_name("my-deployment") is None
+    assert await ls_utils.resolve_project_id_by_name("my-deployment") is None
+    assert await ls_utils.resolve_project_id_by_name("my-deployment") is None
     assert calls == ["my-deployment", "my-deployment"]
 
 
@@ -66,7 +66,7 @@ async def test_create_thread_feedback_posts_thread_scope(
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _FakeClient())
     monkeypatch.setattr(
         ls_utils,
-        "_resolve_project_id_by_name",
+        "resolve_project_id_by_name",
         _resolver({"my-deployment": "project-id"}),
     )
 
@@ -121,11 +121,11 @@ async def test_cached_ids_belong_to_the_credentials_that_produced_them(
 
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: _Client())
 
-    assert await ls_utils._resolve_project_id_by_name("proj") == "pid-a"
+    assert await ls_utils.resolve_project_id_by_name("proj") == "pid-a"
     assert await ls_utils.resolve_tenant_id() == "tenant-a"
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "key-b")
-    assert await ls_utils._resolve_project_id_by_name("proj") == "pid-b"
+    assert await ls_utils.resolve_project_id_by_name("proj") == "pid-b"
     assert await ls_utils.resolve_tenant_id() == "tenant-b"
 
 
@@ -144,6 +144,8 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
     assert calls == 1
 
 
+# Nested: the run's trace sits inside a dashboard send's, one level down.
+@pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize(
     ("scenario", "expected"),
@@ -156,11 +158,16 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
     ],
 )
 async def test_error_url_follows_terminal_failure(
-    monkeypatch: pytest.MonkeyPatch, legacy: bool, scenario: str, expected: str | None
+    monkeypatch: pytest.MonkeyPatch,
+    legacy: bool,
+    nested: bool,
+    scenario: str,
+    expected: str | None,
 ) -> None:
+    prefix = "send." if nested else ""
     thread_url = "https://smith.example/o/tenant/projects/p/pid/t/thread"
     monkeypatch.setattr(ls_utils, "get_langsmith_trace_url", AsyncMock(return_value=thread_url))
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    monkeypatch.setattr(ls_utils, "resolve_project_id_by_name", _resolver({}, default="pid"))
     start = datetime(2026, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(ls_utils, "_project_lookup_start", AsyncMock(return_value=start))
     queries: list[dict[str, object]] = []
@@ -181,11 +188,11 @@ async def test_error_url_follows_terminal_failure(
                 ("failed-model", "1.2.3", "TimeoutError('model timed out')"),
                 ("recovered-tool", "1.4", "ValueError('bad tool input')"),
             ]:
-                yield SimpleNamespace(id=run_id, dotted_order=order, error=error)
+                yield SimpleNamespace(id=run_id, dotted_order=prefix + order, error=error)
             if scenario == "ambiguous":
                 yield SimpleNamespace(
                     id="recovered-timeout",
-                    dotted_order="1.5",
+                    dotted_order=f"{prefix}1.5",
                     error="TimeoutError('model timed out')",
                 )
 
@@ -219,7 +226,7 @@ async def test_error_url_follows_terminal_failure(
 async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant-d")
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    monkeypatch.setattr(ls_utils, "resolve_project_id_by_name", _resolver({}, default="pid"))
 
     assert await ls_utils.get_langsmith_trace_url("t9") == (
         "https://smith.example/o/tenant-d/projects/p/pid/t/t9"
@@ -230,7 +237,7 @@ async def test_trace_url_scopes_to_owning_agent(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api/v1")
     monkeypatch.setenv("LANGSMITH_API_KEY", "key")
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant-d")
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    monkeypatch.setattr(ls_utils, "resolve_project_id_by_name", _resolver({}, default="pid"))
     calls: list[tuple[str, object]] = []
 
     class _FakeClient:

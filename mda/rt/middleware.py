@@ -67,6 +67,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
+from langsmith import trace
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import JOINED_TASK_CONTEXT, InboxSpec
 from runtime_api.endpoint import call
@@ -102,6 +103,7 @@ from rt.backend import (
     since_last_reply,
     subagent_of,
 )
+from rt.first_output import FirstOutput
 from rt.gateway import RUN_GATEWAY
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
@@ -398,14 +400,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            await self._backend.run.load_tool_specs(run_id())
+            await self._load_tool_specs()
             return None, True
         # Asking for the sandbox takes a round trip; reading the tool specs needs none of
         # it, and classifying the thread's route neither, which goes on while it prepares.
         opening = asyncio.create_task(self._opened(runtime))
         classifying = self._loop.classify_ahead(state)
         try:
-            await self._backend.run.load_tool_specs(run_id())
+            await self._load_tool_specs()
             opened = await opening
             # Not behind the outbox: what an earlier run left unsent changes nothing here.
             prepared = await call(
@@ -472,10 +474,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             sender=prepared.sender,
         )
 
+    async def _load_tool_specs(self) -> None:
+        async with trace("tool_specs.load", run_type="chain"):
+            await self._backend.run.load_tool_specs(run_id())
+
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
         if self._open_sandbox is None or not self._in_sandbox:
             return OpenedSandbox()
-        return await self._open_sandbox(runtime)
+        # The run's first model call waits on this, and nothing else in the trace shows it.
+        async with trace("sandbox.open", run_type="chain"):
+            return await self._open_sandbox(runtime)
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
@@ -720,7 +728,14 @@ class ReportRepliesMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        response = await handler(request)
+        if namespace():
+            response = await handler(request)
+        else:
+            # Only the agent's own replies time a send; a subagent's come after them.
+            first = FirstOutput()
+            with first.watching():
+                response = await handler(request)
+            first.stamp(response.result)
         self.report(request, response)
         return response
 

@@ -1,119 +1,645 @@
-"""Dashboard thread time-to-first-token measurement."""
+"""How long a dashboard send takes to reach its run's first output.
 
+Every mark is measured from the moment the backend received the send:
+
+- ``first_generation``: the model opened its first assistant message, thinking or a
+  tool call included, so the agent has visibly started.
+- ``ttft``: the first assistant text, which a run that opens with tool calls reaches
+  only after them.
+
+Managed Deep Agents stamps each of the agent's replies with when its model call opened
+its message and first streamed text (``runtime_api.loop.FIRST_OUTPUT_AT_KEY``), or with
+when the call returned if it streamed nothing. The run's completion webhook reads them back from
+the run's messages, so every send is timed however its client reads the run: a
+transcript dashboard starts runs that stream no messages to the thread.
+
+Each mark goes to an OTLP latency histogram labelled by client and sandbox, and to a
+span of the send's own LangSmith trace (``DashboardSendTrace``), which the run itself
+nests in.
+"""
+
+import asyncio
+import json
 import logging
-from dataclasses import dataclass
-from typing import Any
+import uuid
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from itertools import pairwise
+from typing import TYPE_CHECKING, ClassVar, Final
+from urllib.parse import quote
 
-from openswe.utils.streaming import root_lifecycle
+from langsmith.run_trees import RunTree
+from langsmith.utils import tracing_is_enabled
+from pydantic import JsonValue
+from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
+
+from openswe.bridge.store import Bridge
+from openswe.config import ENV
+from openswe.threads.runtimes import MdaRuntime
+from openswe.utils.langsmith import (
+    async_langsmith_client,
+    resolve_project_id_by_name,
+    sync_langsmith_client,
+)
+from openswe.utils.tracing import tracing_project
+
+if TYPE_CHECKING:
+    from langgraph_api.metrics_otlp import MetricDef
+    from langsmith import AsyncClient as AsyncLangSmithClient
 
 logger = logging.getLogger(__name__)
 
-_DASHBOARD_THREAD_TTFT: Any | None = None
+# A product token only the Robin desktop app's Electron shell has sent in its user agent.
+_DESKTOP_PRODUCTS: Final = ("Robin/", "OpenSWE/", "open-swe-desktop/")
+# The header the dashboard sends with a command: when the person sent it, in epoch ms.
+SUBMITTED_AT_HEADER: Final = "x-robin-submitted-at"
+# How far before the backend received it a client's send time is believed; further
+# back, or ahead by more than the allowed skew, its clock is wrong.
+_MAX_CLIENT_LEAD_MS: Final = 60_000
+_MAX_CLIENT_SKEW_MS: Final = 2_000
 
 
-@dataclass(frozen=True, slots=True)
-class AssistantTextObservation:
-    run_id: str
-    event_timestamp_ms: int
+class DashboardClient(StrEnum):
+    """Which client sent a dashboard command, as a bounded metric label."""
+
+    DESKTOP = "desktop"
+    WEB = "web"
+    OTHER = "other"
+
+    @classmethod
+    def of_user_agent(cls, user_agent: str | None) -> DashboardClient:
+        if not user_agent:
+            return cls.OTHER
+        if "Electron/" in user_agent and any(p in user_agent for p in _DESKTOP_PRODUCTS):
+            return cls.DESKTOP
+        if user_agent.startswith("Mozilla/") and "Electron/" not in user_agent:
+            return cls.WEB
+        return cls.OTHER
 
 
-class AssistantTextEventDetector:
-    """Detect each run's first non-empty streamed AI text delta."""
+class DashboardSandbox(StrEnum):
+    """Where a dashboard thread's agent works, as a bounded metric label."""
 
-    def __init__(self, run_id: str | None = None) -> None:
-        self._target_run_id = run_id
-        self._run_id: str | None = None
-        self._ai_namespaces: set[tuple[str, ...]] = set()
-        self._observed_namespaces: set[tuple[str, ...]] = set()
+    BRIDGE = "bridge"
+    CLOUD = "cloud"
 
-    def observe(self, event: dict[str, Any]) -> AssistantTextObservation | None:
-        lifecycle = root_lifecycle(event)
-        if lifecycle is not None:
-            if lifecycle[1] == "running" and self._target_run_id in (None, lifecycle[0]):
-                self._run_id = lifecycle[0]
-                self._ai_namespaces.clear()
-                self._observed_namespaces.clear()
+    @classmethod
+    def of_thread(cls, metadata: Mapping[str, object]) -> DashboardSandbox:
+        """Where the thread's runs work now, not where a move carried its checkout from."""
+        sandbox_id = metadata.get("sandbox_id")
+        bridged = isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
+        return cls.BRIDGE if bridged else cls.CLOUD
+
+
+class DashboardSendTrace:
+    """One send's LangSmith trace, from the click to the end of the run it starts.
+
+    The backend opens it as the send arrives and hands its trace headers to the run's
+    start, so Managed Deep Agents nests the run inside it. The run's completion webhook
+    takes it up again from the run's metadata (:meth:`of_run`), adds a span per stage the
+    send went through, and closes it with the run's end, last message and error
+    (:meth:`close`). It carries the thread and invocation the run's root would, so the
+    thread view, error links and cost lookups reach the run through it.
+    """
+
+    # The baggage metadata key Managed Deep Agents adopts trace headers on.
+    _NEST_UNDER_PARENT: Final = "ls_nest_under_parent"
+    # The run metadata that names the send's trace, for its completion to close.
+    TRACE_ID_KEY: Final = "dashboard_send_trace_id"
+    DOTTED_ORDER_KEY: Final = "dashboard_send_dotted_order"
+    # How long a close waits to learn whether the root is already closed.
+    _ENDED_TIMEOUT_S: Final = 5
+    # The root's metadata each stage span repeats, so stages chart by client on their own.
+    _SPAN_KEYS: Final = ("thread_id", "invocation_id", "dashboard_client")
+
+    def __init__(self, root: RunTree) -> None:
+        self.root = root
+
+    @staticmethod
+    def at(epoch_ms: int) -> datetime:
+        return datetime.fromtimestamp(epoch_ms / 1000, UTC)
+
+    @staticmethod
+    def time_of(value: object) -> datetime | None:
+        """An ISO 8601 time from a run payload, read as UTC when it names no zone."""
+        if not isinstance(value, str) or not value:
             return None
-        params = event.get("params")
-        if not isinstance(params, dict):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+    @classmethod
+    async def open(
+        cls,
+        *,
+        thread_id: str,
+        invocation_id: str | None,
+        client: DashboardClient,
+        started_at_ms: int,
+        inputs: Mapping[str, object],
+    ) -> DashboardSendTrace | None:
+        """Start the trace, or ``None`` when this backend does not trace or cannot."""
+        api_key = ENV.LANGSMITH_API_KEY.optional()
+        if not api_key or not tracing_is_enabled():
             return None
-        namespace_value = params.get("namespace")
-        if not isinstance(namespace_value, list) or not all(
-            isinstance(part, str) for part in namespace_value
-        ):
+        try:
+            # Personal trace access reads the root's owner, and the run now nests below it.
+            owner = await MdaRuntime.owner_ls_user_id(thread_id)
+            return cls._started(
+                api_key, thread_id, invocation_id, client, started_at_ms, inputs, owner
+            )
+        except Exception:
+            logger.warning("Could not open a dashboard send's trace", exc_info=True)
             return None
-        namespace = tuple(namespace_value)
-        data = params.get("data")
-        if not isinstance(data, dict) or event.get("method") != "messages":
-            return None
-        message_event = data.get("event")
-        if message_event == "message-start":
-            if data.get("role") == "ai":
-                self._ai_namespaces.add(namespace)
-                self._observed_namespaces.discard(namespace)
-            return None
-        if message_event == "message-finish":
-            self._ai_namespaces.discard(namespace)
-            self._observed_namespaces.discard(namespace)
-            return None
-        if message_event != "content-block-delta" or namespace not in self._ai_namespaces:
-            return None
-        delta = data.get("delta")
-        if not isinstance(delta, dict) or delta.get("type") != "text-delta":
-            return None
-        text = delta.get("text")
+
+    @classmethod
+    def _started(
+        cls,
+        api_key: str,
+        thread_id: str,
+        invocation_id: str | None,
+        client: DashboardClient,
+        started_at_ms: int,
+        inputs: Mapping[str, object],
+        owner_ls_user_id: str | None,
+    ) -> DashboardSendTrace:
+        trace_id = uuid.uuid7()
+        root = RunTree(
+            name="dashboard.send",
+            id=trace_id,
+            trace_id=trace_id,
+            run_type="chain",
+            start_time=cls.at(started_at_ms),
+            project_name=tracing_project(),
+            ls_client=sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get()),
+            inputs=dict(inputs),
+            extra={
+                "metadata": {
+                    "thread_id": thread_id,
+                    "dashboard_client": client.value,
+                    **({"invocation_id": invocation_id} if invocation_id else {}),
+                    **({"owner_ls_user_id": owner_ls_user_id} if owner_ls_user_id else {}),
+                }
+            },
+        )
+        root.post()
+        return cls(root)
+
+    @property
+    def trace_id(self) -> str:
+        return str(self.root.id)
+
+    def run_metadata(self) -> dict[str, str]:
+        """What the run's metadata carries so its completion can close this trace."""
+        return {self.TRACE_ID_KEY: self.trace_id, self.DOTTED_ORDER_KEY: self.root.dotted_order}
+
+    @classmethod
+    def of_run(
+        cls, metadata: Mapping[str, object], *, thread_id: str | None, started_at_ms: int
+    ) -> DashboardSendTrace | None:
+        """The send trace a run's metadata names, to add to and close; its root is not posted again."""
+        trace_id = metadata.get(cls.TRACE_ID_KEY)
+        dotted_order = metadata.get(cls.DOTTED_ORDER_KEY)
+        api_key = ENV.LANGSMITH_API_KEY.optional()
         if (
-            not isinstance(text, str)
-            or not text
-            or namespace in self._observed_namespaces
-            or self._run_id is None
-            or self._target_run_id not in (None, self._run_id)
+            not isinstance(trace_id, str)
+            or not isinstance(dotted_order, str)
+            or not api_key
+            or not tracing_is_enabled()
         ):
             return None
-        timestamp = params.get("timestamp")
-        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+        try:
+            root = RunTree(
+                name="dashboard.send",
+                id=uuid.UUID(trace_id),
+                trace_id=uuid.UUID(trace_id),
+                dotted_order=dotted_order,
+                run_type="chain",
+                start_time=cls.at(started_at_ms),
+                project_name=tracing_project(),
+                ls_client=sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get()),
+                extra={
+                    "metadata": {
+                        key: value
+                        for key, value in {**metadata, "thread_id": thread_id}.items()
+                        if key in cls._SPAN_KEYS and isinstance(value, str)
+                    }
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Could not take up a dashboard send's trace",
+                extra={"dashboard_send_trace_id": trace_id},
+                exc_info=True,
+            )
             return None
-        self._observed_namespaces.add(namespace)
-        return AssistantTextObservation(
-            run_id=self._run_id,
-            event_timestamp_ms=int(timestamp),
+        return cls(root)
+
+    async def ended(self) -> bool:
+        """Whether the trace is closed already: a webhook delivered again has closed it."""
+        api_key = ENV.LANGSMITH_API_KEY.optional()
+        project_id = await resolve_project_id_by_name(tracing_project()) if api_key else None
+        if not api_key or not project_id:
+            return False
+        client: AsyncLangSmithClient = async_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get())
+        try:
+            async with asyncio.timeout(self._ENDED_TIMEOUT_S):
+                root = await client.runs.retrieve(
+                    self.trace_id, project_id=project_id, selects=["END_TIME"]
+                )
+        except Exception:
+            # Not ingested yet, so not closed yet.
+            return False
+        return root.end_time is not None
+
+    async def close(self, run: Mapping[str, object], *, failed: bool) -> None:
+        """Close the trace with the end, last message and error of the run it started."""
+        api_key = ENV.LANGSMITH_API_KEY.optional()
+        if not api_key:
+            return
+        try:
+            values = run.get("values")
+            messages = values.get("messages") if isinstance(values, Mapping) else None
+            error = run.get("error")
+            # The sync client redacts outputs as configured and sends on its background batch.
+            sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get()).update_run(
+                self.trace_id,
+                end_time=self.time_of(run.get("run_ended_at")) or datetime.now(UTC),
+                outputs={"messages": messages[-1:]} if isinstance(messages, list) else None,
+                error=(str(error) if error else "The run did not succeed") if failed else None,
+                trace_id=self.trace_id,
+                dotted_order=self.root.dotted_order,
+                session_name=self.root.session_name,
+            )
+        except Exception:
+            logger.warning(
+                "Could not close a dashboard send's trace",
+                extra={"dashboard_send_trace_id": self.trace_id},
+                exc_info=True,
+            )
+
+    def headers(self) -> dict[str, str]:
+        """What the run's start carries so the run nests under this trace.
+
+        Only the position, the project and the nesting mark travel; the root's metadata
+        stays out, since a receiver would copy it onto the run.
+        """
+        baggage = [f"langsmith-metadata={quote(json.dumps({self._NEST_UNDER_PARENT: True}))}"]
+        if self.root.session_name:
+            baggage.append(f"langsmith-project={quote(self.root.session_name)}")
+        return {"langsmith-trace": self.root.dotted_order, "baggage": ",".join(baggage)}
+
+    def fail(self, error: str) -> None:
+        """Close the trace of a send whose run did not start."""
+        try:
+            self.root.end(error=error)
+            self.root.patch()
+        except Exception:
+            logger.warning("Could not close a dashboard send's trace", exc_info=True)
+
+    def record_stages(
+        self,
+        stages: Sequence[tuple[str, int, int]],
+        *,
+        run_id: str,
+        sandbox: DashboardSandbox | None,
+    ) -> None:
+        """Post a span per stage, each with an id of its own trace and name, so tracing
+        them again rewrites the same spans."""
+        root_metadata = self.root.extra.get("metadata") if self.root.extra else None
+        shared = {
+            key: value for key, value in (root_metadata or {}).items() if key in self._SPAN_KEYS
+        }
+        for name, began, ended in stages:
+            self.root.create_child(
+                name,
+                run_id=uuid.uuid5(uuid.UUID(self.trace_id), name),
+                start_time=self.at(began),
+                end_time=self.at(ended),
+                outputs={"elapsed_ms": ended - began},
+                extra={
+                    "metadata": {
+                        **shared,
+                        "agent_run_id": run_id,
+                        **({"sandbox_kind": sandbox.value} if sandbox is not None else {}),
+                    }
+                },
+            ).post()
+
+
+class DashboardRunTimeline:
+    """One dashboard send's marks, read from the replies of the run it started.
+
+    The send's request stages end where the run was created, which is as close as
+    the run's completion comes to when the backend's start of it returned.
+    """
+
+    # The run metadata the send leaves for its run's completion to time it by.
+    RECEIVED_AT_KEY: Final = "dashboard_ttft_started_at_ms"
+    SUBMITTED_AT_KEY: Final = "dashboard_submitted_at_ms"
+    CLIENT_KEY: Final = "dashboard_client"
+    # The thread metadata naming the run each of the thread's latest sends started, by the
+    # send's receipt time. Later runs on the thread, a queued follow-up's or a pickup's,
+    # inherit a send's run metadata; a later send may start before an earlier run's
+    # completion is heard.
+    STARTED_RUNS_KEY: Final = "dashboard_send_runs"
+    _STARTED_RUNS_KEPT: Final = 8
+    # The thread metadata naming its latest runs whose timing is reported, so a run's
+    # completion delivered again reports nothing twice.
+    TIMED_RUNS_KEY: Final = "timed_run_ids"
+    _TIMED_RUNS_KEPT: Final = 16
+    # Where the thread does not name it, a run created this long after the send it
+    # names inherited that metadata.
+    _MAX_START_DELAY: Final = timedelta(minutes=2)
+
+    _METRICS: Final[dict[str, str]] = {
+        "first_generation": "open_swe_dashboard_thread_first_generation",
+        "ttft": "open_swe_dashboard_thread_ttft",
+    }
+    _definitions: ClassVar[dict[str, MetricDef]] = {}
+    _settling: ClassVar[set[asyncio.Task[None]]] = set()
+
+    # Each span of the send trace, named after the point it ends at.
+    _STAGES: Final[dict[str, str]] = {
+        "received": "client.request",
+        "accepted": "commands",
+        "first_generation": "first_generation",
+        "ttft": "first_text",
+    }
+    # Where a reply says when its model call opened and first gave text, by the mark it sets.
+    _STAMPS: Final[dict[str, str]] = {
+        "first_generation": FIRST_OUTPUT_AT_KEY,
+        "ttft": FIRST_TEXT_AT_KEY,
+    }
+
+    def __init__(
+        self,
+        received_at_ms: int,
+        *,
+        run_id: str,
+        client: DashboardClient = DashboardClient.OTHER,
+        submitted_at_ms: int | None = None,
+        accepted_at_ms: int | None = None,
+        trace: DashboardSendTrace | None = None,
+    ) -> None:
+        self.received_at_ms = received_at_ms
+        self.run_id = run_id
+        self.client = client
+        self.submitted_at_ms = submitted_at_ms
+        self.accepted_at_ms = accepted_at_ms
+        self.trace = trace
+        self.marks: dict[str, int] = {}
+
+    @staticmethod
+    def client_submitted_at(header: str | None, received_at_ms: int) -> int | None:
+        """The client's send time, when its clock is plausible against the backend's."""
+        try:
+            submitted = int(header) if header else None
+        except ValueError:
+            return None
+        if submitted is None or not (
+            received_at_ms - _MAX_CLIENT_LEAD_MS
+            <= submitted
+            <= received_at_ms + _MAX_CLIENT_SKEW_MS
+        ):
+            return None
+        return min(submitted, received_at_ms)
+
+    @classmethod
+    def of_run(cls, run: Mapping[str, object]) -> DashboardRunTimeline | None:
+        """The send a finished run's metadata names, marked from the run's replies.
+
+        ``None`` when no dashboard send started the run, or when the run was created so
+        long after the send it names that it inherited the send's metadata.
+        """
+        metadata = run.get("metadata")
+        run_id = run.get("run_id")
+        if not isinstance(metadata, Mapping) or not isinstance(run_id, str):
+            return None
+        received = cls.epoch_ms(metadata.get(cls.RECEIVED_AT_KEY))
+        if received is None:
+            return None
+        created = DashboardSendTrace.time_of(run.get("created_at"))
+        if created is not None and created - DashboardSendTrace.at(received) > cls._MAX_START_DELAY:
+            return None
+        submitted = cls.epoch_ms(metadata.get(cls.SUBMITTED_AT_KEY))
+        client = metadata.get(cls.CLIENT_KEY)
+        timeline = cls(
+            received,
+            run_id=run_id,
+            client=DashboardClient(client)
+            if client in DashboardClient._value2member_map_
+            else DashboardClient.OTHER,
+            submitted_at_ms=submitted,
+            accepted_at_ms=round(created.timestamp() * 1000) if created is not None else None,
+            trace=DashboardSendTrace.of_run(
+                metadata,
+                thread_id=thread_id if isinstance(thread_id := run.get("thread_id"), str) else None,
+                started_at_ms=submitted or received,
+            ),
+        )
+        values = run.get("values")
+        messages = values.get("messages") if isinstance(values, Mapping) else None
+        timeline.read(messages if isinstance(messages, list) else [])
+        return timeline
+
+    def read(self, messages: Sequence[object]) -> None:
+        """Mark the earliest output and text the agent's replies gave since the send.
+
+        Messages come as the run's state serialized them, plain or as LangChain's
+        constructor form; a reply from before the send is an earlier run's.
+        """
+        for message in messages:
+            if not isinstance(message, Mapping):
+                continue
+            kwargs = message.get("kwargs")
+            stamps = message.get("response_metadata") or (
+                kwargs.get("response_metadata") if isinstance(kwargs, Mapping) else None
+            )
+            if not isinstance(stamps, Mapping):
+                continue
+            for name, key in self._STAMPS.items():
+                at = self.epoch_ms(stamps.get(key))
+                if at is not None and at >= self.received_at_ms:
+                    self.marks[name] = min(self.marks.get(name, at), at)
+
+    @classmethod
+    def settle_in_background(cls, run: Mapping[str, object], *, failed: bool) -> None:
+        """Settle a finished run's send without holding up the rest of its completion."""
+        task = asyncio.create_task(cls.settle(run, failed=failed))
+        cls._settling.add(task)
+        task.add_done_callback(cls._settling.discard)
+
+    @classmethod
+    async def settle(cls, run: Mapping[str, object], *, failed: bool) -> None:
+        """Time the send a finished run names, and close its trace; it never raises.
+
+        Only the run the send started does: another that inherited the send's metadata
+        would time it again from the same replies, and move the trace's end to its own.
+        """
+        try:
+            timeline = cls.of_run(run)
+        except Exception:
+            logger.warning("Could not read a dashboard send's timing", exc_info=True)
+            return
+        thread_id = run.get("thread_id")
+        if timeline is None or not isinstance(thread_id, str):
+            return
+        thread = await cls.thread_metadata(thread_id, timeline.run_id)
+        runs = thread.get(cls.STARTED_RUNS_KEY) if thread is not None else None
+        started = runs.get(str(timeline.received_at_ms)) if isinstance(runs, Mapping) else None
+        if started is not None and started != timeline.run_id:
+            return
+        # A completion may be delivered again. The marks are reported once, as the thread
+        # records them, and the trace is closed once, as its end shows; each is retried by
+        # a later delivery when it did not happen the first time.
+        sandbox = DashboardSandbox.of_thread(thread) if thread is not None else None
+        if (
+            thread is not None
+            and sandbox is not None
+            and timeline.marks
+            and not cls.timed_already(thread, timeline.run_id)
+        ):
+            timeline.report(thread_id=thread_id, sandbox=sandbox)
+            await cls.mark_timed(thread_id, thread, timeline.run_id)
+        if timeline.trace is not None and not await timeline.trace.ended():
+            timeline.trace_stages(sandbox)
+            await timeline.trace.close(run, failed=failed)
+
+    @classmethod
+    def timed_already(cls, thread: Mapping[str, object], run_id: str) -> bool:
+        """Whether the thread records ``run_id``'s timing as reported already."""
+        runs = thread.get(cls.TIMED_RUNS_KEY)
+        return isinstance(runs, list) and run_id in runs
+
+    @classmethod
+    async def mark_timed(cls, thread_id: str, thread: Mapping[str, object], run_id: str) -> None:
+        """Record on the thread that ``run_id``'s timing is reported, among its latest."""
+        from openswe.threads.store import THREADS
+
+        runs = thread.get(cls.TIMED_RUNS_KEY)
+        kept: list[JsonValue] = (
+            [r for r in runs if isinstance(r, str) and r != run_id]
+            if isinstance(runs, list)
+            else []
+        )
+        try:
+            await THREADS.update(
+                thread_id, {cls.TIMED_RUNS_KEY: [*kept, run_id][-cls._TIMED_RUNS_KEPT :]}
+            )
+        except Exception:
+            logger.warning(
+                "Could not record a run's timing as reported",
+                extra={"agent_thread_id": thread_id, "run_id": run_id},
+                exc_info=True,
+            )
+
+    @classmethod
+    def started(
+        cls, thread: Mapping[str, object], *, received_at_ms: int, run_id: str
+    ) -> dict[str, JsonValue]:
+        """The thread's record of the runs its sends started, with this send's run added."""
+        runs = thread.get(cls.STARTED_RUNS_KEY)
+        kept: dict[str, JsonValue] = (
+            {k: v for k, v in runs.items() if isinstance(v, str)}
+            if isinstance(runs, Mapping)
+            else {}
+        )
+        kept[str(received_at_ms)] = run_id
+        return dict(sorted(kept.items(), key=lambda item: int(item[0]))[-cls._STARTED_RUNS_KEPT :])
+
+    @staticmethod
+    def epoch_ms(value: object) -> int | None:
+        """``value`` as epoch ms, when it is an integer."""
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    @staticmethod
+    async def thread_metadata(thread_id: str, run_id: str) -> Mapping[str, object] | None:
+        """The thread's metadata, read once the run has ended; ``None`` when it cannot be."""
+        from openswe.threads.store import THREADS
+
+        try:
+            thread = await THREADS.get(thread_id)
+        except Exception:
+            logger.warning(
+                "Could not read the thread for its run timing",
+                extra={"agent_thread_id": thread_id, "run_id": run_id},
+                exc_info=True,
+            )
+            return None
+        return thread.metadata if thread is not None else {}
+
+    def seconds(self) -> dict[str, float]:
+        """Each mark the run reached, in seconds after the send."""
+        return {name: (at - self.received_at_ms) / 1000 for name, at in self.marks.items()}
+
+    def trace_stages(self, sandbox: DashboardSandbox | None) -> None:
+        """Span each stage of the send on its trace, even when the run gave no output."""
+        if self.trace is None:
+            return
+        try:
+            self.trace.record_stages(self.stages(), run_id=self.run_id, sandbox=sandbox)
+        except Exception:
+            logger.warning("Failed to trace a dashboard send's stages", exc_info=True)
+
+    def report(self, *, thread_id: str, sandbox: DashboardSandbox) -> None:
+        """Record the marks the run reached to the histograms and the log; never raises."""
+        run_id = self.run_id
+        seconds = self.seconds()
+        if not seconds:
+            return
+        try:
+            self._record_histograms(seconds, sandbox)
+        except Exception:
+            logger.warning("Failed to record dashboard run timing histograms", exc_info=True)
+        logger.info(
+            "Dashboard run timing",
+            extra={
+                "agent_thread_id": thread_id,
+                "run_id": run_id,
+                "dashboard_client": self.client.value,
+                "dashboard_sandbox": sandbox.value,
+                **{f"{name}_ms": round(value * 1000) for name, value in seconds.items()},
+            },
         )
 
+    def _record_histograms(self, seconds: Mapping[str, float], sandbox: DashboardSandbox) -> None:
+        from langgraph_api.metrics_otlp import (
+            METRIC_TIER_INFO,
+            def_latency,
+            get_otlp_metrics_reporter,
+        )
 
-def _record_ttft_histogram(duration_seconds: float) -> None:
-    from langgraph_api.metrics_otlp import (
-        METRIC_TIER_INFO,
-        def_latency,
-        get_otlp_metrics_reporter,
-    )
+        reporter = get_otlp_metrics_reporter()
+        attributes = {"source": "dashboard", "client": self.client.value, "sandbox": sandbox.value}
+        for name, value in seconds.items():
+            metric = self._definitions.get(name)
+            if metric is None:
+                metric = self._definitions[name] = def_latency(
+                    self._METRICS[name], METRIC_TIER_INFO
+                )
+            reporter.record_latency(metric, value, attributes=attributes)
 
-    global _DASHBOARD_THREAD_TTFT
-    if _DASHBOARD_THREAD_TTFT is None:
-        _DASHBOARD_THREAD_TTFT = def_latency("open_swe_dashboard_thread_ttft", METRIC_TIER_INFO)
-    get_otlp_metrics_reporter().record_latency(
-        _DASHBOARD_THREAD_TTFT,
-        duration_seconds,
-        attributes={"source": "dashboard"},
-    )
+    def _points(self) -> list[tuple[str, int]]:
+        """The send's points in the order they happen, none earlier than the one before.
 
+        Another host's clock can trail the backend's own; a later point never draws a
+        span that ends before it starts.
+        """
+        points = [
+            *([("submitted", self.submitted_at_ms)] if self.submitted_at_ms is not None else []),
+            ("received", self.received_at_ms),
+            *([("accepted", self.accepted_at_ms)] if self.accepted_at_ms is not None else []),
+            *((name, self.marks[name]) for name in self._STAGES if name in self.marks),
+        ]
+        ordered: list[tuple[str, int]] = []
+        for name, at in points:
+            ordered.append((name, max(at, ordered[-1][1]) if ordered else at))
+        return ordered
 
-async def record_dashboard_thread_ttft(
-    observation: AssistantTextObservation,
-    *,
-    thread_id: str,
-    started_at_ms: int,
-) -> None:
-    try:
-        if observation.event_timestamp_ms < started_at_ms:
-            return
-        duration_seconds = (observation.event_timestamp_ms - started_at_ms) / 1000
-        _record_ttft_histogram(duration_seconds)
-    except Exception:
-        logger.warning("Failed to record dashboard thread TTFT histogram", exc_info=True)
-        return
-    logger.info(
-        "Dashboard thread TTFT %.1f ms (thread=%s, run=%s)",
-        duration_seconds * 1000,
-        thread_id,
-        observation.run_id,
-    )
+    def stages(self) -> list[tuple[str, int, int]]:
+        """Each stage the send went through, as ``(span name, began, ended)`` in epoch ms."""
+        return [
+            (self._STAGES[name], began, ended)
+            for (_, began), (name, ended) in pairwise(self._points())
+        ]

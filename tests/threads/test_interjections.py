@@ -87,7 +87,7 @@ def feedback(monkeypatch: pytest.MonkeyPatch) -> _Feedback:
     async def project(_name: str) -> str:
         return "project-id"
 
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", project)
+    monkeypatch.setattr(ls_utils, "resolve_project_id_by_name", project)
     return written
 
 

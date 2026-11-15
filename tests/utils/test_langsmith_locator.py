@@ -31,7 +31,7 @@ async def test_get_open_swe_thread_id_from_langsmith_resolves_run_uuid(
         )
     )
     monkeypatch.setattr(langsmith, "_build_langsmith_client", lambda: client)
-    monkeypatch.setattr(langsmith, "_resolve_project_id_by_name", AsyncMock(return_value="proj-1"))
+    monkeypatch.setattr(langsmith, "resolve_project_id_by_name", AsyncMock(return_value="proj-1"))
 
     result = await langsmith.get_open_swe_thread_id_from_langsmith(
         "11111111-1111-4111-8111-111111111111"

@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
-from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from openswe.dashboard.ttft import DashboardClient, DashboardRunTimeline, DashboardSendTrace
 from openswe.dispatch import channel_of
 from openswe.plugins.records import PluginChat
 from openswe.threads.access import (
@@ -26,7 +26,6 @@ from openswe.threads.machine_reads import machine_thread
 from openswe.threads.mentions import ThreadMentions
 from openswe.threads.principals import Principal
 from openswe.threads.runs import (
-    _ASSISTANT_ID,
     QUEUED_BY_KEY,
     _command_message_content,
     _command_message_id,
@@ -51,17 +50,12 @@ from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
 
-_TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
-# Each observer holds a thread stream that receives everything the thread's runs publish,
-# so one that never sees its first token must not hold it for as long as the run lives.
-_TTFT_OBSERVER_TIMEOUT_SECONDS = 300.0
 _DISCOVERY_HISTORY_LIMIT = 5
 
 
@@ -129,50 +123,6 @@ async def stream_thread_events(
         logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
 
 
-async def _observe_dashboard_run_ttft(
-    thread_id: str,
-    run_id: str,
-    started_at_ms: int,
-) -> None:
-    detector = AssistantTextEventDetector(run_id)
-    try:
-        async with langgraph_client().threads.stream(
-            thread_id, assistant_id=_ASSISTANT_ID
-        ) as thread_stream:
-            async with asyncio.timeout(_TTFT_OBSERVER_TIMEOUT_SECONDS):
-                async for event in thread_stream.subscribe(
-                    ["lifecycle", "messages"], namespaces=[[]], depth=10
-                ):
-                    lifecycle = root_lifecycle(event)
-                    if (
-                        lifecycle is not None
-                        and lifecycle[0] == run_id
-                        and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
-                    ):
-                        return
-                    observation = detector.observe(event)
-                    if observation is None:
-                        continue
-                    await record_dashboard_thread_ttft(
-                        observation,
-                        thread_id=thread_id,
-                        started_at_ms=started_at_ms,
-                    )
-                    return
-    except TimeoutError:
-        logger.info(
-            "Dashboard TTFT observer saw no first token in time",
-            extra={"agent_thread_id": thread_id, "run_id": run_id},
-        )
-    except Exception:
-        logger.warning(
-            "Dashboard TTFT observer closed for run %s on thread %s",
-            run_id,
-            thread_id,
-            exc_info=True,
-        )
-
-
 async def proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
@@ -182,14 +132,18 @@ async def proxy_dashboard_thread_commands(
     content_type: str = "application/json",
     principal: Principal | None = None,
     relayed_from: str | None = None,
+    client: DashboardClient = DashboardClient.OTHER,
+    submitted_at: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
     ``principal`` is how a machine gets in. Without one the sender is the person
     named by ``login``, which is what the dashboard and the agent's own tools pass.
     ``relayed_from`` names the agent thread that sent it on that person's behalf.
+    ``client`` and ``submitted_at``, the client's own send time, only time the run.
     """
     received_at_ms = _now_ms()
+    submitted_at_ms = DashboardRunTimeline.client_submitted_at(submitted_at, received_at_ms)
     principal = principal or Principal.of_login(login, email)
     require_json_content_type(content_type)
     try:
@@ -296,6 +250,7 @@ async def proxy_dashboard_thread_commands(
         )
     outgoing = json.dumps(enriched).encode()
 
+    send_trace: DashboardSendTrace | None = None
     if method == "run.start":
         params = enriched.get("params")
         if isinstance(params, dict):
@@ -303,7 +258,22 @@ async def proxy_dashboard_thread_commands(
             if not isinstance(run_metadata, dict):
                 run_metadata = {}
                 params["metadata"] = run_metadata
-            run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
+            # The run's completion times the send from these (``DashboardRunTimeline``).
+            run_metadata[DashboardRunTimeline.RECEIVED_AT_KEY] = received_at_ms
+            run_metadata[DashboardRunTimeline.CLIENT_KEY] = client.value
+            if submitted_at_ms is not None:
+                run_metadata[DashboardRunTimeline.SUBMITTED_AT_KEY] = submitted_at_ms
+            invocation_id = run_metadata.get("invocation_id")
+            run_input = params.get("input")
+            send_trace = await DashboardSendTrace.open(
+                thread_id=thread_id,
+                invocation_id=invocation_id if isinstance(invocation_id, str) else None,
+                client=client,
+                started_at_ms=submitted_at_ms or received_at_ms,
+                inputs=run_input if isinstance(run_input, dict) else {},
+            )
+            if send_trace is not None:
+                run_metadata.update(send_trace.run_metadata())
             outgoing = json.dumps(enriched).encode()
 
     sender = (
@@ -312,7 +282,12 @@ async def proxy_dashboard_thread_commands(
         else None
     )
     try:
-        reply = await THREADS.command(thread_id, outgoing, user_id=sender)
+        reply = await THREADS.command(
+            thread_id,
+            outgoing,
+            user_id=sender,
+            trace_headers=send_trace.headers() if send_trace is not None else None,
+        )
     except Exception as exc:
         logger.exception(
             "Delivering a thread command failed",
@@ -354,6 +329,8 @@ async def proxy_dashboard_thread_commands(
         reply.status >= 400
         or (isinstance(response_payload, dict) and response_payload.get("type") == "error")
     )
+    if send_trace is not None and not run_start_succeeded:
+        send_trace.fail(f"The run did not start (HTTP {reply.status})")
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
@@ -372,20 +349,15 @@ async def proxy_dashboard_thread_commands(
         mentions.dispatch()
 
     if run_start_succeeded and run_id is not None:
-        task = asyncio.create_task(
-            _observe_dashboard_run_ttft(
-                thread_id,
-                run_id,
-                received_at_ms,
-            )
-        )
-        _TTFT_OBSERVER_TASKS.add(task)
-        task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
         try:
             await THREADS.update(
                 thread_id,
                 {
                     "latest_run_id": run_id,
+                    # Later runs inherit the send's run metadata; its timing is this run's.
+                    DashboardRunTimeline.STARTED_RUNS_KEY: DashboardRunTimeline.started(
+                        metadata, received_at_ms=received_at_ms, run_id=run_id
+                    ),
                     "latest_run_status": "pending",
                     "updated_at_ms": _now_ms(),
                 },

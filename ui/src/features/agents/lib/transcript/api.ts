@@ -10,6 +10,7 @@ import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
 import { inSendOrder } from "@/features/agents/lib/runStartOrder"
 import {
   REQUEST_ID_HEADER,
+  SUBMITTED_AT_HEADER,
   dashboardApiUrl,
   networkError,
   newRequestId,
@@ -264,6 +265,8 @@ export async function startRun(
   command: RunStartCommand
 ): Promise<void> {
   const requestId = newRequestId()
+  // Taken before waiting behind earlier sends, which the person waits through too.
+  const submittedAt = Date.now()
   const response = await inSendOrder(threadId, () =>
     timedFetch(
       dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
@@ -273,6 +276,7 @@ export async function startRun(
         headers: {
           "Content-Type": "application/json",
           [REQUEST_ID_HEADER]: requestId,
+          [SUBMITTED_AT_HEADER]: String(submittedAt),
         },
         body: JSON.stringify(command),
       }
