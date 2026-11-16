@@ -1,6 +1,11 @@
 /** @vitest-environment jsdom */
 
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@langchain/macaw-components/ContextMenu"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
@@ -82,14 +87,46 @@ describe("Copy thread ID", () => {
     fireEvent.keyDown(screen.getByRole("button", { name: "Thread actions" }), {
       key: "Enter",
     })
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Diagnostics" })
+    fireEvent.keyDown(
+      await screen.findByRole("menuitem", { name: "Diagnostics" }),
+      { key: "ArrowRight" }
     )
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Copy thread ID" })
     )
 
     expect(writeText).toHaveBeenCalledWith(expectedId)
+  })
+})
+
+describe("context menu diagnostics", () => {
+  it("opens diagnostics with the keyboard", async () => {
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger>Thread actions</ContextMenuTrigger>
+        <ContextMenuContent>
+          <ThreadMenuItems
+            menu="context"
+            thread={thread}
+            pinned={false}
+            archived={false}
+            isDeleting={false}
+            onTogglePin={vi.fn()}
+            onToggleViewed={vi.fn()}
+            onToggleArchived={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </ContextMenuContent>
+      </ContextMenu>
+    )
+    fireEvent.contextMenu(screen.getByText("Thread actions"))
+    fireEvent.keyDown(
+      await screen.findByRole("menuitem", { name: "Diagnostics" }),
+      { key: "ArrowRight" }
+    )
+    expect(
+      await screen.findByRole("menuitem", { name: "Copy thread ID" })
+    ).toBeTruthy()
   })
 })
 
