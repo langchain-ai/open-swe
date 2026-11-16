@@ -192,81 +192,114 @@ export interface SidebarThreadGroup {
   key: string
   label: string
   threads: Array<SidebarThreadItem>
+  mergable?: boolean
 }
 
-/** Running work follows at most four adaptive activity-date sections. */
-export function groupSidebarThreadsByDate(
+/** The past seven calendar days stay separate; older activity uses broader ranges. */
+export function groupSidebarThreadsByRecency(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
 ): Array<SidebarThreadGroup> {
-  const today = new Date(now).setHours(0, 0, 0, 0)
-  const last12Hours = now.getTime() - 12 * 60 * 60 * 1000
-  const ranges = [
-    { key: "last-12-hours", label: "Last 12 hours", cutoff: last12Hours },
-    // Before noon, the rolling window already extends beyond Today.
-    ...(last12Hours > today
-      ? [{ key: "today", label: "Today", cutoff: today }]
-      : []),
-    {
-      key: "yesterday",
-      label: "Yesterday",
-      cutoff: new Date(today).setDate(now.getDate() - 1),
-    },
-    {
-      key: "last-7-days",
-      label: "Last 7 days",
-      cutoff: new Date(today).setDate(now.getDate() - 6),
-    },
-    {
-      key: "last-14-days",
-      label: "Last 14 days",
-      cutoff: new Date(today).setDate(now.getDate() - 13),
-    },
-    { key: "older", label: "Older", cutoff: -Infinity },
-  ]
-  const groups: Array<SidebarThreadGroup> = []
   let remaining = sortSidebarThreads(
     threads.filter(
       (item) => !item.waitingForDelegatedWork && item.status !== "running"
     )
   )
+
+  type Range = {
+    key: string
+    label: string
+    cutoff: number
+    mergable?: boolean
+  }
+  const ranges: Range[] = []
+
+  const today = new Date(now).setHours(0, 0, 0, 0)
+  const last12Hours = now.getTime() - 12 * 60 * 60 * 1000
+
+  if (
+    last12Hours > today &&
+    remaining.some((thread) => thread.updatedAt >= last12Hours) &&
+    remaining.some(
+      (thread) => thread.updatedAt >= today && thread.updatedAt < last12Hours
+    )
+  ) {
+    ranges.push({
+      key: "last-12-hours",
+      label: "Last 12 hours",
+      cutoff: last12Hours,
+    })
+  }
+
+  ranges.push(
+    { key: "today", label: "Today", cutoff: today },
+    {
+      key: "yesterday",
+      label: "Yesterday",
+      cutoff: new Date(today).setDate(now.getDate() - 1),
+    }
+  )
+
+  const weekDay = (now.getDay() + 6) % 7
+
+  for (let offset = 2; offset <= 6; offset++) {
+    const day = new Date(today)
+    day.setDate(day.getDate() - offset)
+    ranges.push({
+      key: `day:${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`,
+      label: day.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: day.getFullYear() === now.getFullYear() ? undefined : "numeric",
+      }),
+      cutoff: day.getTime(),
+    })
+  }
+
+  const weekStart = new Date(today)
+  weekStart.setDate(weekStart.getDate() - weekDay)
+
+  ranges.push(
+    {
+      key: "last-week",
+      label: "Last week",
+      cutoff: new Date(weekStart).setDate(weekStart.getDate() - 7),
+      mergable: true,
+    },
+    {
+      key: "last-14-days",
+      label: "Last 14 days",
+      cutoff: new Date(today).setDate(now.getDate() - 13),
+      mergable: true,
+    },
+    { key: "older", label: "Older", cutoff: -Infinity, mergable: true }
+  )
+
+  const groups: SidebarThreadGroup[] = []
   for (const range of ranges) {
     const cutoff = range.cutoff
     const items = remaining.filter((thread) => thread.updatedAt >= cutoff)
     if (!items.length) continue
 
-    // Yesterday cannot include a sparse Today that has not been emitted yet.
-    if (
-      range.key === "yesterday" &&
-      items.some((thread) => thread.updatedAt >= today)
-    ) {
-      continue
-    }
+    if (range.mergable) {
+      // Only older ranges are adaptive; calendar days keep their own sections.
+      if (items.length < 3 && items.length < remaining.length) continue
 
-    // Small groups are merged with the previous one if possible.
-    if (items.length < 3 && items.length < remaining.length) continue
+      const previous = groups.at(-1)
 
-    // Reserve the fourth section for all remaining older activity.
-    if (groups.length === 3 && items.length < remaining.length) continue
-
-    if (items.length < 3 && groups.length > 0) {
-      const previous = groups.pop()
-      if (previous) items.unshift(...previous.threads)
-      if (range.key === "yesterday") {
-        groups.push({
-          key: "last-7-days",
-          label: "Last 7 days",
-          threads: items,
-        })
-      } else {
-        groups.push({ key: range.key, label: range.label, threads: items })
+      if (items.length < 3 && previous?.mergable) {
+        groups.pop()
+        items.unshift(...previous.threads)
       }
-    } else {
-      groups.push({ key: range.key, label: range.label, threads: items })
     }
+
+    groups.push({ ...range, threads: items })
+
     remaining = remaining.filter((thread) => thread.updatedAt < cutoff)
     if (!remaining.length) break
   }
+
   const onlyDateGroup = groups.length === 1 ? groups[0] : undefined
   if (onlyDateGroup?.key === "older") onlyDateGroup.label = "Recents"
 
@@ -280,6 +313,69 @@ export function groupSidebarThreadsByDate(
       ),
     },
   ].filter((group) => group.threads.length > 0)
+}
+
+/** Buckets threads by their local activity day, newest first. */
+export function groupSidebarThreadsByDay(
+  threads: ReadonlyArray<SidebarThreadItem>,
+  now: Date = new Date()
+): Array<SidebarThreadGroup> {
+  const today = new Date(now).setHours(0, 0, 0, 0)
+  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
+  const days = new Map<number, Array<SidebarThreadItem>>()
+  const running: Array<SidebarThreadItem> = []
+
+  for (const thread of threads) {
+    if (thread.status === "running" || thread.waitingForDelegatedWork) {
+      running.push(thread)
+      continue
+    }
+    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
+    const items = days.get(day) ?? []
+    items.push(thread)
+    days.set(day, items)
+  }
+
+  const groups: Array<SidebarThreadGroup> = [...days.entries()]
+    .sort(([left], [right]) => right - left)
+    .map(([day, items]) => {
+      if (day === today) {
+        return {
+          key: "today",
+          label: "Today",
+          threads: items.sort(byRecency),
+        }
+      }
+
+      if (day === yesterday) {
+        return {
+          key: "yesterday",
+          label: "Yesterday",
+          threads: items.sort(byRecency),
+        }
+      }
+
+      return {
+        // Collapsed sections are saved by key, so Today and Yesterday keep theirs
+        // as the days roll over, and an older day keeps its date.
+        key: new Date(day).toLocaleDateString("en-CA"),
+        label: new Date(day).toLocaleDateString([], {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          year:
+            new Date(day).getFullYear() === now.getFullYear()
+              ? undefined
+              : "numeric",
+        }),
+        threads: items.sort(byRecency),
+      }
+    })
+
+  if (running.length) {
+    groups.push({ key: "status:running", label: "Running", threads: running })
+  }
+  return groups
 }
 
 export function threadFamily(thread: AgentThread): Array<AgentThread> {

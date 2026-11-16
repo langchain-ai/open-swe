@@ -5,7 +5,10 @@ import {
   filterThreads,
   hasActiveFilters,
 } from "./sidebarFilter"
-import { cloudSidebarThread, groupSidebarThreadsByDate } from "./sidebarThreads"
+import {
+  cloudSidebarThread,
+  groupSidebarThreadsByRecency,
+} from "./sidebarThreads"
 import type { SidebarFilters } from "./sidebarFilter"
 import type { AgentThread } from "./types"
 
@@ -160,7 +163,7 @@ describe("filterThreads", () => {
     const ordinary = makeThread({ status: "running" })
     const items = [active, delegated, ordinary].map(cloudSidebarThread)
     expect(
-      groupSidebarThreadsByDate(
+      groupSidebarThreadsByRecency(
         filterThreads(items, filters(), active.id, "alice-id")
       ).map((group) => [group.label, group.threads.map((thread) => thread.id)])
     ).toEqual([["Running", [ordinary.id]]])

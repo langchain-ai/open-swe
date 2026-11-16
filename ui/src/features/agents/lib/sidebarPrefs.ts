@@ -31,7 +31,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
   hiddenNavItems: ["/agents/skills", "/agents/reviews"],
-  organize: "date",
+  organize: "none",
 }
 
 function asStringArray(value: unknown): Array<string> {

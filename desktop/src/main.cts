@@ -709,12 +709,12 @@ function configureDesktopIpc() {
     target.hash = source.hash;
     clipboard.writeText(target.toString());
   });
-  ipcMain.handle("desktop:open-in-browser", async (event, path) => {
+  ipcMain.handle("desktop:open-in-browser", async (event, pagePath) => {
     requireTrustedDesktopIpc(event);
     if (!backendUrl) throw new Error("Robin is not connected to a backend");
-    if (typeof path !== "string") throw new Error("Invalid path");
+    if (typeof pagePath !== "string") throw new Error("Invalid path");
     await shell.openExternal(
-      await desktopEnvironments.dashboardPageUrl(backendUrl, path),
+      await desktopEnvironments.dashboardPageUrl(backendUrl, pagePath),
     );
   });
   ipcMain.handle("desktop:version", (event) => {

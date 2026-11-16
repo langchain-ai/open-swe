@@ -113,7 +113,8 @@ import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByDate,
+  groupSidebarThreadsByRecency,
+  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -253,7 +254,7 @@ export function AgentsSidebar({
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
   const workspaceOrganize = prefs.organize === "workspace"
-  const sortByActivity = prefs.organize === "date"
+  const sortByActivity = prefs.organize === "date" || prefs.organize === "none"
   // "workspace" mode groups the same repo folders as "repo" mode; it
   // only changes how the unpinned ones are laid out (nested under a workspace
   // header instead of a flat list), so every other repo-mode query and
@@ -649,7 +650,7 @@ export function AgentsSidebar({
         value={prefs.organize}
         onChange={(organize) => setView({ organize })}
         options={[
-          { value: "none", label: "None" },
+          { value: "none", label: "Recency" },
           { value: "date", label: "Date" },
           { value: "repo", label: "Project" },
           { value: "workspace", label: "Environment" },
@@ -701,8 +702,11 @@ export function AgentsSidebar({
     </>
   )
 
-  const threadGroups =
-    prefs.organize === "date" ? groupSidebarThreadsByDate(recents) : []
+  const threadGroups = (() => {
+    if (prefs.organize === "none") return groupSidebarThreadsByRecency(recents)
+    if (prefs.organize === "date") return groupSidebarThreadsByDay(recents)
+    return []
+  })()
   const recentGroups = threadGroups.length
     ? threadGroups.map((group) => ({ ...group, key: `recents:${group.key}` }))
     : [{ key: "recents", label: "Recents", threads: recents }]
@@ -863,16 +867,6 @@ export function AgentsSidebar({
               {index === 0 && recentsQuery.isPending && (
                 <ThreadListSkeleton label="Loading recent threads" />
               )}
-              {index === groups.length - 1 &&
-                prefs.organize !== "date" &&
-                recentsQuery.hasMore && (
-                  <LoadMoreThreadsOnScroll
-                    label="Load more threads"
-                    root={scrollViewport}
-                    loading={recentsQuery.isFetchingNextPage}
-                    onLoadMore={recentsQuery.fetchNextPage}
-                  />
-                )}
             </>
           )}
         </section>
@@ -1165,7 +1159,7 @@ export function AgentsSidebar({
             {recentSections
               .filter((section) => section.key !== "recents:status:running")
               .map((section) => section.content)}
-            {!repoMode && prefs.organize === "date" && recentsQuery.hasMore && (
+            {!repoMode && recentsQuery.hasMore && (
               <LoadMoreThreadsOnScroll
                 label="Load more threads"
                 root={scrollViewport}

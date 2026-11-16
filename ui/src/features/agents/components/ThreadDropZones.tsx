@@ -120,7 +120,13 @@ export function ThreadDropZones(props: {
   }
 
   return (
-    <div ref={attach} className="pointer-events-none absolute inset-0">
+    <div
+      ref={attach}
+      className={cn(
+        "pointer-events-none absolute inset-0",
+        !props.active && "invisible"
+      )}
+    >
       {(
         [
           ...(singlePinned ? [] : ["pin" as const]),

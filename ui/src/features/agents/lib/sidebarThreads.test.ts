@@ -4,7 +4,8 @@ import type { AgentThread } from "./types"
 import {
   cloudSidebarThread,
   groupRepoGroupsByWorkspace,
-  groupSidebarThreadsByDate,
+  groupSidebarThreadsByRecency,
+  groupSidebarThreadsByDay,
   sortSidebarThreads,
   sidebarRefreshInterval,
 } from "./sidebarThreads"
@@ -92,7 +93,7 @@ describe("sortSidebarThreads", () => {
 })
 
 describe("groupSidebarThreadsByDate", () => {
-  it("groups the rolling 12-hour window across midnight without duplicating Today", () => {
+  it("keeps Today and Yesterday separate across midnight", () => {
     const now = new Date(2026, 5, 20, 6)
     const threads = [
       new Date(2026, 5, 20, 5),
@@ -111,13 +112,37 @@ describe("groupSidebarThreadsByDate", () => {
     )
 
     expect(
-      groupSidebarThreadsByDate(threads, now).map((group) => [
+      groupSidebarThreadsByRecency(threads, now).map((group) => [
         group.label,
         group.threads.map((thread) => thread.id),
       ])
     ).toEqual([
-      ["Last 12 hours", ["0", "1", "2"]],
-      ["Yesterday", ["3", "4", "5"]],
+      ["Today", ["0"]],
+      ["Yesterday", ["1", "2", "3", "4", "5"]],
+    ])
+  })
+
+  it("keeps Yesterday separate across the Monday week and month boundary", () => {
+    const now = new Date(2026, 5, 1, 10)
+    const threads = [
+      new Date(2026, 5, 1, 9),
+      new Date(2026, 4, 31, 23),
+      new Date(2026, 4, 30, 12),
+    ].map((date, index) =>
+      cloudSidebarThread(
+        cloudThread({ id: String(index), updatedAt: date.getTime() })
+      )
+    )
+
+    expect(
+      groupSidebarThreadsByRecency(threads, now).map((group) => [
+        group.label,
+        group.threads.map((thread) => thread.id),
+      ])
+    ).toEqual([
+      ["Today", ["0"]],
+      ["Yesterday", ["1"]],
+      ["Sat, May 30", ["2"]],
     ])
   })
 
@@ -143,27 +168,27 @@ describe("groupSidebarThreadsByDate", () => {
     ].map(cloudSidebarThread)
 
     expect(
-      groupSidebarThreadsByDate(threads, now).map((group) => [
+      groupSidebarThreadsByRecency(threads, now).map((group) => [
         group.label,
         group.threads.map((thread) => thread.id),
       ])
     ).toEqual([
-      ["Last 12 hours", ["finished", "error"]],
+      ["Today", ["finished", "error"]],
       ["Running", ["running", "delegating"]],
     ])
   })
 
-  it("merges sparse recent days and sorts by activity rather than creation", () => {
+  it("preserves sparse calendar days and sorts by activity rather than creation", () => {
     const now = new Date(2026, 5, 10, 15)
     const at = (day: number, hour: number) =>
       new Date(2026, 5, day, hour).getTime()
     const thread = (id: string, createdAt: number, updatedAt: number) =>
       cloudSidebarThread(cloudThread({ id, createdAt, updatedAt }))
 
-    const groups = groupSidebarThreadsByDate(
+    const groups = groupSidebarThreadsByRecency(
       [
         thread("busy", at(1, 9), at(10, 14)),
-        thread("fresh", at(10, 8), at(10, 9)),
+        thread("fresh", at(10, 1), at(10, 2)),
         thread("old", at(3, 9), at(5, 10)),
         thread("older", at(2, 9), at(4, 10)),
         thread("yesterday", at(9, 9), at(9, 10)),
@@ -178,17 +203,17 @@ describe("groupSidebarThreadsByDate", () => {
         group.threads.map((item) => item.id),
       ])
     ).toEqual([
-      [
-        "last-7-days",
-        "Last 7 days",
-        ["busy", "fresh", "yesterday", "old", "older"],
-      ],
+      ["last-12-hours", "Last 12 hours", ["busy"]],
+      ["today", "Today", ["fresh"]],
+      ["yesterday", "Yesterday", ["yesterday"]],
+      ["day:2026-6-5", "Fri, Jun 5", ["old"]],
+      ["day:2026-6-4", "Thu, Jun 4", ["older"]],
     ])
   })
 
-  it("caps dense ranges at four groups and includes the oldest threads", () => {
+  it("keeps the past seven days separate across week boundaries", () => {
     const now = new Date(2026, 5, 20, 15)
-    const threads = [20, 19, 14, 7, 6].flatMap((day) =>
+    const threads = [20, 19, 18, 17, 16, 15, 14, 7, 6].flatMap((day) =>
       [1, 2, 3].map((hour) =>
         cloudSidebarThread(
           cloudThread({
@@ -199,13 +224,19 @@ describe("groupSidebarThreadsByDate", () => {
       )
     )
 
-    const groups = groupSidebarThreadsByDate(threads, now)
+    const groups = groupSidebarThreadsByRecency(threads, now)
 
     expect(groups.map((group) => [group.label, group.threads.length])).toEqual([
-      ["Today", 3],
+      ["Last 12 hours", 1],
+      ["Today", 2],
       ["Yesterday", 3],
-      ["Last 7 days", 3],
-      ["Older", 6],
+      ["Thu, Jun 18", 3],
+      ["Wed, Jun 17", 3],
+      ["Tue, Jun 16", 3],
+      ["Mon, Jun 15", 3],
+      ["Sun, Jun 14", 3],
+      ["Last 14 days", 3],
+      ["Older", 3],
     ])
     expect(
       groups.flatMap((group) => group.threads.map((thread) => thread.id))
@@ -218,7 +249,7 @@ describe("groupSidebarThreadsByDate", () => {
 
   it("merges a sparse oldest range with the preceding range", () => {
     const now = new Date(2026, 5, 20, 15)
-    const threads = [20, 20, 20, 14, 14, 14, 6].map((day, index) =>
+    const threads = [20, 20, 20, 13, 13, 13, 6].map((day, index) =>
       cloudSidebarThread(
         cloudThread({
           id: String(index),
@@ -227,10 +258,10 @@ describe("groupSidebarThreadsByDate", () => {
       )
     )
 
-    const groups = groupSidebarThreadsByDate(threads, now)
+    const groups = groupSidebarThreadsByRecency(threads, now)
 
     expect(groups.map((group) => [group.label, group.threads.length])).toEqual([
-      ["Last 12 hours", 3],
+      ["Today", 3],
       ["Older", 4],
     ])
   })
@@ -240,9 +271,61 @@ describe("groupSidebarThreadsByDate", () => {
     const thread = cloudSidebarThread(cloudThread({ updatedAt: now.getTime() }))
 
     expect(
-      groupSidebarThreadsByDate([thread], now).map((group) => group.label)
-    ).toEqual(["Last 12 hours"])
-    expect(groupSidebarThreadsByDate([], now)).toEqual([])
+      groupSidebarThreadsByRecency([thread], now).map((group) => group.label)
+    ).toEqual(["Today"])
+    expect(groupSidebarThreadsByRecency([], now)).toEqual([])
+  })
+})
+
+describe("calendar date grouping", () => {
+  it("keeps running and delegated sessions in the sticky running group", () => {
+    const now = new Date(2026, 5, 20, 15)
+    const threads = [
+      cloudThread({
+        id: "running",
+        status: "running",
+        updatedAt: new Date(2026, 5, 12).getTime(),
+      }),
+      cloudThread({
+        id: "delegating",
+        status: "idle",
+        waitingForDelegatedWork: true,
+      }),
+      cloudThread({ id: "finished", status: "idle", updatedAt: now.getTime() }),
+    ].map(cloudSidebarThread)
+
+    expect(
+      groupSidebarThreadsByDay(threads, now).map((group) => [
+        group.key,
+        group.threads.map((thread) => thread.id),
+      ])
+    ).toEqual([
+      ["today", ["finished"]],
+      ["status:running", ["running", "delegating"]],
+    ])
+    expect(groupSidebarThreadsByDay([], now)).toEqual([])
+  })
+
+  it("keeps older calendar days separate instead of merging by recency", () => {
+    const now = new Date(2026, 5, 20, 15)
+    const threads = [12, 11].map((day) =>
+      cloudSidebarThread(
+        cloudThread({
+          id: String(day),
+          updatedAt: new Date(2026, 5, day, 12).getTime(),
+        })
+      )
+    )
+    expect(
+      groupSidebarThreadsByDay(threads, now).map((group) =>
+        group.threads.map((thread) => thread.id)
+      )
+    ).toEqual([["12"], ["11"]])
+    expect(
+      groupSidebarThreadsByRecency(threads, now).map((group) =>
+        group.threads.map((thread) => thread.id)
+      )
+    ).toEqual([["12", "11"]])
   })
 })
 

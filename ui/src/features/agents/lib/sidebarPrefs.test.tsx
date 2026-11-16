@@ -70,16 +70,16 @@ describe("preferences saved while repositories were called projects", () => {
   })
 })
 
-describe("sidebar date grouping", () => {
+describe("sidebar grouping", () => {
   it.each([undefined, "none", "date", "repo", "workspace"])(
-    "defaults to Date while preserving saved grouping %s",
+    "defaults to Recency while preserving saved grouping %s",
     (organize) => {
       window.localStorage.setItem(
         SIDEBAR_PREFS_STORAGE_KEY,
         JSON.stringify({ organize })
       )
       render(<OrganizeAndPins />)
-      expect(screen.getByRole("status").textContent).toBe(organize ?? "date")
+      expect(screen.getByRole("status").textContent).toBe(organize ?? "none")
     }
   )
 })
