@@ -15,9 +15,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Self
 
-import httpx2
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
-
 from openswe.dashboard.profiles import PROFILES
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.codeowners import CodeOwners
@@ -32,23 +29,6 @@ logger = logging.getLogger(__name__)
 
 HISTORY_WINDOW = timedelta(days=90)
 HISTORY_MAX_FILES = 30
-_HISTORY_CONCURRENCY = 8
-
-
-class _Login(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    login: str
-    type: str = "User"
-
-
-class _Commit(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    author: _Login | None = None
-
-
-_COMMITS = TypeAdapter(list[_Commit])
 
 
 def _is_bot(login: str) -> bool:
@@ -110,30 +90,12 @@ class Wait:
 async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
-    gate = asyncio.Semaphore(_HISTORY_CONCURRENCY)
-
-    async def authors(path: str) -> set[str]:
-        async with gate:
-            try:
-                commits = _COMMITS.validate_python(
-                    await repo.commits(path=path, since=since, ref=ref)
-                )
-            except httpx2.HTTPError, ValueError, ValidationError:
-                logger.warning(
-                    "Could not read a changed file's history",
-                    extra={"repository": repo.full_name, "path": path},
-                    exc_info=True,
-                )
-                return set()
-        return {
-            commit.author.login.lower()
-            for commit in commits
-            if commit.author is not None and commit.author.type == "User"
-        }
-
+    authors = await repo.recent_file_authors(
+        [file.filename for file in busiest], since=since, ref=ref
+    )
     touched: Counter[str] = Counter()
-    for logins in await asyncio.gather(*(authors(f.filename) for f in busiest)):
-        touched.update(logins)
+    for file in busiest:
+        touched.update(authors.get(file.filename, set()))
     return touched
 
 

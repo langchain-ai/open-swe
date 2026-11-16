@@ -68,6 +68,24 @@ _PAGE_SIZE = 100
 _PAGE_CONCURRENCY = 10
 _TEAM_MAX_PAGES = 10
 _FILES_PER_QUERY = 100
+_HISTORIES_PER_QUERY = 10
+
+
+class _HistoryUser(BaseModel):
+    login: str
+
+
+class _HistoryAuthor(BaseModel):
+    user: _HistoryUser | None
+
+
+class _HistoryCommit(BaseModel):
+    author: _HistoryAuthor
+
+
+class _History(BaseModel):
+    nodes: list[_HistoryCommit]
+
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
 _IDEMPOTENT_RETRYABLE_STATUS = frozenset({502, 504})
@@ -943,6 +961,62 @@ class RepoClient:
         if ref:
             params["sha"] = ref
         return await self.get("commits", params)
+
+    async def recent_file_authors(
+        self, paths: Sequence[str], *, since: str, ref: str | None = None
+    ) -> dict[str, set[str]]:
+        """Linked human authors of each path's newest 100 commits, omitting unreadable paths."""
+        authors: dict[str, set[str]] = {}
+        for start in range(0, len(paths), _HISTORIES_PER_QUERY):
+            batch = paths[start : start + _HISTORIES_PER_QUERY]
+            params = "".join(f",$p{i}:String!" for i in range(len(batch)))
+            fields = "".join(
+                f"f{i}:history(first:100,path:$p{i},since:$since)"
+                "{nodes{author{user{login}}}}"
+                for i in range(len(batch))
+            )
+            try:
+                data = await self.github.graphql(
+                    "query($owner:String!,$repo:String!,$ref:String!,$since:GitTimestamp!"
+                    f"{params}){{repository(owner:$owner,name:$repo)"
+                    f"{{object(expression:$ref){{...on Commit{{{fields}}}}}}}}}",
+                    {
+                        "owner": self.owner,
+                        "repo": self.name,
+                        "ref": f"{ref or 'HEAD'}^{{commit}}",
+                        "since": since,
+                        **{f"p{i}": path for i, path in enumerate(batch)},
+                    },
+                    partial=True,
+                )
+                repository = data.get("repository")
+                commit = repository.get("object") if isinstance(repository, Mapping) else None
+                if not isinstance(commit, Mapping):
+                    raise ValueError("GitHub answered file history without a commit")
+            except httpx2.HTTPError, ValueError:
+                logger.warning(
+                    "Could not read changed files' history",
+                    extra={"repository": self.full_name, "paths": list(batch)},
+                    exc_info=True,
+                )
+                continue
+            for i, path in enumerate(batch):
+                try:
+                    history = _History.model_validate(commit.get(f"f{i}"))
+                except ValueError:
+                    logger.warning(
+                        "Could not read a changed file's history",
+                        extra={"repository": self.full_name, "path": path},
+                        exc_info=True,
+                    )
+                    continue
+                authors[path] = {
+                    node.author.user.login.lower()
+                    for node in history.nodes
+                    if node.author.user is not None
+                    and not node.author.user.login.lower().endswith("[bot]")
+                }
+        return authors
 
     async def commit_sha(self, ref: str) -> str:
         """The SHA of the commit ``ref`` (a branch, tag or SHA) names."""

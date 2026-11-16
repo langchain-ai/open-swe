@@ -175,6 +175,60 @@ def _make_response(status_code: int, headers: dict[str, str] | None = None) -> h
     return httpx2.Response(status_code, headers=headers or {})
 
 
+class TestRecentFileAuthors:
+    requests: list[dict[str, object]]
+    failure: str | None
+
+    async def handle(self, request: httpx2.Request) -> httpx2.Response:
+        import json
+
+        payload = json.loads(request.content)
+        self.requests.append(payload)
+        variables = payload["variables"]
+        assert variables["owner"] == "acme"
+        assert variables["repo"] == "widgets"
+        assert variables["since"] == "2026-08-18T00:00:00+00:00"
+        assert variables["ref"] == "release^{commit}"
+        assert "history(first:100," in payload["query"]
+        histories = {
+            f"f{i}": {
+                "nodes": [
+                    {"author": {"user": {"login": login}}}
+                    for login in ["Ada", "ada", "Grace", "robin[bot]", variables[f"p{i}"]]
+                ]
+                + [{"author": {"user": None}}]
+            }
+            for i in range(len([key for key in variables if key.startswith("p")]))
+        }
+        errors = []
+        if len(self.requests) == 1:
+            if self.failure == "http":
+                return httpx2.Response(403)
+            if self.failure == "alias":
+                histories["f0"] = None
+                errors = [{"message": "Unavailable", "path": ["repository", "object", "f0"]}]
+            elif self.failure == "malformed":
+                histories["f0"] = {"nodes": [{"author": {"user": {}}}]}
+        return httpx2.Response(
+            200, json={"data": {"repository": {"object": histories}}, "errors": errors}
+        )
+
+    @pytest.mark.parametrize("failure", [None, "alias", "malformed", "http"])
+    async def test_batched_history_keeps_humans_and_surviving_paths(self, failure: str | None):
+        self.requests = []
+        self.failure = failure
+        paths = [f"file-{i}.py" for i in range(21)]
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle)) as http:
+            authors = (
+                await GitHubClient(http)
+                .repo("acme", "widgets")
+                .recent_file_authors(paths, since="2026-08-18T00:00:00+00:00", ref="release")
+            )
+        missing = paths[:10] if failure == "http" else paths[:1] if failure else []
+        assert authors == {path: {"ada", "grace", path} for path in paths if path not in missing}
+        assert len(self.requests) == 3
+
+
 class TestComputeBackoff:
     def test_caps_retry_after_at_max(self) -> None:
         resp = _make_response(429, {"Retry-After": "120"})
