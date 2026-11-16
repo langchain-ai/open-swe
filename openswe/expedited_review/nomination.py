@@ -1,5 +1,6 @@
 """Expedited review nomination shared by dashboard requests and agent tools."""
 
+import asyncio
 import hashlib
 import logging
 from collections.abc import Mapping
@@ -225,24 +226,23 @@ class ExpeditedReviewNomination:
         pr_ref, origin, token = self.pr_ref, self.origin, self.token
         requester, thread_id = origin.requester, origin.thread_id
         own_channel, own_thread = origin.slack_channel_id, origin.slack_thread_ts
+        coverage: tuple[ApprovalCondition | None, list[ExcludedHunk]] | None = None
+        author_registered = False
         async with GitHubClient.connect(token=token) as github:
             pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
-            pr = await or_none(pull.pull())
-            files = await ChangedFile.of_pull(pull, max_pages=FILE_PAGES) if pr else None
+            pr, files = await asyncio.gather(
+                or_none(pull.pull()), ChangedFile.of_pull(pull, max_pages=FILE_PAGES)
+            )
             if not replace_standard and pr:
-                if files is None or isinstance(
-                    assess_eligibility(
-                        files,
-                        (await self.covered(PullRequestPayload.model_validate(pr), files, []))[1],
-                    ),
-                    Ineligible,
-                ):
+                if files is None:
                     raise ExpeditedReviewIneligible("The diff needs standard review.")
-                if (
-                    await User.for_login("github", PullRequestPayload.model_validate(pr).author)
-                    is None
-                ):
+                payload = PullRequestPayload.model_validate(pr)
+                coverage = await self.covered(payload, files, [])
+                if isinstance(assess_eligibility(files, coverage[1]), Ineligible):
+                    raise ExpeditedReviewIneligible("The diff needs standard review.")
+                if await User.for_login("github", payload.author) is None:
                     raise ExpeditedReviewIneligible("The author needs standard review.")
+                author_registered = True
             if pr and pr.get("state") == "open" and files is not None and len(files) < MAX_FILES:
                 payload = PullRequestPayload.model_validate(pr)
                 states = await latest_review_states(pull, payload.author)
@@ -283,7 +283,11 @@ class ExpeditedReviewNomination:
                 exclusions = await self.resolve_exclusions(excluded, files, pr_ref, payload, token)
             except ValueError as exc:
                 return self.failure(str(exc))
-        condition, exclusions = await self.covered(payload, files, exclusions)
+        condition, exclusions = (
+            coverage
+            if coverage is not None and not excluded
+            else await self.covered(payload, files, exclusions)
+        )
         verdict = assess_eligibility(files, exclusions)
         if isinstance(verdict, Ineligible):
             raise ExpeditedReviewIneligible(
@@ -296,7 +300,7 @@ class ExpeditedReviewNomination:
                 "shows that condition instead of the diff. Otherwise ask for a normal review."
             )
 
-        if await User.for_login("github", payload.author) is None:
+        if not author_registered and await User.for_login("github", payload.author) is None:
             raise ExpeditedReviewIneligible(
                 "Expedited review is only available for PRs authored by Robin users."
             )

@@ -1,5 +1,6 @@
 """Dashboard review selection without an agent run or pre-existing PR record."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,6 +25,7 @@ from openswe.slack.client import GitHubPrRef
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from openswe.utils.json_types import JsonObject
 
 
 @pytest.mark.parametrize("expedited", [True, False])
@@ -88,6 +90,8 @@ async def test_review_channel_lookup_failure_is_actionable(
         "active_pending_other_user",
         "active_unposted",
         "reviews_unavailable",
+        "pull_unavailable",
+        "files_unavailable",
         "codeowners_unreadable",
         "already_reviewed",
     ],
@@ -158,6 +162,30 @@ async def test_dashboard_selects_review_workflow(
             raise RuntimeError("save failed")
         return row
 
+    files_started = asyncio.Event()
+
+    async def read_pull() -> JsonObject | None:
+        if case in {"active_other_user", "active_pending_other_user"}:
+            raise AssertionError("Retrieval must not nominate or read GitHub")
+        if case == "eligible":
+            await asyncio.wait_for(files_started.wait(), timeout=1)
+        if case == "pull_unavailable":
+            return None
+        return {
+            "state": "open",
+            "head": {"sha": "abc"},
+            "base": {"ref": "main"},
+            "user": {"login": "alice"},
+            "title": "Manual PR",
+            "body": "<!-- hidden -->\nThe PR description.\nWith more context.",
+        }
+
+    async def read_files(pull: PullRequestClient, *, max_pages: int) -> list[ChangedFile] | None:
+        files_started.set()
+        if case == "files_unavailable":
+            return None
+        return [ChangedFile(filename="app.py", additions=30 if case == "large" else 1, patch="+x")]
+
     target = SlackChannel(id="C1", name="reviews")
     github = GitHubClient.connect(token="token")
     app_github = GitHubClient.connect(token="token")
@@ -194,34 +222,8 @@ async def test_dashboard_selects_review_workflow(
             "openswe.human_review.dashboard.request_review",
             AsyncMock(return_value=RequestResult(success=True, request_id="standard")),
         ) as standard,
-        patch.object(
-            PullRequestClient,
-            "pull",
-            AsyncMock(
-                side_effect=AssertionError("Retrieval must not nominate or read GitHub")
-                if case in {"active_other_user", "active_pending_other_user"}
-                else None,
-                return_value={
-                    "state": "open",
-                    "head": {"sha": "abc"},
-                    "base": {"ref": "main"},
-                    "user": {"login": "alice"},
-                    "title": "Manual PR",
-                    "body": "<!-- hidden -->\nThe PR description.\nWith more context.",
-                },
-            ),
-        ),
-        patch.object(
-            ChangedFile,
-            "of_pull",
-            AsyncMock(
-                return_value=[
-                    ChangedFile(
-                        filename="app.py", additions=30 if case == "large" else 1, patch="+x"
-                    )
-                ]
-            ),
-        ),
+        patch.object(PullRequestClient, "pull", AsyncMock(side_effect=read_pull)),
+        patch.object(ChangedFile, "of_pull", AsyncMock(side_effect=read_files)),
         patch(
             "openswe.expedited_review.nomination.latest_review_states",
             AsyncMock(

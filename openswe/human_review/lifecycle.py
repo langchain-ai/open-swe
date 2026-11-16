@@ -4,6 +4,7 @@ Every Slack write here edits or posts the one card, and only because someone
 just acted, a GitHub event arrived, or one of the request's deadlines passed.
 """
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -114,8 +115,20 @@ class ReviewCard:
 
     async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
         """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-        shown = ExpeditedDiff(files, self.request.excluded_hunks).shown
-        return await SlackDiffImage(shown, f"diff-{self.request.head_sha[:12]}.png").upload()
+        request = self.request
+        shown = ExpeditedDiff(files, request.excluded_hunks).shown
+        fingerprint = hashlib.sha256(
+            "\0".join(file.model_dump_json() for file in shown).encode()
+        ).hexdigest()
+        image_key = [request.head_sha, fingerprint, request.slack_diff_file_id]
+        if request.slack_diff_file_id and request.run_config.get("slack_diff_image") == image_key:
+            return request.slack_diff_file_id
+        file_id = await SlackDiffImage(shown, f"diff-{request.head_sha[:12]}.png").upload()
+        request.run_config = {
+            **request.run_config,
+            "slack_diff_image": [request.head_sha, fingerprint, file_id or ""],
+        }
+        return file_id
 
     async def _warn_target(self, card: tuple[str, list[Block]]) -> tuple[str, list[Block]]:
         pr = self.request.pull_request

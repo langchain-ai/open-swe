@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard import profiles
 from openswe.expedited_review import voting
-from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.eligibility import ChangedFile, Exclusion
 from openswe.github import http as github_http
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
@@ -419,13 +419,28 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert len(private_messages) == 1
 
 
+@pytest.mark.parametrize(
+    "image_change",
+    [
+        "unchanged",
+        "head",
+        "exclusions",
+        "patch",
+        "counts",
+        "legacy",
+        "failed-upload",
+        "failed-refresh",
+    ],
+)
 async def test_draft_card_is_not_posted_until_ready(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
+    open_approval: OpenApproval,
+    monkeypatch: pytest.MonkeyPatch,
+    github_app: AsyncMock,
+    image_change: str,
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     approval.slack_message_ts = ""
-    approval.slack_dm_channel_id = "D_ADA"
-    approval.slack_dm_message_ts = "4.0"
+    approval.run_config = {"existing_setting": "retained"}
     approval = await approval.save()
     deleted = AsyncMock(return_value=True)
     monkeypatch.setattr(lifecycle, "delete_slack_message", deleted)
@@ -437,19 +452,59 @@ async def test_draft_card_is_not_posted_until_ready(
     posted = AsyncMock(return_value="3.0")
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
-    monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=[]))
+    files = [
+        ChangedFile(
+            filename="agent/example.py",
+            additions=2,
+            patch="@@ -0,0 +1 @@\n+first\n@@ -4,0 +6 @@\n+second",
+        )
+    ]
+    monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=files))
+    uploaded = AsyncMock(
+        side_effect=[
+            None if image_change == "failed-upload" else "F_INITIAL",
+            None if image_change == "failed-refresh" else "F_UPDATED",
+        ]
+    )
+    monkeypatch.setattr(lifecycle.SlackDiffImage, "upload", uploaded)
+    monkeypatch.setattr(
+        lifecycle, "send_dm_with_location", AsyncMock(return_value=("D_ADA", "4.0"))
+    )
+    assert await ReviewCard(approval).prompt_author_ready() is None
+    approval = await _stored(approval)
 
     with pytest.raises(SlackRequestError, match="draft card is author-only"):
         await ReviewCard(approval).post_expedited(title="Fix", files=[])
     await ReviewCard(approval).refresh()
     posted.assert_not_called()
     deleted.assert_not_awaited()
+    if image_change in ("head", "failed-refresh"):
+        approval.head_sha = "def456"
+    elif image_change == "exclusions":
+        approval.excluded_hunks = Exclusion(
+            path=files[0].filename, hunks=[1], guideline="Cosmetic", reason="No behavior change"
+        ).resolve(files)
+    elif image_change == "patch":
+        files[0] = files[0].model_copy(update={"patch": "@@ -0,0 +1 @@\n+replacement"})
+    elif image_change == "counts":
+        files[0] = files[0].model_copy(update={"additions": 3})
+    elif image_change == "legacy":
+        approval.run_config = {"existing_setting": "retained"}
     approval.awaiting_ready = False
     await approval.save()
     await ReviewCard(approval).refresh()
 
     stored = await _stored(approval)
     assert stored.slack_message_ts == "3.0"
+    expected_image = {"unchanged": "F_INITIAL", "failed-refresh": ""}.get(image_change, "F_UPDATED")
+    assert stored.slack_diff_file_id == expected_image
+    assert uploaded.await_count == (1 if image_change == "unchanged" else 2)
+    assert stored.run_config["existing_setting"] == "retained"
+    if expected_image:
+        assert expected_image in str(posted.call_args)
+    else:
+        assert "F_INITIAL" not in str(posted.call_args)
+        assert "+first" in str(posted.call_args)
     assert (stored.slack_dm_channel_id, stored.slack_dm_message_ts) == ("D_ADA", "4.0")
     deleted.assert_not_awaited()
     assert "Ready for review" in str(updated.call_args)
