@@ -229,6 +229,29 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
     assert client.post_calls[0]["json"]["draft"] is False
 
 
+@pytest.mark.parametrize(("argument", "draft"), [({"draft": False}, False), ({}, True)])
+async def test_run_without_sender_profile_takes_draft_argument(
+    monkeypatch: pytest.MonkeyPatch, argument: dict[str, bool], draft: bool
+) -> None:
+    _set_config(monkeypatch, {"source": "api", "draft_prs": None})
+    _stub_token(monkeypatch)
+    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
+    _install_client(monkeypatch, client)
+
+    result = await opr.open_pull_request(
+        owner="langchain-ai",
+        repo="open-swe",
+        head="feature",
+        base="main",
+        title="fix: x",
+        body="body",
+        **argument,
+    )
+
+    assert result["success"] is True
+    assert client.post_calls[0]["json"]["draft"] is draft
+
+
 @pytest.mark.parametrize("stored", [True, False, None, "slow", "error"])
 def test_draft_preference_refresh_never_waits(
     monkeypatch: pytest.MonkeyPatch, stored: bool | str | None

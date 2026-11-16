@@ -376,6 +376,30 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
     assert configurable["draft_prs"] is False
 
 
+@pytest.mark.parametrize(
+    ("login", "profile", "expected"),
+    [
+        (None, None, None),
+        ("draft-preference-none", None, None),
+        ("draft-preference-unset", {}, True),
+    ],
+)
+async def test_sender_profile_decides_run_draft_preference(
+    saved_thread_scope,
+    login: str | None,
+    profile: dict[str, object] | None,
+    expected: bool | None,
+) -> None:
+    saved_thread_scope["owner_login"] = login
+    config = _base_config()
+    configurable = config["configurable"]
+    configurable["github_login"] = login
+
+    await _agent_catalog(config, profile=profile)
+
+    assert configurable["draft_prs"] is expected
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("tier", "expected_model"),

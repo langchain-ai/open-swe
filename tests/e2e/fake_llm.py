@@ -1593,7 +1593,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-expedite-push",
         ),
         _tool_step(
-            "Opening a pull request that is ready for review.",
+            "Opening a draft pull request.",
             "open_pull_request",
             {
                 "owner": OWNER,
@@ -1602,7 +1602,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "base": BASE_BRANCH,
                 "title": EXPEDITE_PR_TITLE,
                 "body": "Restores the single exclamation mark in the greeting.",
-                "draft": False,
+                "draft": True,
                 "resolves_thread": True,
             },
             "call-expedite-pr",

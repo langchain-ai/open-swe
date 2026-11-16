@@ -1,4 +1,4 @@
-Open a draft GitHub pull request using the thread’s credential scope.
+Open a GitHub pull request using the thread’s credential scope.
 
 Use this to OPEN a NEW pull request instead of `gh pr create` so authorship and repository-access checks are enforced.
 The PR opens as the thread’s owner; system-owned threads outside Ask channels use the GitHub App.

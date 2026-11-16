@@ -108,6 +108,12 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     return Handoff(middleware, settings, store)
 
 
+async def test_preparing_a_turn_keeps_an_unset_draft_preference(handoff: Handoff) -> None:
+    await handoff.prepare()
+
+    assert handoff.middleware._config["configurable"]["draft_prs"] is None
+
+
 @pytest.mark.parametrize(
     "requested", ["anthropic:claude-opus-5-5", None, "inference_failure", "low_confidence"]
 )

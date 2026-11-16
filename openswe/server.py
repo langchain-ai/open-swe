@@ -1148,7 +1148,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._effort = cfg.resolved_agent_effort
         self._source = cfg.source or "dashboard"
         self._user_email = cfg.user_email or ""
-        self._draft_prs = cfg.draft_prs is True
+        self._draft_prs = cfg.draft_prs
         self._admin_workspaces = turn.admin_workspaces
         self._sole_writer = turn.sole_writer
         self._routing_defaults = dict(turn.route_models)
@@ -1908,7 +1908,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
 
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
-    sender_draft_prs = profile_draft_prs(sender_profile)
+    sender_draft_prs = None if sender_profile is None else profile_draft_prs(sender_profile)
     try:
         # Most runs continue a thread whose task exists; only a new one takes the creation lock.
         if cfg.source != "incidents_agent" and await Task.of_thread(thread_id) is None:
