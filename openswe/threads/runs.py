@@ -2068,6 +2068,13 @@ async def _enrich_system_run_start_command(
             }
         ],
     )
+    # A client finds its own message in the thread's state by the id it minted,
+    # unless that id is taken: the graph would overwrite the earlier message.
+    client_message_id = _command_message_id(params)
+    if client_message_id and (
+        creating or client_message_id not in (await _ThreadHistory.of(thread_id)).message_ids
+    ):
+        structured[-1]["id"] = client_message_id
     run_input = params.get("input")
     if isinstance(run_input, dict):
         run_input["messages"] = structured

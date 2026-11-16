@@ -140,6 +140,40 @@ async def test_a_key_starts_a_system_thread_with_no_person_on_it(machine: _FakeC
     assert "admin_thread" not in configurable
 
 
+async def test_a_machine_run_keeps_the_message_id_its_client_minted(machine: _FakeClient) -> None:
+    command = _command("Upgrade the linter", thread_type="system", repo="acme/api")
+    command["params"]["input"]["messages"][-1]["id"] = "prompt-1"
+
+    enriched = await runs._enrich_system_run_start_command(
+        "thread-ids", await _key_caller(), command, metadata={}, creating=True
+    )
+
+    assert enriched["params"]["input"]["messages"][-1]["id"] == "prompt-1"
+
+
+async def test_a_machine_run_drops_a_message_id_the_thread_already_holds(
+    machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    principal = await _key_caller()
+
+    class _State:
+        async def state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": [{"id": "prompt-1", "type": "human", "content": "x"}]}}
+
+    monkeypatch.setattr(runs, "THREADS", _State())
+    command = _command("Upgrade the linter", thread_type="system")
+    command["params"]["input"]["messages"][-1]["id"] = "prompt-1"
+
+    enriched = await runs._enrich_system_run_start_command(
+        "thread-ids",
+        principal,
+        command,
+        metadata={STARTED_BY_ID: principal.started_by_id, "repo_owner": "acme", "repo_name": "api"},
+    )
+
+    assert "id" not in enriched["params"]["input"]["messages"][-1]
+
+
 async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -> None:
     enriched = await runs._enrich_system_run_start_command(
         "thread-2",

@@ -810,14 +810,19 @@ async def api_delete_thread(
 @router.get("/threads/{thread_id}/state")
 async def api_get_thread_state(
     thread_id: str,
+    principal: PrincipalDep,
     select: Annotated[list[str] | None, Query()] = None,
-    session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     timings: dict[str, float] = {}
     started = perf_counter()
     try:
         payload = await get_dashboard_thread_state(
-            thread_id, session["sub"], select=select, email=session.get("email"), timings=timings
+            thread_id,
+            principal.login or "",
+            select=select,
+            email=principal.email,
+            timings=timings,
+            principal=principal,
         )
     except (httpx.HTTPStatusError, httpx2.HTTPStatusError) as exc:
         # The runtime validates the read, `select` included; what it refuses goes back as it said.

@@ -734,6 +734,7 @@ async def get_dashboard_thread_state(
     select: list[str] | None = None,
     email: str | None = None,
     timings: dict[str, float] | None = None,
+    principal: Principal | None = None,
 ) -> dict[str, JsonValue]:
     """The thread's state, narrowed by its runtime to the ``select`` fields when given."""
     record = timings if timings is not None else {}
@@ -741,7 +742,10 @@ async def get_dashboard_thread_state(
         thread = await THREADS.get(thread_id)
     if thread is None:
         raise HTTPException(404, "thread not found")
-    assert_thread_readable(thread.metadata, login, email)
+    if principal is not None:
+        principal.assert_can_read(thread.metadata)
+    else:
+        assert_thread_readable(thread.metadata, login, email)
 
     async def latest_run() -> IndexedThread:
         with phase(record, "runs_list"):

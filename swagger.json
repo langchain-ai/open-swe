@@ -28103,11 +28103,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Get Thread State",
         "tags": [
           "dashboard",

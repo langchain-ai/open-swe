@@ -19,7 +19,6 @@ from langgraph_sdk.errors import APIStatusError
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, profiles
-from openswe.dashboard.oauth import require_session
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
@@ -39,6 +38,7 @@ from openswe.threads import routes as thread_routes
 from openswe.threads import runs as thread_runs
 from openswe.threads import store as thread_store
 from openswe.threads.index import Runtime
+from openswe.threads.principals import STARTED_BY_ID, Principal, require_principal
 from openswe.threads.runtimes import RUNTIMES, MdaRun
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.trace_metadata import RunOrigin
@@ -1469,6 +1469,8 @@ async def _read_thread_state(
     agent_server: Callable[[httpx.Request | httpx2.Request], httpx.Response | httpx2.Response],
     *,
     select: list[str],
+    metadata: dict[str, object] | None = None,
+    reader: Principal | None = None,
 ) -> httpx.Response:
     """Read a thread's state through the dashboard, from a runtime whose Agent Server is faked."""
     if runtime == "mda":
@@ -1495,11 +1497,13 @@ async def _read_thread_state(
     patch_thread_module(monkeypatch, "THREADS", thread_store.THREADS)
     thread_id = "00000000-0000-4000-8000-0000000000a1"
     await thread_index.create(
-        thread_id, runtime=runtime, metadata={"source": "dashboard", "github_login": "owner"}
+        thread_id,
+        runtime=runtime,
+        metadata=metadata or {"source": "dashboard", "github_login": "owner"},
     )
     app = FastAPI()
     app.include_router(thread_routes.router, prefix="/dashboard/api")
-    app.dependency_overrides[require_session] = lambda: {"sub": "owner"}
+    app.dependency_overrides[require_principal] = lambda: reader or Principal.of_login("owner")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -1543,6 +1547,33 @@ async def test_thread_state_refuses_a_select_the_threads_runtime_refuses(
 
     assert response.status_code == 422
     assert "Invalid select columns: ['bogus']" in response.text
+
+
+@pytest.mark.parametrize(("started_by_id", "status_code"), [("api_key:1", 200), ("api_key:2", 404)])
+async def test_a_machine_reads_the_state_of_only_the_threads_it_started(
+    monkeypatch, started_by_id: str, status_code: int
+) -> None:
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
+        if request.url.path.endswith("/state"):
+            return response(200, json={"values": {"messages": []}, "next": []})
+        return response(200, json=[])
+
+    response = await _read_thread_state(
+        monkeypatch,
+        "mda",
+        agent_server,
+        select=[],
+        metadata={
+            "source": "api",
+            "owner_type": "system",
+            "visibility": "public",
+            STARTED_BY_ID: "api_key:1",
+        },
+        reader=Principal(kind="api_key", workspace="core", started_by_id=started_by_id),
+    )
+
+    assert response.status_code == status_code
 
 
 async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
