@@ -39,12 +39,17 @@ _DISCOVERY_SLOTS: weakref.WeakValueDictionary[asyncio.AbstractEventLoop, asyncio
     weakref.WeakValueDictionary()
 )
 
-type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
+type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "deferred", "failed"]
 
 _MAX_TOOL_PAGES = 50
-_CATALOG_TTL = timedelta(minutes=10)
+# A listing older than this is still served, and listed again in the background.
+_CATALOG_TTL = timedelta(minutes=5)
 _CATALOG_MAX_AGE = timedelta(hours=24)
 _MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
+# How long a run's start waits on a connection with no listing cached at all.
+_CATALOG_GRACE = 1.0
+# Listings that outlasted a run's grace, finishing so the next run finds them.
+_DEFERRED_LISTINGS: set[asyncio.Task[SWRResult[list[dict[str, Any]]]]] = set()
 
 
 class MCPTools(list[BaseTool]):
@@ -365,10 +370,32 @@ async def _catalog(source: MCPSource, record: MCPConnection) -> SWRResult[list[d
     return await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
 
 
+def _keep_listing(task: asyncio.Task[SWRResult[list[dict[str, Any]]]]) -> None:
+    _DEFERRED_LISTINGS.add(task)
+
+    def finished(done: asyncio.Task[SWRResult[list[dict[str, Any]]]]) -> None:
+        _DEFERRED_LISTINGS.discard(done)
+        if not done.cancelled() and (error := done.exception()) is not None:
+            logger.warning("Deferred MCP discovery failed", exc_info=error)
+
+    task.add_done_callback(finished)
+
+
 async def _cached_definitions(
     source: MCPSource, record: MCPConnection
 ) -> tuple[list[Tool], CatalogOutcome]:
-    result = await _catalog(source, record)
+    """The connection's tools for a run. A cached listing comes back at once, fresh or
+    stale (a stale one is listed again in the background), so only a connection with none
+    cached waits, and at most a second (a kit LangSmith builds per caller can take
+    several): past that the run starts without its tools while the listing finishes for
+    the next run."""
+    lookup = asyncio.ensure_future(_catalog(source, record))
+    try:
+        result = await asyncio.wait_for(asyncio.shield(lookup), _CATALOG_GRACE)
+    except TimeoutError:
+        _keep_listing(lookup)
+        logger.info("MCP catalog deferred past a run's start", extra={"mcp_name": record.name})
+        return [], "deferred"
     return [Tool.model_validate(tool) for tool in result.value], (
         "hit" if result.status == "fresh" else result.status
     )

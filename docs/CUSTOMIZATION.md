@@ -305,12 +305,13 @@ const { answers } = await tools.classify({
 Robin stores no MCP servers of its own.
 A run gets MCP tools from LangSmith Managed Tools kits:
 
-- A private thread loads its owner's personal kit (`LMT_KIT_ID`), called with the owner's own LangSmith sign-in.
+- A private thread loads its owner's `me` kit, which LangSmith builds from every server the owner can use: the workspace's servers, LangSmith built-ins, and servers the owner added for themselves.
+  It is called with the owner's own LangSmith sign-in.
 - Every other run loads Robin's bot kit (`LMT_BOT_KIT_ID`), called as the LMT profile `LMT_BOT_PROFILE_ID` with Robin's LangSmith key.
 
-The kits, their servers, and the bot profile's credentials are managed in LangSmith; Robin only reads them.
-To give runs another MCP server, such as Datadog, incident.io, Currents, or Linear, add it to the bot kit, or to the personal kit for tools people use with their own accounts.
-Robin has no setting, dashboard form, or API for adding MCP servers.
+The bot kit, the workspace's servers and the bot profile's credentials are managed in LangSmith.
+To give every run another MCP server, such as Datadog, incident.io, Currents, or Linear, add it to the bot kit; a server added to the LangSmith workspace is offered to everyone's private threads.
+A person adds a server only they use under Settings → Connections, or by asking Robin in a private thread, which registers it in LangSmith once they confirm.
 
 Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session.
 The channel reports a session's failed run in the session.

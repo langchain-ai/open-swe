@@ -16,6 +16,7 @@ from openswe.mcp.managed import (
     LangSmithNotConnected,
     ManagedServer,
     ManagedToolsError,
+    NewServer,
     PersonalTools,
     managed_tools_configured,
 )
@@ -123,6 +124,52 @@ async def api_disconnect_managed_tool(server: str, session: dict[str, Any] = SES
     """Remove the caller's own LangSmith connection to one service."""
     try:
         await PersonalTools(session["sub"]).disconnect(server)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/my-managed-tools/servers", response_model=ManagedServer, status_code=201)
+@audit_endpoint
+async def api_add_managed_server(
+    new: NewServer, session: dict[str, Any] = SESSION_DEP
+) -> ManagedServer:
+    """Register an MCP server in LangSmith that only the caller sees and uses."""
+    try:
+        return await PersonalTools(session["sub"]).add_server(new)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.get("/my-managed-tools/proposed-server", response_model=ManagedServer | None)
+async def api_get_proposed_managed_server(
+    thread_id: str, card: str, session: dict[str, Any] = SESSION_DEP
+) -> ManagedServer | None:
+    """The server a thread's card added once its owner confirmed it; null while unconfirmed."""
+    try:
+        return await (await _card(thread_id, card, session["sub"])).added()
+    except ManagedToolsError as exc:
+        raise _managed_error(exc) from None
+
+
+@router.post("/my-managed-tools/proposed-server", response_model=ManagedServer, status_code=201)
+@audit_endpoint
+async def api_add_proposed_managed_server(
+    thread_id: str, card: str, session: dict[str, Any] = SESSION_DEP
+) -> ManagedServer:
+    """Confirm the server a thread's card proposed. What is registered comes from the
+    stored card, so the request chooses no name or URL."""
+    try:
+        return await (await _card(thread_id, card, session["sub"])).add_proposed()
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.delete("/my-managed-tools/servers/{server}", status_code=204)
+@audit_endpoint
+async def api_remove_managed_server(server: str, session: dict[str, Any] = SESSION_DEP) -> None:
+    """Delete a server the caller registered for themselves."""
+    try:
+        await PersonalTools(session["sub"]).remove_server(server)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
 

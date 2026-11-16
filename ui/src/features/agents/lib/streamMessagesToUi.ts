@@ -44,7 +44,11 @@ export function toolKind(name: string): ToolKind {
   if (lowered === "background_execute") return "background"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
-  if (lowered === "connect_managed_tools") return "managed-tools"
+  if (
+    lowered === "connect_managed_tools" ||
+    lowered === "add_managed_tools_server"
+  )
+    return "managed-tools"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||

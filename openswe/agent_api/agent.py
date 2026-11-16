@@ -113,5 +113,10 @@ class AgentKind(RunKind):
         cfg = RunConfig.from_config(config)
         if (page := PageTools.of_run(cfg)) is not None and (tool := page.tool(name)) is not None:
             return tool
-        static = agent_tools_by_name().get(name)
-        return static if static is not None else (await integration_tools(config)).get(name)
+        if (static := agent_tools_by_name().get(name)) is not None:
+            return static
+        if (kept := (await integration_tools(config)).get(name)) is not None:
+            return kept
+        # The run was granted it, so it was added (a person's new MCP server, say) after
+        # this replica last listed them.
+        return (await integration_tools(config, fresh=True)).get(name)

@@ -16,6 +16,7 @@ from openswe.mcp import cards, managed, routes, runtime
 from openswe.mcp.transport import MCPCredentialMissing
 from openswe.users.models import User
 
+ORIGINAL_PAGES = managed.ManagedTools._pages
 LINEAR_ID = "01a0f8da-0000-7000-8000-000000000001"
 NOTION_ID = "01a0f8da-0000-7000-8000-000000000002"
 
@@ -31,7 +32,6 @@ def server(server_id, name, *, connected, kind="oauth", enabled=True):
     }
 
 
-KIT_ID = "01a11414-0000-7000-8000-00000000c1d0"
 BOT_KIT_ID = "01a1a619-0000-7000-8000-00000000b0c1"
 PROFILE_ID = "01a1a619-0000-7000-8000-0000000b0700"
 
@@ -41,7 +41,6 @@ def lmt(monkeypatch):
     """LMT as plain data: each caller's server list and the kit's links, with no cache."""
     monkeypatch.delenv("LMT_TENANT_ID", raising=False)
     monkeypatch.setenv("LANGSMITH_API_KEY", "openswe-key")
-    monkeypatch.setenv("LMT_KIT_ID", KIT_ID)
     monkeypatch.setenv("LMT_BOT_KIT_ID", BOT_KIT_ID)
     monkeypatch.setenv("LMT_BOT_PROFILE_ID", PROFILE_ID)
     monkeypatch.setattr(managed, "langsmith_oauth_configured", lambda: True)
@@ -57,21 +56,15 @@ def lmt(monkeypatch):
                 server(NOTION_ID, "Notion", connected=False),
                 server("exa", "Exa", connected=False, kind="secret"),
                 server("off", "Off", connected=True, enabled=False),
-                # Not in the kit, so never offered.
                 server("sentry", "Sentry", connected=False),
             ],
         },
-        kit_links=[
-            {"server_id": LINEAR_ID, "tool_name": "list_issues"},
-            {"server_id": NOTION_ID, "tool_name": "search"},
-            {"server_id": "exa", "tool_name": "web_search"},
-            {"builtin_server_key": "off", "tool_name": "off"},
-        ],
         bot_kit_links=[],
         listed_as=[],
         bot_listing_status=None,
         kit_headers=[],
         posts=[],
+        registered=[],
     )
 
     async def cached(self, listing):
@@ -87,11 +80,16 @@ def lmt(monkeypatch):
         return state.servers.get("bot" if profile else caller, [])
 
     async def request(self, method, path, *, body=None, ok=()):
-        if (method, path) == ("GET", f"{managed.KITS_PATH}/{KIT_ID}"):
-            return httpx.Response(200, json={"id": KIT_ID, "tools": state.kit_links})
         if (method, path) == ("GET", f"{managed.KITS_PATH}/{BOT_KIT_ID}"):
             state.kit_headers.append(await self.headers())
             return httpx.Response(200, json={"id": BOT_KIT_ID, "tools": state.bot_kit_links})
+        if (method, path) == ("POST", managed.SERVERS_PATH):
+            kind = body["connection"]["type"]
+            added = server(f"own-{len(state.registered)}", body["name"], connected=kind == "none")
+            added |= {"connection": body["connection"], "scope": body["scope"]}
+            state.registered.append(body)
+            state.servers[self.login].append(added)
+            return httpx.Response(201, json=added)
         state.posts.append((method, path))
         return httpx.Response(
             201, json={"verification_url": "https://smith.langchain.com/c/1", "auth_id": "a1"}
@@ -145,7 +143,7 @@ async def test_a_private_owner_loads_the_whole_kit_as_themselves(monkeypatch, re
     ]
     assert remote == [
         (
-            f"https://api.smith.langchain.com{managed.KITS_PATH}/{KIT_ID}/mcp",
+            f"https://api.smith.langchain.com{managed.KITS_PATH}/{managed.ME_KIT}/mcp",
             {"Authorization": "Bearer alice-langsmith-token"},
         )
     ]
@@ -159,15 +157,19 @@ async def test_a_private_owner_loads_the_whole_kit_as_themselves(monkeypatch, re
     assert await runtime.load_mcp_tools(managed.PersonalTools("bob").source()) == []
 
 
-async def test_connecting_a_service_lists_the_kits_tools_again(monkeypatch, lmt):
-    """LMT lists a service's tools from the service once the person connects it, so the next
-    run must not keep the list it cached before, wherever the connection was made."""
+async def test_a_change_to_the_kit_relists_only_when_robin_refreshes_it(monkeypatch, lmt):
+    """A run never waits on the kit's slow listing because a service changed: its cached
+    list stays under the same key, and Robin lists it again when it makes the change."""
     cache: dict[str, object] = {}
 
     async def swr(key, load, **_):
         if key not in cache:
             cache[key] = await load()
-        return SimpleNamespace(value=cache[key], status="fresh")
+
+        async def mutate():
+            cache[key] = await load()
+
+        return SimpleNamespace(value=cache[key], status="fresh", mutate=mutate)
 
     import langgraph_api.cache
 
@@ -180,12 +182,99 @@ async def test_connecting_a_service_lists_the_kits_tools_again(monkeypatch, lmt)
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     private_thread(monkeypatch, "alice")
-    source = managed.PersonalTools("alice").source()
-    await runtime.load_mcp_tools(source)
-    await runtime.load_mcp_tools(source)
+    tools = managed.PersonalTools("alice")
+    await runtime.load_mcp_tools(tools.source())
     lmt.servers["alice"][1]["connected"] = True
-    await runtime.load_mcp_tools(source)
-    assert len(listed) == 2 and listed[0] != listed[1]
+    await runtime.load_mcp_tools(tools.source())
+    assert len(listed) == 1
+    await tools.refresh()
+    assert len(listed) == 2 and listed[0] == listed[1]
+
+
+async def test_the_built_kit_offers_every_server_and_takes_the_persons_own(monkeypatch, lmt):
+    """LangSmith builds the ``me`` kit from every server the person can use, so there is
+    no stored kit to read, and a person adds and removes only their own servers."""
+    monkeypatch.setattr(managed.ManagedTools, "refresh", AsyncMock())
+    tools = managed.PersonalTools("alice")
+    assert "Sentry" in [item.name for item in await tools.kit_servers()]
+    assert lmt.posts == []
+
+    new = managed.NewServer(
+        name="Mine", url="https://mcp.example.com/mcp", kind="secret", header="X-Api-Key"
+    )
+    # LangSmith registered it, so a failed refresh afterwards still reports it added.
+    monkeypatch.setattr(
+        managed.ManagedTools, "refresh", AsyncMock(side_effect=managed.ManagedToolsError("down"))
+    )
+    added = await tools.add_server(new)
+    assert added.personal and added.needs_connect
+    assert lmt.registered == [
+        {
+            "name": "Mine",
+            "upstream_url": "https://mcp.example.com/mcp",
+            "connection": {
+                "type": "secret",
+                "fields": [
+                    {"name": "X-Api-Key", "injection": {"type": "header", "name": "X-Api-Key"}}
+                ],
+            },
+            "scope": "personal",
+        }
+    ]
+
+    # Only a server the person registered is theirs to delete.
+    with pytest.raises(managed.ManagedToolsError):
+        await tools.remove_server(LINEAR_ID)
+    await tools.remove_server(added.id)
+    assert lmt.posts == [("DELETE", f"{managed.SERVERS_PATH}/{added.id}")]
+
+
+async def test_an_unreachable_langsmith_leaves_the_run_without_managed_tools(monkeypatch):
+    """A run starts whether or not LangSmith answers: listing failures only drop the
+    services the prompt offers to connect."""
+    monkeypatch.setattr(managed.ManagedTools, "_pages", ORIGINAL_PAGES)
+
+    def refused(request):
+        raise httpx2.ConnectError("refused", request=request)
+
+    monkeypatch.setattr(
+        managed.ManagedTools,
+        "_client",
+        lambda self: httpx2.AsyncClient(transport=httpx2.MockTransport(refused)),
+    )
+    assert await managed.PersonalTools("alice").connectable() == []
+
+    # An instance signing people in to a LangSmith without HTTPS has no managed tools.
+    monkeypatch.setenv("LANGSMITH_CONNECTION_URL", "http://127.0.0.1:9")
+    assert not managed.managed_tools_configured()
+
+
+async def test_a_server_added_after_the_last_listing_still_runs_its_tools(monkeypatch):
+    """A person's new server joins the next run's catalog at once, so running one of its
+    tools must not depend on what this replica listed before it was added."""
+    from langchain_core.tools import StructuredTool
+
+    from openswe import server as backend
+    from openswe.agent_api import agent
+
+    async def answer() -> str:
+        return "ok"
+
+    old, new = (
+        StructuredTool.from_function(coroutine=answer, name=name, description=name)
+        for name in ("mcp_lmt_linear_list_teams", "mcp_lmt_mine_fetch_docs")
+    )
+    monkeypatch.setattr(backend, "_integrations", {})
+    monkeypatch.setattr(backend, "private_credential_login", AsyncMock(return_value="alice"))
+    listings = AsyncMock(side_effect=[[old], [old, new]])
+    monkeypatch.setattr(backend, "_run_mcp_tools", listings)
+    monkeypatch.setattr(agent, "agent_tools_by_name", dict)
+    config = {"configurable": {"thread_id": "t"}}
+
+    kind = agent.AgentKind()
+    assert await kind.tool(config, old.name) is old
+    assert await kind.tool(config, new.name) is new
+    assert listings.await_count == 2
 
 
 async def test_the_bot_calls_its_own_kit_as_its_profile_with_robins_key(monkeypatch, remote):
@@ -282,14 +371,14 @@ async def test_private_threads_load_the_kit_as_the_owner_and_others_as_the_bot(
     ]
     assert remote == [
         (
-            f"https://api.smith.langchain.com{managed.KITS_PATH}/{KIT_ID if private else BOT_KIT_ID}/mcp",
+            f"https://api.smith.langchain.com{managed.KITS_PATH}/{managed.ME_KIT if private else BOT_KIT_ID}/mcp",
             {"Authorization": "Bearer alice-langsmith-token"}
             if private
             else {"X-Api-Key": "openswe-key", "X-LangSmith-Profile": PROFILE_ID},
         )
     ]
-    # A private thread's prompt names the kit's services its owner could still connect.
-    assert tools.connectable == (["Notion", "Exa"] if private else [])
+    # A private thread's prompt names the services its owner could still connect.
+    assert tools.connectable == (["Notion", "Exa", "Sentry"] if private else [])
     note = runtime.catalog_note(tools.failures, tools.connectable)
     assert ("connect_managed_tools" in note) is private
 
@@ -342,8 +431,8 @@ async def test_connect_links_come_from_lmt_for_the_kits_oauth_and_secret_service
     )
     assert await tools.connect_link(LINEAR_ID) is None
     assert [server.name for server in await tools.unconnected(["notion"])] == ["Notion"]
-    # Sentry is in the workspace but not the kit, so connecting it would load nothing.
-    assert [server.name for server in await tools.unconnected()] == ["Notion", "Exa"]
+    # Every enabled service the person can use and has not connected, never one turned off.
+    assert [server.name for server in await tools.unconnected()] == ["Notion", "Exa", "Sentry"]
 
 
 async def test_discovery_denies_shared_threads_before_reading_integrations(monkeypatch):
@@ -498,6 +587,53 @@ async def test_only_the_card_owner_can_mint_its_consent_links(monkeypatch, card_
     queued = waits.await_args_list[0].args
     assert queued[0] == cards.CONSENT_JOB
     assert (queued[1]["auth_id"], queued[1]["card_id"]) == ("a1", "call-1")
+
+
+async def test_a_proposed_server_is_registered_only_when_its_cards_owner_confirms(
+    monkeypatch, lmt, card_store
+):
+    """The agent only proposes a server; what is registered is the stored proposal, once,
+    for the person the card was offered to."""
+    monkeypatch.setattr(managed.ManagedTools, "refresh", AsyncMock())
+    resume = AsyncMock()
+    monkeypatch.setattr(cards.ConnectCard, "_resume", resume)
+    queued = AsyncMock()
+    monkeypatch.setattr(cards.queue, "schedule", queued)
+    proposed = managed.NewServer(name="Docs", url="https://docs.example.com/mcp", kind="none")
+    await cards.ConnectCard(
+        thread_id="t", card_id="call-9", login="alice", proposed=proposed
+    ).save()
+
+    with pytest.raises(HTTPException) as denied:
+        await routes.api_add_proposed_managed_server("t", "call-9", session={"sub": "bob"})
+    assert denied.value.status_code == 404
+    assert lmt.registered == []
+
+    unconfirmed = await routes.api_get_proposed_managed_server(
+        "t", "call-9", session={"sub": "alice"}
+    )
+    assert unconfirmed is None
+    added = await routes.api_add_proposed_managed_server("t", "call-9", session={"sub": "alice"})
+    again = await routes.api_add_proposed_managed_server("t", "call-9", session={"sub": "alice"})
+    assert again.id == added.id
+    # The card names the server it added, so a reload shows it even beside a same-named one.
+    lmt.servers["alice"].append(server("older", "Docs", connected=True) | {"scope": "personal"})
+    shown = await routes.api_get_proposed_managed_server("t", "call-9", session={"sub": "alice"})
+    assert shown is not None and shown.id == added.id
+    [registered] = lmt.registered
+    assert (registered["upstream_url"], registered["scope"]) == (proposed.url, "personal")
+    # A public server needs no sign-in, so the queue continues the thread, retrying a run
+    # that cannot start yet.
+    [(kind, payload)] = [call.args for call in queued.await_args_list]
+    assert kind == cards.RESUME_JOB
+    # The job names the owner by users.id, which a GitHub login rename can't break.
+    assert "login" not in payload and payload["user_id"]
+    resume.side_effect = [RuntimeError("runtime busy"), None]
+    job = SimpleNamespace(id="j1", payload=payload)
+    with pytest.raises(RuntimeError):
+        await cards.ConnectCard.resume_job(job)
+    await cards.ConnectCard.resume_job(job)
+    assert resume.await_args_list[-1].args == (["Docs"],)
 
 
 async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, card_store):

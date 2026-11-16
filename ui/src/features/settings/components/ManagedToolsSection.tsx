@@ -3,6 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
+import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
+import { Input } from "@langchain/macaw-components/Input"
+import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { api, managedToolConnectUrl } from "@/lib/api"
@@ -13,6 +16,7 @@ import type {
   ManagedConnectResult,
   ManagedServer,
   ManagedToolsView,
+  NewManagedServer,
 } from "@/lib/api"
 import { SignInWithLangSmithButton } from "./ConnectionsSection"
 
@@ -154,55 +158,203 @@ function useDisconnect() {
   return (serverId: string) => disconnect.mutate(serverId)
 }
 
+/** Deletes a server the caller added themselves; its row goes at once. */
+function useRemoveServer() {
+  const qc = useQueryClient()
+  const remove = useMutation({
+    meta: { errorTitle: "Couldn't remove the server" },
+    mutationFn: api.removeManagedServer,
+    onMutate: async (serverId) => ({
+      undo: await optimisticUpdate<ManagedToolsView>(
+        qc,
+        MANAGED_TOOLS_KEY,
+        (current) => ({
+          ...current,
+          servers: current.servers.filter((server) => server.id !== serverId),
+        })
+      ),
+    }),
+    onError: (_e, _v, ctx) => ctx?.undo(),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
+    },
+  })
+  return (serverId: string) => remove.mutate(serverId)
+}
+
 function ServerRow({
   server,
   connecting,
   onConnect,
   onDisconnect,
+  onRemove,
 }: {
   server: ManagedServer
   connecting: boolean
   onConnect: (serverId: string) => void
   onDisconnect: (serverId: string) => void
+  onRemove: (serverId: string) => void
 }) {
+  const status = server.connected
+    ? undefined
+    : server.kind === "secret"
+      ? "Needs your API key"
+      : "Not connected"
   return (
     <SettingsRow
       label={server.name}
       description={
-        server.connected
-          ? undefined
-          : server.kind === "secret"
-            ? "Needs your API key"
-            : "Not connected"
+        server.personal
+          ? ["Added by you", status].filter(Boolean).join(" · ")
+          : status
       }
       control={
-        server.connected ? (
-          <div className="flex items-center gap-space-2">
-            <Badge color="primary" size="xs">
-              Connected
-            </Badge>
-            {server.has_credential ? (
-              <Button
-                size="xs"
-                color="secondary"
-                variant="outlined"
-                aria-label={`Disconnect ${server.name}`}
-                onClick={() => onDisconnect(server.id)}
-              >
-                Disconnect
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <ConnectButton
-            server={server}
-            href={managedToolConnectUrl(server.id)}
-            connecting={connecting}
-            onConnect={onConnect}
-          />
-        )
+        <div className="flex items-center gap-space-2">
+          {server.connected ? (
+            <>
+              <Badge color="primary" size="xs">
+                Connected
+              </Badge>
+              {server.has_credential ? (
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
+                  aria-label={`Disconnect ${server.name}`}
+                  onClick={() => onDisconnect(server.id)}
+                >
+                  Disconnect
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <ConnectButton
+              server={server}
+              href={managedToolConnectUrl(server.id)}
+              connecting={connecting}
+              onConnect={onConnect}
+            />
+          )}
+          {server.personal ? (
+            <Button
+              size="xs"
+              color="secondary"
+              variant="outlined"
+              aria-label={`Remove ${server.name}`}
+              onClick={() => onRemove(server.id)}
+            >
+              Remove
+            </Button>
+          ) : null}
+        </div>
       }
     />
+  )
+}
+
+const SIGN_IN_TYPES: Array<{ value: NewManagedServer["kind"]; label: string }> =
+  [
+    { value: "oauth", label: "OAuth (sign in on the service's page)" },
+    { value: "secret", label: "API key in a request header" },
+    { value: "none", label: "None (public server)" },
+  ]
+
+const EMPTY_SERVER: NewManagedServer = {
+  name: "",
+  url: "",
+  kind: "oauth",
+  header: "Authorization",
+}
+
+/** Registers an MCP server only the caller sees; it then lists here to connect. */
+function AddServerDialog({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const [server, setServer] = useState(EMPTY_SERVER)
+  const add = useMutation({
+    mutationFn: api.addManagedServer,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
+      onClose()
+    },
+  })
+  const ready =
+    server.name.trim() !== "" &&
+    server.url.trim().toLowerCase().startsWith("https://") &&
+    (server.kind !== "secret" || (server.header ?? "").trim() !== "")
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        title="Add MCP server"
+        description="Only you can see and use a server you add. Your private threads load its tools; any sign-in or API key is stored in LangSmith."
+        className="w-[min(30rem,calc(100vw-2rem))]"
+      >
+        <form
+          className="flex flex-col gap-space-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (ready) add.mutate(server)
+          }}
+        >
+          <Input
+            size="sm"
+            label="Name"
+            value={server.name}
+            placeholder="Sentry"
+            onChange={(name) => setServer({ ...server, name })}
+          />
+          <Input
+            size="sm"
+            label="Server URL"
+            value={server.url}
+            placeholder="https://mcp.example.com/mcp"
+            onChange={(url) => setServer({ ...server, url })}
+          />
+          <div className="flex flex-col gap-space-1">
+            <span className="text-xs font-medium text-primary">Sign-in</span>
+            <Select
+              aria-label="Sign-in"
+              options={SIGN_IN_TYPES}
+              value={server.kind}
+              onChange={(kind) => kind && setServer({ ...server, kind })}
+            />
+          </div>
+          {server.kind === "secret" ? (
+            <Input
+              size="sm"
+              label="Header name"
+              hintText="The key itself is entered in LangSmith after you add the server."
+              value={server.header ?? ""}
+              placeholder="Authorization"
+              onChange={(header) => setServer({ ...server, header })}
+            />
+          ) : null}
+          {add.isError ? (
+            <p role="alert" className="text-xs text-error-secondary">
+              {add.error.message}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-space-2">
+            <Button
+              type="button"
+              color="secondary"
+              variant="outlined"
+              size="md"
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="md"
+              loading={add.isPending}
+              disabled={!ready || add.isPending}
+            >
+              Add server
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -213,6 +365,8 @@ export function ManagedToolsSection() {
     api.connectManagedTool(serverId)
   )
   const disconnect = useDisconnect()
+  const remove = useRemoveServer()
+  const [adding, setAdding] = useState(false)
 
   if (!view.data?.configured && !view.isLoading) return null
   // Public workspace services work for everyone without connecting, so only list
@@ -224,7 +378,7 @@ export function ManagedToolsSection() {
   return (
     <SettingsSection
       title="Managed Tools"
-      description="The services in Robin's personal LangSmith Managed Tools kit. Your private threads use them with your own accounts; provider tokens stay in LangSmith."
+      description="The LangSmith Managed Tools services you can use, and MCP servers you add yourself. Your private threads use them with your own accounts; provider tokens stay in LangSmith."
     >
       {view.isLoading ? (
         <p className="p-space-4 text-xs text-secondary">Loading…</p>
@@ -250,13 +404,25 @@ export function ManagedToolsSection() {
                 connecting={popup.connecting === server.id}
                 onConnect={popup.start}
                 onDisconnect={disconnect}
+                onRemove={remove}
               />
             ))
           )}
-          <p className="p-space-4 text-xs text-secondary">
-            A LangSmith workspace admin adds services to the kit in LangSmith;
-            they show up here to connect.
-          </p>
+          <div className="flex items-center justify-between gap-space-3 p-space-4">
+            <p className="text-xs text-secondary">
+              Services a LangSmith workspace admin adds show up here too.
+            </p>
+            <Button
+              size="xs"
+              color="secondary"
+              variant="outlined"
+              className="shrink-0"
+              onClick={() => setAdding(true)}
+            >
+              Add MCP server
+            </Button>
+          </div>
+          {adding ? <AddServerDialog onClose={() => setAdding(false)} /> : null}
         </>
       )}
     </SettingsSection>

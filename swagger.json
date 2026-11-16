@@ -4393,6 +4393,40 @@
         ],
         "type": "string"
       },
+      "NewServer": {
+        "description": "A remote MCP server a person registers for themselves alone.",
+        "properties": {
+          "header": {
+            "default": "Authorization",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Header",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind",
+            "default": "oauth"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "NewServer",
+        "type": "object"
+      },
       "OpenPullRequest": {
         "properties": {
           "additions": {
@@ -15199,6 +15233,214 @@
           }
         ],
         "summary": "Api Connect Managed Tool",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/proposed-server": {
+      "get": {
+        "description": "The server a thread's card added once its owner confirmed it; null while unconfirmed.",
+        "operationId": "api_get_proposed_managed_server_dashboard_api_my_managed_tools_proposed_server_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": true,
+            "schema": {
+              "title": "Card",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ManagedServer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Get Proposed Managed Server Dashboard Api My Managed Tools Proposed Server Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Proposed Managed Server",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "post": {
+        "description": "Confirm the server a thread's card proposed. What is registered comes from the\nstored card, so the request chooses no name or URL.",
+        "operationId": "api_add_proposed_managed_server_dashboard_api_my_managed_tools_proposed_server_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": true,
+            "schema": {
+              "title": "Card",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedServer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Add Proposed Managed Server",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/servers": {
+      "post": {
+        "description": "Register an MCP server in LangSmith that only the caller sees and uses.",
+        "operationId": "api_add_managed_server_dashboard_api_my_managed_tools_servers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewServer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedServer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Add Managed Server",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/servers/{server}": {
+      "delete": {
+        "description": "Delete a server the caller registered for themselves.",
+        "operationId": "api_remove_managed_server_dashboard_api_my_managed_tools_servers__server__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server",
+            "required": true,
+            "schema": {
+              "title": "Server",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Managed Server",
         "tags": [
           "dashboard"
         ]

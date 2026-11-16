@@ -544,6 +544,15 @@ export interface ManagedToolsView {
   servers: ManagedServer[]
 }
 
+/** An MCP server someone registers for themselves alone. */
+export interface NewManagedServer {
+  name: string
+  url: string
+  kind: ManagedServer["kind"]
+  /** The request header an API key goes in, when `kind` is `secret`. */
+  header?: string
+}
+
 /** Robin's bot kit: what runs outside private threads load, as the bot's LMT profile. */
 export interface BotToolsView {
   configured: boolean
@@ -1817,6 +1826,26 @@ export const api = {
       `/my-managed-tools/services/${encodeURIComponent(serverId)}`,
       { method: "DELETE" }
     ),
+  addManagedServer: (server: NewManagedServer) =>
+    request<ManagedServer>("/my-managed-tools/servers", {
+      method: "POST",
+      body: JSON.stringify(server),
+    }),
+  /** The server a thread's card added once confirmed, or null while it is unconfirmed. */
+  getProposedManagedServer: (card: ManagedToolsConnectCard) =>
+    request<ManagedServer | null>(
+      `/my-managed-tools/proposed-server?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
+    ),
+  /** Confirms the server a thread's card proposed; the card, not the caller, names it. */
+  addProposedManagedServer: (card: ManagedToolsConnectCard) =>
+    request<ManagedServer>(
+      `/my-managed-tools/proposed-server?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`,
+      { method: "POST" }
+    ),
+  removeManagedServer: (serverId: string) =>
+    request<void>(`/my-managed-tools/servers/${encodeURIComponent(serverId)}`, {
+      method: "DELETE",
+    }),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>

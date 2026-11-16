@@ -1,7 +1,7 @@
 Offer the person cards to connect their own accounts to LangSmith Managed Tools services (Linear, Notion, Google, Datadog and the like).
 
 Managed tools are named `mcp_lmt_*`, and in a private thread they run on its owner's own accounts.
-Every service in Robin's personal kit lists its tools whether or not the person connected it; calling one they have not connected fails and tells you to call this.
+Every LangSmith service the person can use lists its tools whether or not the person connected it; calling one they have not connected fails and tells you to call this.
 When that happens, or the person asks to connect a service, call this with that service's name in `services` instead of saying you lack access.
 Name the services the person asked for; leave `services` empty only when they ask to connect everything.
 Do not call it in a thread you are not running for its private owner.

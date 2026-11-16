@@ -1,8 +1,12 @@
-import type { ConnectableServer } from "@/lib/api"
+import type { ConnectableServer, NewManagedServer } from "@/lib/api"
 
-/** What `connect_managed_tools` offered: a LangSmith login, or the services to connect. */
+/**
+ * What a managed tools card offered: a LangSmith login or the services to connect
+ * (`connect_managed_tools`), or a server to confirm adding (`add_managed_tools_server`).
+ */
 export type ManagedToolsCardOffer =
   | { status: "langsmith_required" }
+  | { status: "confirmation_required"; server: NewManagedServer }
   | {
       status: "connection_required"
       missing: Array<ConnectableServer>
@@ -11,6 +15,14 @@ export type ManagedToolsCardOffer =
     }
 
 const KINDS = new Set<unknown>(["none", "oauth", "secret"])
+
+function proposedServer(item: unknown): NewManagedServer | null {
+  if (typeof item !== "object" || item === null) return null
+  const { name, url, kind } = item as Record<string, unknown>
+  if (typeof name !== "string" || typeof url !== "string" || !KINDS.has(kind))
+    return null
+  return { name, url, kind: kind as NewManagedServer["kind"] }
+}
 
 function offeredServer(item: unknown): ConnectableServer | null {
   if (typeof item !== "object" || item === null) return null
@@ -41,6 +53,10 @@ export function parseManagedToolsCard(
   if (typeof value !== "object" || value === null) return null
   const result = value as Record<string, unknown>
   if (result.status === "langsmith_required") return { status: result.status }
+  if (result.status === "confirmation_required") {
+    const server = proposedServer(result.server)
+    return server ? { status: result.status, server } : null
+  }
   if (result.status !== "connection_required" || !Array.isArray(result.missing))
     return null
   const missing = result.missing

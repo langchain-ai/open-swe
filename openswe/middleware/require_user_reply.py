@@ -23,7 +23,7 @@ from openswe.prompts import prompt
 logger = logging.getLogger(__name__)
 
 # Tools that post a card as the turn's final Slack reply.
-CARD_TOOLS = frozenset({"connect_managed_tools"})
+CARD_TOOLS = frozenset({"add_managed_tools_server", "connect_managed_tools"})
 
 ReplySurface = Literal["slack", "web"]
 

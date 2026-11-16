@@ -161,3 +161,43 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     tool = (await runtime.load_mcp_tools(shared, kit))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+async def test_a_slow_listing_never_holds_up_a_run(remote, monkeypatch):
+    """A run starts at once on a cached listing, even a stale one being listed again, and
+    waits only briefly when nothing is cached (a kit LangSmith builds per caller is slow)."""
+    import asyncio
+    import uuid
+    from datetime import timedelta
+
+    gate = asyncio.Event()
+    allowed = ["search"]
+
+    async def discover(record):
+        await gate.wait()
+        return [Tool(name=name, input_schema={"type": "object"}) for name in allowed]
+
+    async def eventually(count):
+        async with asyncio.timeout(5):
+            while len(await runtime.load_mcp_tools(kit)) != count:
+                await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    monkeypatch.setattr(runtime, "_CATALOG_GRACE", 0.05)
+    kit = source(
+        ("managed_tools", str(uuid.uuid4())),
+        {"lmt": record("lmt", allowed_tools=["search", "delete"])},
+    )
+
+    # Nothing cached: the run starts without the connection's tools.
+    assert len(await runtime.load_mcp_tools(kit)) == 0
+    gate.set()
+    await eventually(1)
+
+    # A stale listing is served while it is listed again in the background.
+    monkeypatch.setattr(runtime, "_CATALOG_TTL", timedelta(0))
+    gate.clear()
+    allowed.append("delete")
+    assert len(await runtime.load_mcp_tools(kit)) == 1
+    gate.set()
+    await eventually(2)

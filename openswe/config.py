@@ -418,11 +418,6 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "LMT_KIT_ID",
-    "LangSmith Managed Tools kit private threads load as the MCP connection lmt, called with "
-    "the owner's own LangSmith sign-in. Unset loads no personal managed tools.",
-)
-ENV.var(
     "LMT_BOT_KIT_ID",
     "LangSmith Managed Tools kit every other run loads as the MCP connection lmt, called as "
     "LMT_BOT_PROFILE_ID. Unset leaves managed tools out of those runs.",

@@ -172,6 +172,7 @@ from openswe.threads.recent_context import RecentContextAudience, recent_thread_
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
+    add_managed_tools_server,
     assign_human_reviewer,
     auto_assign_human_reviewer,
     background_execute,
@@ -629,6 +630,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_only_sql",
         "execute_database_sql",
         "read_user_settings",
+        "add_managed_tools_server",
         "connect_managed_tools",
         "discover_managed_tools",
         "save_user_settings",
@@ -720,6 +722,7 @@ AGENT_TOOLS: Final = (
     read_user_settings,
     request_pr_review,
     recheck_pr_approval,
+    add_managed_tools_server,
     connect_managed_tools,
     discover_managed_tools,
     recreate_sandbox,
@@ -839,15 +842,18 @@ def _keep_integrations(key: str | None, tools: dict[str, BaseTool]) -> None:
     _integrations[key] = (now + _INTEGRATIONS_TTL_SECONDS, tools)
 
 
-async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
-    """The MCP tools the run may call, by name, loaded as its plan loads them."""
+async def integration_tools(
+    config: RunnableConfig, *, fresh: bool = False
+) -> Mapping[str, BaseTool]:
+    """The MCP tools the run may call, by name, loaded as its plan loads them; ``fresh``
+    lists them again rather than reuse what this replica kept."""
     cfg = RunConfig.from_config(config)
     try:
         login = await private_credential_login(config)
     except Exception:
         logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
         return {}
-    loaded = _integrations.get(login)
+    loaded = None if fresh else _integrations.get(login)
     if loaded is not None and loaded[0] > time.monotonic():
         return loaded[1]
     tools = await _run_mcp_tools(cfg.thread_id or "", login)
@@ -950,6 +956,7 @@ _NOT_FROM_CODE = frozenset({"task"}) | frozenset(
         "slack_reply",
         "slack_no_reply_needed",
         "cli_result",
+        "add_managed_tools_server",
         "connect_managed_tools",
         "switch_to_performance_model",
         "record_human_input",
@@ -2009,7 +2016,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(
             ()
             if credential_login and managed_tools_configured()
-            else (connect_managed_tools, discover_managed_tools)
+            else (add_managed_tools_server, connect_managed_tools, discover_managed_tools)
         ),
         *(
             ()

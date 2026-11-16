@@ -10,6 +10,7 @@ _TOOL_MODULES = {
     "unshare_project": ".projects",
     "move_thread_to_project": ".projects",
     "add_finding": ".add_finding",
+    "add_managed_tools_server": ".add_managed_tools_server",
     "assign_human_reviewer": ".request_human_review",
     "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
@@ -100,6 +101,7 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
+    "add_managed_tools_server",
     "assign_human_reviewer",
     "auto_assign_human_reviewer",
     "background_execute",
@@ -211,6 +213,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.search import slack_search
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
     from openswe.tools.add_finding import add_finding
+    from openswe.tools.add_managed_tools_server import add_managed_tools_server
     from openswe.tools.apps import preview_app, publish_app
     from openswe.tools.automations import (
         create_automation,

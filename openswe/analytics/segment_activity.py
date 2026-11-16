@@ -66,6 +66,7 @@ _BUILTINS = frozenset(
         "write_todos",
         "read_todos",
         "schedule_thread_wakeup",
+        "add_managed_tools_server",
         "connect_managed_tools",
         "switch_to_performance_model",
         "external",

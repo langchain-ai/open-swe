@@ -1,7 +1,8 @@
 """Connect cards for a person's managed tools, and the follow-up run once they work.
 
 The agent offers a card in a private thread for the LMT services the owner asked to use
-and has not connected. Each button opens Robin, which mints LMT's single-use consent
+and has not connected, or for a personal MCP server it proposes adding, which Robin
+registers only once the owner confirms it on the card. Each connect button opens Robin, which mints LMT's single-use consent
 link only for the card's owner, waits for that consent to finish, and queues one
 follow-up run once the card's services work. The job queue does the waiting, one long
 poll per job, so a restarted or replaced backend only delays the follow-up run.
@@ -12,9 +13,9 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlencode
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 from sqlalchemy import ForeignKey, Text, select
-from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -26,7 +27,9 @@ from openswe.jobs import queue
 from openswe.jobs.queue import Job
 from openswe.mcp.managed import (
     ConsentLink,
+    ManagedServer,
     ManagedToolsError,
+    NewServer,
     PersonalTools,
 )
 from openswe.prompts import prompt
@@ -51,6 +54,7 @@ _CONTEXT: InputMessageContext = {
     "kind": "system",
 }
 CONSENT_JOB = "managed_tools_consent"
+RESUME_JOB = "managed_tools_card_resume"
 # Consent links expire after ten minutes; stop waiting shortly after.
 _CONSENT_DEADLINE = timedelta(minutes=11)
 # LangSmith's long poll sometimes returns early; never ask it again sooner than this.
@@ -141,6 +145,7 @@ class ConnectCardRow(Base):
     card_id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     services: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
+    proposed_server: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB, default=None)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
@@ -152,6 +157,8 @@ class ConnectCard(BaseModel):
     login: str
     services: list[str] = Field(default_factory=list)
     """IDs of the LMT servers the card offers."""
+    proposed: NewServer | None = None
+    """A personal server the agent proposed, registered only when the owner confirms."""
 
     @classmethod
     async def load(cls, thread_id: str, card_id: str, login: str) -> ConnectCard | None:
@@ -171,6 +178,9 @@ class ConnectCard(BaseModel):
             card_id=row.card_id,
             login=login.strip().lower(),
             services=row.services,
+            proposed=(
+                NewServer.model_validate(row.proposed_server) if row.proposed_server else None
+            ),
         )
 
     @property
@@ -182,7 +192,11 @@ class ConnectCard(BaseModel):
             user_id = await session.scalar(select(user_id_for_login(self.login)))
             if user_id is None:
                 raise UnknownUser(self.login)
-            values = {"user_id": user_id, "services": self.services}
+            values = {
+                "user_id": user_id,
+                "services": self.services,
+                "proposed_server": self.proposed.model_dump(mode="json") if self.proposed else None,
+            }
             await session.execute(
                 insert(ConnectCardRow)
                 .values(thread_id=self.thread_id, card_id=self.card_id, **values)
@@ -207,6 +221,59 @@ class ConnectCard(BaseModel):
         if link is not None and link.auth_id:
             await ConsentWait.start(self.login, link.auth_id, self)
         return link
+
+    async def added(self) -> ManagedServer | None:
+        """The server the card's confirmed proposal registered, while it still exists."""
+        if self.proposed is not None or not self.services:
+            return None
+        return next(
+            (server for server in await self.tools.servers() if server.id in self.services),
+            None,
+        )
+
+    async def add_proposed(self) -> ManagedServer:
+        """Register the server the card proposed, for its owner. The card then offers that
+        server, so a second confirmation finds it instead of registering another."""
+        if self.proposed is None:
+            if (added := await self.added()) is None:
+                raise ManagedToolsError("This card proposes no server")
+            return added
+        server = await self.tools.add_server(self.proposed)
+        self.services, self.proposed = [server.id], None
+        await self.save()
+        if not server.needs_connect:
+            # No consent will follow, so the queue owns continuing the thread and retries
+            # it when a run cannot start yet.
+            owner = await User.for_login("github", self.login)
+            if owner is None:
+                raise UnknownUser(self.login)
+            await queue.schedule(
+                RESUME_JOB,
+                {"thread_id": self.thread_id, "card_id": self.card_id, "user_id": str(owner.id)},
+                key=f"{self.thread_id}:{self.card_id}",
+            )
+        return server
+
+    @classmethod
+    async def resume_job(cls, job: Job) -> None:
+        """Continue a card's thread once its services work; raises to retry."""
+        payload = job.payload
+        thread_id, card_id, user_id = (payload.get(k) for k in ("thread_id", "card_id", "user_id"))
+        if not (
+            isinstance(thread_id, str) and isinstance(card_id, str) and isinstance(user_id, str)
+        ):
+            logger.warning(
+                "Managed tools card resume job has no card", extra={"job_id": str(job.id)}
+            )
+            return
+        owner = await User.get(UUID(user_id))
+        if owner is None:
+            logger.info("Managed tools card owner no longer exists")
+            return
+        # Runs name a GitHub-linked person by their current login, which may have changed.
+        card = await cls.load(thread_id, card_id, owner.session_login)
+        if card is not None:
+            await card.resume_if_ready()
 
     async def resume_if_ready(self) -> None:
         """Queue the thread's one follow-up run once every service the card offers works."""
