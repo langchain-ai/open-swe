@@ -553,13 +553,7 @@ class SlackChannelPayload(SlackPayload):
 
     @property
     def is_public(self) -> bool:
-        """Whether anybody in the workspace can already read this channel.
-
-        Channel history is fetched with the deployment's bot token, which says
-        nothing about who is asking, so only a channel with no membership to leak
-        may be read that way: not private, not a DM or group DM, and not shared
-        with another organization.
-        """
+        """Whether the channel is public and internal, without checking guest access."""
         return (
             self.is_channel is True
             and self.is_private is False

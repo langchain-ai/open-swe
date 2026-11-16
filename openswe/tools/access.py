@@ -124,6 +124,7 @@ class Access:
     sole: bool = False
     direct: bool = False
     slack_bot_channel: str | None = None
+    slack_public_channel: str | None = None
     # The run was started from a Slack thread; the bot's own reach applies there.
     slack_context: bool = False
 
@@ -288,6 +289,21 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         )
         else None
     )
+    slack_public_channel = (
+        slack.channel_id
+        if (
+            scope.owner_type == "user"
+            and scope.visibility == "public"
+            and cfg.source == "slack"
+            and slack is not None
+            and slack.location is not None
+            and current_slack is not None
+            and not current_slack.triggering_bot_id
+            and current_slack.location == slack.location
+            and current_slack.team_id == slack.team_id
+        )
+        else None
+    )
     return Access(
         private=private,
         owner=private_owner_login(cfg, metadata) is not None,
@@ -297,6 +313,7 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
         slack_bot_channel=slack_bot_channel,
+        slack_public_channel=slack_public_channel,
         slack_context=cfg.slack_context,
     )
 

@@ -9,9 +9,9 @@ from openswe.tools import access as tool_access
 DEFAULT_CHANNEL_MESSAGE_LIMIT = 30
 
 _NOT_PUBLIC = (
-    "Only public channels can be read this way. That channel is private, a direct message, "
-    "or shared with another organization, and reading it here would bypass its membership. "
-    "Ask the person for what you need instead."
+    "Only public, internal channels can be read this way. The channel could not be verified "
+    "as public and internal; it may be unavailable, private, a direct message, or shared "
+    "with another organization. Ask the person for what you need instead."
 )
 
 
@@ -24,11 +24,18 @@ async def readable_public_channel(
 ) -> SlackChannel:
     """The public channel this run may read with the bot's own access, else ``ChannelNotReadable``."""
     if not current_access.private:
-        if current_access.slack_bot_channel is None:
+        if current_access.slack_bot_channel is not None:
+            if current_access.slack_bot_channel != channel_id:
+                raise ChannelNotReadable("Bot-triggered runs can read only their current channel.")
+        elif current_access.slack_public_channel is not None:
+            destination = await SlackChannel.load(
+                current_access.slack_public_channel, use_cache=False
+            )
+            if destination is None or not destination.public:
+                raise ChannelNotReadable(prompt("slack/read-refused-shared-thread"))
+        else:
             raise ChannelNotReadable(prompt("slack/read-refused-shared-thread"))
-        if current_access.slack_bot_channel != channel_id:
-            raise ChannelNotReadable("Bot-triggered runs can read only their current channel.")
-    channel = await SlackChannel.load(channel_id)
+    channel = await SlackChannel.load(channel_id, use_cache=False)
     if channel is None or not channel.public:
         raise ChannelNotReadable(_NOT_PUBLIC)
     return channel
