@@ -11,6 +11,7 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
@@ -27,6 +28,7 @@ import { Link } from "@tanstack/react-router"
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
+import { reportError } from "@/lib/errorReporting"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
@@ -90,6 +92,10 @@ export function Header({
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const { openShortcutReference } = useAppCommandControls()
   const githubUrl = githubUrls.pullRequest(pr)
+  const openInBrowser =
+    typeof window !== "undefined"
+      ? window.openSweDesktop?.openInBrowser
+      : undefined
   const current = usePullRequestStanding(pr)
   const queue = useReviewQueue(pr)
   const status = current?.status
@@ -391,6 +397,22 @@ export function Header({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            {openInBrowser && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  void openInBrowser(
+                    window.location.pathname +
+                      window.location.search +
+                      window.location.hash
+                  ).catch((error: unknown) =>
+                    reportError({ title: "Couldn't open the browser", error })
+                  )
+                }}
+              >
+                <ArrowSquareOutIcon aria-hidden size={16} weight="regular" />
+                Open in Browser
+              </DropdownMenuItem>
+            )}
             {detail?.trace_url && (
               <DropdownMenuItem asChild>
                 <a href={detail.trace_url} target="_blank" rel="noreferrer">
