@@ -14,6 +14,52 @@ export interface GhosttyCellRange {
 
 const DEFAULT_SELECTION_BACKGROUND = "rgba(72, 122, 191, 0.35)"
 
+class PowerlineSeparator {
+  static isSeparator(text: string): boolean {
+    return ["\ue0b0", "\ue0b2", "\ue0b4", "\ue0b6"].includes(text)
+  }
+
+  static draw(
+    context: CanvasRenderingContext2D,
+    text: string,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    seamOverlap = 0
+  ): void {
+    const rightward = text === "\ue0b0" || text === "\ue0b4"
+    const base = rightward ? left : left + width
+    context.beginPath()
+    if (text === "\ue0b4" || text === "\ue0b6") {
+      const start = rightward ? -Math.PI / 2 : Math.PI / 2
+      context.ellipse(
+        base,
+        top + height / 2,
+        width,
+        height / 2,
+        0,
+        start,
+        start + Math.PI
+      )
+    } else {
+      context.moveTo(base, top)
+      context.lineTo(rightward ? left + width : left, top + height / 2)
+      context.lineTo(base, top + height)
+    }
+    context.closePath()
+    if (seamOverlap > 0) {
+      context.rect(
+        rightward ? base - seamOverlap : base,
+        top,
+        seamOverlap,
+        height
+      )
+    }
+    context.fill()
+  }
+}
+
 function cssColor(color: GhosttyColor): string {
   return `rgb(${color.r}, ${color.g}, ${color.b})`
 }
@@ -209,8 +255,36 @@ export function renderGhosttySnapshot(options: {
         runStart += 1
         continue
       }
-      const runEnd = ghosttyTextRunEnd(row.cells, runStart, (cell) =>
-        sameTextStyle(cell, first)
+      if (PowerlineSeparator.isSeparator(first.text)) {
+        if (!first.invisible) {
+          const rightward = first.text === "\ue0b0" || first.text === "\ue0b4"
+          const neighbor = row.cells[runStart + (rightward ? -1 : 1)]
+          const seamOverlap =
+            neighbor &&
+            !neighbor.selected &&
+            ghosttyColorsEqual(neighbor.background, first.foreground)
+              ? Math.min(1, metrics.width)
+              : 0
+          context.fillStyle = cssColor(first.foreground)
+          PowerlineSeparator.draw(
+            context,
+            first.text,
+            padding + runStart * metrics.width,
+            top,
+            metrics.width,
+            metrics.height,
+            seamOverlap
+          )
+        }
+        runStart += 1
+        continue
+      }
+      const runEnd = ghosttyTextRunEnd(
+        row.cells,
+        runStart,
+        (cell) =>
+          sameTextStyle(cell, first) &&
+          !PowerlineSeparator.isSeparator(cell.text)
       )
       const text = row.cells
         .slice(runStart, runEnd)
@@ -307,10 +381,26 @@ export function renderGhosttySnapshot(options: {
     } else {
       context.fillRect(left, top, metrics.width, metrics.height)
       const cell = snapshot.rowData[snapshot.cursorY]?.cells[snapshot.cursorX]
-      if (cell?.text) {
-        context.font = fontForCell(cell, fontSize, fontFamily)
+      if (cell?.text && !cell.invisible) {
         context.fillStyle = cssColor(snapshot.background)
-        context.fillText(cell.text, left, top + metrics.baseline, metrics.width)
+        if (PowerlineSeparator.isSeparator(cell.text)) {
+          PowerlineSeparator.draw(
+            context,
+            cell.text,
+            left,
+            top,
+            metrics.width,
+            metrics.height
+          )
+        } else {
+          context.font = fontForCell(cell, fontSize, fontFamily)
+          context.fillText(
+            cell.text,
+            left,
+            top + metrics.baseline,
+            metrics.width
+          )
+        }
       }
     }
   }

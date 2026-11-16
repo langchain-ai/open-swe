@@ -84,6 +84,149 @@ describe("ghosttyTextRunEnd", () => {
 })
 
 describe("renderGhosttySnapshot", () => {
+  it.each([
+    ["\ue0b0", "triangle", true],
+    ["\ue0b2", "triangle", false],
+    ["\ue0b4", "round", true],
+    ["\ue0b6", "round", false],
+  ])("draws %s as a full-cell %s separator", (separator, shape, rightward) => {
+    const paths: Array<Array<unknown>> = []
+    const textCalls: Array<Array<unknown>> = []
+    let fillStyle = ""
+    const context = {
+      canvas: { width: 50, height: 30 },
+      beginPath: () => paths.push(["begin"]),
+      closePath: () => paths.push(["close"]),
+      clip: () => {},
+      ellipse: (...args: Array<unknown>) => paths.push(["ellipse", ...args]),
+      moveTo: (...args: Array<unknown>) => paths.push(["move", ...args]),
+      lineTo: (...args: Array<unknown>) => paths.push(["line", ...args]),
+      rect: (...args: Array<unknown>) => paths.push(["rect", ...args]),
+      fill: () => paths.push(["fill", fillStyle]),
+      fillRect: () => {},
+      fillText: (...args: Array<unknown>) => textCalls.push(args),
+      resetTransform: () => {},
+      restore: () => {},
+      save: () => {},
+      set fillStyle(value: string) {
+        fillStyle = value
+      },
+      set font(_value: string) {},
+      set textBaseline(_value: string) {},
+    } as unknown as CanvasRenderingContext2D
+    const color = { r: 255, g: 255, b: 255 }
+    const background = { r: 0, g: 0, b: 0 }
+    const neighbor = { ...cell(rightward ? "a" : "b"), background: color }
+    const cells = rightward
+      ? [neighbor, cell(separator), cell("b")]
+      : [cell("a"), cell(separator), neighbor]
+    const snapshot: GhosttySnapshot = {
+      cols: 3,
+      rows: 1,
+      foreground: color,
+      background,
+      cursor: color,
+      cursorX: 1,
+      cursorY: 0,
+      cursorVisible: true,
+      cursorBlinking: false,
+      cursorStyle: 1,
+      dirtyRows: new Set([0]),
+      rowData: [
+        { cells, text: "", isWrapContinuation: false, wrapsToNext: false },
+      ],
+    }
+    renderGhosttySnapshot({
+      context,
+      snapshot,
+      metrics: { width: 7.2, height: 16, baseline: 11 },
+      fontSize: 12,
+      fontFamily: "monospace",
+      padding: 4,
+      forceFull: false,
+      cursorOn: true,
+    })
+    const base = rightward ? 11.2 : 18.4
+    const geometry =
+      shape === "round"
+        ? [
+            "ellipse",
+            base,
+            12,
+            7.2,
+            8,
+            0,
+            rightward ? -Math.PI / 2 : Math.PI / 2,
+            rightward ? Math.PI / 2 : (3 * Math.PI) / 2,
+          ]
+        : ["move", base, 4]
+    expect(paths.filter((path) => path[0] === geometry[0])).toEqual([
+      geometry,
+      geometry,
+    ])
+    expect(paths.filter((path) => path[0] === "fill")).toEqual([
+      ["fill", "rgb(255, 255, 255)"],
+      ["fill", "rgb(0, 0, 0)"],
+    ])
+    expect(paths.filter((path) => path[0] === "rect" && path[3] === 1)).toEqual(
+      [["rect", rightward ? base - 1 : base, 4, 1, 16]]
+    )
+    expect(textCalls.map(([text]) => text)).toEqual(["a", "b"])
+  })
+
+  it("does not draw invisible separators or overlap a differently colored neighbor", () => {
+    const paths: Array<Array<unknown>> = []
+    const context = {
+      canvas: { width: 50, height: 30 },
+      beginPath: () => {},
+      closePath: () => {},
+      clip: () => {},
+      ellipse: () => paths.push(["ellipse"]),
+      fill: () => {},
+      rect: (...args: Array<unknown>) => paths.push(["rect", ...args]),
+      fillRect: () => {},
+      fillText: () => {},
+      resetTransform: () => {},
+      restore: () => {},
+      save: () => {},
+      set fillStyle(_value: string) {},
+      set font(_value: string) {},
+      set textBaseline(_value: string) {},
+    } as unknown as CanvasRenderingContext2D
+    const cells = [
+      cell(" "),
+      cell("\ue0b4"),
+      { ...cell("\ue0b6"), invisible: true },
+      cell(" "),
+    ]
+    const snapshot: GhosttySnapshot = {
+      cols: 4,
+      rows: 1,
+      foreground: { r: 255, g: 255, b: 255 },
+      background: { r: 0, g: 0, b: 0 },
+      cursor: { r: 255, g: 255, b: 255 },
+      cursorX: 2,
+      cursorY: 0,
+      cursorVisible: true,
+      cursorBlinking: false,
+      cursorStyle: 1,
+      dirtyRows: new Set([0]),
+      rowData: [
+        { cells, text: "", isWrapContinuation: false, wrapsToNext: false },
+      ],
+    }
+    renderGhosttySnapshot({
+      context,
+      snapshot,
+      metrics: { width: 7.2, height: 16, baseline: 11 },
+      fontSize: 12,
+      fontFamily: "monospace",
+      padding: 4,
+      forceFull: false,
+      cursorOn: true,
+    })
+    expect(paths).toEqual([["ellipse"]])
+  })
   it("underlines every cell in a hovered wrapped link", () => {
     const fillRectCalls: Array<Array<number>> = []
     const context = {
