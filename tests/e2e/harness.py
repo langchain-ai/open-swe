@@ -1358,6 +1358,18 @@ def gh_get_repo(owner: str, repo: str) -> JSONResponse:
     )
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/labels")
+def gh_list_repo_labels(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse([])
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/issues/{number}/labels")
+def gh_list_issue_labels(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
+
+
 @app.get("/fake-gh/search/issues")
 def gh_search_issues(
     q: str = "",

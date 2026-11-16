@@ -43,6 +43,7 @@ vi.mock("@/lib/api", () => ({
     closePullRequest: vi.fn(),
     markPullRequestReady: vi.fn(),
     repoMergeMethods: vi.fn(),
+    getPullRequestLabels: vi.fn(),
     humanReviewAvailability: vi.fn(),
     openPullRequestThread: vi.fn(),
   },
@@ -204,6 +205,10 @@ const chooseMergeMethod = async (number: number, label: string) => {
 }
 
 beforeEach(() => {
+  vi.mocked(api.getPullRequestLabels).mockResolvedValue({
+    selected: [],
+    available: [],
+  })
   vi.mocked(api.repoMergeMethods).mockResolvedValue({
     mergeMethods: ["squash", "merge", "rebase"],
   })
@@ -375,9 +380,7 @@ describe("My PRs", () => {
       const button = screen.getByRole("button", { name: "Squash and merge" })
       expect((button as HTMLButtonElement).disabled).toBe(false)
       fireEvent.click(button)
-      expect(screen.queryByRole("dialog") !== null).toBe(
-        mergeState === "blocked"
-      )
+      await waitFor(() => expect(api.getPullRequestLabels).toHaveBeenCalled())
       if (mergeState === "blocked") {
         const dialog = await screen.findByRole("dialog")
         within(dialog).getByText(/Could not confirm whether/)
@@ -438,6 +441,118 @@ describe("My PRs", () => {
           expect.objectContaining({ number: 1 }),
           "squash",
           true,
+          autoMerge
+        )
+      )
+    }
+  )
+
+  it.each([
+    ["Squash merge", "Squash and merge", "squash", false, 0],
+    ["Merge commit", "Merge", "merge", false, 0],
+    ["Rebase merge", "Rebase and merge", "rebase", false, 0],
+    ["Squash merge", "Enable auto-merge", "squash", true, 0],
+    ["Squash merge", "Squash and merge", "squash", false, 2],
+  ] as const)(
+    "confirms do-not-merge before %s (%s, auto-merge: %s, conversations: %s)",
+    async (choice, button, method, autoMerge, unresolvedThreads) => {
+      vi.mocked(api.getPullRequestLabels).mockResolvedValue({
+        selected: [
+          { name: "do-not-merge", color: "ff0000", description: null },
+        ],
+        available: [],
+      })
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [
+          pull(1, {
+            ci: autoMerge ? "pending" : "passing",
+            unresolvedThreads,
+            conversationResolutionRequired: true,
+          }),
+        ],
+      })
+      vi.mocked(api.mergePullRequest).mockResolvedValue({
+        action: "merge",
+        done: true,
+      })
+      mount()
+      await screen.findByText("Change 1")
+      await chooseMergeMethod(1, choice)
+      fireEvent.click(screen.getByRole("button", { name: button }))
+      let dialog = await screen.findByRole("dialog")
+      expect(
+        within(dialog).getByText("PR #1 is labeled do-not-merge")
+      ).toBeTruthy()
+      expect(api.mergePullRequest).not.toHaveBeenCalled()
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      expect(api.mergePullRequest).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: button }))
+      dialog = await screen.findByRole("dialog")
+      fireEvent.click(
+        within(dialog).getByRole("button", {
+          name:
+            unresolvedThreads > 0
+              ? "Resolve and merge"
+              : autoMerge
+                ? "Enable auto-merge anyway"
+                : "Merge anyway",
+        })
+      )
+      await waitFor(() =>
+        expect(api.mergePullRequest).toHaveBeenCalledWith(
+          expect.objectContaining({ number: 1 }),
+          method,
+          unresolvedThreads > 0,
+          autoMerge
+        )
+      )
+    }
+  )
+
+  it.each([false, true])(
+    "confirms when labels cannot be checked (auto-merge: %s)",
+    async (autoMerge) => {
+      vi.mocked(api.getPullRequestLabels).mockRejectedValue(
+        new Error("Unavailable")
+      )
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [pull(1, { ci: autoMerge ? "pending" : "passing" })],
+      })
+      vi.mocked(api.mergePullRequest).mockResolvedValue({
+        action: "merge",
+        done: true,
+      })
+      const client = makeQueryClient()
+      client.setQueryData(["pullRequestLabels", "acme", "app", 1], {
+        selected: [],
+        available: [],
+      })
+      mount(client)
+      await screen.findByText("Change 1")
+      await chooseMergeMethod(1, "Squash merge")
+      expect(api.getPullRequestLabels).not.toHaveBeenCalled()
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: autoMerge ? "Enable auto-merge" : "Squash and merge",
+        })
+      )
+      const dialog = await screen.findByRole("dialog")
+      expect(
+        within(dialog).getByText("Could not check labels on PR #1")
+      ).toBeTruthy()
+      expect(api.mergePullRequest).not.toHaveBeenCalled()
+      fireEvent.click(
+        within(dialog).getByRole("button", {
+          name: autoMerge ? "Enable auto-merge anyway" : "Merge anyway",
+        })
+      )
+      await waitFor(() =>
+        expect(api.mergePullRequest).toHaveBeenCalledWith(
+          expect.objectContaining({ number: 1 }),
+          "squash",
+          false,
           autoMerge
         )
       )

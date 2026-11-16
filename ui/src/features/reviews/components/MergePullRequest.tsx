@@ -1,6 +1,6 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
 import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { DropdownMenuItem } from "@/components/MenuItem"
@@ -33,7 +33,11 @@ export function MergePullRequest({
   const [choice, setChoice] = useState<MergeMethod | null>(null)
   const [preferred] = useState(readPreferredMergeMethod)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [confirming, setConfirming] = useState(false)
+  const [confirmation, setConfirmation] = useState<
+    "label" | "unknown" | "conversations" | null
+  >(null)
+  const [checkingLabels, setCheckingLabels] = useState(false)
+  const checking = useRef(false)
   const allowed = useQuery({
     queryKey: ["repo-merge-methods", pr.repo],
     queryFn: () => api.repoMergeMethods(pr.repo),
@@ -122,23 +126,61 @@ export function MergePullRequest({
     (rulesUnknown && pr.mergeState !== "clean")
       ? (pr.unresolvedThreads ?? 0)
       : 0
+  const [owner, repo] = pr.repo.split("/")
   const conversations = `${blocking} unresolved conversation${blocking === 1 ? "" : "s"}`
-  const start = () => {
-    if (queryClient.isMutating({ mutationKey }) > 0) return
-    if (autoMergeEnabled) disable.mutate()
-    else if (!method) setMenuOpen(true)
-    else if (blocking > 0) setConfirming(true)
-    else merge.mutate()
+  const action = autoMerge ? "enable auto-merge" : "merge"
+  const conversationWarning = `${rulesUnknown ? `Could not confirm whether ${pr.repo} requires conversations to be resolved before merging.` : `${pr.repo} requires every conversation to be resolved before merging.`} Resolve ${blocking === 1 ? "it" : `all ${blocking}`} and ${action}?`
+  const confirmationLabel =
+    blocking > 0
+      ? `Resolve and ${action}`
+      : autoMerge
+        ? "Enable auto-merge anyway"
+        : "Merge anyway"
+  const start = async () => {
+    if (checking.current || queryClient.isMutating({ mutationKey }) > 0) return
+    if (autoMergeEnabled) {
+      disable.mutate()
+      return
+    }
+    if (!method) {
+      setMenuOpen(true)
+      return
+    }
+    checking.current = true
+    setCheckingLabels(true)
+    let reason: "label" | "unknown" | "conversations" | null = null
+    try {
+      const pullRequestLabels = await queryClient.fetchQuery({
+        queryKey: ["pullRequestLabels", owner, repo, pr.number],
+        queryFn: () => api.getPullRequestLabels(owner!, repo!, pr.number),
+        staleTime: 0,
+        retry: false,
+      })
+      if (
+        pullRequestLabels.selected.some(
+          (label) => label.name.toLowerCase() === "do-not-merge"
+        )
+      )
+        reason = "label"
+    } catch {
+      reason = "unknown"
+    }
+    checking.current = false
+    setCheckingLabels(false)
+    if (reason || blocking > 0) setConfirmation(reason ?? "conversations")
+    else if (queryClient.isMutating({ mutationKey }) === 0) merge.mutate()
   }
   return (
     <>
       <SplitButton
         disabled={
-          busy || (!autoMergeEnabled && (!pr.headSha || allowed.isPending))
+          busy ||
+          checkingLabels ||
+          (!autoMergeEnabled && (!pr.headSha || allowed.isPending))
         }
-        onClick={start}
+        onClick={() => void start()}
         menuLabel={`Merge method for PR #${pr.number}`}
-        menuDisabled={busy || autoMergeEnabled}
+        menuDisabled={busy || checkingLabels || autoMergeEnabled}
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
         menu={
@@ -169,28 +211,41 @@ export function MergePullRequest({
           ))
         }
       >
-        {autoMergeEnabled
-          ? "Disable auto-merge"
-          : disable.isPending
-            ? "Disabling auto-merge…"
-            : allowed.isPending
-              ? "Merge"
-              : !method
-                ? "Choose how to merge"
-                : !autoMerge && state === labels.idle
-                  ? mergeMethodCopy[method].button
-                  : state}
+        {checkingLabels
+          ? "Checking labels…"
+          : autoMergeEnabled
+            ? "Disable auto-merge"
+            : disable.isPending
+              ? "Disabling auto-merge…"
+              : allowed.isPending
+                ? "Merge"
+                : !method
+                  ? "Choose how to merge"
+                  : !autoMerge && state === labels.idle
+                    ? mergeMethodCopy[method].button
+                    : state}
       </SplitButton>
       <ConfirmDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        title={`${conversations} on PR #${pr.number}`}
-        description={`${rulesUnknown ? `Could not confirm whether ${pr.repo} requires conversations to be resolved before merging.` : `${pr.repo} requires every conversation to be resolved before merging.`} Resolve ${blocking === 1 ? "it" : `all ${blocking}`} and ${autoMerge ? "enable auto-merge" : "merge"}?`}
-        confirmLabel={`Resolve and ${autoMerge ? "enable auto-merge" : "merge"}`}
+        open={confirmation !== null}
+        onOpenChange={(open) => !open && setConfirmation(null)}
+        title={
+          confirmation === "label"
+            ? `PR #${pr.number} is labeled do-not-merge`
+            : confirmation === "unknown"
+              ? `Could not check labels on PR #${pr.number}`
+              : `${conversations} on PR #${pr.number}`
+        }
+        description={
+          confirmation === "conversations"
+            ? conversationWarning
+            : `${confirmation === "label" ? "This PR is labeled do-not-merge." : "Could not check whether this PR is labeled do-not-merge."} ${blocking > 0 ? `${conversations}. ${conversationWarning}` : `Are you sure you want to ${action} anyway?`}`
+        }
+        confirmLabel={confirmationLabel}
+        destructive={confirmation !== "conversations"}
         onConfirm={() => {
-          setConfirming(false)
+          setConfirmation(null)
           if (queryClient.isMutating({ mutationKey }) === 0)
-            merge.mutate({ resolveConversations: true })
+            merge.mutate({ resolveConversations: blocking > 0 })
         }}
       />
     </>
