@@ -201,8 +201,13 @@ class RunCatalog:
         }
         # Integrations stay on the backend, which finds them for the run's search and its
         # code mode: listing hundreds of them would put about a megabyte in every run's
-        # context. The run's own tools stay listed, so the model knows them unsearched.
-        withheld = from_code_only & set(surface.integration_names)
+        # context. The run's own tools stay listed, so the model knows them unsearched. One
+        # whose name code cannot call is withheld too, and called directly after a search.
+        withheld = {
+            name
+            for name in tools.keys() - excluded
+            if name in surface.integration_names and not direct_and_from_code(name)
+        }
         searches = surface.code_mode or bool(withheld)
         offered = tools.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
         if surface.force_code_mode:

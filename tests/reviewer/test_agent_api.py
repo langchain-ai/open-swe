@@ -1120,6 +1120,36 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "route_model"))
 
 
+# A LangSmith Managed Tools server disambiguated by its UUID: no JavaScript identifier.
+_UUID_NAMED = "mcp_lmt_notion_2ba201a8-8751-427f-92b5-dd3ede30551c_n_ff20808db9"
+
+
+async def test_an_integration_code_cannot_call_is_still_left_to_search() -> None:
+    """Without code mode too: offered directly, hundreds of them overflow the model's request."""
+    from langchain_core.tools import StructuredTool
+
+    from openswe.agent_api.run_catalog import RunCatalog
+    from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels
+
+    async def run(query: str) -> str:
+        return query
+
+    tool = StructuredTool.from_function(coroutine=run, name=_UUID_NAMED, description="Notion")
+    model = ModelChoice("openai:gpt-6.1-sol", {})
+    surface = ToolSurface(
+        dynamic=DynamicToolMiddleware({"MCP": [tool]}),
+        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+    )
+    await surface.prepare()
+
+    catalog = RunCatalog(RunKind(), RUN, surface, {}).build()
+
+    assert _UUID_NAMED not in {op.name for op in catalog.operations}
+    assert _UUID_NAMED not in catalog.code_only
+    assert catalog.search_tools
+
+
 @pytest.mark.parametrize("force_code_mode", [False, True])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch, registry_db: None, force_code_mode: bool
@@ -1167,7 +1197,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
                 "headers": {"Authorization": "private-token"},
                 "namespace": ["managed_tools", "private-owner", "private-gateway"],
             }
-            surface.dynamic = DynamicToolMiddleware({"MCP": [search, integration("mcp.dotted")]})
+            surface.dynamic = DynamicToolMiddleware({"MCP": [search, integration(_UUID_NAMED)]})
             surface.base_tools = [
                 integration(name)
                 for name in (
@@ -1208,10 +1238,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
-    assert {"mcp.dotted", "web_search", "manage_thread", "slack_reply"} <= names
+    assert {"web_search", "manage_thread", "slack_reply"} <= names
     assert "message_task_thread" in names
-    # An integration called only from code: kept on the backend.
+    # Integrations stay on the backend, whether code can call them or not.
     assert "mcp_search" not in names
+    assert _UUID_NAMED not in names
+    assert _UUID_NAMED not in catalog["code_only"]
     assert "eval" not in names
     excluded = catalog["excluded"]
     assert isinstance(excluded, list) and "load_integration_tools" in excluded
@@ -1286,6 +1318,15 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         await TokenRun.answer(parts, started_run, "resolve_tool", {"name": "mcp_search"})
     )
     assert by_name.tool == looked_up.tool
+    # One code cannot call is found too, to be called directly by its own name.
+    uuid_found = ToolMatches.model_validate(
+        await TokenRun.answer(parts, started_run, "search_tools", {"query": _UUID_NAMED})
+    )
+    assert (uuid_found.matches[0].name, uuid_found.matches[0].code_name) == (_UUID_NAMED, None)
+    uuid_resolved = ResolvedTool.model_validate(
+        await TokenRun.answer(parts, started_run, "resolve_tool", {"name": _UUID_NAMED})
+    )
+    assert uuid_resolved.tool is not None and RUN.granted(_UUID_NAMED, uuid_resolved.tool.grant)
     unknown = await TokenRun.answer(
         parts, started_run, "resolve_tool", {"name": "load_integration_tools"}
     )
