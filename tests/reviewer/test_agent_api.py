@@ -1139,7 +1139,7 @@ async def test_an_integration_code_cannot_call_is_still_left_to_search() -> None
     model = ModelChoice("openai:gpt-6.1-sol", {})
     surface = ToolSurface(
         dynamic=DynamicToolMiddleware({"MCP": [tool]}),
-        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+        models=SurfaceModels(main=model, subagent=model),
     )
     await surface.prepare()
 

@@ -2004,8 +2004,9 @@ async function handleNavigation(window, event, url) {
 function showEditContextMenu(window, params) {
   const { editFlags, isEditable, misspelledWord, dictionarySuggestions } =
     params;
+  const linkURL = params.linkURL;
   const hasSelection = params.selectionText.trim().length > 0;
-  if (!isEditable && !hasSelection) return;
+  if (!isEditable && !hasSelection && !linkURL) return;
   const template = [];
   if (isEditable && misspelledWord) {
     for (const suggestion of dictionarySuggestions)
@@ -2034,7 +2035,15 @@ function showEditContextMenu(window, params) {
       { type: "separator" },
       { role: "selectAll", enabled: editFlags.canSelectAll },
     );
-  else template.push({ role: "copy", enabled: editFlags.canCopy });
+  else if (hasSelection)
+    template.push({ role: "copy", enabled: editFlags.canCopy });
+  if (linkURL) {
+    if (template.length) template.push({ type: "separator" });
+    template.push({
+      label: "Copy Link Address",
+      click: () => clipboard.writeText(linkURL),
+    });
+  }
   Menu.buildFromTemplate(template).popup({ window });
 }
 
