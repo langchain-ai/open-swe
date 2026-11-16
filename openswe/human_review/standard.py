@@ -47,6 +47,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.coverage import Area, Coverage
 from openswe.human_review.deadlines import PUBLISH_STEP
 from openswe.human_review.deadlines import schedule as _schedule
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
@@ -54,15 +55,7 @@ from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.pick_modals import SNOOZE_DURATIONS
-from openswe.human_review.picking import (
-    Area,
-    Candidates,
-    Coverage,
-    Pick,
-    ReviewerAvailability,
-    Wait,
-    choose_reviewer,
-)
+from openswe.human_review.picking import Candidates, Pick, Wait, choose_reviewer
 from openswe.human_review.readiness import offer_readiness
 from openswe.human_review.requests import (
     AUTO_ASSIGN_ASKED,
@@ -79,6 +72,7 @@ from openswe.human_review.supplementary import (
 )
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
+from openswe.slack.availability import ReviewerAvailability
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
 from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel

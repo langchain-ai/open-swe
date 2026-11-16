@@ -11,8 +11,9 @@ import pytest
 
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
-from openswe.human_review.picking import ReviewerAvailability
+from openswe.human_review.coverage import Coverage
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.slack.availability import ReviewerAvailability
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
 
@@ -48,10 +49,10 @@ def test_the_last_matching_codeowners_rule_owns_a_path(path: str, owners: tuple[
 async def test_the_largest_code_owner_area_comes_first_and_an_approval_leaves_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openswe.human_review import picking
+    from openswe.human_review import coverage
 
-    monkeypatch.setattr(picking, "team_members", AsyncMock(return_value=["Grace", "Ada"]))
-    coverage = await picking.Coverage.build(
+    monkeypatch.setattr(coverage, "team_members", AsyncMock(return_value=["Grace", "Ada"]))
+    coverage = await Coverage.build(
         _CODEOWNERS,
         [
             "smith-frontend/src/design-system/Button.tsx",
@@ -155,7 +156,7 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     if skip_reason == "opted_out":
         user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
     monkeypatch.setattr(
-        picking,
+        availability,
         "get_slack_user_info",
         AsyncMock(return_value={"profile": profile} if profile is not None else None),
     )

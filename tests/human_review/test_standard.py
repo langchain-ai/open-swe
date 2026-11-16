@@ -252,8 +252,8 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
     source: str, user_records: FakeUserRecords, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from openswe.human_review import standard
+    from openswe.human_review.coverage import Coverage
     from openswe.human_review.people import Participant
-    from openswe.human_review.picking import Coverage
 
     tool = import_module("openswe.tools.request_human_review")
     reviewer = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
@@ -344,8 +344,9 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
     local_time: str, out_of_office: bool, named: bool, recent_poster: bool, allowed: bool
 ) -> None:
     from openswe.human_review import standard
+    from openswe.human_review.coverage import Coverage
     from openswe.human_review.people import Participant
-    from openswe.human_review.picking import Coverage, ReviewerAvailability
+    from openswe.slack.availability import ReviewerAvailability
 
     zone = ZoneInfo("America/New_York")
     now = datetime.fromisoformat(local_time).replace(tzinfo=zone).astimezone(UTC)
@@ -1167,8 +1168,8 @@ async def test_only_auto_merge_requests_merge_when_approved(
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
     from openswe.human_review import standard
+    from openswe.human_review.coverage import Coverage
     from openswe.human_review.merging import MergeResult
-    from openswe.human_review.picking import Coverage
 
     async def thread(thread_id: str) -> MagicMock | None:
         if thread_id == "deleted":

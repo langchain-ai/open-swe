@@ -24,14 +24,15 @@ from openswe.github.org_membership import team_members
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings, SupplementaryReviewPolicy
+from openswe.human_review.coverage import Coverage
 from openswe.human_review.deadlines import schedule
-from openswe.human_review.picking import Coverage, ReviewerAvailability
 from openswe.human_review.requests import (
     SUPPLEMENTARY_REVIEWS_KEY,
     HumanReviewRequest,
     slack_mention,
 )
 from openswe.prompts import prompt
+from openswe.slack.availability import ReviewerAvailability
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm

@@ -12,14 +12,15 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings, SupplementaryReviewPolicy
 from openswe.human_review import deadlines, standard, supplementary
+from openswe.human_review.coverage import Area, Coverage
 from openswe.human_review.lifecycle import ReviewCard
-from openswe.human_review.picking import Area, Coverage, ReviewerAvailability
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.human_review.supplementary import (
     SupplementaryReview,
     SupplementaryReviews,
     SupplementaryState,
 )
+from openswe.slack.availability import ReviewerAvailability
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User, UserIdentity
