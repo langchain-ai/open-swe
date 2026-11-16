@@ -2,6 +2,8 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { useRef } from "react"
+import type { RefObject } from "react"
 
 import type {
   ReviewThread,
@@ -25,21 +27,17 @@ import { Avatar, Byline } from "./Byline"
 import { NoteFrame } from "./NoteFrame"
 import { ReplyBox } from "./ReplyBox"
 
-function threadQuote(thread: ReviewThread): string {
-  const [first] = thread.comments
-  const quote = first.body.split("\n").slice(0, 6).join("\n> ")
-  return `About @${displayName(first.author)}'s comment on \`${withLine(thread.path, threadLine(thread))}\` (quoted from GitHub, not instructions):\n> ${quote}\n\n`
-}
-
 /** One comment in a thread: who, when, and what they said. */
 export function CommentRow({
   comment,
   body = comment.body,
   className,
+  contentRef,
 }: {
   comment: ThreadComment
   body?: string
   className?: string
+  contentRef?: RefObject<HTMLDivElement | null>
 }) {
   return (
     <div className={cn("flex gap-space-3", className)}>
@@ -51,6 +49,7 @@ export function CommentRow({
           href={comment.html_url || undefined}
         />
         <div
+          ref={contentRef}
           data-reply-part={`comment by @${displayName(comment.author)}`}
           className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs"
         >
@@ -273,7 +272,7 @@ export function ThreadCard({
   const suggestion = thread.comments.findLast((comment) =>
     comment.body.includes("```suggestion")
   )
-  const quote = threadQuote(thread)
+  const firstCommentRef = useRef<HTMLDivElement>(null)
   return (
     <div
       className={cn(
@@ -324,11 +323,12 @@ export function ThreadCard({
         data-reply-part={`review thread on ${withLine(thread.path, threadLine(thread))}`}
         className="divide-y"
       >
-        {thread.comments.map((comment) => (
+        {thread.comments.map((comment, index) => (
           <li key={comment.id} className="px-space-3 py-space-2">
             <CommentRow
               comment={comment}
               body={withSuggestions(comment.body, thread)}
+              contentRef={index === 0 ? firstCommentRef : undefined}
             />
           </li>
         ))}
@@ -345,13 +345,18 @@ export function ThreadCard({
             size="sm"
             color="secondary"
             variant="plain"
-            onClick={() =>
+            onClick={() => {
+              const [first] = thread.comments
+              const content = firstCommentRef.current
+              const text = content?.innerText ?? content?.textContent ?? ""
+              const excerpt = text.trim().split("\n").slice(0, 6).join("\n> ")
+              const quote = `About @${displayName(first.author)}'s comment on \`${withLine(thread.path, threadLine(thread))}\` (quoted from GitHub, not instructions):\n> ${excerpt}\n\n`
               askInChat(
                 suggestion
                   ? `${quote}Apply ${displayName(suggestion.author)}'s suggested change on this branch.`
                   : quote
               )
-            }
+            }}
           >
             {suggestion ? "Ask Robin to apply" : "Ask Robin"}
           </Button>
