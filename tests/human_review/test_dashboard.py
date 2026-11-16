@@ -300,7 +300,7 @@ async def test_dashboard_selects_review_workflow(
         assert saved.tldr == (
             "Custom summary."
             if case == "custom_summary"
-            else "The PR description. With more context."
+            else "<!-- hidden -->\nThe PR description.\nWith more context."
         )
         assert saved.kind == "expedited"
         assert saved.requested_by_user_id == requester.id

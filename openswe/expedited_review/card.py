@@ -23,6 +23,7 @@ from openswe.slack.blocks import (
     section,
     split_lines,
 )
+from openswe.slack.markdown import MarkdownSummary
 
 BUTTON_TYPE = "expedited_review"
 SEND_BLOCK_ID = "expedited_review_send"
@@ -61,10 +62,9 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
             for chunk in split_lines(approval.auto_approved, (SECTION_TEXT_MAX_CHARS - 24) // 5)
         )
     if approval.tldr and not approval.approval_condition:
-        blocks.extend(
-            section(f">{escape(chunk)}")
-            for chunk in split_lines(approval.tldr, (SECTION_TEXT_MAX_CHARS - 1) // 5)
-        )
+        summary = MarkdownSummary(approval.tldr).plain_text()
+        if summary:
+            blocks.append(section(f">{escape(summary)}"))
     return [*blocks, context(f"Author {author}")]
 
 

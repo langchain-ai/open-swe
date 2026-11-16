@@ -1,4 +1,5 @@
 import json
+from html import unescape
 from unittest.mock import AsyncMock
 
 import pytest
@@ -288,8 +289,38 @@ def test_fallback_card_fits_slack_block_limit_with_every_omitted_group(shown_cou
         assert blocks[-1]["block_id"] == "expedited_review_send"
 
 
+def test_card_summarizes_github_description_without_markup_or_screenshots() -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    approval = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="expedited",
+        tldr=(
+            "**Issue:** Raw <b>badge</b> HTML & Markdown leaked.\n\n"
+            "**Fix:** Quote the [rendered text](https://example.com/review).\n\n"
+            '<img width="640" alt="Before screenshot" src="https://example.com/before.png">\n\n'
+            "![After screenshot](https://example.com/after.png)\n\n"
+            '```html\n<img src="example">\n```\n\n'
+            "Flag: none\n\nMade by [Robin](https://example.com/robin)"
+        ),
+    )
+    approval.pull_request = pr
+    for render in (open_card, readiness_prompt):
+        _, blocks = render(approval, title="t", author="<@U1>", files=[])
+        summaries = [
+            block["text"]["text"]
+            for block in blocks
+            if block["type"] == "section" and block["text"]["text"].startswith(">")
+        ]
+        assert summaries == [
+            ">Issue: Raw badge HTML &amp; Markdown leaked. Fix: Quote the rendered text."
+        ]
+
+
 @pytest.mark.parametrize("condition", [False, True])
-def test_inline_approval_keeps_long_descriptions_and_every_patch_record(condition: bool) -> None:
+def test_inline_approval_bounds_summary_but_keeps_conditions_and_every_patch_record(
+    condition: bool,
+) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7)
     description = "Approve the complete change & its consequences. " * 100
     approval = HumanReviewRequest(
@@ -332,7 +363,11 @@ def test_inline_approval_keeps_long_descriptions_and_every_patch_record(conditio
         ]
         assert escaped in "".join(covered)
     else:
-        assert escaped in "".join(text.removeprefix(">") for text in sections)
+        summaries = [text.removeprefix(">") for text in sections if text.startswith(">")]
+        assert len(summaries) == 1
+        assert summaries[0].startswith("Approve the complete change &amp; its consequences.")
+        assert summaries[0].endswith("…")
+        assert len(unescape(summaries[0])) <= 280
     assert all(len(text) <= SECTION_TEXT_MAX_CHARS for text in sections)
     drawn = [
         block["elements"][0]["elements"][0]["text"]

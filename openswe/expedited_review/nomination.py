@@ -30,7 +30,7 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
-from openswe.human_review.standard import Origin, summary_line
+from openswe.human_review.standard import Origin
 from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.slack.channels import SlackChannel
@@ -400,9 +400,7 @@ class ExpeditedReviewNomination:
             kind="expedited",
             diff_fingerprint=verdict.fingerprint,
             excluded_hunks=exclusions,
-            tldr=summary_line(
-                payload.body or "" if inline_summary is None else inline_summary, limit=None
-            ),
+            tldr=payload.body or "" if inline_summary is None else inline_summary,
             slack_channel_choices=broadcast_choice,
             awaiting_ready=payload.draft,
             slack_channel_id=channel_id,

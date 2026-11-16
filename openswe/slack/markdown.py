@@ -1,5 +1,7 @@
 import re
+from dataclasses import dataclass
 from html import escape
+from textwrap import shorten
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -17,6 +19,31 @@ from openswe.slack.blocks import (
 
 _parser = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
 _SLACK_TOKEN = re.compile(r"(<[@#!][A-Za-z0-9^]+(?:\|[^<>]*)?>)")
+
+
+@dataclass(frozen=True)
+class MarkdownSummary:
+    text: str
+
+    def plain_text(self, *, limit: int = 280) -> str:
+        """A bounded prose excerpt without images, HTML, code blocks, or PR metadata."""
+        parts: list[str] = []
+        for token in MarkdownIt("commonmark", {"html": True}).parse(self.text):
+            if token.type != "inline":
+                continue
+            prose = "".join(
+                child.content
+                if child.type in {"text", "code_inline"}
+                else " "
+                if child.type in {"softbreak", "hardbreak"}
+                else ""
+                for child in token.children or []
+            ).strip()
+            if prose.startswith(("Made by ", "Flag:")):
+                break
+            if prose:
+                parts.append(prose)
+        return shorten(" ".join(parts), width=limit, placeholder="…")
 
 
 def markdown_blocks(text: str) -> list[Block] | None:
