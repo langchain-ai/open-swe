@@ -21,7 +21,6 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
-import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 
@@ -67,12 +66,10 @@ export function Header({
   pr,
   leftInset,
   compactRail,
-  navigatorShown,
 }: {
   pr: PullRequestRef
   leftInset: string
   compactRail: boolean
-  navigatorShown: boolean
 }) {
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
@@ -86,7 +83,6 @@ export function Header({
   const reviewVerdict = useReviewPage((state) => state.reviewVerdict)
   const setReviewOpen = useReviewPage((state) => state.setReviewOpen)
   const openReview = useReviewPage((state) => state.openReview)
-  const toggleNavigator = useReviewPage((state) => state.toggleNavigator)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
@@ -127,15 +123,6 @@ export function Header({
       >
         <Link to="/agents/reviews" search={queue ? { tab: "to-review" } : {}} />
       </IconButton>
-      <IconButton
-        icon={TreeViewIcon}
-        label={navigatorShown ? "Hide files" : "Show files"}
-        aria-pressed={navigatorShown}
-        size="md"
-        color="secondary"
-        variant="plain"
-        onClick={toggleNavigator}
-      />
       <div className="min-w-0 flex-1">
         <div className="flex min-h-7 min-w-0 items-center gap-space-2">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}

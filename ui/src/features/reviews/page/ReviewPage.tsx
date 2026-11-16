@@ -19,7 +19,7 @@ import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
-import { Navigator } from "./Navigator"
+import { Navigator, NavigatorToggle } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
@@ -106,12 +106,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   return (
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
-        <Header
-          pr={pr}
-          leftInset={leftInset}
-          compactRail={!wide}
-          navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
-        />
+        <Header pr={pr} leftInset={leftInset} compactRail={!wide} />
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />
         ) : (
@@ -128,8 +123,18 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
                 />
               </div>
             )}
-            <section aria-label="Changes" className="min-w-0 flex-1">
-              <Changes pr={pr} />
+            <section
+              aria-label="Changes"
+              className="flex min-w-0 flex-1 flex-col"
+            >
+              {!navigatorInline && (
+                <div className="flex h-11 shrink-0 items-center px-space-3">
+                  <NavigatorToggle shown={false} />
+                </div>
+              )}
+              <div className="min-h-0 flex-1">
+                <Changes pr={pr} />
+              </div>
             </section>
             {wide && (
               <RightPanelShell
@@ -158,7 +163,16 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             side="left"
             title="Files"
             open={navigatorOverlay}
-            onClose={() => setNavigatorOverlay(false)}
+            onClose={() => {
+              setNavigatorOverlay(false)
+              requestAnimationFrame(() =>
+                document
+                  .querySelector<HTMLElement>(
+                    '[data-navigator-toggle][aria-pressed="false"]'
+                  )
+                  ?.focus()
+              )
+            }}
             className="w-[min(88vw,300px)] pt-space-7"
           >
             <Navigator pr={pr} />
