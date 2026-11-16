@@ -24,7 +24,7 @@ import {
 import { LiveWorkTail } from "./LiveWorkTail"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
-import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
+import { TurnFoldRow } from "./foldRows"
 import {
   ImageEntryBody,
   JsonInputEntryBody,
@@ -46,13 +46,6 @@ import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/Ma
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
-
-/**
- * How many entries of a work group stay visible while it is collapsed. One
- * keeps the group's most recent activity legible without letting a long
- * exploration burst push the reply off screen.
- */
-const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
 /**
  * How long a reply sits at the end of a live turn before an activity row joins
@@ -197,46 +190,6 @@ function ToolWorkEntry({
   )
 }
 
-/**
- * A run of related tool calls (exploration, mostly). Collapsed, it shows only
- * the most recent entries plus a toggle for the rest.
- */
-function WorkGroup({
-  chunks,
-  repoPath,
-  expanded,
-  onToggle,
-}: {
-  chunks: Array<ToolExecutionChunk>
-  repoPath?: string
-  expanded: boolean
-  onToggle: () => void
-}) {
-  const hiddenCount = Math.max(0, chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
-  const visible = expanded
-    ? chunks
-    : chunks.slice(chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
-
-  return (
-    <div>
-      {hiddenCount > 0 && (
-        <WorkGroupToggleRow
-          hiddenCount={hiddenCount}
-          expanded={expanded}
-          onToggle={onToggle}
-        />
-      )}
-      {visible.map((chunk, index) => (
-        <ToolWorkEntry
-          key={chunk.toolCallId || `work-${index}`}
-          chunk={chunk}
-          repoPath={repoPath}
-        />
-      ))}
-    </div>
-  )
-}
-
 export function AgentTurn({
   message,
   isStreaming,
@@ -257,13 +210,6 @@ export function AgentTurn({
     () => buildRenderItems(message.chunks, message.id),
     [message.chunks, message.id]
   )
-
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
-    {}
-  )
-  const toggleGroup = useCallback((id: string) => {
-    setExpandedGroups((prev) => ({ ...prev, [id]: !(prev[id] ?? false) }))
-  }, [])
 
   // Measure wall-clock work time for live runs (most accurate); fall back to
   // the turn's first→last message timestamps for transcripts loaded from state.
@@ -355,17 +301,6 @@ export function AgentTurn({
           </div>
         )
       }
-
-      case "explored-group":
-        return (
-          <WorkGroup
-            key={item.key}
-            chunks={item.chunks}
-            repoPath={repoPath}
-            expanded={expandedGroups[item.id] ?? false}
-            onToggle={() => toggleGroup(item.id)}
-          />
-        )
 
       case "subagent-group":
         return <SubagentGroup key={item.key} chunks={item.chunks} />

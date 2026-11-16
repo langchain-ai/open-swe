@@ -316,6 +316,77 @@ describe("Messages", () => {
     expect(container.textContent).not.toContain("Can I change")
   })
 
+  it("shows consecutive read and search calls individually inside the work fold", () => {
+    const read = (id: string, path: string): ToolExecutionChunk => ({
+      kind: "tool-execution",
+      toolCallId: id,
+      toolName: "read_file",
+      title: "read_file",
+      toolKind: "read",
+      input: { file_path: path },
+      status: "completed",
+      output: "File contents",
+    })
+    const search: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "search",
+      toolName: "grep",
+      title: "grep",
+      toolKind: "search",
+      input: { pattern: "work" },
+      status: "completed",
+      output: "Matches",
+    }
+    const messages: Message[] = [
+      {
+        id: "turn",
+        author: "agent",
+        timestamp: "2026-01-01T00:00:10Z",
+        chunks: [
+          read("read-1", "first.ts"),
+          search,
+          read("read-2", "second.ts"),
+          {
+            kind: "tool-execution",
+            toolCallId: "eval",
+            title: "eval",
+            toolKind: "code",
+            input: { code: "await tools.readFile()" },
+            status: "completed",
+            calls: [
+              read("nested-1", "nested-first.ts"),
+              read("nested-2", "nested-second.ts"),
+            ],
+          },
+          { kind: "text", text: "Done." },
+        ],
+      },
+    ]
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    const fold = screen.getByRole("button", { name: "Worked · 6 actions" })
+    expect(screen.queryByText("first.ts")).toBeNull()
+    fireEvent.click(fold)
+    const rows = [
+      screen.getByText("first.ts"),
+      screen.getByText('"work"'),
+      screen.getByText("second.ts"),
+      screen.getByText("nested-first.ts"),
+      screen.getByText("nested-second.ts"),
+    ]
+    for (let i = 1; i < rows.length; i += 1) {
+      expect(
+        rows[i - 1]!.compareDocumentPosition(rows[i]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
+    expect(
+      screen.queryByRole("button", { name: /previous tool calls/i })
+    ).toBeNull()
+    fireEvent.click(fold)
+    expect(screen.queryByText("first.ts")).toBeNull()
+  })
+
   it("keeps the worker launch in the conversation when surrounding work is folded", async () => {
     const workerId = "7db1bbf5-0623-5a35-a5a4-db372cfc31d4"
     const messages = streamMessagesToUi([
