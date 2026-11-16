@@ -798,7 +798,7 @@ def test_an_accountless_ask_request_cannot_borrow_a_participant_or_use_the_app(
 def test_ask_pr_uses_requesters_authorization(
     monkeypatch: pytest.MonkeyPatch, allowed: bool, background: bool
 ) -> None:
-    login = "bob" if background else "alice"
+    login = "bob"
     _set_config(
         monkeypatch,
         {
@@ -809,7 +809,8 @@ def test_ask_pr_uses_requesters_authorization(
         },
         metadata={
             "visibility": "public",
-            "owner_type": "system",
+            "owner_type": "user",
+            "owner_login": "alice",
             "participant_logins": ["alice", "bob"],
         },
     )
@@ -842,6 +843,14 @@ def test_ask_pr_uses_requesters_authorization(
             body="body",
             draft=False,
         )
+    )
+    preflight_headers = [
+        call["headers"]["Authorization"]
+        for call in client.get_calls
+        if not call["url"].endswith("/installation/repositories")
+    ]
+    assert preflight_headers and all(
+        header == f"Bearer {login}-token" for header in preflight_headers
     )
     if allowed:
         assert result["success"] is True

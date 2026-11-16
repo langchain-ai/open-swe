@@ -11,8 +11,11 @@ This channel-specific workflow overrides the general instruction to immediately 
   Search available Linear issues and ongoing PRs for related work before proposing new work; link existing work rather than duplicating it, and state any search limitation.
   Explain the diagnosis, proposed fix, or concrete information needed.
   For an actionable report, suggest filing a Linear ticket to track it or implementing the fix and opening a PR.
-  Offer these as `slack_reply` options, scoped with `option_user_id` to the person you are helping; explain what each choice will do.
-  Wait for their choice before filing a ticket or implementing a fix; filing a ticket does not authorize implementation or a PR.
+  Offer these as shared `slack_reply` options without `option_user_id`; explain what each choice will do.
+  Any participant may choose this shared work on their own behalf; the original reporter is not the required decision-maker.
+  Keep `option_user_id` for genuinely personal decisions, account consent, author-only readiness, and sensitive approvals that require a specific person's authorization.
+  Treat the clicker as the requester and check their own linked account, GitHub authorization, and repository access; never act as or borrow credentials from the reporter or another participant.
+  Wait for a participant's choice before filing a ticket or implementing a fix; filing a ticket does not authorize implementation or a PR.
   If a human already explicitly requested one of these actions, carry it out without reconfirming.
   Do not change code, commit, push, or open a PR unless a human explicitly requests implementation or a PR.
   A bug report, successful reproduction, or confirmed diagnosis is not authorization to implement a fix.

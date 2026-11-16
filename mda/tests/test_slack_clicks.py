@@ -145,13 +145,20 @@ class _Slack:
 
 
 def _option(user_id: str | None = "U1") -> dict[str, Any]:
-    return {"type": "open_swe_option", "response": "Option B", "user_id": user_id}
+    return {
+        "type": "open_swe_option",
+        "response": "Option B",
+        **({"user_id": user_id} if user_id is not None else {}),
+    }
 
 
-def test_an_option_answers_for_the_person_it_was_for(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("recipient", "clicker"), [("U1", "U1"), (None, "U2")])
+def test_an_option_runs_as_the_clicker(
+    monkeypatch: pytest.MonkeyPatch, recipient: str | None, clicker: str
+) -> None:
     slack = _Slack(monkeypatch, SlackClickStart(run=_RUN, interrupts=False))
 
-    result = asyncio.run(clicks.start_click(_click(_option()), _THREAD))
+    result = asyncio.run(clicks.start_click(_click(_option(recipient), clicker=clicker), _THREAD))
 
     assert _options(result)["input"] == _RUN.input
     # A click waits behind the work in progress, as the person's message would.
@@ -164,7 +171,7 @@ def test_an_option_answers_for_the_person_it_was_for(monkeypatch: pytest.MonkeyP
     [asked] = slack.asked
     assert asked.click == OptionClick(text="Option B")
     assert (asked.user_id, asked.message_ts, asked.action_ts, asked.team_id) == (
-        "U1",
+        clicker,
         "171.5",
         "171.6",
         "T1",

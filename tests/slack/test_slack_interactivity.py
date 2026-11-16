@@ -208,6 +208,9 @@ async def test_option_interaction_schedules_update_only_for_authorized_actor(
         "Option B",
     )
     process.assert_awaited_once()
+    request = process.await_args.args[0]
+    assert (request.user_id, request.text, request.thread_id) == ("U1", "Option B", "thread-1")
+    assert repo.await_args.kwargs["slack_user_id"] == "U1"
 
 
 @pytest.mark.parametrize(

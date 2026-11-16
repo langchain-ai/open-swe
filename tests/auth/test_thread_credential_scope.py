@@ -462,7 +462,7 @@ async def test_ask_channel_prs_require_the_persons_linked_github_credentials(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("background", [False, True])
 @pytest.mark.parametrize("owner_type", ["user", "system"])
-@pytest.mark.parametrize("login", ["bob", ""])
+@pytest.mark.parametrize("login", ["bob", "carol", ""])
 async def test_ask_preflight_requires_the_authenticated_requester(
     monkeypatch, thread_metadata, credentials, background, owner_type, login
 ):
@@ -476,11 +476,17 @@ async def test_ask_preflight_requires_the_authenticated_requester(
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
     monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
     credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    app = AsyncMock(return_value="bot-token")
+    monkeypatch.setattr(opr, "get_github_app_installation_token", app)
     if not login:
         with pytest.raises(RuntimeError, match="authenticated requester"):
             await opr._resolve_pr_author_token()
-        return
-    assert await opr._resolve_pr_author_token() == (
-        "bob-token",
-        "user",
-    )
+        credentials.assert_not_awaited()
+    elif login == "carol":
+        with pytest.raises(auth.GitHubUserAuthRequired):
+            await opr._resolve_pr_author_token()
+        credentials.assert_awaited_once_with("carol")
+    else:
+        assert await opr._resolve_pr_author_token() == ("bob-token", "user")
+        credentials.assert_awaited_once_with("bob")
+    app.assert_not_awaited()

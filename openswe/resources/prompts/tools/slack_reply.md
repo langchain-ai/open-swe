@@ -43,10 +43,12 @@ Do not add no-op options such as "Just discussing", "Do nothing", or "Ignore" �
 Do not add options such as "Reply in Slack" or "Tell me more" that merely ask the user to type a reply; they can already reply manually.
 Do not invent choices for open-ended questions.
 
-When the decision belongs to a specific person, set `option_user_id` to their Slack user ID (the `U...` ID, not their name or GitHub login).
+For ordinary shared-work choices, such as filing a ticket or fixing a bug in a draft PR, omit `option_user_id` so another participant can choose on their own behalf.
+Reporting the issue or triggering the run does not make someone the sole decision-maker.
+A shared click is a request from the clicker, subject to their own linked account, GitHub/repository access, and the action's server-side authorization; it does not grant the reporter's identity or credentials.
+When the decision inherently belongs to a specific person—personal preferences, account consent, author-only readiness, or a sensitive approval requiring their authorization—set `option_user_id` to their Slack user ID (the `U...` ID, not their name or GitHub login).
 This restricts all option buttons to that person server-side; an @mention alone does not.
-Use the intended decision-maker, even when someone else triggered the run.
-Omit `option_user_id` only for genuinely shared choices that anyone may answer.
+Use the intended decision-maker, even when someone else triggered the run; never remove required recipient restrictions to make an approval shared.
 Recipient-scoped options cannot be combined with custom `blocks`.
 
 To mention/tag a user, use Slack's mention format: <@USER_ID>.
