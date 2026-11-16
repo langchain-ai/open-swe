@@ -443,7 +443,7 @@ class ThreadRouter:
             # The index answered whether the thread exists; MDA makes its own copy if
             # it has none, as when it never got one or swept it, in the same call.
             payload["if_not_exists"] = "create"
-        rewritten = await mda.run_payload(
+        rewritten = await THREADS.run_payload(
             thread_id,
             payload,
             thread_metadata=thread.metadata,

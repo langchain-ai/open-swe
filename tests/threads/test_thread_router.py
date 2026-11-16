@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
@@ -144,7 +145,13 @@ class _Harness:
         self.local_status = 200
         self.while_starting: Callable[[], Awaitable[object]] | None = None
 
+        # MDA's copy of the thread's metadata as each run was created there.
+        self.metadata_at_create: list[JsonValue] = []
+
         def mda(request: httpx2.Request) -> httpx2.Response:
+            if request.url.path == f"/threads/{THREAD}/runs":
+                kept = self.runtimes.mda.threads.get(THREAD, {})
+                self.metadata_at_create.append(kept.get("metadata"))
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
             self.acted_as.append({k: v for k, v in request.headers.items() if k in AS_THE_PERSON})
             return httpx2.Response(
@@ -395,6 +402,35 @@ async def test_a_stop_while_a_run_starts_interrupts_it_once_mda_has_it(
         f"/threads/{THREAD}/runs",
         f"/threads/{THREAD}/runs/remote-run/cancel",
     ]
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/runs", {"assistant_id": "agent"}),
+        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
+    ],
+)
+async def test_a_run_is_created_once_metadata_written_while_it_starts_reached_mda(
+    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: dict[str, JsonValue]
+) -> None:
+    # MDA's run create updates the thread's row, and waits only briefly for a copy holding it.
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    await harness.runtimes.mda.create(THREAD, {})
+    copy = harness.runtimes.mda.update
+
+    async def slow_copy(thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
+        await asyncio.sleep(0.05)
+        await copy(thread_id, metadata)
+
+    monkeypatch.setattr(harness.runtimes.mda, "update", slow_copy)
+    harness.while_starting = lambda: store.THREADS.update(THREAD, {"thread_settings": {}})
+
+    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
+
+    assert status == 200
+    assert harness.metadata_at_create == [{"thread_settings": {}}]
 
 
 @pytest.mark.parametrize(

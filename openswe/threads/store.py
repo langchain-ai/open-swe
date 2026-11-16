@@ -30,7 +30,7 @@ from openswe.dispatch import channel_of
 from openswe.tasks.store import sidebar_memberships
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
-from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite
+from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite, now_ms
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
@@ -195,6 +195,25 @@ class ThreadStore:
         if updated is not None and metadata:
             self.copies.start(updated, metadata)
         return updated
+
+    async def run_payload(
+        self,
+        thread_id: str,
+        payload: dict[str, JsonValue],
+        *,
+        thread_metadata: Mapping[str, JsonValue],
+        graph_id: str,
+    ) -> dict[str, JsonValue]:
+        """``payload`` rewritten for the thread's MDA graph, once its metadata copies landed.
+
+        Working out the run can write the thread's metadata, such as its settings, and
+        MDA's run create waits only about a second for the thread's row a copy holds.
+        """
+        rewritten = await RUNTIMES.mda_runtime.run_payload(
+            thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
+        )
+        await self.copies.settled(thread_id)
+        return rewritten
 
     async def archive_task_workers(
         self,
@@ -377,12 +396,19 @@ class ThreadStore:
                     )
                 return _json_reply(409, {"detail": refusal})
         if thread is not None and method == "run.start" and isinstance(params, dict):
-            reply = await RUNTIMES.mda_runtime.start_command_run(
+            mda = RUNTIMES.mda_runtime
+            starting_ms = now_ms()
+            run = await self.run_payload(
                 thread_id,
-                command,
-                params,
+                mda.command_run(thread_id, params, write=write),
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
+            )
+            reply = await mda.create_command_run(
+                thread_id,
+                command,
+                run,
+                starting_ms=starting_ms,
                 write=write,
                 trace_headers=trace_headers,
             )

@@ -641,26 +641,15 @@ class MdaRuntime:
             rewritten.pop("config", None)
         return _object.validate_python(rewritten)
 
-    async def start_command_run(
-        self,
-        thread_id: str,
-        command: Mapping[str, JsonValue],
-        params: Mapping[str, JsonValue],
-        *,
-        thread_metadata: Mapping[str, JsonValue],
-        graph_id: str = MDA_GRAPH_ID,
-        write: ChannelWrite | None = None,
-        trace_headers: Mapping[str, str] | None = None,
+    @staticmethod
+    def command_run(
+        thread_id: str, params: Mapping[str, JsonValue], *, write: ChannelWrite
     ) -> dict[str, JsonValue]:
-        """Answer a protocol v2 ``run.start`` by creating the run here with its context.
+        """The run a protocol v2 ``run.start`` asks for, as :meth:`run_payload` takes it.
 
-        MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        On a channel's thread, ``write`` (:meth:`channel_write`) starts the run in its
-        conversation, as the person it names; without one the run is the backend's own.
-        ``trace_headers`` name the LangSmith trace the run nests in.
+        MDA's own ``run.start`` would drop the context, which is what carries the run token,
+        so the backend creates the run itself (:meth:`create_command_run`).
         """
-        write = write or ChannelWrite()
-        starting_ms = now_ms()
         config = params.get("config")
         configurable = config.get("configurable") if isinstance(config, dict) else None
         run_config: dict[str, JsonValue] = {
@@ -689,13 +678,29 @@ class MdaRuntime:
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
-        rewritten = await self.run_payload(
-            thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
-        )
+        return payload
+
+    async def create_command_run(
+        self,
+        thread_id: str,
+        command: Mapping[str, JsonValue],
+        run: Mapping[str, JsonValue],
+        *,
+        starting_ms: int,
+        write: ChannelWrite,
+        trace_headers: Mapping[str, str] | None = None,
+    ) -> dict[str, JsonValue]:
+        """Answer a protocol v2 ``run.start`` by creating ``run``, rewritten by :meth:`run_payload`.
+
+        On a channel's thread, ``write`` (:meth:`channel_write`) starts the run in its
+        conversation, as the person it names; without one the run is the backend's own.
+        ``starting_ms`` is when the start was asked for, which a stop since then interrupts.
+        ``trace_headers`` name the LangSmith trace the run nests in.
+        """
         async with self.http as client:
             response = await client.post(
                 f"/threads/{thread_id}/runs",
-                json=rewritten,
+                json=dict(run),
                 headers={**(trace_headers or {}), **write.headers},
             )
         if response.is_error:
