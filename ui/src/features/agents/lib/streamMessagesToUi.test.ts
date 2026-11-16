@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest"
 
 import { streamMessagesToUi } from "./streamMessagesToUi"
+import { groupQuietRuns } from "@/features/agents/components/messages/quietRuns"
 
 describe("streamMessagesToUi", () => {
   it("drops superseded partial replies and their unexecuted tools after a retry", () => {
@@ -200,6 +201,62 @@ describe("streamMessagesToUi", () => {
         .filter((message) => message.author === "agent")
         .map((message) => message.turnKey)
     ).toEqual(["user-1", "user-2"])
+  })
+
+  it("keeps wake-up runs separate and groups their quiet work", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({ id: "user", content: "Watch CI" }),
+      new AIMessage({ id: "answer", content: "Watching." }),
+      new HumanMessage({
+        id: "wake-1",
+        content:
+          '<input-message sender="system:monitor" kind="system">Check CI</input-message>',
+      }),
+      new AIMessage({
+        id: "run-1",
+        content: "",
+        tool_calls: [{ id: "check-1", name: "execute", args: {} }],
+      }),
+      new ToolMessage({ tool_call_id: "check-1", content: "pending" }),
+      new HumanMessage({
+        id: "wake-2",
+        content:
+          '<input-message sender="system:thread-wakeup" kind="system">Check again</input-message>',
+      }),
+      new AIMessage({
+        id: "run-2",
+        content: "",
+        tool_calls: [{ id: "check-2", name: "execute", args: {} }],
+      }),
+      new ToolMessage({ tool_call_id: "check-2", content: "pending" }),
+      new HumanMessage({
+        id: "wake-3",
+        content:
+          '<input-message sender="system:goal" kind="system">Final check</input-message>',
+      }),
+      new AIMessage({ id: "answer-2", content: "CI passed." }),
+    ])
+
+    expect(messages.map((message) => message.id)).toEqual([
+      "user",
+      "answer",
+      "wake-1",
+      "run-1",
+      "wake-2",
+      "run-2",
+      "wake-3",
+      "answer-2",
+    ])
+    expect(
+      messages
+        .filter((message) => message.author === "agent")
+        .map((message) => message.turnKey)
+    ).toEqual(["user", "wake-1", "wake-2", "wake-3"])
+    const grouped = groupQuietRuns(messages)
+    expect(grouped.find((entry) => entry.type === "quiet")).toMatchObject({
+      type: "quiet",
+      stretch: { runCount: 2, actionCount: 2, triggers: [["Context", 2]] },
+    })
   })
 
   it("identifies local task calls as subagents", () => {

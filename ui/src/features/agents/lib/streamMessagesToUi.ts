@@ -329,8 +329,6 @@ export function streamMessagesToUi(
 
     if (HumanMessage.isInstance(raw)) {
       if (raw.additional_kwargs.lc_source === "summarization") return
-      flushAgentTurn()
-      turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
       const chunks: Array<Chunk> = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
@@ -348,6 +346,8 @@ export function streamMessagesToUi(
       const replies = parsed.type === "message" ? parsed.replies : undefined
       if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length && !taskEvent && !replies) return
+      flushAgentTurn()
+      turnKey = typeof raw.id === "string" ? raw.id : undefined
       uiMessages.push({
         id: msgId,
         ...(taskEvent ? { taskEvent } : {}),

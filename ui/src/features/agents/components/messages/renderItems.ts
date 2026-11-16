@@ -53,13 +53,17 @@ export type RenderItem =
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "routed-message-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "worker-launch-item"; key: string; chunk: ToolExecutionChunk }
+  | {
+      type: "task-event-item"
+      key: string
+      chunk: Extract<Chunk, { kind: "task-event" }>
+    }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "managed-tools-item",
   "iframe-item",
-  "worker-launch-item",
   "routed-message-item",
   "image-item",
 ])
@@ -121,6 +125,10 @@ function attentionItems(
     return chunks.some((chunk) => toolNeedsAttention(chunk, includeUnfinished))
       ? [item]
       : []
+  }
+
+  if (item.type === "worker-launch-item" || item.type === "task-event-item") {
+    return [item]
   }
 
   if (item.type === "text-chunk" && item.chunk.kind === "error") {
@@ -221,7 +229,8 @@ export function countWorkActions(items: Array<RenderItem>): number {
       item.type === "edit-item" ||
       item.type === "shell-item" ||
       item.type === "sql-item" ||
-      item.type === "tool-item"
+      item.type === "tool-item" ||
+      item.type === "worker-launch-item"
     ) {
       return count + 1
     }
@@ -449,6 +458,16 @@ export function buildRenderItems(
     }
 
     if (chunk.kind === "text" && !chunk.text.trim()) continue
+
+    if (chunk.kind === "task-event") {
+      flushGroups()
+      items.push({
+        type: "task-event-item",
+        key: `task-event-${chunk.messageId}`,
+        chunk,
+      })
+      continue
+    }
 
     if (chunk.kind === "reasoning") {
       flushGroups()

@@ -215,7 +215,15 @@ export interface RemoteImageChunk {
 /** Either image form, as a renderer receives it from `Chunk`. */
 export type AnyImageChunk = ImageChunk | RemoteImageChunk
 
+export interface TaskEventChunk {
+  kind: "task-event"
+  messageId: string
+  event: TaskEventMetadata
+  timestamp?: string
+}
+
 export type Chunk =
+  | TaskEventChunk
   | TextChunk
   | ReasoningChunk
   | CodeChunk

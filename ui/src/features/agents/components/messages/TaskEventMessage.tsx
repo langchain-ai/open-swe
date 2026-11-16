@@ -1,10 +1,12 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Link } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
 
 import { MessageTimestamp } from "./MessageTimestamp"
+import { WorkEntryRow } from "./timeline/WorkEntryRow"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -27,15 +29,44 @@ export function TaskEventMessage({
   messageId: string
   timestamp?: string
 }) {
+  if (event.kind === "completion") {
+    const label =
+      event.sender_label ??
+      `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${shortThreadId(event.sender_thread_id)}`
+    const failed = event.status !== "success"
+    return (
+      <div data-testid="task-event" data-message-id={messageId}>
+        <WorkEntryRow
+          entry={{
+            icon: "bot",
+            heading: failed
+              ? `Worker result received · ${COMPLETION_LABELS[event.status]}`
+              : "Worker result received",
+            preview: label,
+            destinationHref: `/agents/${event.sender_thread_id}`,
+            destinationLabel: `Open ${label} thread`,
+            tone: failed ? "error" : "info",
+            status: failed ? "error" : "completed",
+            expandedText: event.content,
+            loadExpandedText: null,
+          }}
+          timestamp={timestamp}
+          body={
+            <div className="text-xs leading-relaxed break-words whitespace-pre-wrap text-primary">
+              {event.content}
+            </div>
+          }
+        />
+      </div>
+    )
+  }
   return (
     <TaskMessageChip
       label={
         event.sender_label ??
         `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${shortThreadId(event.sender_thread_id)}`
       }
-      status={
-        event.kind === "message" ? "Message" : COMPLETION_LABELS[event.status]
-      }
+      status="Message"
       threadId={event.sender_thread_id}
       content={event.content}
       messageId={messageId}
@@ -77,10 +108,38 @@ function launchResult(output: string | undefined): {
 }
 
 export function WorkerLaunchMessage({ chunk }: { chunk: ToolExecutionChunk }) {
+  const [loaded, setLoaded] = useState<{
+    load: ToolExecutionChunk["loadOutput"]
+    preview: string | undefined
+    text?: string
+    failed?: boolean
+  }>()
+  const { loadOutput, output } = chunk
   const pending = chunk.status === "pending" || chunk.status === "in_progress"
+  useEffect(() => {
+    if (pending || !loadOutput || launchResult(output).threadId) return
+    let active = true
+    void loadOutput().then(
+      (text) => {
+        if (active) setLoaded({ load: loadOutput, preview: output, text })
+      },
+      () => {
+        if (active)
+          setLoaded({ load: loadOutput, preview: output, failed: true })
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [loadOutput, output, pending])
+  const current =
+    loaded && loaded.load === loadOutput && loaded.preview === output
+      ? loaded
+      : undefined
+  const resultText = current?.text ?? output
   const { failed, threadId } =
     chunk.status === "completed"
-      ? launchResult(chunk.output)
+      ? launchResult(resultText)
       : { failed: chunk.status === "error", threadId: undefined }
   const status = pending
     ? "Starting…"
@@ -89,17 +148,31 @@ export function WorkerLaunchMessage({ chunk }: { chunk: ToolExecutionChunk }) {
       : threadId
         ? "Started"
         : "Launch status unknown"
+  const label = threadId ? `Worker ${shortThreadId(threadId)}` : "Worker"
   return (
-    <TaskMessageChip
-      label={threadId ? `Worker ${shortThreadId(threadId)}` : "Worker"}
-      status={status}
-      threadId={threadId}
-      content={
-        typeof chunk.input?.description === "string"
-          ? chunk.input.description
-          : "Worker assignment unavailable."
-      }
-      messageId={chunk.toolCallId}
+    <WorkEntryRow
+      entry={{
+        icon: "bot",
+        heading: `Worker · ${status}`,
+        preview: threadId ? label : null,
+        destinationHref: threadId ? `/agents/${threadId}` : undefined,
+        destinationLabel: `Open ${label} thread`,
+        tone: failed ? "error" : "info",
+        status: failed
+          ? "error"
+          : pending
+            ? "in_progress"
+            : threadId
+              ? "completed"
+              : "unknown",
+        expandedText:
+          (typeof chunk.input?.description === "string"
+            ? chunk.input.description
+            : "Worker assignment unavailable.") +
+          (failed && resultText ? `\n\n${resultText}` : "") +
+          (current?.failed ? "\nCould not load the worker launch result." : ""),
+        loadExpandedText: null,
+      }}
       timestamp={chunk.timestamp}
     />
   )

@@ -298,7 +298,14 @@ describe("Messages", () => {
         .getByRole("link", { name: "Open Worker 2cfc31d4 thread" })
         .getAttribute("href")
     ).toBe("/agents/7db1bbf5-0623-5a35-a5a4-db372cfc31d4")
+    const result = screen.getByRole("button", {
+      name: "Worker result received Worker 2cfc31d4",
+    })
+    expect(result.getAttribute("aria-expanded")).toBe("false")
     expect(container.textContent).not.toContain("Can I change")
+    fireEvent.click(result)
+    expect(container.textContent).toContain(source.content)
+    fireEvent.click(result)
     fireEvent.click(details)
     expect(container.textContent).toContain(source.content)
     expect(container.querySelector("img,script")).toBeNull()
@@ -350,19 +357,16 @@ describe("Messages", () => {
       wrapper,
     })
     const chip = screen.getByRole("button", {
-      name: "Worker 2cfc31d4 · Started",
+      name: "Worker · Started Worker 2cfc31d4",
     })
-    const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
-    expect(folds).toHaveLength(2)
-    for (const fold of folds) {
-      expect(fold.getAttribute("aria-expanded")).toBe("false")
-    }
+    const fold = screen.getByRole("button", { name: "Worked · 3 actions" })
+    expect(fold.getAttribute("aria-expanded")).toBe("false")
     expect(
-      folds[0]!.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING
+      fold.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
-    expect(
-      chip.compareDocumentPosition(folds[1]!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
+    fireEvent.click(fold)
+    expect(screen.getByText("AGENTS.md")).toBeTruthy()
+    expect(screen.getByText("README.md")).toBeTruthy()
     expect(
       screen
         .getByRole("link", { name: "Open Worker 2cfc31d4 thread" })
@@ -377,6 +381,73 @@ describe("Messages", () => {
     fireEvent.click(chip)
     expect(screen.getByText("Investigate <login> & validation")).toBeTruthy()
     expect(container.querySelector("login")).toBeNull()
+  })
+
+  it("shows a worker result in order within the work fold and keeps failures clear", async () => {
+    const workerId = "7db1bbf5-0623-5a35-a5a4-db372cfc31d4"
+    const tool = (id: string, path: string): ToolExecutionChunk => ({
+      kind: "tool-execution",
+      toolCallId: id,
+      toolName: "read_file",
+      title: `read_file ${path}`,
+      toolKind: "read",
+      input: { path },
+      status: "completed",
+    })
+    const messages: Message[] = [
+      {
+        id: "turn",
+        author: "agent",
+        timestamp: "2026-01-01T00:00:10Z",
+        chunks: [
+          tool("before", "before.txt"),
+          {
+            kind: "task-event",
+            messageId: "result",
+            event: {
+              version: 1,
+              task_id: "d505b040-c025-4b52-a27e-339803281cfb",
+              sender_thread_id: workerId,
+              sender_role: "worker",
+              sender_label: "Investigation",
+              kind: "completion",
+              status: "error",
+              content: "The worker failed safely <test>.",
+            },
+          },
+          tool("after", "after.txt"),
+          { kind: "text", text: "Continuing." },
+        ],
+      },
+    ]
+    const router = createRouter({
+      routeTree: createRootRoute({
+        component: () => <Messages messages={messages} isStreaming={false} />,
+      }),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    await router.load()
+    render(<RouterProvider router={router} />, { wrapper })
+    const fold = screen.getByRole("button", { name: "Worked · 2 actions" })
+    const result = screen.getByRole("button", {
+      name: "Worker result received · Failed Investigation",
+    })
+    expect(
+      screen
+        .getByRole("link", { name: "Open Investigation thread" })
+        .getAttribute("href")
+    ).toBe(`/agents/${workerId}`)
+    fireEvent.click(fold)
+    const before = screen.getByText("before.txt")
+    const after = screen.getByText("after.txt")
+    expect(
+      before.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      result.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    fireEvent.click(result)
+    expect(screen.getByText("The worker failed safely <test>.")).toBeTruthy()
   })
 
   it.each(["manage_thread", "message_task_thread"])(

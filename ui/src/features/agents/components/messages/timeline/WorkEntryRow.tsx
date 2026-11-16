@@ -85,6 +85,8 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
     )
   }
 
+  if (status === "unknown") return null
+
   return (
     <Tooltip title={status === "pending" ? "Waiting" : "Running"}>
       <span className="flex size-4 items-center justify-center">
@@ -153,10 +155,14 @@ export function WorkEntryLine({
                 </span>
               ))}
             {entry.destinationHref && (
-              <Tooltip title="Open destination thread">
+              <Tooltip
+                title={entry.destinationLabel ?? "Open destination thread"}
+              >
                 <Link
                   href={entry.destinationHref}
-                  aria-label="Open destination thread"
+                  aria-label={
+                    entry.destinationLabel ?? "Open destination thread"
+                  }
                   className="shrink-0 text-icon-secondary"
                   onClick={stopRowToggle}
                   onKeyDown={stopRowToggle}

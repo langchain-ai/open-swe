@@ -396,6 +396,94 @@ describe("transcript events", () => {
     expect(message?.chunks).toEqual([{ kind: "text", text: taskEvent.content }])
   })
 
+  it("places received worker results in the active turn but leaves wakeups standalone", () => {
+    const event = {
+      version: 1,
+      task_id: "d505b040-c025-4b52-a27e-339803281cfb",
+      sender_thread_id: "86186b55-1999-52e2-bf4b-ca3de907043e",
+      sender_role: "worker",
+      sender_label: "Investigation",
+      kind: "completion",
+      status: "success",
+      content: "Found the cause",
+    }
+    const data = JSON.stringify(event)
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+    const eventText = `<input-message sender="system:event-subscription" kind="system" surface="automation" event_match="86186b55-1999-52e2-bf4b-ca3de907043e" task_event="${data}">hidden</input-message>`
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [
+            turn("active", "2026-01-01T00:00:00Z"),
+            turn("wake", "2026-01-01T00:01:00Z"),
+          ],
+          messages: [
+            messageRow({
+              message_id: "question",
+              turn_id: "active",
+              role: "human",
+              text: "Go",
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+            messageRow({
+              message_id: "hidden",
+              turn_id: "active",
+              role: "human",
+              text: '<dynamic-context kind="system" id="system:test">\ndisplay_name: Test\n</dynamic-context>',
+              created_at: "2026-01-01T00:00:02Z",
+            }),
+            messageRow({
+              message_id: "result",
+              turn_id: "active",
+              role: "human",
+              text: eventText,
+              created_at: "2026-01-01T00:00:03Z",
+            }),
+            messageRow({
+              message_id: "answer",
+              turn_id: "active",
+              text: "Done",
+              created_at: "2026-01-01T00:00:05Z",
+            }),
+            messageRow({
+              message_id: "idle-result",
+              turn_id: "wake",
+              role: "human",
+              text: eventText,
+              created_at: "2026-01-01T00:01:00Z",
+            }),
+          ],
+          tool_calls: [
+            toolCall({
+              tool_call_id: "before",
+              turn_id: "active",
+              name: "read_file",
+              started_at: "2026-01-01T00:00:01Z",
+            }),
+            toolCall({
+              tool_call_id: "after",
+              turn_id: "active",
+              name: "read_file",
+              started_at: "2026-01-01T00:00:04Z",
+            }),
+          ],
+        })
+      )
+    )
+    expect(messages).toHaveLength(3)
+    expect(messages[1]?.chunks.map((chunk) => chunk.kind)).toEqual([
+      "tool-execution",
+      "task-event",
+      "tool-execution",
+      "text",
+    ])
+    expect(messages[1]?.chunks[1]).toMatchObject({ messageId: "result", event })
+    expect(messages[2]).toMatchObject({ id: "idle-result", taskEvent: event })
+  })
+
   it("concatenates fragments and then takes the completed text as canonical", () => {
     const base = fromSnapshot(twoTurnSnapshot())
     const streamed = applyEvent(

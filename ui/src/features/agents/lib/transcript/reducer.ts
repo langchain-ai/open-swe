@@ -1191,9 +1191,29 @@ function turnMessages(
       const row = state.messages[item.id]
       if (!row || !sameNamespace(row.namespace, namespace)) continue
       if (row.role === "human") {
-        flush()
         const message = humanMessage(state.threadId, row, state.entities)
         if (!message) continue
+        if (
+          agent &&
+          message.structuredSenderKind === "system" &&
+          !message.taskEvent &&
+          message.structuredSenderId !== "system:sandbox-handoff" &&
+          !message.structuredSenderId?.startsWith("system:api_key/") &&
+          !message.structuredSenderId?.startsWith("system:github_actions/")
+        )
+          continue
+        if (agent && message.taskEvent?.kind === "completion") {
+          append(row.messageId, row.createdAt, [
+            {
+              kind: "task-event",
+              messageId: row.messageId,
+              event: message.taskEvent,
+              timestamp: row.createdAt,
+            },
+          ])
+          continue
+        }
+        flush()
         turnKey = row.messageId
         out.push(
           turn.state === "failed" && turn.startedAt === null

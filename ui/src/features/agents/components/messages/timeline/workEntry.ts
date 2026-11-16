@@ -34,9 +34,10 @@ export interface WorkEntryView {
   preview: string | null
   previewTooltip?: string
   destinationHref?: string
+  destinationLabel?: string
   diffStats?: { additions: number; deletions: number }
   tone: WorkEntryTone
-  status: AcpToolStatus
+  status: AcpToolStatus | "unknown"
   /** The call's output as plain text, for rows that render nothing richer. */
   expandedText: string | null
   /**
@@ -293,6 +294,7 @@ export function liveActivityLabel(
       return "Preparing response…"
     }
     if (chunk.kind === "todo") return "Planning next steps…"
+    if (chunk.kind === "task-event") return "Thinking…"
 
     if (chunk.status === "completed") {
       const activeTool = chunks.findLast(

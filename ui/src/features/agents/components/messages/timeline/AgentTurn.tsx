@@ -12,7 +12,7 @@ import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { ExpandableMessageChip } from "../ExpandableMessageChip"
 import { MessageTimestamp } from "../MessageTimestamp"
-import { WorkerLaunchMessage } from "../TaskEventMessage"
+import { TaskEventMessage, WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
@@ -411,6 +411,16 @@ export function AgentTurn({
       case "worker-launch-item":
         return <WorkerLaunchMessage key={item.key} chunk={item.chunk} />
 
+      case "task-event-item":
+        return (
+          <TaskEventMessage
+            key={item.key}
+            event={item.chunk.event}
+            messageId={item.chunk.messageId}
+            timestamp={item.chunk.timestamp}
+          />
+        )
+
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
 
@@ -506,7 +516,15 @@ export function AgentTurn({
         />
         {live && !expanded && (
           <LiveWorkTail
-            tail={new WorkTail(segment.items)}
+            tail={
+              new WorkTail(
+                segment.items.filter(
+                  (item) =>
+                    item.type !== "worker-launch-item" &&
+                    item.type !== "task-event-item"
+                )
+              )
+            }
             repoPath={repoPath}
           />
         )}
