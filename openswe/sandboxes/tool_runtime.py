@@ -95,7 +95,7 @@ class SurfaceModels:
 
     main: ModelChoice
     subagent: ModelChoice
-    use_gateway: bool
+
     # Model routes the agent's model selection picks between, by route name.
     routes: Mapping[str, ModelChoice] = field(default_factory=dict)
     fallback: ModelChoice | None = None

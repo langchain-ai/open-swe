@@ -17,8 +17,11 @@ def _capture() -> tuple[dict[str, Any], Any]:
 
 def _make_model(model_id: str, **kwargs: Any) -> dict[str, Any]:
     captured, fake = _capture()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model(model_id, use_gateway=False, **kwargs)
+    with (
+        patch.object(model, "gateway_api_key", return_value="ls-test-key"),
+        patch.object(model, "init_chat_model", fake),
+    ):
+        model.make_model(model_id, **kwargs)
     return captured
 
 

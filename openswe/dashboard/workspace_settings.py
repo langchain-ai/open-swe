@@ -17,7 +17,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
-from runtime_api.models import gateway_overrides, resolve_gateway_enabled
 
 from openswe.audit_logs.context import bind_workspace, current_audit_log
 from openswe.audit_logs.middleware import audit_endpoint
@@ -50,8 +49,6 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6.1-sol", "medium")
-ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
-ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _DOMAIN = re.compile(rf"(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+")
 # An MCP connection's name, then the name of a tool on its server.
@@ -109,9 +106,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     """Listed apps added to everyone's web UI, their permissions approved for them, each at
     the release an instance admin approved and sharing its ``repositories`` with each person
     who can read them. Only the instance record's value is read."""
-    # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
-    # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
-    # a workspace inherits the instance.
     # Tri-state adaptive model routing toggle: True/False is authoritative. None
     # on the instance is on; None on a workspace inherits.
     model_routing_enabled: bool | None = Field(
@@ -126,9 +120,6 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     model_selection_enabled: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    gateway_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
@@ -383,7 +374,6 @@ def _default_settings() -> dict[str, Any]:
         "model_routing_split": False,
         "model_selection_enabled": False,
         "cloud_first_desktop_enabled": False,
-        "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "human_review_auto_merge_enabled": True,
@@ -438,6 +428,7 @@ def resolve_settings_workspace(explicit: str | None = None) -> str:
 
 
 _STALE_FIELDS = (
+    "gateway_enabled",
     "trigger_mode",
     "autofix_mode",
     "autofix_severity_threshold",
@@ -459,7 +450,7 @@ def _set_fields(record: Mapping[str, Any] | None) -> dict[str, Any]:
     """
     if not record:
         return {}
-    return {k: v for k, v in record.items() if v is not None}
+    return {k: v for k, v in record.items() if v is not None and k not in _STALE_FIELDS}
 
 
 def _finish(merged: dict[str, Any]) -> WorkspaceSettings:
@@ -628,21 +619,6 @@ async def delete_workspace_settings(slug: str) -> None:
     await Topic.WORKSPACES.invalidate()
 
 
-def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
-    """Use Opus for titles on Anthropic-only deployments."""
-    if not pair[0].startswith("openai:"):
-        return pair
-    # The toggle alone isn't enough: without a LangSmith key the gateway is
-    # bypassed and the call still needs a real OpenAI credential.
-    if gateway_enabled and gateway_overrides(pair[0]) is not None:
-        return pair
-    if ENV.OPENAI_API_KEY.optional():
-        return pair
-    if not ENV.ANTHROPIC_API_KEY.optional():
-        return pair
-    return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
-
-
 def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     """Supported pair if valid, else same-provider fallback, else global default."""
     if (
@@ -767,7 +743,7 @@ class WorkspaceSettings(Mapping[str, Any]):
             pair = _resolve_default_pair(model, effort)
         else:
             pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
-        return _gate_openai_title_model(pair, gateway_enabled=self.effective_gateway_enabled)
+        return pair
 
     @property
     def review_shadow(self) -> ReviewShadowArm | None:
@@ -844,17 +820,6 @@ class WorkspaceSettings(Mapping[str, Any]):
     @property
     def model_routing_split(self) -> bool:
         return self.get("model_routing_split") is True
-
-    @property
-    def gateway_enabled(self) -> bool | None:
-        """The stored LLM Gateway toggle (``None`` means inherit the env default)."""
-        value = self.get("gateway_enabled")
-        return value if isinstance(value, bool) else None
-
-    @property
-    def effective_gateway_enabled(self) -> bool:
-        """Whether LLM Gateway routing is on: the stored toggle, else the env default."""
-        return resolve_gateway_enabled(self.gateway_enabled)
 
     @property
     def fable_enabled(self) -> bool:

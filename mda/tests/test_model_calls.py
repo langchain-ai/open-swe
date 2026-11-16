@@ -225,15 +225,12 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
     monkeypatch: pytest.MonkeyPatch, with_image: bool
 ) -> None:
     built: dict[str, BaseChatModel] = {"fireworks:kimi": _FIREWORKS, "openai:gpt": _OPENAI}
-    monkeypatch.setattr(
-        "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
-    )
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: built[spec.model_id])
     call = ModelCall(
         system_prompt="prompt",
         model=ModelSpec(model_id="fireworks:kimi", kwargs={}),
         vision=ModelSpec(model_id="openai:gpt", kwargs={}),
         fallback=None,
-        use_gateway=False,
     )
     image = [{"type": "image", "url": "https://example.com/screenshot.png"}]
     messages: list[AnyMessage] = [
@@ -248,7 +245,6 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
         models=RunModels(
             model=call.model,
             subagent_model=call.model,
-            use_gateway=False,
             routes={"fast": call.model},
         ),
     )
@@ -304,9 +300,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     breakpoint ahead of the skills and the thread's own part, keeping a request within
     four, the tools take none, and a fallback to another provider carries none."""
     built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
-    monkeypatch.setattr(
-        "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
-    )
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: built[spec.model_id])
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     primary = ModelSpec(model_id="anthropic:opus", kwargs={})
     catalog = Catalog(
@@ -314,7 +308,6 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         models=RunModels(
             model=primary,
             subagent_model=primary,
-            use_gateway=False,
             routes={"fast": primary},
         ),
     )
@@ -343,7 +336,6 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
             thread_prompt=thread,
             model=ModelSpec(model_id="anthropic:opus", kwargs={}),
             fallback=ModelSpec(model_id="openai:gpt", kwargs={}),
-            use_gateway=False,
         )
         messages: list[AnyMessage] = [HumanMessage(content="go")]
         request = ModelRequest(
@@ -557,11 +549,6 @@ async def test_a_run_whose_login_lapsed_tells_the_person_instead_of_calling(
         assert is_model_failure_reply(answer.result[0])
     assert attempts.models == []
 
-    await call_with_fallback(
-        ModelRequest(model=_ANTHROPIC, messages=[]), attempts, None, use_gateway=False
-    )
-    assert attempts.models == [_ANTHROPIC]
-
 
 async def test_without_a_fallback_the_call_is_made_once() -> None:
     attempts = _Attempts(TimeoutError("stalled"))
@@ -701,7 +688,6 @@ async def test_provider_http_retries_are_owned_by_model_middleware(
                     "max_retries": 9,
                 },
             ),
-            use_gateway=False,
         )
         assert isinstance(model, ChatOpenAI)
         assert model.max_retries is not None

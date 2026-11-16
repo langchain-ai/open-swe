@@ -128,7 +128,6 @@ async def test_reviewer_says_whether_its_next_run_gets_a_fresh_sandbox(handed_ov
     middleware = PrepareReviewerRunMiddleware(
         thread_id="thread-reviewer",
         config=config,
-        use_gateway=False,
         model=ReviewerModelChoice("openai:gpt-6.1-sol", {}, None),
     )
 

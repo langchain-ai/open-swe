@@ -59,7 +59,7 @@ def apply() -> None:
     # The LLM is the only agent-internal piece we fake, and only by default.
     # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
     # with a real model — useful for manually exercising plan review etc. The
-    # provider key (e.g. ANTHROPIC_API_KEY) must be in the environment.
+    # LangSmith gateway credential must be in the environment.
     if os.environ.get("E2E_REAL_LLM"):
         logger.warning("E2E_REAL_LLM set — using the real model factory, not the scripted fake")
     else:

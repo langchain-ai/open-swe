@@ -146,7 +146,6 @@ class ModelCall(BaseModel):
     vision: ModelSpec | None = None
     # Another provider's model, tried once when a call to ``model`` fails.
     fallback: ModelSpec | None = None
-    use_gateway: bool = False
 
 
 class BeforeModel(PhaseResult):

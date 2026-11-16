@@ -410,7 +410,6 @@ class RunLoop:
                 if self._models is None or (model is not None and model.reads_images)
                 else self._models.vision,
                 fallback=None if model is None else model.fallback,
-                use_gateway=self._models is not None and self._models.use_gateway,
             ),
         )
 

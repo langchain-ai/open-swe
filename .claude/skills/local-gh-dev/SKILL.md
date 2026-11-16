@@ -80,8 +80,8 @@ Drive those paths over HTTP instead (below).
 Agent and reviewer runs work locally against real models and real sandboxes.
 Nothing is stubbed; runs cost money and take minutes.
 
-1. `.env` needs a model key — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
-   With both set, `DEFAULT_MODEL_ID` resolves to the OpenAI model; with only Anthropic, to Claude.
+1. `.env` needs `LANGSMITH_GATEWAY_API_KEY` (or `LANGSMITH_API_KEY`) with `gateway:invoke`.
+   Configure provider keys in LangSmith workspace Provider Secrets; Robin never calls providers directly.
 
 2. Expose the dashboard on a real hostname (`make tunnel`, see docs/DEVELOPMENT.md).
    Every run's sandbox is a LangSmith one Managed Deep Agents creates, and those **cannot work from a laptop's `localhost`**: the run PATCHes a proxy config whose `match_hosts` is the hostname of your `DASHBOARD_API_BASE_URL`, and the sandbox API rejects `localhost` with a bare `422 unknown` whose body never reaches the log.

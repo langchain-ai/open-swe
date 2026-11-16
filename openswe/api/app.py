@@ -56,7 +56,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
     from openswe.dashboard.oauth import validate_github_login_allowlist
-    from openswe.dashboard.options import validate_local_dev_llm_config
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import SEGMENT_WORKER, start_jobs
@@ -76,7 +75,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     DatadogSpans.install()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
-    validate_local_dev_llm_config()
     validate_mda_startup_config()
     validate_slack_startup_config()
     # Before anything is served: no thread or run is ever made on this Agent Server.

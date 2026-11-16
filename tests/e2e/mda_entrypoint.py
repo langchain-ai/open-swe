@@ -46,7 +46,7 @@ if not os.environ.get("E2E_REAL_LLM"):
 
     LAST_SYSTEM_PROMPT.report_to = f"{BASE_URL}/control/last-system-prompt"
 
-    def _fake_model(_model_id: str, _kwargs_json: str, _use_gateway: bool) -> BaseChatModel:
+    def _fake_model(_model_id: str, _kwargs_json: str) -> BaseChatModel:
         return FakeScriptedChatModel(script=build_script())
 
     models._build = _fake_model

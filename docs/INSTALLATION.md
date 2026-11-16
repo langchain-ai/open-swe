@@ -51,7 +51,7 @@ What a deployment needs:
 | Value | How you get it |
 |---|---|
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
-| A model provider key such as `ANTHROPIC_API_KEY`, or `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` (step 4) |
+| `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | A LangSmith key with `gateway:invoke` (step 4) |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_ID`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
@@ -296,26 +296,17 @@ Give each deployment its own GitHub App, or at least a distinct mention handle (
 
 ## 4. Model providers and API keys
 
-Robin calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, so any provider you give a key for is available.
-Set at least one provider key unless you use an LLM gateway, such as the LangSmith Gateway described below:
-
-| Provider | Variable | Notes |
-|---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` | Default model when it is the only key set |
-| OpenAI | `OPENAI_API_KEY` | Default model otherwise. `OPENAI_BASE_URL` points at an OpenAI-compatible API |
-| Google | `GOOGLE_API_KEY` | `google_genai:` models |
-| Fireworks | `FIREWORKS_API_KEY` | `fireworks:` models |
-| Groq | `GROQ_API_KEY` | `groq:` models |
-| Baseten | `BASETEN_API_KEY` | `baseten:` models |
-
-**LangSmith LLM Gateway.**
-Instead of per-provider keys, route every model call through the gateway with one LangSmith key that has the `gateway:invoke` permission, set as `LANGSMITH_GATEWAY_API_KEY`.
-Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` forces it either way (with `true` and no gateway key, `LANGSMITH_API_KEY` is used, which on LangGraph Platform may lack the permission).
+Robin calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, using providers supported by the gateway integration.
+All model calls use the LangSmith LLM Gateway.
+Configure provider credentials in your LangSmith workspace's Provider Secrets, not Robin's environment.
+Set `LANGSMITH_GATEWAY_API_KEY` to a LangSmith key with `gateway:invoke`; if unset, Robin uses `LANGSMITH_API_KEY` (the platform-provided key may lack this permission).
 `LANGSMITH_GATEWAY_BASE_URL` points at a regional or self-hosted gateway.
-Admins can also toggle the gateway per team in the dashboard.
+Routing cannot be disabled.
+Unsupported providers or missing gateway credentials fail closed.
+OpenAI uses the Responses API.
 
 **Which model runs.**
-The deployment default comes from the supported-model list in `packages/runtime-api/src/runtime_api/models.py` (an Anthropic model when only an Anthropic key is configured, otherwise an OpenAI one); override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails.
+The deployment default is `openai:gpt-6.1-sol` with medium reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails.
 Admins set the instance default under **Admin → Defaults** and can override model and effort defaults per workspace.
 Users can override the model for an individual thread, for example by asking the agent to switch to the performance model there.
 Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
@@ -446,7 +437,7 @@ Slack verifies the events Request URL the first time it can reach it; if the bac
 LANGGRAPH_URL="<URL>"                 # the deployment's own URL
 LANGSMITH_API_KEY=""                  # step 2; injected by LangGraph Platform
 LANGSMITH_TRACING="true"              # injected by LangGraph Platform
-ANTHROPIC_API_KEY=""                  # step 4: any provider key, or LANGSMITH_GATEWAY_API_KEY
+LANGSMITH_GATEWAY_API_KEY=""          # step 4: LangSmith key with gateway:invoke
 
 GITHUB_APP_ID=""                      # step 3
 GITHUB_APP_CLIENT_ID=""

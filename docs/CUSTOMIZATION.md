@@ -12,7 +12,6 @@ surface.loop = LoopRules(...)  # what MDA's middleware does around each model ca
 surface.models = SurfaceModels(
     main=ModelChoice(model_id, dict(model_kwargs)),
     subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
-    use_gateway=bool(use_gateway),
 )
 surface.subagents = [SurfaceSubagent(name="general-purpose", ...)]
 ```
@@ -70,8 +69,7 @@ LLM_MODEL_ID="anthropic:claude-opus-5-5"
 LLM_REASONING_EFFORT="high"
 ```
 
-When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`.
-All other deployments default to `openai:gpt-6.1-sol`, including deployments with both keys set.
+When `LLM_MODEL_ID` is unset or blank, the deployment defaults to `openai:gpt-6.1-sol`, independently of provider credentials.
 The default reasoning effort is `medium`.
 
 Either variable can be set independently.
@@ -121,14 +119,14 @@ else:
         "openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort": "medium"}}
     )
 
-surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_gateway))
+surface.models = SurfaceModels(main=main, subagent=main)
 ```
 
 ### Auto model routing with Jev
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
 A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); this requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
-Routing is independent of the provider-proxy gateway toggle below.
+Adaptive model routing is optional; provider calls always use the gateway.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
 Jev receives the latest human task text (up to 8,000 characters).
@@ -159,30 +157,20 @@ They call Jev and are separate from the deterministic unit tests.
 
 ### Routing through the LangSmith LLM Gateway
 
-Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly.
-The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing.
-Your org must have the gateway enabled with Provider Secrets configured.
-
-Routing is opt-in and off by default.
-Enable it either way:
+Every model call goes through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway).
+The gateway resolves provider credentials from workspace Provider Secrets and applies central spend limits, PII/secrets redaction, and tracing.
+Your organization must have the gateway enabled with Provider Secrets configured; provider keys in Robin's environment are not used.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `LANGSMITH_GATEWAY_ENABLED` | on when `LANGSMITH_GATEWAY_API_KEY` is set, else off | Deployment-level default for gateway routing; set explicitly to override. |
-| `LANGSMITH_GATEWAY_API_KEY` | unset | Dedicated LangSmith key for Gateway calls; setting it also turns routing on. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY` when routing is enabled some other way. |
-| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
-| `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
+| `LANGSMITH_GATEWAY_API_KEY` | `LANGSMITH_API_KEY` | LangSmith key with `gateway:invoke`. Prefer a dedicated key if the platform-provided key lacks this permission. |
+| `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Regional or self-hosted gateway host. |
 
-The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
-
-Routing is applied centrally in `make_model` (`packages/runtime-api/src/runtime_api/models.py`), which resolves the effective on/off and wires the gateway's URL and key, on the backend and in the MDA runtime alike.
-**OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
-Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
-
-**Caveat — OpenAI endpoint:** Robin uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions.
-Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled.
-Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions.
-Anthropic, Baseten, and Fireworks are unaffected.
+Routing is mandatory on the backend and in MDA, applied centrally in `packages/runtime-api/src/runtime_api/models.py`.
+**OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are supported; unsupported providers or missing gateway credentials fail rather than contacting a provider directly.
+OpenAI always uses HTTPS Responses.
+Gateway routing and its OpenAI endpoint are not configurable switches.
+Per-run bearer credentials still attribute calls to the person the run acts for; model selection, reasoning effort, and fallback settings remain configurable.
 
 ---
 

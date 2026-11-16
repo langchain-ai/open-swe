@@ -13,7 +13,6 @@ def _models() -> RunModels:
     return RunModels(
         model=_MAIN,
         subagent_model=_MAIN,
-        use_gateway=False,
         routes={"fast": _FAST},
         fallback_model_id=_FALLBACK,
     )

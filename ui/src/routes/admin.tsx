@@ -7,7 +7,6 @@ import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import { ShadowReviewSection } from "@/features/settings/components/ShadowReviewSection"
 import {
   DefaultRepoSection,
-  LLMGatewaySection,
   ModelDefaultsSection,
   ModelRoutingSection,
 } from "@/features/settings/components/WorkspaceSettingsSections"
@@ -45,7 +44,6 @@ function AdminDefaultsPage() {
         scope={INSTANCE_SCOPE}
         repositories={repos.data?.repositories ?? []}
       />
-      <LLMGatewaySection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
       <ShadowReviewSection

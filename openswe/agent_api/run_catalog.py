@@ -180,7 +180,6 @@ class RunCatalog:
         return RunModels(
             model=spec(models.main),
             subagent_model=spec(models.subagent),
-            use_gateway=models.use_gateway,
             routes={route: spec(choice) for route, choice in models.routes.items()},
             vision=None
             if self.surface.loop.pinned_model or models.vision is None

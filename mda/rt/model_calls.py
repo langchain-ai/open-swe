@@ -249,7 +249,6 @@ async def call_with_fallback(
     attempting: Callable[[bool], None] = _ignore,
     backoff_schedule: Sequence[float] | None = None,
     budget: timedelta = MODEL_CALL_BUDGET,
-    use_gateway: bool = True,
 ) -> ModelResponse:
     """``request``, and again while it fails transiently, alternating with ``fallback``.
 
@@ -259,7 +258,7 @@ async def call_with_fallback(
     the model answers with why; any other error that is not transient raises at once.
     Once the attempts or ``budget`` run out, the outage message answers instead.
     """
-    if use_gateway and (unavailable := await RUN_GATEWAY.unavailable()) is not None:
+    if (unavailable := await RUN_GATEWAY.unavailable()) is not None:
         return _failure_reply(unavailable, "model_access")
     schedule = (
         tuple(BACKOFF_SCHEDULE if backoff_schedule is None else backoff_schedule)

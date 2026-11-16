@@ -11,6 +11,7 @@ from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_workspace_settings,
     upsert_instance_settings,
+    workspace_record,
 )
 from openswe.tools import access as tool_access
 from openswe.tools.manage_feature_flags import manage_feature_flags
@@ -30,15 +31,27 @@ def private_admin(grant_tool_access: Callable[..., None]) -> None:
 @pytest.mark.usefixtures("registry_db")
 async def test_instance_flags_keep_unrelated_settings_and_reset() -> None:
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(pr_summaries=False, org_guidelines="Keep me", gateway_enabled=True)
+        WorkspaceSettingsUpdate(
+            pr_summaries=False, org_guidelines="Keep me", model_selection_enabled=True
+        )
     )
-    set_result = await manage_feature_flags("set", {"pr_summaries": True, "gateway_enabled": False})
-    assert set_result["effective"]["gateway_enabled"] is False
+    set_result = await manage_feature_flags(
+        "set", {"pr_summaries": True, "model_selection_enabled": False}
+    )
+    assert set_result["effective"]["model_selection_enabled"] is False
     assert set_result["effective"]["pr_summaries"] is True
     assert (await get_workspace_settings())["org_guidelines"] == "Keep me"
     await manage_feature_flags("set", {"pr_summaries": None})
     assert (await get_workspace_settings())["pr_summaries"] is True
-    assert (await get_workspace_settings())["gateway_enabled"] is False
+    assert (await get_workspace_settings())["model_selection_enabled"] is False
+
+
+async def test_retired_gateway_override_is_not_returned() -> None:
+    await WORKSPACE_SETTINGS.put("team", {"gateway_enabled": False, "pr_summaries": False})
+    settings = await get_workspace_settings("team")
+    assert "gateway_enabled" not in settings
+    assert "gateway_enabled" not in await workspace_record("team")
+    assert settings["pr_summaries"] is False
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -71,7 +84,13 @@ async def test_workspace_flags_inherit_and_keep_other_overrides(flag: str) -> No
 
 @pytest.mark.parametrize(
     "flags",
-    [{"review_auto_approve": True}, {"org_guidelines": True}, {"pr_summaries": "yes"}, {}],
+    [
+        {"gateway_enabled": False},
+        {"review_auto_approve": True},
+        {"org_guidelines": True},
+        {"pr_summaries": "yes"},
+        {},
+    ],
 )
 async def test_invalid_flags_are_refused(flags: dict[str, object]) -> None:
     with pytest.raises(ValueError):
@@ -103,7 +122,7 @@ async def test_private_admin_gate_rejects_other_surfaces(
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     monkeypatch.setattr(tool_access, "resolve_access", real_resolve_access)
     with patch("openswe.run_config.get_config", return_value={"configurable": config}):
-        result = await manage_feature_flags("set", {"gateway_enabled": True})
+        result = await manage_feature_flags("set", {"model_selection_enabled": True})
     assert "not available in this thread" in str(result["error"])
 
 
@@ -118,17 +137,17 @@ async def test_sole_writer_sets_flags_but_cannot_read_them(
 
     monkeypatch.setattr(audit_tools, "append_safely", append)
     grant_tool_access(admin=True, sole=True)
-    assert await manage_feature_flags("set", {"gateway_enabled": True}) == {
+    assert await manage_feature_flags("set", {"model_selection_enabled": True}) == {
         "ok": True,
         "scope": "instance",
     }
-    assert (await get_workspace_settings())["gateway_enabled"] is True
+    assert (await get_workspace_settings())["model_selection_enabled"] is True
     assert "not available in this thread" in str((await manage_feature_flags("read"))["error"])
     (entry,) = entries
     assert entry.operation_succeeded is True
     assert entry.enrichments.source == "tool"
     assert entry.enrichments.settings_scope == "instance"
     assert entry.enrichments.settings_changes == {
-        "gateway_enabled": {"before": None, "after": True}
+        "model_selection_enabled": {"before": None, "after": True}
     }
     assert current_audit_log.get() is None

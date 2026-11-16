@@ -1,11 +1,8 @@
 """Chat models for the models Open SWE picked when it dispatched a run.
 
-The backend sends model ids and provider settings, never keys: a gateway-routed
-model calls as whoever its run acts for (``rt.gateway``), and other keys come from
-this deployment's environment. Both sides build a model with
-``runtime_api.models``, so its provider settings, gateway routing and context
-window are the ones the backend picked it with. Here the model middleware owns the
-retries (``rt.model_retries``), so a known provider's SDK retries are turned off.
+The backend sends model ids and provider settings, never keys. Every model calls
+through the gateway as whoever its run acts for (``rt.gateway``). Both sides build
+models with ``runtime_api.models``. The model middleware owns retries here.
 """
 
 import json
@@ -34,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=32)
-def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
+def _build(model_id: str, kwargs_json: str) -> BaseChatModel:
     kwargs = _kwargs.validate_python(json.loads(kwargs_json))
     provider = model_id.split(":", 1)[0]
     if provider in _SDK_RETRY_DISABLE:
@@ -45,7 +42,7 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
                 extra={"provider": provider},
             )
         kwargs["max_retries"] = disabled
-    return build_chat_model(model_id, kwargs, use_gateway=use_gateway, gateway=GATEWAY_BEARER)
+    return build_chat_model(model_id, kwargs, gateway=GATEWAY_BEARER)
 
 
 def middleware_retries(model: object) -> bool:
@@ -63,6 +60,6 @@ def middleware_retries(model: object) -> bool:
     )
 
 
-def build_model(spec: ModelSpec, *, use_gateway: bool) -> BaseChatModel:
+def build_model(spec: ModelSpec) -> BaseChatModel:
     """The chat model for ``spec``, built once per distinct model and settings."""
-    return _build(spec.model_id, json.dumps(spec.kwargs, sort_keys=True), use_gateway)
+    return _build(spec.model_id, json.dumps(spec.kwargs, sort_keys=True))

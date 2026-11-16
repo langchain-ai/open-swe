@@ -4,7 +4,7 @@
 # hot-reload, and Vite proxies the API + Yjs collaboration WebSocket + mock
 # Slack/GitHub + sign-in to the harness ($API). Same-origin is what lets the
 # session cookie ride the plan-review WebSocket (cross-origin WS drops it).
-# The LLM is real when an OpenAI key is available, otherwise the scripted fake;
+# The LLM is real when E2E_REAL_LLM=1, otherwise the scripted fake;
 # only the Slack/GitHub SaaS boundaries are always faked.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -15,26 +15,7 @@ UI_PORT="${UI_PORT:-3000}"
 API="http://127.0.0.1:${API_PORT}"
 UI="http://127.0.0.1:${UI_PORT}"
 
-# Use a real OpenAI key. The agent talks to OpenAI directly, so a LangSmith
-# gateway key (lsv2_*) stray in the shell won't authenticate — prefer .env's
-# OPENAI_API_KEY unless the shell already holds an OpenAI-looking key (sk-…).
-# Pulled line-by-line, not by sourcing .env, which would clobber the harness's
-# test env (E2E_SANDBOX_ROOT, DASHBOARD_*, …).
-case "${OPENAI_API_KEY:-}" in
-  sk-*) : ;;
-  *)
-    if [ -f .env ]; then
-      export OPENAI_API_KEY="$(grep -E '^OPENAI_API_KEY=' .env | head -1 | cut -d= -f2- | tr -d "\"'")"
-    fi
-    ;;
-esac
-case "${OPENAI_API_KEY:-}" in
-  sk-*) REAL_LLM=1 ;;
-  *)
-    echo "No OpenAI key (sk-…) found; using the scripted fake model." >&2
-    REAL_LLM=""
-    ;;
-esac
+REAL_LLM="${E2E_REAL_LLM:-}"
 
 # Single origin = the Vite HMR server ($UI). Agent links, the sign-in redirect,
 # and the same-origin/WS allowlist all point there; the UI calls the API on its

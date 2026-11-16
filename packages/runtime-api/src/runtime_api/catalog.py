@@ -36,7 +36,7 @@ class RunModels(BaseModel):
 
     model: ModelSpec
     subagent_model: ModelSpec
-    use_gateway: bool
+
     # The models the graph's model routing picks between, by route name.
     routes: dict[str, ModelSpec] = {}
     # What a text-only model's call goes to once the conversation holds an image.

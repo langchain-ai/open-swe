@@ -807,7 +807,7 @@ async def test_remote_prompts_include_deployment_context(
     monkeypatch.setenv("OPENSWE_ENV", environment)
     model = ModelChoice("openai:gpt-6.1-sol", {})
     surface = ToolSurface(
-        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+        models=SurfaceModels(main=model, subagent=model),
         subagents=[SurfaceSubagent("worker", "worker", "subagent instructions")],
     )
     catalog = RunCatalog(RunKind(), RUN, surface, {}).build()
@@ -1215,7 +1215,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             surface.model_call_limit = 20
             surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]
             choice = ModelChoice("openai:gpt-6.1-sol", {})
-            surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+            surface.models = SurfaceModels(main=choice, subagent=choice)
             surface.loop = LoopRules(
                 routing=RoutingRules(shadow=True), model_experiment="performance"
             )

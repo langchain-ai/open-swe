@@ -302,9 +302,9 @@ def _answering(monkeypatch: pytest.MonkeyPatch, backend: OpenSweBackend, answer:
     monkeypatch.setattr(backend, "post", post)
 
 
-def _models(model: ModelSpec, *, gateway: bool = False) -> Catalog:
+def _models(model: ModelSpec) -> Catalog:
     """A catalog that runs on ``model``."""
-    return Catalog(models=RunModels(model=model, subagent_model=model, use_gateway=gateway))
+    return Catalog(models=RunModels(model=model, subagent_model=model))
 
 
 def _preparing(**update: JsonValue) -> Answer:
@@ -905,7 +905,7 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _RecordingAnthropic(model_name="claude-opus-5-5", api_key="test-key", sent=[])
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: named)
     backend = _run_backend(
         invocation_id="invocation-1",
         catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})),
@@ -951,7 +951,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _PayloadAnthropic(model_name="claude-opus-5-5", api_key="test-key", payloads=[])
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: named)
     backend = _run_backend(
         invocation_id="invocation-1",
         catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})),
@@ -1024,7 +1024,7 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
         "anthropic:claude-opus-5-5": _StalledAnthropic(model_name="claude-opus-5-5", api_key="k"),
         "anthropic:claude-sonnet-5-5": fallback,
     }
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: built[spec.model_id])
     model = ModelSpec(
         model_id="anthropic:claude-opus-5-5",
         kwargs={},
@@ -1056,10 +1056,10 @@ async def test_a_run_whose_login_lapsed_answers_why_even_without_a_fallback(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     model = _RecordingAnthropic(model_name="claude-opus-5-5", api_key="test-key", sent=[])
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: model)
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: model)
     backend = _run_backend(
         invocation_id="invocation-1",
-        catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}), gateway=True),
+        catalog=_models(ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})),
     )
     preparing = _preparing(rendered_system_prompt="You are Open SWE.")
     replies: list[dict[str, JsonValue]] = []
@@ -1110,14 +1110,13 @@ async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
     }
     if selection == "fallback":
         built[routed.model_id] = _StalledAnthropic(model_name=routed.model_id, api_key="test")
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: built[spec.model_id])
     backend = _run_backend(
         invocation_id="turn",
         catalog=Catalog(
             models=RunModels(
                 model=primary,
                 subagent_model=primary,
-                use_gateway=False,
                 routes={"fast": routed},
                 vision=vision,
             )
@@ -1235,7 +1234,7 @@ async def test_the_turn_root_counts_its_tool_calls_and_their_errors_on_either_ar
     if not fails:
         replies.append(AIMessage(content="done"))
     model = _AnsweringThenDown(messages=iter(replies))
-    monkeypatch.setattr("rt.middleware.build_model", lambda _spec, use_gateway: model)
+    monkeypatch.setattr("rt.middleware.build_model", lambda _spec: model)
 
     @tool
     def look(path: str) -> str:
@@ -2675,7 +2674,6 @@ async def test_mda_retries_only_transient_errors_on_the_fallback(
             system_prompt="test",
             model=None,
             fallback=ModelSpec(model_id="fallback", kwargs={}),
-            use_gateway=False,
         ).model_dump(mode="json"),
     }
     request = ModelRequest(model=model, messages=[], state=state)
@@ -2706,7 +2704,6 @@ async def test_a_model_call_paused_for_a_connection_is_not_retried_on_the_fallba
             system_prompt="test",
             model=None,
             fallback=ModelSpec(model_id="fallback", kwargs={}),
-            use_gateway=False,
         ).model_dump(mode="json"),
     }
     middleware = BackendRunMiddleware(_run_backend("token", invocation_id="run"))
@@ -2724,7 +2721,6 @@ def _planned_with_fallback() -> RunState:
             system_prompt="test",
             model=ModelSpec(model_id="primary", kwargs={}),
             fallback=ModelSpec(model_id="fallback", kwargs={}),
-            use_gateway=False,
         ).model_dump(mode="json"),
     }
 

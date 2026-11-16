@@ -9,7 +9,6 @@ Credentials and routing come from the environment of the process that builds the
 model, never from what the other side sends.
 """
 
-import logging
 import os
 from collections.abc import Mapping
 from datetime import timedelta
@@ -24,7 +23,6 @@ from runtime_api.catalog import ModelSpec, RunModels, kept_route
 if TYPE_CHECKING:
     from runtime_api.gateway_auth import GatewayBearer
 
-logger = logging.getLogger(__name__)
 
 # The most a model call may take, its retries across the fallback included. The
 # backend fails a run that went quiet for twice this (``openswe/threads/stalls.py``).
@@ -359,9 +357,7 @@ def provider_model_kwargs(
 # The LLM Gateway (https://docs.langchain.com/langsmith/llm-gateway) proxies
 # provider calls through LangSmith: the client authenticates with a LangSmith API
 # key and the gateway resolves the real provider key from workspace Provider
-# Secrets, enforcing spend/PII/secrets policies and tracing every call. Routing is
-# opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
-# ``gateway_enabled`` workspace setting, and is applied centrally in ``make_model``.
+# Secrets, enforcing spend/PII/secrets policies and tracing every call.
 
 DEFAULT_GATEWAY_BASE_URL: Final = "https://gateway.smith.langchain.com"
 
@@ -382,7 +378,7 @@ GatewayModelRoute = Literal["auto", "default"]
 # ``/v1/messages`` to a bare host, and google-genai appends
 # ``/<api_version>/models/...`` to a bare host. Vertex (``google_vertexai``, which
 # uses service-account auth rather than a bearer key) and any other provider are
-# not routed and call the provider directly.
+# rejected rather than called directly.
 _GATEWAY_PROVIDER_PATHS: Final[Mapping[str, str]] = {
     "openai": "/openai/v1",
     "anthropic": "/anthropic",
@@ -401,10 +397,6 @@ def _env(*names: str) -> str | None:
     return None
 
 
-def _env_bool(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def gateway_api_key() -> str | None:
     """LangSmith API key used to authenticate gateway calls.
 
@@ -420,81 +412,27 @@ def gateway_base_url() -> str:
     return (_env("LANGSMITH_GATEWAY_BASE_URL") or DEFAULT_GATEWAY_BASE_URL).rstrip("/")
 
 
-def gateway_env_default() -> bool:
-    """Deployment-level default for gateway routing.
-
-    ``LANGSMITH_GATEWAY_ENABLED`` decides when set. Otherwise a dedicated
-    ``LANGSMITH_GATEWAY_API_KEY`` is the signal: that key exists for nothing
-    else, so configuring it means routing through the gateway.
-    """
-    explicit = _env("LANGSMITH_GATEWAY_ENABLED")
-    if explicit is not None:
-        return _env_bool(explicit)
-    return bool(_env("LANGSMITH_GATEWAY_API_KEY"))
-
-
-def gateway_openai_use_responses() -> bool:
-    """Whether gateway-routed OpenAI keeps the Responses API.
-
-    Defaults to ``True`` because OpenAI reasoning models with tool calls reject
-    ``reasoning_effort`` on Chat Completions. Set
-    ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false`` only for deployments that
-    need to force Chat Completions through the gateway.
-    """
-    raw = _env("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES")
-    if raw is None:
-        return True
-    return _env_bool(raw)
-
-
-def resolve_gateway_enabled(team_value: bool | None) -> bool:
-    """Combine the workspace-settings toggle with the env default.
-
-    A workspace value of ``True``/``False`` is authoritative; ``None`` inherits the
-    ``LANGSMITH_GATEWAY_ENABLED`` deployment default.
-    """
-    if team_value is None:
-        return gateway_env_default()
-    return team_value
-
-
 def gateway_overrides(
     model_id: str, *, bearer: GatewayBearer | None = None, timeout: float | None = None
-) -> dict[str, object] | None:
-    """``init_chat_model`` kwargs that route ``model_id`` through the gateway.
-
-    ``bearer`` authenticates each request as whoever the run acts for; without one the
-    deployment's LangSmith API key does. Returns ``None`` (so the caller keeps talking
-    to the provider directly) when the provider isn't routable through the gateway or
-    there is neither a bearer nor a key — both cases are logged rather than raised, so
-    a run never fails just because gateway routing couldn't be applied.
-    """
+) -> dict[str, object]:
+    """Route a model through the gateway, refusing missing credentials or unsupported providers."""
     provider = model_id.split(":", 1)[0]
     path = _GATEWAY_PROVIDER_PATHS.get(provider)
     if path is None:
-        logger.warning(
-            "LangSmith gateway enabled but provider %r is not routed; calling it directly",
-            provider,
-        )
-        return None
+        raise ValueError(f"Provider {provider!r} is not supported by the LangSmith gateway")
     base_url = f"{gateway_base_url()}{path}"
     if bearer is not None:
         overrides = bearer.sdk_overrides(provider, base_url, timeout=timeout)
     elif api_key := gateway_api_key():
         overrides = {"api_key": api_key}
     else:
-        logger.warning(
-            "LangSmith gateway enabled but no LANGSMITH_GATEWAY_API_KEY or "
-            "LANGSMITH_API_KEY is set; "
-            "calling the provider directly"
-        )
-        return None
+        raise ValueError("LANGSMITH_GATEWAY_API_KEY or LANGSMITH_API_KEY is required")
     overrides["base_url"] = base_url
     headers = {GATEWAY_SERVICE_HEADER: GATEWAY_SERVICE_NAME, GATEWAY_MODEL_ROUTE_HEADER: "default"}
     if provider == "openai":
-        # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
+        # Use HTTPS Responses through the gateway; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.
-        overrides["use_responses_api"] = gateway_openai_use_responses()
+        overrides["use_responses_api"] = True
     if provider == "google_genai":
         overrides["api_version"] = "v1beta"
         overrides["additional_headers"] = headers
@@ -508,9 +446,6 @@ def gateway_overrides(
 
 
 # --- Building the chat model ------------------------------------------------------------------
-
-OPENAI_RESPONSES_WS_BASE_URL: Final = "wss://api.openai.com/v1"
-BASETEN_BASE_URL: Final = "https://inference.baseten.co/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback kicks in.
@@ -531,19 +466,7 @@ _TIMEOUT_PROVIDER_PREFIXES: Final = (
 )
 
 
-def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:
-    if model_kwargs.get("use_responses_api") is not False:
-        return
-    reasoning = model_kwargs.pop("reasoning", None)
-    if isinstance(reasoning, dict):
-        effort = reasoning.get("effort")
-        if isinstance(effort, str):
-            model_kwargs.setdefault("reasoning_effort", effort)
-
-
 def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
-    if model_kwargs.get("use_responses_api") is False:
-        return
     model_kwargs.setdefault("store", False)
     model_kwargs.setdefault("output_version", "responses/v1")
     include = model_kwargs.get("include")
@@ -570,16 +493,9 @@ def model_init_kwargs(
     model_id: str,
     kwargs: Mapping[str, object],
     *,
-    use_gateway: bool | None = None,
     gateway: GatewayBearer | None = None,
 ) -> tuple[str, dict[str, object]]:
-    """The model id and keyword arguments ``init_chat_model`` builds ``model_id`` from.
-
-    ``use_gateway`` resolves the deployment default (``LANGSMITH_GATEWAY_ENABLED``)
-    when ``None``; callers that read the workspace's setting pass its value. When on,
-    gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
-    provider defaults below.
-    """
+    """Build provider SDK arguments with mandatory gateway routing."""
     model_kwargs: dict[str, object] = dict(model_request_defaults(model_id))
     model_kwargs.update(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
@@ -590,49 +506,31 @@ def model_init_kwargs(
         # Runs aren't streamed, and without a stream LangSmith has no time to first
         # token and a long answer is cut off by the non-streaming request timeout.
         model_kwargs.setdefault("streaming", True)
-    if model_id.startswith("openai:"):
-        model_kwargs["base_url"] = (
-            _env("OPENAI_BASE_URL", "OPENAI_API_BASE") or OPENAI_RESPONSES_WS_BASE_URL
-        )
-        model_kwargs["use_responses_api"] = True
-
-    enabled = gateway_env_default() if use_gateway is None else use_gateway
-    gateway_applied = False
-    if enabled:
-        timeout = model_kwargs.get("timeout")
-        overrides = gateway_overrides(
-            model_id,
-            bearer=gateway,
-            timeout=float(timeout) if isinstance(timeout, int | float) else None,
-        )
-        if overrides is not None:
-            for key, value in overrides.items():
-                existing = model_kwargs.get(key)
-                if isinstance(existing, Mapping) and isinstance(value, Mapping):
-                    merged = dict(existing)
-                    for inner_key, inner_value in value.items():
-                        current = merged.get(inner_key)
-                        if isinstance(current, Mapping) and isinstance(inner_value, Mapping):
-                            inner_value = {**current, **inner_value}
-                        merged[inner_key] = inner_value
-                    value = merged
-                model_kwargs[key] = value
-            gateway_applied = True
+    timeout = model_kwargs.get("timeout")
+    overrides = gateway_overrides(
+        model_id,
+        bearer=gateway,
+        timeout=float(timeout) if isinstance(timeout, int | float) else None,
+    )
+    for key, value in overrides.items():
+        existing = model_kwargs.get(key)
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged = dict(existing)
+            for inner_key, inner_value in value.items():
+                current = merged.get(inner_key)
+                if isinstance(current, Mapping) and isinstance(inner_value, Mapping):
+                    inner_value = {**current, **inner_value}
+                merged[inner_key] = inner_value
+            value = merged
+        model_kwargs[key] = value
 
     if model_id.startswith("openai:"):
         _configure_openai_responses_kwargs(model_kwargs)
-        _coerce_openai_chat_completions_kwargs(model_kwargs)
 
     init_model_id = model_id
     if model_id.startswith("baseten:"):
         init_model_id = model_id.split(":", 1)[1]
         model_kwargs["model_provider"] = "openai"
-        if not gateway_applied:
-            api_key = _env("BASETEN_API_KEY")
-            if not api_key:
-                raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
-            model_kwargs["base_url"] = BASETEN_BASE_URL
-            model_kwargs["api_key"] = api_key
 
     codex_profile = _codex_profile(model_id)
     if codex_profile is not None:
@@ -644,7 +542,6 @@ def build_chat_model(
     model_id: str,
     kwargs: Mapping[str, object],
     *,
-    use_gateway: bool | None = None,
     gateway: GatewayBearer | None = None,
 ) -> BaseChatModel:
     """The chat model for ``model_id`` with ``kwargs``, as ``model_init_kwargs`` sets it up.
@@ -652,9 +549,7 @@ def build_chat_model(
     ``gateway`` authenticates a gateway-routed model's every request as whoever the run
     acts for; without it the deployment's LangSmith API key does.
     """
-    init_model_id, model_kwargs = model_init_kwargs(
-        model_id, kwargs, use_gateway=use_gateway, gateway=gateway
-    )
+    init_model_id, model_kwargs = model_init_kwargs(model_id, kwargs, gateway=gateway)
     if (
         gateway is not None
         and gateway.authenticates(model_kwargs)
@@ -667,12 +562,11 @@ def build_chat_model(
 def make_model(
     model_id: str,
     *,
-    use_gateway: bool | None = None,
     gateway: GatewayBearer | None = None,
     **kwargs: Unpack[ModelKwargs],
 ) -> BaseChatModel:
-    """Build a chat model, optionally routed through the LangSmith LLM Gateway."""
-    return build_chat_model(model_id, kwargs, use_gateway=use_gateway, gateway=gateway)
+    """Build a chat model, routed through the LangSmith LLM Gateway."""
+    return build_chat_model(model_id, kwargs, gateway=gateway)
 
 
 # --- The model each call goes to ----------------------------------------------------------------

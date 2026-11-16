@@ -11534,18 +11534,6 @@
             ],
             "title": "Featured Apps"
           },
-          "gateway_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gateway Enabled"
-          },
           "human_review_auto_assign_minutes": {
             "anyOf": [
               {

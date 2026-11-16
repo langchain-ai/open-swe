@@ -35,7 +35,6 @@ import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
-  LLMGatewaySection,
   ModelDefaultsSection,
   ModelRoutingSection,
 } from "./WorkspaceSettingsSections"
@@ -306,7 +305,6 @@ export function WorkspaceSettingsPanel({
       {canEdit && (
         <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
       )}
-      <LLMGatewaySection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <ShadowReviewSection

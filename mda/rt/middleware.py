@@ -333,7 +333,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         models = self._backend.run.catalog.models
         if models is None:
             raise BackendCallError("The run has no model configuration")
-        return build_model(models.model, use_gateway=models.use_gateway)
+        return build_model(models.model)
 
     def _trace_metadata(self) -> dict[str, JsonValue]:
         """Who the run acts for."""
@@ -634,7 +634,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
         )
         if model is not None:
-            request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
+            request = request.override(model=build_model(model))
             trace.record_model(model.model_id)
         fallback = planned.fallback
 
@@ -654,11 +654,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 run=self._backend.run,
                 routed_model=request.model if model is planned.model else None,
             ),
-            None
-            if fallback is None
-            else lambda: build_model(fallback, use_gateway=planned.use_gateway),
+            None if fallback is None else lambda: build_model(fallback),
             attempting=attempting,
-            use_gateway=planned.use_gateway,
         )
 
     async def _report_failure(self, exc: Exception) -> None:

@@ -143,7 +143,6 @@ class GraphInputs(BaseModel):
     # run's model and credentials; routing may still send a call to another model.
     model: ModelSpec | None = None
     subagent_model: ModelSpec | None = None
-    use_gateway: bool = False
 
     @classmethod
     def of(cls, graph: Graph, catalog: Catalog) -> Self:
@@ -155,7 +154,6 @@ class GraphInputs(BaseModel):
             worker_webhook=catalog.worker_webhook,
             model=models.model,
             subagent_model=models.subagent_model,
-            use_gateway=models.use_gateway,
         )
 
     def agent_model(self) -> BaseChatModel | str:
@@ -165,7 +163,7 @@ class GraphInputs(BaseModel):
         return self._built(self.subagent_model)
 
     def _built(self, spec: ModelSpec | None) -> BaseChatModel | str:
-        return _DEFAULT_MODEL if spec is None else build_model(spec, use_gateway=self.use_gateway)
+        return _DEFAULT_MODEL if spec is None else build_model(spec)
 
 
 async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:

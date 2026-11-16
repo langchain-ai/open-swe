@@ -91,8 +91,7 @@ _DEFAULTS = {
     "LANGGRAPH_URL": BASE_URL,
     "MDA_RUNTIME_URL": f"http://127.0.0.1:{MDA_PORT}",
     "REMOTE_RUNTIME_TOKEN_SECRET": "test-remote-runtime-token-secret",
-    # Dashboard: the "Open in Web" link target + session-cookie signing. Use
-    # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
+    # Dashboard: the "Open in Web" link target + session-cookie signing.
     # The link points at the app server, so following it lands the browser on
     # the origin a real user is on rather than on the backend.
     "DASHBOARD_BASE_URL": APP_URL,

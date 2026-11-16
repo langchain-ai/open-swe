@@ -178,16 +178,6 @@ ENV.var(
     default="https://gateway.smith.langchain.com",
 )
 ENV.var(
-    "LANGSMITH_GATEWAY_ENABLED",
-    "Route provider calls through the LangSmith LLM Gateway; defaults to on when "
-    "LANGSMITH_GATEWAY_API_KEY is set and off otherwise.",
-)
-ENV.var(
-    "LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES",
-    "Keep the OpenAI Responses API when routed through the gateway.",
-    default="true",
-)
-ENV.var(
     "REVIEWER_OUTCOMES_DATASET",
     "LangSmith dataset for reviewer finding outcomes.",
     default="openswe-reviewer-outcomes",
@@ -495,13 +485,6 @@ ENV.var("ANALYTICS_ACK_OUTBOX_DAYS", "Acknowledged outbox retention.", default="
 ENV.var("ANALYTICS_RECEIPT_DAYS", "Ingestion-receipt retention.", default="90")
 
 # --- Models and tools ------------------------------------------------------------------------
-ENV.var("ANTHROPIC_API_KEY", "Anthropic API key.", secret=True)
-ENV.var("OPENAI_API_KEY", "OpenAI API key.", secret=True)
-ENV.var("OPENAI_BASE_URL", "OpenAI-compatible API base URL.", aliases=("OPENAI_API_BASE",))
-ENV.var("GOOGLE_API_KEY", "Google AI API key.", secret=True)
-ENV.var("GROQ_API_KEY", "Groq API key.", secret=True)
-ENV.var("FIREWORKS_API_KEY", "Fireworks API key.", secret=True)
-ENV.var("BASETEN_API_KEY", "Baseten API key.", secret=True)
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
 ENV.var(
     "LLM_REASONING_EFFORT",

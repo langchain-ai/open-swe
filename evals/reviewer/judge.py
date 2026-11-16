@@ -108,9 +108,7 @@ def _get_judge() -> BaseChatModel:
                 "The judge calls Anthropic through the LangSmith gateway; set "
                 "LANGSMITH_GATEWAY_API_KEY or LANGSMITH_API_KEY."
             )
-        _judge = make_model(
-            JUDGE_MODEL, use_gateway=True, temperature=0.0, max_tokens=512, max_retries=3
-        )
+        _judge = make_model(JUDGE_MODEL, temperature=0.0, max_tokens=512, max_retries=3)
     return _judge
 
 

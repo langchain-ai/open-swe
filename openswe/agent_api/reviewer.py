@@ -58,7 +58,6 @@ class ReviewerKind(RunKind):
             PrepareReviewerRunMiddleware(
                 thread_id=cfg.thread_id,
                 config=config,
-                use_gateway=models.use_gateway,
                 model=models.main,
             )
         ]

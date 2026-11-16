@@ -14,20 +14,6 @@ import {
   type StringSettingField,
 } from "@/features/settings/lib/settingsScope"
 
-type GatewayMode = "inherit" | "enabled" | "disabled"
-
-function gatewayMode(value: boolean | null | undefined): GatewayMode {
-  if (value === true) return "enabled"
-  if (value === false) return "disabled"
-  return "inherit"
-}
-
-function gatewayModeValue(mode: GatewayMode): boolean | null {
-  if (mode === "enabled") return true
-  if (mode === "disabled") return false
-  return null
-}
-
 /**
  * A settings row whose value may come from the tier above. On a workspace it
  * says whether the value is inherited or overridden and offers a way back.
@@ -70,55 +56,6 @@ export function TierRow({
         </div>
       }
     />
-  )
-}
-
-export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
-  const settings = useScopedSettings(scope)
-  const mode = gatewayMode(settings.data?.gateway_enabled)
-  const scoped = scope.kind === "workspace"
-  const modes = [
-    {
-      value: "inherit",
-      label: scoped ? "Inherit instance setting" : "Inherit deployment default",
-    },
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" },
-  ] satisfies Array<{ value: GatewayMode; label: string }>
-
-  return (
-    <SettingsSection
-      title="LLM Gateway"
-      description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
-    >
-      <div className="divide-y divide-default">
-        <TierRow
-          settings={settings}
-          fields={["gateway_enabled"]}
-          label="Route through the gateway"
-          description={
-            scoped
-              ? "Inherit follows the instance setting. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
-              : "Inherit uses the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
-          }
-          control={
-            <Select
-              aria-label="Route through the gateway"
-              options={modes}
-              value={mode}
-              onChange={(next) => {
-                if (!next) return
-                const value = gatewayModeValue(next)
-                if (value === null && scoped) settings.reset("gateway_enabled")
-                else settings.save({ gateway_enabled: value })
-              }}
-              disabled={!settings.data}
-              triggerClassName="w-48"
-            />
-          }
-        />
-      </div>
-    </SettingsSection>
   )
 }
 

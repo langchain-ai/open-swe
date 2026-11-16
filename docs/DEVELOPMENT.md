@@ -83,7 +83,7 @@ LANGSMITH_API_KEY=""            # LangSmith → Settings → API Keys; also used
 LANGSMITH_TRACING="true"        # trace runs to LangSmith
 LANGSMITH_PROJECT=""            # optional project for traces and "View trace" links; default "default"
 
-ANTHROPIC_API_KEY=""            # any provider key; not needed if you use an LLM gateway (e.g. LangSmith Gateway; see the installation guide)
+LANGSMITH_GATEWAY_API_KEY=""    # LangSmith key with gateway:invoke; provider keys live in workspace Provider Secrets
 
 GITHUB_APP_ID=""                # step 2
 GITHUB_APP_CLIENT_ID=""
@@ -114,7 +114,8 @@ Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally.
 Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel.
-You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys).
+Model calls require a [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys) credential (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) with `gateway:invoke`.
+Direct provider keys are not used.
 How the running model is chosen is covered in the same section.
 Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 

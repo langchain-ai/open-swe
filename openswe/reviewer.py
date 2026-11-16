@@ -455,12 +455,10 @@ def _format_existing_findings(findings: list[Finding]) -> str:
 
 def _make_model_or_defer(
     model_id: str,
-    *,
-    use_gateway: bool,
     **kwargs: Any,
 ) -> BaseChatModel:
     try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+        return make_model(model_id, **kwargs)
     except Exception as e:  # noqa: BLE001
         logger.warning("Deferring reviewer model setup failure for %s", model_id, exc_info=True)
         return make_deferred_error_model(e, model_id=model_id)
@@ -570,12 +568,10 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         *,
         thread_id: str,
         config: RunnableConfig,
-        use_gateway: bool,
         model: ReviewerModelChoice,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
-        self._use_gateway = use_gateway
         self._model = model
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -1014,7 +1010,6 @@ class ReviewerModelChoice(NamedTuple):
 class ReviewerModels(NamedTuple):
     main: ReviewerModelChoice
     subagent: ReviewerModelChoice
-    use_gateway: bool
 
 
 async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
@@ -1071,7 +1066,6 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
             ),
             subagent_effort,
         ),
-        use_gateway=settings.effective_gateway_enabled,
     )
 
 
@@ -1126,7 +1120,6 @@ async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None
         raise ValueError("A review run needs a thread")
 
     models = await resolve_reviewer_models(cfg)
-    use_gateway = models.use_gateway
 
     surface.base_tools = reviewer_tools()
     if (app_tools := await ReviewAppTools.of_run(cfg)) is not None:
@@ -1138,7 +1131,6 @@ async def reviewer_catalog(config: RunnableConfig, surface: ToolSurface) -> None
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),
-        use_gateway=use_gateway,
     )
     surface.subagents = [
         SurfaceSubagent(

@@ -53,12 +53,11 @@ def _spec(model_id: str, effort: str) -> ModelSpec:
     return ModelSpec.model_validate({"model_id": model_id, "kwargs": kwargs})
 
 
-@pytest.mark.parametrize("use_gateway", [False, True])
 @pytest.mark.parametrize(
     "option", SUPPORTED_MODELS, ids=[option["id"] for option in SUPPORTED_MODELS]
 )
 def test_the_runtime_builds_each_model_with_the_backends_settings(
-    monkeypatch: pytest.MonkeyPatch, option: Any, use_gateway: bool
+    monkeypatch: pytest.MonkeyPatch, option: Any
 ) -> None:
     """What reaches ``init_chat_model`` is what the backend's ``make_model`` sends it, but
     for the SDK retries of a provider whose retries MDA's model middleware owns."""
@@ -72,21 +71,19 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
     monkeypatch.setattr(shared, "init_chat_model", init_chat_model)
     spec = _spec(option["id"], option["default_effort"])
 
-    model = build_model(spec, use_gateway=use_gateway)
+    model = build_model(spec)
 
     # The spec's kwargs crossed the wire as JSON, as the backend's never do.
     kwargs = provider_model_kwargs(option["id"], option["default_effort"], max_tokens=64_000)
     provider = option["id"].split(":", 1)[0]
     if provider in _SDK_RETRY_DISABLE:
         kwargs = {**kwargs, "max_retries": _SDK_RETRY_DISABLE[provider]}
-    if use_gateway and provider == "anthropic":
+    if provider == "anthropic":
         # Its every request asks the run's gateway credential, which init_chat_model can't.
         assert built == []
         assert isinstance(model, GatewayChatAnthropic)
         return
-    expected_id, expected = model_init_kwargs(
-        option["id"], kwargs, use_gateway=use_gateway, gateway=GATEWAY_BEARER
-    )
+    expected_id, expected = model_init_kwargs(option["id"], kwargs, gateway=GATEWAY_BEARER)
     # Clients that carry the run's credential are built anew for each model.
     fresh = {"async_client", "client_args", "http_async_client"}
     assert [
@@ -95,47 +92,26 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
 
 
 def test_an_openai_model_has_the_window_codex_serves_it_at() -> None:
-    model = build_model(_spec("openai:gpt-6.1-sol", "xhigh"), use_gateway=False)
+    model = build_model(_spec("openai:gpt-6.1-sol", "xhigh"))
 
     assert isinstance(model, ChatOpenAI)
     assert model.profile is not None and model.profile["max_input_tokens"] == 272_000
-    assert model.openai_api_base == "wss://api.openai.com/v1"
+    assert model.openai_api_base == "https://gateway.smith.langchain.com/openai/v1"
     assert model.use_responses_api is True
 
 
-def test_a_gateway_routed_openai_model_can_use_chat_completions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "false")
-
-    model = build_model(_spec("openai:gpt-6.1-sol", "high"), use_gateway=True)
-
-    assert isinstance(model, ChatOpenAI)
-    assert model.openai_api_base == "https://gateway.smith.langchain.com/openai/v1"
-    assert model.use_responses_api is False
-    assert model.reasoning_effort == "high"
-
-
 def test_an_anthropic_model_streams() -> None:
-    model = build_model(_spec("anthropic:claude-opus-5-5", "high"), use_gateway=False)
-
+    model = build_model(_spec("anthropic:claude-opus-5-5", "high"))
     assert isinstance(model, ChatAnthropic)
-    # Runs aren't streamed: without it LangSmith has no time to first token, and a long
-    # answer is cut off by the non-streaming request timeout.
     assert model.streaming is True
-    # Its retries are the model middleware's (``rt.model_retries``), not the SDK's.
     assert model.max_retries == 0
 
 
-def test_a_baseten_model_goes_to_baseten_with_its_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BASETEN_API_KEY", "baseten-key")
-
-    model = build_model(ModelSpec(model_id="baseten:moonshot/kimi", kwargs={}), use_gateway=False)
-
+def test_a_baseten_model_uses_the_gateway() -> None:
+    model = build_model(ModelSpec(model_id="baseten:moonshot/kimi", kwargs={}))
     assert isinstance(model, ChatOpenAI)
     assert model.model_name == "moonshot/kimi"
-    assert model.openai_api_base == "https://inference.baseten.co/v1"
+    assert model.openai_api_base == "https://gateway.smith.langchain.com/baseten/v1"
 
 
 @pytest.mark.parametrize("subagent", [False, True])
@@ -171,7 +147,7 @@ async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
     spec = _spec("anthropic:claude-haiku-5-5", "medium")
     catalog = Catalog(
         loop=rules,
-        models=RunModels(model=spec, subagent_model=spec, use_gateway=True, routes={"fast": spec}),
+        models=RunModels(model=spec, subagent_model=spec, routes={"fast": spec}),
     )
 
     def run_for(credential: GatewayCredential) -> Run:
@@ -200,7 +176,7 @@ async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
     try:
         monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", f"http://127.0.0.1:{port}")
         monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2-deployment-key")
-        model = build_model(spec, use_gateway=True)
+        model = build_model(spec)
         monkeypatch.setattr("rt.loop.get_stream_writer", lambda: lambda _: None)
         monkeypatch.setattr("rt.run_tools.run_id", lambda: "run-1")
 

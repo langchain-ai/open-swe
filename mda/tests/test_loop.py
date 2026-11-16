@@ -51,9 +51,7 @@ _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
 _FAST = ModelSpec(model_id="fireworks:kimi", kwargs={}, reads_images=False, fallback=_FALLBACK)
 _VISION = ModelSpec(model_id="google_genai:gemini-3.8-flash", kwargs={})
-_MODELS = RunModels(
-    model=_MAIN, subagent_model=_MAIN, use_gateway=True, routes={"fast": _FAST}, vision=_VISION
-)
+_MODELS = RunModels(model=_MAIN, subagent_model=_MAIN, routes={"fast": _FAST}, vision=_VISION)
 _GUARD = "system:reply-guard"
 _NUDGE = (
     f'<input-message sender="{_GUARD}" surface="automation" kind="system">'
@@ -226,7 +224,6 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
     assert planned.call.fallback == _FALLBACK
-    assert planned.call.use_gateway is True
     assert [message.content for message in messages_from_dict(planned.messages)] == [
         role,
         context,
@@ -436,7 +433,7 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
     monkeypatch.setattr(backend, "post", prepare_signalled)
     models: list[str] = []
 
-    def build(spec: ModelSpec, use_gateway: bool) -> FakeListChatModel:
+    def build(spec: ModelSpec) -> FakeListChatModel:
         models.append(spec.model_id)
         return FakeListChatModel(responses=["Done."])
 
@@ -752,7 +749,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",
-        lambda spec, use_gateway: FakeListChatModel(responses=["Model call limits exceeded"]),
+        lambda spec: FakeListChatModel(responses=["Model call limits exceeded"]),
     )
     monkeypatch.setattr("rt.outbox._RETRY_SECONDS", (0.0,))
     backend.run.invocation_id = "turn"

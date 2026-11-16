@@ -407,7 +407,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         middleware = reviewer.PrepareReviewerRunMiddleware(
             thread_id="reviewer-cache-thread",
             config=config,
-            use_gateway=False,
             model=reviewer.ReviewerModelChoice("openai:gpt-6.1-sol", {}, None),
         )
         previous = list(state["messages"])

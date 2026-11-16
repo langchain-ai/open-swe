@@ -1096,12 +1096,11 @@ def _slack_concierge_run(cfg: RunConfig) -> bool:
 def _make_model_or_defer(
     model_id: str,
     *,
-    use_gateway: bool,
     gateway: GatewayBearer | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     try:
-        return make_model(model_id, use_gateway=use_gateway, gateway=gateway, **kwargs)
+        return make_model(model_id, gateway=gateway, **kwargs)
     except Exception as e:  # noqa: BLE001
         logger.warning("Deferring model setup failure for %s", model_id, exc_info=True)
         return make_deferred_error_model(e, model_id=model_id)
@@ -1173,7 +1172,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             kwargs.pop("thinking", None)
         return _make_model_or_defer(
             turn.title_model_id,
-            use_gateway=turn.use_gateway,
             gateway=LangSmithModelAccess.for_run(self._config).bearer(),
             **kwargs,
         )
@@ -1787,7 +1785,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     model_defaults = settings.default_model_pair("agent")
     routing_defaults = dict(settings.agent_routing_models)
     title_defaults = settings.default_thread_title_model
-    use_gateway = settings.effective_gateway_enabled
     fable_enabled = settings.fable_enabled
 
     slack_ask_mode = cfg.slack_ask_mode
@@ -2151,7 +2148,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         sole_writer=tool_access.sole,
         title_model_id=title_model_id,
         title_effort=title_effort,
-        use_gateway=bool(use_gateway),
         route_models=routing_defaults,
         offers_requested_models=requested_models is not None,
         fable_enabled=fable_enabled,
@@ -2245,7 +2241,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             subagent_model_id,
             dict(model_kwargs if subagent_model_id == model_id else subagent_model_kwargs),
         ),
-        use_gateway=bool(use_gateway),
         routes={
             route: ModelChoice(
                 routed_model_id,

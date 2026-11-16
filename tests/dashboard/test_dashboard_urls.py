@@ -46,20 +46,3 @@ def test_https_without_a_dashboard_keeps_the_session_cookie_lax(
 
     assert dashboard_links.dashboard_base_url() == ""
     assert dashboard_oauth.cookie_security() == (True, "lax")
-
-
-def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(
-    monkeypatch: pytest.MonkeyPatch, bundled: Path
-) -> None:
-    """A fresh platform deployment has the bundled UI and no LANGGRAPH_URL yet; it must boot."""
-    from openswe.dashboard import options
-
-    for name in ("DASHBOARD_BASE_URL", "LANGGRAPH_URL", "OPENAI_API_KEY", "LLM_MODEL_ID"):
-        monkeypatch.delenv(name, raising=False)
-
-    assert dashboard_links.dashboard_base_url() == "http://localhost:2024"
-    options.validate_local_dev_llm_config()
-
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://localhost:3000")
-    with pytest.raises(ValueError, match="_API_KEY is required"):
-        options.validate_local_dev_llm_config()

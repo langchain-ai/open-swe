@@ -60,7 +60,7 @@ class AgentTurnSettings(BaseModel):
     # The model that titles the thread.
     title_model_id: str
     title_effort: str | None = None
-    use_gateway: bool = False
+
     # The model and effort each route stands for.
     route_models: dict[str, tuple[str, str | None]] = {}
     # Whether the opening message may ask for a model, and the one an earlier message did.

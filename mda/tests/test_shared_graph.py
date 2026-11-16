@@ -1534,7 +1534,6 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
                 "models": RunModels(
                     model=ModelSpec(model_id=f"parent-{index}", kwargs={}),
                     subagent_model=ModelSpec(model_id=f"child-{index}", kwargs={}),
-                    use_gateway=False,
                 ),
                 "subagents": [
                     SubagentSpec(
@@ -1602,7 +1601,6 @@ async def test_each_run_compacts_a_long_conversation_with_its_own_model(
                 "models": RunModels(
                     model=ModelSpec(model_id=model_id, kwargs={}),
                     subagent_model=ModelSpec(model_id=f"{model_id}-child", kwargs={}),
-                    use_gateway=False,
                 )
             }
         )

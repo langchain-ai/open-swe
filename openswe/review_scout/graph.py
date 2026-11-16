@@ -259,9 +259,9 @@ async def finish_scout_plan(
     )
 
 
-def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
+def _make_model_or_defer(model_id: str, **kwargs: Any) -> BaseChatModel:
     try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
+        return make_model(model_id, **kwargs)
     except Exception as e:  # noqa: BLE001
         logger.warning("Deferring review scout model setup failure for %s", model_id, exc_info=True)
         return make_deferred_error_model(e, model_id=model_id)
@@ -283,9 +283,7 @@ async def scout_models(cfg: RunConfig) -> SurfaceModels:
             )
         ),
     )
-    return SurfaceModels(
-        main=choice, subagent=choice, use_gateway=settings.effective_gateway_enabled
-    )
+    return SurfaceModels(main=choice, subagent=choice)
 
 
 def scout_tools() -> list[BaseTool]:

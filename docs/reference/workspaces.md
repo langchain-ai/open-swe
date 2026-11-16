@@ -39,10 +39,10 @@ A workspace has an immutable slug and a display name, plus:
   Zero or more channel ids whose messages route here.
   A channel routes to one workspace.
 - **MCP connections** of its own, layered over the instance-wide set that existed before workspaces (see "Settings tiers").
-- **Settings**, the former team settings: model defaults, review toggles, organization guidelines, gateway and Fable toggles, default repository.
+- **Settings**, the former team settings: model defaults, review toggles, organization guidelines, Fable toggle, default repository.
   These are tiered; see "Settings tiers" below.
 
-Instance-level configuration stays in the environment: the GitHub App and its installation, the Slack app, model provider keys, sandbox provider and sandbox credentials, `CONFIGURED_ADMINS`, the sign-in allowlist, and the base snapshot fallback.
+Instance-level configuration stays in the environment: the GitHub App and its installation, the Slack app, gateway credentials, sandbox provider and sandbox credentials, `CONFIGURED_ADMINS`, the sign-in allowlist, and the base snapshot fallback.
 
 ### Settings tiers
 

@@ -67,12 +67,12 @@ def test_workspace_settings_update_rejects_invalid_effort_for_openai_model() -> 
 @pytest.mark.parametrize(
     ("anthropic_key", "openai_key", "expected"),
     [
-        ("key", "", SUPPORTED_ANTHROPIC),
+        ("key", "", SUPPORTED_OPENAI),
         ("key", "key", SUPPORTED_OPENAI),
         ("", "", SUPPORTED_OPENAI),
     ],
 )
-def test_global_default_matches_available_credentials(
+def test_global_default_ignores_direct_provider_credentials(
     monkeypatch: pytest.MonkeyPatch, anthropic_key: str, openai_key: str, expected: str
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_key)

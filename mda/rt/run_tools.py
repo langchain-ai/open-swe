@@ -92,9 +92,7 @@ class RunTools:
         self.subagents = {subagent.name: subagent for subagent in catalog.subagents}
         models = catalog.models
         self.subagent_model: BaseChatModel | None = (
-            None
-            if models is None
-            else build_model(models.subagent_model, use_gateway=models.use_gateway)
+            None if models is None else build_model(models.subagent_model)
         )
         self._route_models: dict[str, BaseChatModel] = {}
 
@@ -104,7 +102,7 @@ class RunTools:
         if models is None or route is None or (spec := models.routes.get(route)) is None:
             return self.subagent_model
         if route not in self._route_models:
-            self._route_models[route] = build_model(spec, use_gateway=models.use_gateway)
+            self._route_models[route] = build_model(spec)
         return self._route_models[route]
 
     def _offer(self, mcp: McpTools) -> None:
