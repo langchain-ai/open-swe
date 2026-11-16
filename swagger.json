@@ -3677,7 +3677,8 @@
             "items": {
               "enum": [
                 "issue.created",
-                "issue.labeled"
+                "issue.labeled",
+                "issue.accepted"
               ],
               "type": "string"
             },

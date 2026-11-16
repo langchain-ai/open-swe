@@ -87,7 +87,7 @@ _SLACK_MESSAGE_MAX_CHARS = 8_000
 _BranchPattern = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
 ]
-LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
+LinearTriggerEvent = Literal["issue.created", "issue.labeled", "issue.accepted"]
 _LINEAR_TEAM_KEY_RE = re.compile(TEAM_KEY_PATTERN)
 # Each automation run a Linear delivery starts gets a thread of its own, named by both.
 _LINEAR_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:linear-automation")

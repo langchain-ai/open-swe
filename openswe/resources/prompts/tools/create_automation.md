@@ -19,7 +19,8 @@ Args:
     Optional pull request filters, as case-sensitive globs such as ``"actions/*"``: ``head_branches_exclude`` (a pull request whose head branch matches any is skipped) and ``base_branches`` (when listed, the base branch must match one); issue events ignore them.
   - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}`` runs on new top-level messages in a Slack channel Robin is a member of, passed to the run as untrusted context.
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
-  - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).
+  - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created", "issue.labeled" (a label was added), and "issue.accepted" (the issue's first `triagedAt` timestamp is set, with a non-canceled, non-duplicate destination state).
+    Acceptance ignores creation outside Triage, rejection, and later status edits; deliveries are deduplicated for 24 hours.
     Optional filters: ``labels`` (names; the issue must carry, or for "issue.labeled" gain, one of them), ``project`` (a project name), and ``max_runs_per_hour``.
     A GitHub trigger's ``repo`` must be one the configuring user can access.
 - name: Short display name.

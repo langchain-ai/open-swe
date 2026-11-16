@@ -2,6 +2,7 @@ import asyncio
 import socket
 import uuid
 from typing import cast
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -537,6 +538,120 @@ async def test_an_issue_event_starts_the_automations_it_fires_on_threads_of_thei
             "id": str(uuid.uuid5(uuid.NAMESPACE_URL, automation_id)),
         }
         assert run.get("context") == {"__run_token": "signed"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expanded", [True, False])
+@pytest.mark.parametrize(
+    "state_type", ["unstarted", "completed", "canceled", "duplicate", "triage"]
+)
+async def test_acceptance_uses_the_destination_state(
+    monkeypatch: pytest.MonkeyPatch, expanded: bool, state_type: str
+) -> None:
+    accepted = LinearAutomation(
+        id="accepted",
+        prompt="Fix the SDK issue.",
+        triggers=[LinearTrigger(events=["issue.accepted", "issue.labeled"], labels=["sdk"])],
+    )
+    backend = _Backend(rules=[accepted])
+    monkeypatch.setattr(linear, "ask_backend", backend)
+    monkeypatch.setattr(automations, "ask_backend", backend)
+    payload = _issue("update", labels={"sdk-id": "sdk"})
+    payload["updatedFrom"] = {"triagedAt": None}
+    data = cast(dict[str, object], payload["data"])
+    data.update(triagedAt="2026-11-06T10:00:00Z", stateId="todo-state")
+    if expanded:
+        data["state"] = {"type": state_type, "name": "Destination"}
+    monkeypatch.setattr(automations.connections, "get", AsyncMock(return_value="test-token"))
+    post = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "workflowState": {
+                        "id": "todo-state",
+                        "type": state_type,
+                        "name": "Destination",
+                        "team": {"key": "ENG"},
+                    }
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(automations.httpx2.AsyncClient, "post", post)
+
+    result = await automations.start_automations(_issue_event(payload), _THREAD)
+
+    assert bool(result) is (state_type in {"unstarted", "completed"})
+    if result:
+        (planned,) = backend.automations
+        assert planned.event == "issue.accepted"
+        assert "State: Destination" in planned.prompt
+    assert post.await_count == (0 if expanded else 1)
+    if not expanded:
+        assert post.call_args.kwargs["json"]["variables"] == {"id": "todo-state"}
+
+    backend.automations.clear()
+    payload["updatedFrom"] = {"triagedAt": "2026-11-05T10:00:00Z"}
+    assert await automations.start_automations(_issue_event(payload), _THREAD) is None
+    assert backend.automations == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (200, {"errors": [{"message": "denied"}]}),
+        (
+            200,
+            {
+                "data": {
+                    "workflowState": {
+                        "id": "todo-state",
+                        "type": "unstarted",
+                        "team": {"key": "OTHER"},
+                    }
+                }
+            },
+        ),
+        (503, {}),
+    ],
+)
+async def test_an_unresolved_acceptance_still_starts_the_label_automations(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: dict[str, object]
+) -> None:
+    backend = _Backend(
+        rules=[
+            LinearAutomation(
+                id="accepted",
+                prompt="Fix it",
+                triggers=[LinearTrigger(events=["issue.accepted"])],
+            ),
+            LinearAutomation(
+                id="labeled",
+                prompt="Look at the SDK issue.",
+                triggers=[LinearTrigger(events=["issue.labeled"], labels=["sdk"])],
+            ),
+        ]
+    )
+    monkeypatch.setattr(linear, "ask_backend", backend)
+    monkeypatch.setattr(automations, "ask_backend", backend)
+    monkeypatch.setattr(automations.connections, "get", AsyncMock(return_value="test-token"))
+    monkeypatch.setattr(
+        automations.httpx2.AsyncClient,
+        "post",
+        AsyncMock(return_value=httpx.Response(status, json=body)),
+    )
+    payload = _issue("update", labels={"sdk-id": "sdk"})
+    payload["updatedFrom"] = {"triagedAt": None, "labelIds": []}
+    cast(dict[str, object], payload["data"]).update(
+        triagedAt="2026-11-06T10:00:00Z", stateId="todo-state"
+    )
+
+    assert await automations.start_automations(_issue_event(payload), _THREAD)
+
+    (planned,) = backend.automations
+    assert (planned.automation_id, planned.event) == ("labeled", "issue.labeled")
 
 
 @pytest.mark.asyncio

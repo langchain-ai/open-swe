@@ -11,19 +11,23 @@ its run's context (``plan_linear_automations``); the channel starts each run on 
 thread of its own, so automations never touch the issue's conversation.
 """
 
+import logging
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, cast
 
+import httpx2
 from managed_deepagents import (
     ChannelRun,
     LinearChannelThread,
     LinearEventResult,
     LinearIssueCreateEvent,
     LinearIssueUpdateEvent,
+    connections,
 )
 from pydantic import JsonValue
+from runtime_api.connections import LINEAR_APP_TOKEN
 from runtime_api.linear import (
     LINEAR_AUTOMATION_RULES,
     PLAN_LINEAR_AUTOMATIONS,
@@ -41,10 +45,13 @@ from rt.linear import delivery_of, record
 from rt.prompts import prompt
 from rt.untrusted import fence
 
+logger = logging.getLogger(__name__)
+
 _TEAM_KEY: Final = re.compile(TEAM_KEY_PATTERN)
 _EVENT_DESCRIPTIONS: Final[dict[LinearTriggerEvent, str]] = {
     "issue.created": "an issue was created",
     "issue.labeled": "a label was added to an issue",
+    "issue.accepted": "an issue was accepted out of Triage",
 }
 _DESCRIPTION_MAX_CHARS: Final = 8_000
 
@@ -96,12 +103,23 @@ class IssueEvent:
         if payload.get("action") == "create":
             events = frozenset({"issue.created"})
         elif payload.get("action") == "update":
-            before = cast(Mapping[str, object], payload.get("updatedFrom") or {}).get("labelIds")
+            updated_from = payload.get("updatedFrom")
+            if not isinstance(updated_from, Mapping):
+                return None
+            before = updated_from.get("labelIds")
             after = issue.get("labelIds")
+            state = issue.get("state")
+            if cls.first_triage(issue, updated_from) and (
+                not isinstance(state, Mapping)
+                or not isinstance(state.get("type"), str)
+                or state.get("type") in {"backlog", "unstarted", "started", "completed"}
+            ):
+                events = frozenset({"issue.accepted"})
             if isinstance(before, list) and isinstance(after, list):
                 added_ids = {str(label) for label in after} - {str(label) for label in before}
                 added = frozenset(names.get(label_id, "") for label_id in added_ids) - {""}
-                events = frozenset({"issue.labeled"}) if added_ids else frozenset()
+                if added_ids:
+                    events = events | frozenset[LinearTriggerEvent]({"issue.labeled"})
         team = _team(issue)
         if not events or not _TEAM_KEY.fullmatch(team):
             return None
@@ -114,6 +132,67 @@ class IssueEvent:
             added_labels=added,
             project=str(project_name or ""),
             data=cast(dict[str, JsonValue], dict(issue)),
+        )
+
+    @staticmethod
+    def first_triage(data: Mapping[str, object], before: Mapping[str, object]) -> bool:
+        return (
+            "triagedAt" in before
+            and before["triagedAt"] is None
+            and isinstance(data.get("triagedAt"), str)
+            and bool(data["triagedAt"])
+        )
+
+    async def resolve_state(self) -> IssueEvent:
+        """Resolve an acceptance candidate's destination with the deployment's Linear app."""
+        state = self.data.get("state")
+        if "issue.accepted" not in self.events or (
+            isinstance(state, dict) and isinstance(state.get("type"), str)
+        ):
+            return self
+        state_id = self.data.get("stateId")
+        if not isinstance(state_id, str) or not state_id:
+            raise ValueError("Linear acceptance has no destination state ID")
+        token = await connections.get(LINEAR_APP_TOKEN, {"type": "agent"})
+        async with httpx2.AsyncClient(timeout=10, follow_redirects=False) as client:
+            response = await client.post(
+                "https://api.linear.app/graphql",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "query": (
+                        "query DestinationState($id: String!) { workflowState(id: $id) "
+                        "{ id name type team { key } } }"
+                    ),
+                    "variables": {"id": state_id},
+                },
+            )
+        if response.status_code != 200:
+            raise RuntimeError("Linear destination state request failed")
+        body: object = response.json()
+        result = body.get("data") if isinstance(body, dict) and not body.get("errors") else None
+        resolved = result.get("workflowState") if isinstance(result, dict) else None
+        team = resolved.get("team") if isinstance(resolved, dict) else None
+        if (
+            not isinstance(resolved, dict)
+            or resolved.get("id") != state_id
+            or not isinstance(resolved.get("type"), str)
+            or not isinstance(team, dict)
+            or team.get("key") != self.team
+        ):
+            raise ValueError("Linear destination state response does not match the issue")
+        events = self.events
+        if resolved["type"] not in {"backlog", "unstarted", "started", "completed"}:
+            events = events - {"issue.accepted"}
+        return IssueEvent(
+            events=events,
+            team=self.team,
+            labels=self.labels,
+            added_labels=self.added_labels,
+            project=self.project,
+            data={
+                **self.data,
+                "state": {"type": resolved["type"], "name": str(resolved.get("name") or "")},
+            },
         )
 
     def fires(self, trigger: LinearTrigger, event: LinearTriggerEvent) -> bool:
@@ -182,6 +261,18 @@ async def start_automations(
         LinearAutomationRulesRequest(delivery=delivery_of(event), team=issue.team),
         msg_id=f"msg_{event.delivery_id}_automations",
     )
+    if any(
+        issue.fires(trigger, "issue.accepted")
+        for automation in rules.automations
+        for trigger in automation.triggers
+    ):
+        try:
+            issue = await issue.resolve_state()
+        except Exception:
+            # Linear won't resend the delivery, so a failed lookup drops only the
+            # acceptance: the delivery's other events still start their automations.
+            logger.warning("Could not resolve a Linear acceptance's destination", exc_info=True)
+            issue = replace(issue, events=issue.events - {"issue.accepted"})
     fired = [
         FiredLinearAutomation(
             automation_id=automation.id,

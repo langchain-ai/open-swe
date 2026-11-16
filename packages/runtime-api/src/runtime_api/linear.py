@@ -184,7 +184,7 @@ class LinearSessionStart(BaseModel):
     answer: Annotated[LinearSessionRun | LinearSessionDeclined, Field(discriminator="kind")]
 
 
-LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
+LinearTriggerEvent = Literal["issue.created", "issue.labeled", "issue.accepted"]
 
 
 class LinearTrigger(BaseModel):
