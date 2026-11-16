@@ -16,7 +16,6 @@ Args:
   The commit must match the live reviewed head.
   Unresolved findings force ``needs_human_review``.
   A new assessment is published even when a re-review has no new findings.
-  GitHub keeps native thumbs-up/down feedback on the review.
   The host may submit an approval only when an admin has set the repository to approve and the reviewed commit is still current; otherwise it posts the assessment as a comment.
   No merge is performed.
   Assessments are omitted in eval mode and when publication retries with only a subset of findings.

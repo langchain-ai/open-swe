@@ -1309,6 +1309,8 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     approval_stands = expected_event == "APPROVE" and live_head == "a" * 40
     recorded.assert_awaited_once_with("o", "r", 7, "a" * 40 if approval_stands else "")
     body = post.await_args.kwargs["body"]
+    assert "React 👍 or 👎" not in body
+    assert "#assessment-feedback" not in body
     assert ("Risk:" in body) is has_assessment
     assert ("(dry run)" in body) is (has_assessment and mode == "dry_run")
     saved = await PublishedAssessment.get(77)

@@ -116,9 +116,6 @@ def render_inline_comment_body(finding: Finding) -> str:
 
         *(Refers to lines X-Y)*
 
-        ---
-        *Your feedback helps Open SWE learn. React with 👍 or 👎 to tell us if this review comment was useful.*
-
         ```suggestion
         <replacement>
         ```
@@ -145,13 +142,6 @@ def render_inline_comment_body(finding: Finding) -> str:
         body_parts.extend(["", detail])
     if line_ref:
         body_parts.extend(["", line_ref])
-    body_parts.extend(
-        [
-            "",
-            "---",
-            "*Your feedback helps Robin learn. React with 👍 or 👎 to tell us if this review comment was useful.*",
-        ]
-    )
     body = "\n".join(body_parts)
 
     suggestion = finding.get("suggestion")
@@ -477,12 +467,6 @@ def render_review_body(
             )
             + "\n\n</details>"
         )
-        feedback_link = (
-            f", or [rate the latest assessment in Robin]({ui_url}#assessment-feedback)"
-            if ui_url
-            else ""
-        )
-        parts.append(f"React 👍 or 👎{feedback_link}.")
     links = []
     if ui_url:
         links.append(f"[Open in Robin]({ui_url})")

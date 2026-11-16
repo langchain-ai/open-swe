@@ -872,9 +872,6 @@ function OpenSweRow({
             <div className="mt-space-2 [&>section]:mt-0 [&>section]:border-dashed [&>section]:bg-transparent [&>section]:p-space-3 [&>section]:text-xs">
               <ReviewAssessmentCard
                 assessment={assessment}
-                owner={pr.owner}
-                repo={pr.repo}
-                number={pr.number}
                 headSha={detail.head_sha}
               />
             </div>
