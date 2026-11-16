@@ -50,7 +50,7 @@ _TIMEOUT: Final = httpx2.Timeout(10.0, connect=5.0)
 _LABEL_LIMIT: Final = 150
 
 _FOR_SOMEONE_ELSE: Final = "This choice is for someone else. No action was taken."
-_NOT_YOUR_RETRY: Final = "Only the person whose request failed can retry it. No action was taken."
+_WRONG_RETRY_CHANNEL: Final = "This Retry button belongs to another channel. No action was taken."
 _RETRY_EXPIRED: Final = (
     "This Retry button has expired or is invalid. Send your request again to retry."
 )
@@ -178,12 +178,19 @@ class _Click:
 
     async def retry(self) -> ChannelRunResult | None:
         fields = {key: self.value.get(key) for key in ("user_id", "channel_id", "thread_ts")}
-        if fields["user_id"] != self.clicker or fields["channel_id"] != self.event.channel_id:
-            await self._tell_clicker(_NOT_YOUR_RETRY)
+        if fields["channel_id"] != self.event.channel_id:
+            await self._tell_clicker(_WRONG_RETRY_CHANNEL)
             return None
         thread_ts = fields["thread_ts"]
         expires_at = self.value.get("expires_at")
-        if not isinstance(thread_ts, str) or not thread_ts or _expired(expires_at):
+        original_user_id = fields["user_id"]
+        if (
+            not isinstance(original_user_id, str)
+            or not original_user_id
+            or not isinstance(thread_ts, str)
+            or not thread_ts
+            or _expired(expires_at)
+        ):
             await self._tell_clicker(_RETRY_EXPIRED)
             return None
         # Before anything runs, so a second click finds no button.
@@ -191,6 +198,7 @@ class _Click:
         try:
             start = await self._plan(
                 RetryClick(
+                    original_user_id=original_user_id,
                     thread_ts=thread_ts,
                     message_ts=_text(self.value.get("message_ts")),
                     reply_thread_ts=_text(self.value.get("reply_thread_ts")),

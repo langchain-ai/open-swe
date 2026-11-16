@@ -1554,6 +1554,46 @@ async def test_an_option_click_is_the_persons_message_and_is_acted_on_once(
     )
 
 
+@pytest.mark.parametrize("original_user_id", ["", "U2"])
+async def test_a_retry_runs_as_the_clicker_with_the_original_message(
+    monkeypatch: pytest.MonkeyPatch, original_user_id: str
+) -> None:
+    from openswe.slack import retry  # noqa: PLC0415
+
+    app = _click_app(monkeypatch)
+    prepare = _prepared(monkeypatch)
+    monkeypatch.setattr(
+        retry,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(return_value={"user": original_user_id or "U1", "text": "Fix the bug"}),
+    )
+    monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
+    repo = AsyncMock(return_value=None)
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo)
+
+    start = await _post_click(
+        app,
+        _plan_click(
+            {
+                "kind": "retry",
+                "thread_ts": "171.1",
+                "message_ts": "171.2",
+                "original_user_id": original_user_id,
+            }
+        ),
+    )
+
+    assert start["run"] is not None
+    request = prepare.await_args.args[0]
+    assert (request.user_id, request.text, request.original_message_ts) == (
+        "U1",
+        "Fix the bug",
+        "171.2",
+    )
+    assert request.target.user_id == (original_user_id or "U1")
+    assert repo.await_args.kwargs["slack_user_id"] == "U1"
+
+
 async def test_a_click_in_a_concierge_dm_runs_on_the_dms_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

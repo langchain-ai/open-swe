@@ -217,7 +217,7 @@ async def test_option_interaction_schedules_update_only_for_authorized_actor(
     "channel_id,thread_ts,message_ts",
     [("C1", "1.0", "1.5"), ("C1", "0", "1.5"), ("D1", "0", "1.5"), ("C1", "1.0", "")],
 )
-async def test_retry_is_requester_scoped_and_dispatches_only_once(
+async def test_retry_is_channel_scoped_and_dispatches_only_once(
     monkeypatch: pytest.MonkeyPatch,
     memory_event_claims: MemoryEventClaims,
     channel_id: str,
@@ -233,7 +233,8 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     monkeypatch.setattr(
         slack_routes.common, "resolve_slack_thread_id", AsyncMock(return_value="thread-1")
     )
-    monkeypatch.setattr(slack_routes.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    repo = AsyncMock(return_value=None)
+    monkeypatch.setattr(slack_routes.common, "get_slack_repo_config", repo)
     monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
     update = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
@@ -254,7 +255,7 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     blocks = retry_request.blocks("Unexpected error")
     assert blocks is not None
     payload = _option_payload()
-    payload["channel"]["id"] = channel_id
+    payload["channel"]["id"] = "C-other"
     payload["actions"][0]["value"] = blocks[1]["elements"][0]["value"]
     payload["message"]["blocks"] = blocks
     payload["user"]["id"] = "U2"
@@ -266,14 +267,16 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     update.assert_not_awaited()
     notify.assert_awaited_once()
 
-    payload["user"]["id"] = "U1"
+    payload["channel"]["id"] = channel_id
     assert (await slack_routes.slack_interactivity(_request(payload), background)).get(
         "status"
     ) == "accepted"
     await background()
     assert process.await_args is not None
     request = process.await_args.args[0]
-    assert request.user_id == "U1"
+    assert request.user_id == "U2"
+    assert request.target.user_id == "U1"
+    assert repo.await_args.kwargs["slack_user_id"] == "U2"
     assert request.thread_ts == thread_ts
     assert request.text == ("Fix the bug" if message_ts else "Retry")
     assert request.turn_context == ("" if message_ts else retry.prompt("runs/slack-retry").strip())

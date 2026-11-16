@@ -289,8 +289,10 @@ def _retry(user_id: str = "U1", **fields: object) -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("clicker", ["U1", "U2"])
 def test_a_retry_removes_its_button_before_it_sends_the_request_again(
     monkeypatch: pytest.MonkeyPatch,
+    clicker: str,
 ) -> None:
     slack = _Slack(monkeypatch, SlackClickStart(run=_RUN, interrupts=True))
     retry_message = {
@@ -303,7 +305,7 @@ def test_a_retry_removes_its_button_before_it_sends_the_request_again(
             },
         ],
     }
-    event = _click(_retry())
+    event = _click(_retry(), clicker=clicker)
     event.payload["message"] = retry_message
 
     result = asyncio.run(clicks.start_click(event, _THREAD))
@@ -311,19 +313,22 @@ def test_a_retry_removes_its_button_before_it_sends_the_request_again(
     assert _options(result)["multitask_strategy"] == "interrupt"
     assert [kind for kind, _ in slack.calls] == ["slack", "backend"]
     assert slack.posted[0]["blocks"][-1]["elements"][0]["text"] == "Retrying…"
-    assert slack.asked[0].click == RetryClick(thread_ts="171.1", message_ts="171.2")
+    assert slack.asked[0].user_id == clicker
+    assert slack.asked[0].click == RetryClick(
+        original_user_id="U1", thread_ts="171.1", message_ts="171.2"
+    )
 
 
 @pytest.mark.parametrize(
     "value",
     [
-        _retry(user_id="U2"),
+        _retry(user_id=""),
         _retry(channel_id="C2"),
         _retry(expires_at=1.0),
     ],
-    ids=["someone else's", "another channel's", "expired"],
+    ids=["missing original sender", "another channel's", "expired"],
 )
-def test_a_retry_only_its_requester_may_click_starts_nothing_otherwise(
+def test_an_invalid_retry_starts_nothing(
     monkeypatch: pytest.MonkeyPatch, value: dict[str, Any]
 ) -> None:
     slack = _Slack(monkeypatch, SlackClickStart(run=_RUN))

@@ -214,6 +214,7 @@ class RetryClick(BaseModel):
     """Send a failed request again: the message that failed, in its Slack thread."""
 
     kind: Literal["retry"] = "retry"
+    original_user_id: str = Field(default="", max_length=64)
     thread_ts: str = Field(min_length=1, max_length=64)
     message_ts: str = Field(default="", max_length=64)
     reply_thread_ts: str = Field(default="", max_length=64)

@@ -1,4 +1,4 @@
-"""Requester-scoped retries for failed Slack requests and runs."""
+"""Channel-scoped retries for failed Slack requests and runs."""
 
 import logging
 from datetime import UTC, datetime, timedelta
@@ -86,14 +86,14 @@ class SlackRetry(BaseModel):
     ) -> WebhookResponse:
         from openswe.slack import webhook as service
 
-        if self.channel_id != interaction.channel_id or self.user_id != interaction.user.id:
+        if self.channel_id != interaction.channel_id:
             await post_slack_ephemeral_message(
                 interaction.channel_id,
                 interaction.user.id,
-                "Only the person whose request failed can retry it. No action was taken.",
+                "This Retry button belongs to another channel. No action was taken.",
                 interaction.message.thread_ts or None,
             )
-            return ignored("Retry belongs to another requester or channel")
+            return ignored("Retry belongs to another channel")
         claim_key = f"{self.channel_id}:{self.nonce}"
         if not await event_claims.claim(BUTTON_TYPE, claim_key, ttl=_RETRY_LIFETIME):
             return ignored("Retry already queued")
@@ -111,12 +111,15 @@ class SlackRetry(BaseModel):
             repo = await common.get_slack_repo_config(
                 self.channel_id,
                 self.thread_ts,
-                slack_user_id=self.user_id,
+                slack_user_id=interaction.user.id,
                 channel_context=channel_context,
                 thread_id=thread_id,
             )
             request = await self.request(
-                thread_id=thread_id, channel_context=channel_context, team_id=interaction.team.id
+                thread_id=thread_id,
+                channel_context=channel_context,
+                team_id=interaction.team.id,
+                user_id=interaction.user.id,
             )
             background_tasks.add_task(service.process_slack_mention, request, repo)
         except Exception:
@@ -134,9 +137,14 @@ class SlackRetry(BaseModel):
         return accepted("Retry queued")
 
     async def request(
-        self, *, thread_id: str, channel_context: SlackChannelContext, team_id: str
+        self,
+        *,
+        thread_id: str,
+        channel_context: SlackChannelContext,
+        team_id: str,
+        user_id: str | None = None,
     ) -> SlackRequest:
-        """The failed request again, as its sender sent it, on ``thread_id``."""
+        """The failed request again, authorized as the person retrying it."""
         from openswe.slack.request import SlackRequest
 
         text = "Retry"
@@ -157,6 +165,7 @@ class SlackRetry(BaseModel):
             text = message.text or ""
             attachments = message.attachments
 
+        actor = user_id or self.user_id
         return SlackRequest(
             channel_id=self.channel_id,
             thread_ts=self.thread_ts,
@@ -165,7 +174,8 @@ class SlackRetry(BaseModel):
             original_message_ts=self.message_ts,
             source_message_ts=self.message_ts,
             retry_message_ts=self.message_ts,
-            user_id=self.user_id,
+            retry_user_id=self.user_id,
+            user_id=actor,
             text=text,
             turn_context=prompt("runs/slack-retry").strip() if not self.message_ts else "",
             attachments=attachments,
@@ -175,7 +185,7 @@ class SlackRetry(BaseModel):
             team_id=team_id,
             reply_thread_ts=self.reply_thread_ts,
             concierge_mode=self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D"),
-            kitchen_channel=await is_kitchen_channel(self.channel_id, slack_user_id=self.user_id),
+            kitchen_channel=await is_kitchen_channel(self.channel_id, slack_user_id=actor),
             treat_all_messages_as_mentions=True,
             explicit_request=True,
         )

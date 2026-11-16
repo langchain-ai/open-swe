@@ -644,11 +644,16 @@ async def _click_request(
         return await SlackRetry(
             channel_id=plan.channel_id,
             thread_ts=click.thread_ts,
-            user_id=plan.user_id,
+            user_id=click.original_user_id or plan.user_id,
             message_ts=click.message_ts,
             reply_thread_ts=click.reply_thread_ts,
             nonce="",
-        ).request(thread_id=run_thread, channel_context=channel_context, team_id=plan.team_id)
+        ).request(
+            thread_id=run_thread,
+            channel_context=channel_context,
+            team_id=plan.team_id,
+            user_id=plan.user_id,
+        )
     # A concierge DM answers a click inside a Slack thread there.
     reply_thread_ts = plan.thread_ts if concierge and plan.thread_ts != plan.message_ts else ""
     return SlackRequest(
