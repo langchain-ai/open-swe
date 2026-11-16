@@ -266,12 +266,15 @@ class ThreadStore:
         return updated
 
     async def delete(self, thread: IndexedThread) -> None:
+        from openswe.tasks.messages import TaskMessage
+
         await self.copies.settled(thread.thread_id)
         await RUNTIMES.runs_on(thread.runtime).delete(thread.thread_id)
         if thread.runtime == "mda":
             # MDA threads made before the Agent Server was sealed kept a copy here too.
             await RUNTIMES.local.delete(thread.thread_id)
         await index.delete(thread.thread_id)
+        await TaskMessage.forget(thread.thread_id)
 
     async def state(self, thread_id: str) -> dict[str, JsonValue] | None:
         """The thread's state as its runtime keeps it, or ``None`` for an unknown thread."""

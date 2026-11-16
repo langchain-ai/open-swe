@@ -19,10 +19,11 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 from runtime_api.catalog import InboxSpec
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import func, select, text, update
 
 from openswe import completion
 from openswe.database import postgres
+from openswe.jobs import queue
 from openswe.tasks import events, presentation, store
 from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
@@ -433,6 +434,65 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert attempted_turns[-1] != attempted_turns[-2]
 
 
+@pytest.mark.parametrize("failure", ["lookup", "dispatch"])
+async def test_failed_task_message_retries_settle_without_abandoning_later_messages(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from openswe.jobs.kinds import WORKER
+
+    task, _ = await store.Task.reserve_worker(
+        _COORDINATOR,
+        _WORKER,
+        title="Repair login",
+        workspace="default",
+        instructions="Fix login",
+        model="openai:gpt-5.5",
+        effort="high",
+    )
+    message = TaskMessage(
+        task_id=task.id,
+        thread_id=_WORKER,
+        delivery_id="follow-up",
+        content="Check logout too",
+        run_config={},
+    )
+    async with postgres.session() as session:
+        await message.record(session)
+    client = SimpleNamespace(threads=AsyncMock())
+    client.threads.get.return_value = {"status": "idle"}
+    if failure == "lookup":
+        client.threads.get.side_effect = ConnectionError("runtime unavailable")
+    monkeypatch.setattr(task_messages, "dispatch_client", lambda: client)
+    monkeypatch.setattr(
+        task_messages,
+        "create_durable_run",
+        AsyncMock(side_effect=ConnectionError("runtime unavailable")),
+    )
+    with pytest.raises(ConnectionError, match="runtime unavailable"):
+        await TaskMessage.deliver(_WORKER, "enqueue")
+    (retry,) = await queue.find({"kind": task_messages.RETRY_JOB_KIND})
+    assert retry.key is not None
+    later = TaskMessage(
+        task_id=task.id,
+        thread_id=_WORKER,
+        delivery_id="later-follow-up",
+        content="Check password reset too",
+        run_config={},
+    )
+    async with postgres.session() as session:
+        await later.record(session)
+    for _ in range(queue.MAX_ATTEMPTS):
+        if await queue.get(retry.key) is None:
+            break
+        await queue.run_now(retry.key)
+        assert await WORKER.run_due() == 1
+    assert await queue.find({"kind": task_messages.RETRY_JOB_KIND}) == []
+    assert await TaskMessage.pending_threads([_WORKER]) == {_WORKER}
+    await TaskMessage.received(_WORKER, [later.id])
+    assert await TaskMessage.pending_threads([_WORKER]) == set()
+    assert [owed.id for owed in await TaskMessage.owed(_WORKER)] == [message.id]
+
+
 async def test_task_message_retention_preserves_owed_work_and_deduplicates_pruned_results(
     registry_db: None,
 ) -> None:
@@ -647,6 +707,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
 
 async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_db: None) -> None:
     from openswe.workspaces.rows import WorkspaceRow
+    from openswe.workspaces.store import WORKSPACES
 
     workspace = WorkspaceRow(slug="task-cascade", name="Task cascade")
     async with postgres.session() as session:
@@ -668,10 +729,14 @@ async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_d
             content="Fix login",
             run_config={},
         ).record(session)
-        await session.execute(delete(WorkspaceRow).where(WorkspaceRow.id == workspace.id))
+    await TaskMessage._schedule_retry(_WORKER, "enqueue")
+    assert len(await queue.find({"kind": task_messages.RETRY_JOB_KIND})) == 1
+    await WORKSPACES.delete(workspace.slug)
+    await WORKSPACES.delete(workspace.slug)
     async with postgres.session() as session:
         for model in (store.Task, store.TaskMembership, store.TaskDelegation, TaskMessage):
             assert await session.scalar(select(func.count()).select_from(model)) == 0
+    assert await queue.find({"kind": task_messages.RETRY_JOB_KIND}) == []
 
 
 @pytest.mark.parametrize("strategy", ["enqueue", "interrupt"])

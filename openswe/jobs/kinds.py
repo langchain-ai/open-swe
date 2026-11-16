@@ -86,6 +86,8 @@ from openswe.slack.mda_forwarding import RETIRED_SWEEP_JOB as SLACK_LOST_REQUEST
 from openswe.slack.tools.search import PURGE_JOB as SLACK_SEARCH_GRANT_PURGE
 from openswe.slack.tools.search import PURGE_SCHEDULE as SLACK_SEARCH_GRANT_SCHEDULE
 from openswe.slack.tools.search import SlackSearchGrant
+from openswe.tasks.messages import RETRY_JOB_KIND as TASK_MESSAGE_DELIVERY
+from openswe.tasks.messages import TaskMessage
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
@@ -109,6 +111,7 @@ WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
+WORKER.register(TASK_MESSAGE_DELIVERY)(TaskMessage.retry)
 WORKER.register(INCIDENT_JOIN)(IncidentChannel.join)
 WORKER.register(INCIDENT_INVESTIGATE)(IncidentChannel.investigate)
 WORKER.register(MANAGED_TOOLS_CONSENT)(ConsentWait.run)

@@ -7,11 +7,13 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 import pytest
 from fastapi import HTTPException
 from pydantic import JsonValue
+from runtime_api.catalog import InboxSpec
 from sqlalchemy import func, select, update
 
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.database import postgres
+from openswe.jobs import queue
 from openswe.tasks import messages as task_messages
 from openswe.tasks import presentation, service, store
 from openswe.tasks.messages import TaskMessage
@@ -651,8 +653,21 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
     async with postgres.session() as session:
         session.add(subscription)
         await event.record(session)
+    create_run = client.runs.create.side_effect
+    client.runs.create.side_effect = ConnectionError("temporary dispatch failure")
+    sent = await service.message_task_thread(
+        actor,
+        message="Check logout too",
+        worker_thread_id=worker_id,
+        request_id="follow-up",
+    )
+    assert sent["delivery"] == "pending"
+    assert len(await queue.find({"kind": task_messages.RETRY_JOB_KIND})) == 1
+    client.runs.create.side_effect = create_run
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
+    assert await queue.find({"kind": task_messages.RETRY_JOB_KIND}) == []
+    assert await TaskMessage.owed(worker_id) == []
     assert await EventMatch.owed(worker_id) == []
     assert await EventSubscription.for_thread(worker_id) == []
     assert await EventMatch.deliver(worker_id, "enqueue") is False
@@ -705,6 +720,8 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert await TaskMessage.owed(worker_id) == []
     assert not client.created_runs
     client.runs.cancel_many.assert_not_awaited()
+    create_run = client.runs.create.side_effect
+    client.runs.create.side_effect = ConnectionError("temporary dispatch failure")
     sent = await service.message_task_thread(
         actor,
         message="Check logout too",
@@ -713,6 +730,18 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     )
     assert sent["success"] is True
     assert sent["recipient_thread_id"] == worker_id
+    assert sent["delivery"] == "pending"
+    assert not client.created_runs
+    assert await TaskMessage.pending_threads([worker_id]) == {worker_id}
+    client.runs.create.side_effect = create_run
+    from openswe.jobs.kinds import WORKER
+    from openswe.threads.inbox import ThreadInbox
+
+    (retry,) = await queue.find({"kind": task_messages.RETRY_JOB_KIND})
+    assert retry.key is not None
+    await queue.run_now(retry.key)
+    assert await WORKER.run_due() == 1
+    assert await queue.find({"kind": task_messages.RETRY_JOB_KIND}) == []
     (follow_up,) = await TaskMessage.owed(worker_id)
     assert "Check logout too" in follow_up.content
     follow_up_display = TaskEventMetadata.model_validate(follow_up.task_event)
@@ -727,6 +756,12 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert follow_up_run["thread_id"] == worker_id
     assert follow_up_run["status"] == "pending"
     assert follow_up_run["config"]["configurable"]["github_login"] == OWNER
+    assert await TaskMessage.pending_threads([worker_id]) == {worker_id}
+    inbox = ThreadInbox(worker_id)
+    taken = await inbox.read(follow_up_run["run_id"], InboxSpec(events=True))
+    assert taken.events == [follow_up.id]
+    await inbox.receive(events=taken.events)
+    assert await TaskMessage.pending_threads([worker_id]) == set()
 
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True

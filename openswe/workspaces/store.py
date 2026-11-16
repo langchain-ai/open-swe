@@ -58,6 +58,7 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
+from openswe.jobs import queue
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -1002,9 +1003,15 @@ class WorkspaceStore:
         )
 
     async def delete(self, slug: str) -> None:
+        from openswe.tasks.messages import RETRY_JOB_KIND
+
         async with postgres.session() as session:
-            await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
+            workspace_id = await session.scalar(
+                delete(WorkspaceRow).where(WorkspaceRow.slug == slug).returning(WorkspaceRow.id)
+            )
             await Topic.WORKSPACES.invalidate(session)
+        if workspace_id is not None:
+            await queue.cancel_matching({"kind": RETRY_JOB_KIND, "workspace_id": str(workspace_id)})
 
     async def owner_of_repo(self, full_name: str) -> str | None:
         """The slug of the workspace this repository belongs to, if any."""
