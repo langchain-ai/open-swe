@@ -30,14 +30,18 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   timeout: 90_000,
   // Nearly every assertion here settles in under two seconds; the handful that
   // wait on a real agent run pass their own longer timeout. A low default is
   // what keeps a genuine failure from burning 60s per assertion before the run
   // goes red.
   expect: { timeout: 20_000 },
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [
+    ["list"],
+    ["html", { open: "never" }],
+    ["json", { outputFile: "playwright-report/results.json" }],
+  ],
   use: {
     baseURL,
     // Recording a trace (DOM snapshots, network, console, source — open with
@@ -45,16 +49,8 @@ export default defineConfig({
     // spec, pass or fail. Default to keeping them only for failures; set
     // E2E_ARTIFACTS=1 to capture everything, which is what you want when
     // debugging a spec that passes but does the wrong thing.
-    trace: process.env.E2E_ARTIFACTS
-      ? "on"
-      : process.env.CI
-        ? "on-first-retry"
-        : "retain-on-failure",
-    video: process.env.E2E_ARTIFACTS
-      ? "on"
-      : process.env.CI
-        ? "on-first-retry"
-        : "retain-on-failure",
+    trace: process.env.E2E_ARTIFACTS ? "on" : "retain-on-failure",
+    video: process.env.E2E_ARTIFACTS ? "on" : "retain-on-failure",
     screenshot: "only-on-failure",
     // SLOW_MO=700 pnpm exec playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
