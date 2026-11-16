@@ -82,6 +82,7 @@ class DashboardPrincipal:
         if relative == "plugins" and method == "GET":
             return
         if relative in {
+            "info",
             "options",
             "desktop/environments",
             "client-errors",

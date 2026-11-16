@@ -56,10 +56,6 @@ logger = logging.getLogger(__name__)
 
 # Marks the thread router's own calls to the local Agent Server, so they skip it.
 LOCAL_HEADER: Final = "x-openswe-local-runtime"
-_V3_STREAMING_KEY: Final = "__event_streaming_v2"
-# The protocol v2 stream modes `run.start` uses, minus protocol-only channels the
-# REST run-create schema rejects.
-_V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
 # as, which decides whether its catalog names that person's connections, and the person
@@ -119,6 +115,18 @@ class _ErroredThread(BaseModel):
 type RunStatus = Literal["pending", "running", "success", "error", "timeout", "interrupted"]
 
 
+# What of a run's kwargs a dashboard client reads: a queued run's message or answer, and
+# how the run streams. The rest stays here, the context above all: it carries the run
+# token, which the agent API accepts as the run itself.
+_CLIENT_RUN_KWARGS: Final = (
+    "input",
+    "command",
+    "stream_mode",
+    "subgraphs",
+    "__protocol_stream_run",
+)
+
+
 class MdaRun(BaseModel):
     """A run as MDA reports it."""
 
@@ -130,6 +138,23 @@ class MdaRun(BaseModel):
     @property
     def active(self) -> bool:
         return self.status in ("pending", "running")
+
+    @staticmethod
+    def client_view(run: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        """``run`` as a dashboard client may see it: its kwargs cut to what a client reads,
+        keeping only the stream marker of its configurable."""
+        kwargs = run.get("kwargs")
+        if not isinstance(kwargs, dict):
+            return dict(run)
+        visible: dict[str, JsonValue] = {
+            key: kwargs[key] for key in _CLIENT_RUN_KWARGS if key in kwargs
+        }
+        config = kwargs.get("config")
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        if isinstance(configurable, dict) and dispatch.V3_STREAMING_CONFIG_KEY in configurable:
+            marker = configurable[dispatch.V3_STREAMING_CONFIG_KEY]
+            visible["config"] = {"configurable": {dispatch.V3_STREAMING_CONFIG_KEY: marker}}
+        return {**run, "kwargs": visible}
 
 
 _runs = TypeAdapter(list[MdaRun])
@@ -565,7 +590,7 @@ class MdaRuntime:
             **(config_metadata if isinstance(config_metadata, dict) else {}),
             "origin": origin,
         }
-        streaming = configurable.pop(_V3_STREAMING_KEY, None)
+        streaming = configurable.pop(dispatch.V3_STREAMING_CONFIG_KEY, None)
         assistant_id = payload.get("assistant_id")
         if not isinstance(assistant_id, str):
             raise ValueError("A run needs an assistant_id")
@@ -626,9 +651,10 @@ class MdaRuntime:
             )
         )
         context["owner_ls_user_id"] = owner_ls_user_id
-        if streaming:
-            # Context replaces configurable on the server, so the stream marker rides in it.
-            context[_V3_STREAMING_KEY] = True
+        if isinstance(streaming, bool):
+            # Context replaces configurable on the server, so the stream marker rides in
+            # it; ``False`` too, or the run inherits the ``True`` its thread kept.
+            context[dispatch.V3_STREAMING_CONFIG_KEY] = streaming
         rewritten = {
             **payload,
             "assistant_id": graph_id,
@@ -643,9 +669,14 @@ class MdaRuntime:
 
     @staticmethod
     def command_run(
-        thread_id: str, params: Mapping[str, JsonValue], *, write: ChannelWrite
+        thread_id: str,
+        params: Mapping[str, JsonValue],
+        *,
+        write: ChannelWrite,
+        run_format: dispatch.RunFormat,
     ) -> dict[str, JsonValue]:
-        """The run a protocol v2 ``run.start`` asks for, as :meth:`run_payload` takes it.
+        """The run a ``run.start`` asks for, streaming in ``run_format``, as
+        :meth:`run_payload` takes it.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token,
         so the backend creates the run itself (:meth:`create_command_run`).
@@ -656,7 +687,7 @@ class MdaRuntime:
             **(config if isinstance(config, dict) else {}),
             "configurable": {
                 **(configurable if isinstance(configurable, dict) else {}),
-                _V3_STREAMING_KEY: True,
+                dispatch.V3_STREAMING_CONFIG_KEY: run_format.protocol_v2,
                 "thread_id": thread_id,
             },
         }
@@ -667,10 +698,8 @@ class MdaRuntime:
             "input": params.get("input"),
             "config": run_config,
             "metadata": write.acting(metadata if isinstance(metadata, dict) else {}),
-            "stream_mode": list(_V3_RUN_STREAM_MODES),
-            "stream_subgraphs": True,
             # A client that reads the transcript instead of this stream opts out.
-            "stream_resumable": params.get("stream_resumable") is not False,
+            **run_format.run_fields(resumable=params.get("stream_resumable") is not False),
             "on_completion": "keep",
             "if_not_exists": "create",
             "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
@@ -688,14 +717,17 @@ class MdaRuntime:
         *,
         starting_ms: int,
         write: ChannelWrite,
+        run_format: dispatch.RunFormat,
         trace_headers: Mapping[str, str] | None = None,
     ) -> dict[str, JsonValue]:
-        """Answer a protocol v2 ``run.start`` by creating ``run``, rewritten by :meth:`run_payload`.
+        """Answer a ``run.start`` by creating ``run``, rewritten by :meth:`run_payload`.
 
         On a channel's thread, ``write`` (:meth:`channel_write`) starts the run in its
         conversation, as the person it names; without one the run is the backend's own.
         ``starting_ms`` is when the start was asked for, which a stop since then interrupts.
-        ``trace_headers`` name the LangSmith trace the run nests in.
+        ``trace_headers`` name the LangSmith trace the run nests in. The answer has protocol
+        v2's shape for any ``run_format``, which only decides whether a refusal carries
+        MDA's status.
         """
         async with self.http as client:
             response = await client.post(
@@ -708,12 +740,16 @@ class MdaRuntime:
                 "Starting an MDA run failed",
                 extra={"thread_id": thread_id, "status_code": response.status_code},
             )
-            return {
+            refusal: dict[str, JsonValue] = {
                 "type": "error",
                 "id": command.get("id", 0),
                 "error": "unknown_error",
                 "message": response.text[:500],
             }
+            if not run_format.protocol_v2:
+                # A runs API client reacts to the status, such as a 422 for a stream mode.
+                refusal["status"] = response.status_code
+            return refusal
         run = _object.validate_python(response.json())
         run_id = str(run.get("run_id") or "")
         await self.interrupt_if_stopped(thread_id, run_id, starting_ms=starting_ms)

@@ -31,6 +31,7 @@ from openswe.short_links.routes import router as short_link_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.router import ThreadRouter
+from openswe.threads.runs_api import STEERED_HEADER
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.authorization import AccountConflict
 from openswe.users.records import UnknownUser
@@ -170,7 +171,15 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "Retry-After"],
+        # The SDK reconnects to a run stream's Location and reads its run id from
+        # Content-Location; the steered header says the message joined the live run.
+        expose_headers=[
+            "X-Request-ID",
+            "Retry-After",
+            "Location",
+            "Content-Location",
+            STEERED_HEADER,
+        ],
     )
     app.add_middleware(AuditLogMiddleware)
     # Ahead of the core /threads and /runs routes, which the custom app shadows.

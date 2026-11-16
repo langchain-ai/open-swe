@@ -26,8 +26,10 @@ busy-check and the custom store-queue) with one function that uses:
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Self
+from types import MappingProxyType
+from typing import Any, Final, Self
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -35,7 +37,7 @@ from langgraph.types import Durability
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY
 from openswe.config import ENV
@@ -156,6 +158,41 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
     "tasks",
     "checkpoints",
 )
+
+
+@dataclass(frozen=True)
+class RunFormat:
+    """The events a run streams, fixed by its ``__event_streaming_v2`` marker when it starts.
+
+    A protocol v2 run, the format ``/commands`` and its readers take, streams the v3 run
+    shape. Any other run streams as the runs API does, as its client asked: ``fields``
+    are the run-create fields that say how, which only such a run honours. Its marker is
+    sent ``False``, so it never inherits the ``True`` its thread kept from an earlier run.
+    """
+
+    protocol_v2: bool
+    fields: Mapping[str, JsonValue] = field(default_factory=lambda: MappingProxyType({}))
+
+    @classmethod
+    def runs_api(cls, fields: Mapping[str, JsonValue]) -> RunFormat:
+        return cls(protocol_v2=False, fields=MappingProxyType(dict(fields)))
+
+    def run_fields(self, *, resumable: bool) -> dict[str, JsonValue]:
+        """The fields a run-create body starts a run in this format with.
+
+        ``resumable`` is whether a protocol v2 run keeps its events for a rejoin; any
+        other run keeps them as its client asked.
+        """
+        if not self.protocol_v2:
+            return dict(self.fields)
+        return {
+            "stream_mode": list(V3_RUN_STREAM_MODES),
+            "stream_subgraphs": True,
+            "stream_resumable": resumable,
+        }
+
+
+PROTOCOL_V2: Final = RunFormat(protocol_v2=True)
 
 
 async def dispatch_input(
@@ -367,6 +404,7 @@ def prepare_run_config(
     *,
     source: str | None = None,
     origin: str | None = None,
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> LangGraphRunConfig:
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
@@ -391,7 +429,7 @@ def prepare_run_config(
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
     configurable.setdefault("invocation_started_at", started_at)
-    configurable[V3_STREAMING_CONFIG_KEY] = True
+    configurable[V3_STREAMING_CONFIG_KEY] = run_format.protocol_v2
     configurable.setdefault("background_task_completion", False)
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
@@ -449,6 +487,7 @@ async def prepare_durable_run(
     source: str,
     origin: str | None = None,
     as_sender: bool = False,
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> LangGraphRunConfig:
     """The config and metadata a durable run starts with, wherever it is created.
 
@@ -484,7 +523,9 @@ async def prepare_durable_run(
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
-    run_config = prepare_run_config(config, run_metadata, source=source, origin=origin)
+    run_config = prepare_run_config(
+        config, run_metadata, source=source, origin=origin, run_format=run_format
+    )
     if execution_user_id is None:
         configurable = run_config["configurable"]
         if isinstance(configurable, dict):
@@ -509,6 +550,7 @@ async def create_durable_run(
     source_context: SourceContext | None = None,
     origin: str | None = None,
     as_sender: bool = False,
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
@@ -522,7 +564,13 @@ async def create_durable_run(
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     run_config = await prepare_durable_run(
-        assistant_id, config, metadata, source=source, origin=origin, as_sender=as_sender
+        assistant_id,
+        config,
+        metadata,
+        source=source,
+        origin=origin,
+        as_sender=as_sender,
+        run_format=run_format,
     )
     recorded = RunMetadata.of_run(assistant_id, config)
     create_kwargs: dict[str, Any] = {
@@ -532,9 +580,7 @@ async def create_durable_run(
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
-        "stream_mode": list(V3_RUN_STREAM_MODES),
-        "stream_subgraphs": True,
-        "stream_resumable": False,
+        **run_format.run_fields(resumable=False),
     }
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
@@ -579,6 +625,7 @@ async def dispatch_agent_run(
     source_context: SourceContext | None = None,
     origin: str | None = None,
     as_sender: bool = False,
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -617,4 +664,5 @@ async def dispatch_agent_run(
         source_context=source_context,
         origin=origin,
         as_sender=as_sender,
+        run_format=run_format,
     )

@@ -5,10 +5,11 @@ import logging
 import posixpath
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 import httpx
 import httpx2
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -78,22 +79,23 @@ from openswe.threads.listing import (
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
 from openswe.threads.pins import THREAD_PINS
-from openswe.threads.principals import PrincipalDep
+from openswe.threads.principals import Principal, PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_run_enqueue,
-    proxy_dashboard_thread_runs_list,
     proxy_dashboard_thread_stream_events,
 )
 from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.runs import (
     SessionCreateBody,
+    ThreadCreateBody,
     ThreadRenameBody,
     ThreadResolveBody,
     create_dashboard_session,
 )
+from openswe.threads.runs_api import SdkRun, ThreadOnRuntime
 from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from openswe.threads.store import THREADS
@@ -123,11 +125,15 @@ async def api_list_threads(
     return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
 
 
-@router.post("/threads", status_code=201)
+@router.post("/threads", status_code=201, response_model=dict[str, str])
 async def api_create_session(
-    body: SessionCreateBody,
+    body: Annotated[SessionCreateBody | ThreadCreateBody, Body(union_mode="left_to_right")],
     session: dict[str, str] = SESSION_DEP,
-) -> dict[str, str]:
+) -> dict[str, str] | Response:
+    """Start a session from a prompt. The SDK's ``threads.create`` (a ``thread_id`` and no
+    prompt) creates nothing: it gets back a thread the caller can read, and 404 otherwise."""
+    if isinstance(body, ThreadCreateBody):
+        return JSONResponse(await body.existing(session["sub"], email=session.get("email")))
     thread_id = await create_dashboard_session(body, session["sub"], email=session.get("email"))
     if body.start:
         status, content, _ = await proxy_dashboard_thread_commands(
@@ -669,16 +675,17 @@ async def api_list_thread_runs(
     select: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
-    status_code, content, media_type = await proxy_dashboard_thread_runs_list(
-        thread_id,
-        session["sub"],
-        limit=limit,
-        offset=offset,
-        status=status,
-        select=select,
-        email=session.get("email"),
+    reader = Principal.of_login(session["sub"], session.get("email"))
+    thread = await ThreadOnRuntime.readable(thread_id, reader)
+    params = httpx2.QueryParams(
+        [
+            ("limit", limit),
+            ("offset", offset),
+            *([("status", status)] if status else []),
+            *(("select", field) for field in select or []),
+        ]
     )
-    return Response(content=content, status_code=status_code, media_type=media_type)
+    return await thread.runs(f"/threads/{thread_id}/runs", params)
 
 
 @router.post("/threads/{thread_id}/runs")
@@ -698,6 +705,54 @@ async def api_create_thread_run(
     )
 
 
+@router.get("/info")
+async def api_runtime_info(_principal: PrincipalDep) -> Response:
+    """MDA's ``/info``: the features the SDK turns on are MDA's, not this deployment's."""
+    async with RUNTIMES.mda_runtime.read_http as client:
+        try:
+            response = await client.get("/info")
+        except httpx2.TransportError as exc:
+            raise HTTPException(502, "the runtime could not be reached") from exc
+    return Response(
+        response.content,
+        status_code=response.status_code,
+        headers=ThreadOnRuntime.client_headers(response),
+    )
+
+
+@router.post("/threads/{thread_id}/runs/stream")
+@audit_endpoint
+async def api_stream_thread_run(
+    thread_id: str,
+    body: SdkRun,
+    request: Request,
+    principal: PrincipalDep,
+) -> Response:
+    """Start a run as ``/commands`` starts a message, streamed in the runs API's format."""
+    return await body.stream(thread_id, principal, request)
+
+
+@router.get("/threads/{thread_id}/runs/{run_id}/stream")
+async def api_join_thread_run(
+    thread_id: str, run_id: UUID, request: Request, principal: PrincipalDep
+) -> Response:
+    thread = await ThreadOnRuntime.readable(thread_id, principal)
+    return await thread.join(str(run_id), request)
+
+
+@router.get("/threads/{thread_id}/runs/{run_id}")
+async def api_get_thread_run(thread_id: str, run_id: UUID, principal: PrincipalDep) -> Response:
+    thread = await ThreadOnRuntime.readable(thread_id, principal)
+    return await thread.runs(f"/threads/{thread_id}/runs/{run_id}")
+
+
+@router.get("/threads/{thread_id}/stream")
+async def api_watch_thread(thread_id: str, request: Request, principal: PrincipalDep) -> Response:
+    """The thread's runs as they start and end, for as long as a tab watches it."""
+    thread = await ThreadOnRuntime.readable(thread_id, principal)
+    return await thread.stream_as_sent(f"/threads/{thread_id}/stream", request)
+
+
 @router.post("/threads/{thread_id}/runs/{run_id}/cancel")
 @audit_endpoint
 async def api_cancel_thread_run(
@@ -706,6 +761,7 @@ async def api_cancel_thread_run(
     session: dict[str, Any] = SESSION_DEP,
     wait: str = "0",
     action: str = "interrupt",
+    reason: str | None = None,
 ) -> Response:
     status_code, content, media_type = await proxy_dashboard_thread_run_cancel(
         thread_id,
@@ -713,6 +769,7 @@ async def api_cancel_thread_run(
         session["sub"],
         wait=wait,
         action=action,
+        reason=reason,
         email=session.get("email"),
     )
     if status_code < 400:

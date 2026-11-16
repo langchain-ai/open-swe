@@ -8522,6 +8522,188 @@
         "title": "ScheduleUpdateBody",
         "type": "object"
       },
+      "SdkCommand": {
+        "description": "What a run answers an interrupt with: the answers, and the state update and jump\nthat come with them, as ``input.respond`` takes them on ``/commands``.",
+        "properties": {
+          "goto": {
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          },
+          "resume": {
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          },
+          "update": {
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          }
+        },
+        "title": "SdkCommand",
+        "type": "object"
+      },
+      "SdkConfig": {
+        "description": "A run's config as a client may send it: only ``configurable``, of which the backend\nreads the keys ``/commands`` does and builds the rest.",
+        "properties": {
+          "configurable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configurable"
+          }
+        },
+        "title": "SdkConfig",
+        "type": "object"
+      },
+      "SdkRun": {
+        "description": "A run the SDK asks for, with only the fields a client may set.\n\nEvery other field is dropped: ``webhook``, ``context``, ``assistant_id``, the\ninterrupt fields, ``if_not_exists`` and ``after_seconds`` among them. The backend\nbuilds the run's context, which carries MDA's run token, catalog and owner, itself.",
+        "properties": {
+          "checkpoint": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SdkCommand"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SdkConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "durability": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sync",
+                  "async",
+                  "exit"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durability"
+          },
+          "input": {
+            "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "multitask_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "reject",
+                  "interrupt",
+                  "rollback",
+                  "enqueue"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multitask Strategy"
+          },
+          "on_disconnect": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cancel",
+                  "continue"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Disconnect"
+          },
+          "stream_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Mode"
+          },
+          "stream_resumable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Resumable"
+          },
+          "stream_subgraphs": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Subgraphs"
+          }
+        },
+        "title": "SdkRun",
+        "type": "object"
+      },
       "SearchedEvent": {
         "description": "A logged row with the names of the rows it links to.",
         "properties": {
@@ -9579,6 +9761,30 @@
           "html_url"
         ],
         "title": "ThreadComment",
+        "type": "object"
+      },
+      "ThreadCreateBody": {
+        "description": "The SDK's ``threads.create``, which never creates a thread here.\n\nA dashboard thread starts with its first message, whose run config carries what\nthe composer chose for it: its repository, workspace, visibility, project and\nmachine. A create carries none of that, so this answers only for a thread that\nexists, as the Agent Server does for ``if_exists``.",
+        "properties": {
+          "if_exists": {
+            "default": "raise",
+            "enum": [
+              "raise",
+              "do_nothing"
+            ],
+            "title": "If Exists",
+            "type": "string"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "title": "ThreadCreateBody",
         "type": "object"
       },
       "ThreadMessageModel": {
@@ -14368,6 +14574,27 @@
         "tags": [
           "dashboard",
           "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/info": {
+      "get": {
+        "description": "MDA's ``/info``: the features the SDK turns on are MDA's, not this deployment's.",
+        "operationId": "api_runtime_info_dashboard_api_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Runtime Info",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -25321,12 +25548,21 @@
         ]
       },
       "post": {
+        "description": "Start a session from a prompt. The SDK's ``threads.create`` (a ``thread_id`` and no\nprompt) creates nothing: it gets back a thread the caller can read, and 404 otherwise.",
         "operationId": "api_create_session_dashboard_api_threads_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SessionCreateBody"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SessionCreateBody"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ThreadCreateBody"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },
@@ -27519,6 +27755,109 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/runs/stream": {
+      "post": {
+        "description": "Start a run as ``/commands`` starts a message, streamed in the runs API's format.",
+        "operationId": "api_stream_thread_run_dashboard_api_threads__thread_id__runs_stream_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SdkRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Stream Thread Run",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/runs/{run_id}": {
+      "get": {
+        "operationId": "api_get_thread_run_dashboard_api_threads__thread_id__runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Thread Run",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/runs/{run_id}/cancel": {
       "post": {
         "operationId": "api_cancel_thread_run_dashboard_api_threads__thread_id__runs__run_id__cancel_post",
@@ -27560,6 +27899,22 @@
               "title": "Action",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            }
           }
         ],
         "responses": {
@@ -27588,6 +27943,57 @@
           }
         ],
         "summary": "Api Cancel Thread Run",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/runs/{run_id}/stream": {
+      "get": {
+        "operationId": "api_join_thread_run_dashboard_api_threads__thread_id__runs__run_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Join Thread Run",
         "tags": [
           "dashboard",
           "threads"
@@ -27703,6 +28109,48 @@
           }
         ],
         "summary": "Api Get Thread State",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/stream": {
+      "get": {
+        "description": "The thread's runs as they start and end, for as long as a tab watches it.",
+        "operationId": "api_watch_thread_dashboard_api_threads__thread_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Watch Thread",
         "tags": [
           "dashboard",
           "threads"

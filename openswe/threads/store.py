@@ -26,7 +26,7 @@ from openswe.agent_api.client import (
     RUNTIME_METADATA_KEY,
     mda_graph_for,
 )
-from openswe.dispatch import channel_of
+from openswe.dispatch import PROTOCOL_V2, RunFormat, channel_of
 from openswe.tasks.store import sidebar_memberships
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
@@ -357,6 +357,38 @@ class ThreadStore:
         channel's thread acts as; without one it is the channel's own, for no person.
         ``trace_headers`` name a LangSmith trace a ``run.start``'s run nests in.
         """
+        return await self._answer(
+            thread_id, body, PROTOCOL_V2, user_id=user_id, trace_headers=trace_headers
+        )
+
+    async def start_run(
+        self,
+        thread_id: str,
+        body: bytes,
+        run_format: RunFormat,
+        *,
+        user_id: str | None = None,
+        trace_headers: Mapping[str, str] | None = None,
+    ) -> CommandReply:
+        """Answer a ``run.start`` command as :meth:`command` does, its run in ``run_format``.
+
+        A protocol v2 run is the command's own.
+        """
+        if run_format.protocol_v2:
+            return await self.command(thread_id, body, user_id=user_id, trace_headers=trace_headers)
+        return await self._answer(
+            thread_id, body, run_format, user_id=user_id, trace_headers=trace_headers
+        )
+
+    async def _answer(
+        self,
+        thread_id: str,
+        body: bytes,
+        run_format: RunFormat,
+        *,
+        user_id: str | None,
+        trace_headers: Mapping[str, str] | None,
+    ) -> CommandReply:
         try:
             command = _object.validate_json(body)
         except ValueError:
@@ -403,7 +435,7 @@ class ThreadStore:
             starting_ms = now_ms()
             run = await self.run_payload(
                 thread_id,
-                mda.command_run(thread_id, params, write=write),
+                mda.command_run(thread_id, params, write=write, run_format=run_format),
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
             )
@@ -414,6 +446,7 @@ class ThreadStore:
                 starting_ms=starting_ms,
                 write=write,
                 trace_headers=trace_headers,
+                run_format=run_format,
             )
             if reply.get("type") == "success":
                 try:

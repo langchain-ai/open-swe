@@ -13,7 +13,7 @@ from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
 from runtime_api.provenance import Provenance
 
 from openswe.agent_api.connections import SENDER_USER_KEY
@@ -38,7 +38,9 @@ from openswe.dashboard.workspace_settings import (
 )
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
+    PROTOCOL_V2,
     TURN_ATTRIBUTION_FIELDS,
+    RunFormat,
     _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
@@ -85,6 +87,7 @@ from openswe.threads.summary import (
     _is_thread_resolved,
     _now_ms,
     _parse_repo,
+    assert_thread_readable,
     chats_beside_plugin,
     repo_config_from_metadata,
     thread_is_promptable,
@@ -552,6 +555,41 @@ class SessionCreateBody(BaseModel):
     workspace: str | None = None
     visibility: Literal["public", "private"] | None = None
     start: bool = True
+
+
+class ThreadCreateBody(BaseModel):
+    """The SDK's ``threads.create``, which never creates a thread here.
+
+    A dashboard thread starts with its first message, whose run config carries what
+    the composer chose for it: its repository, workspace, visibility, project and
+    machine. A create carries none of that, so this answers only for a thread that
+    exists, as the Agent Server does for ``if_exists``.
+    """
+
+    thread_id: uuid.UUID
+    if_exists: Literal["raise", "do_nothing"] = "raise"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _without_prompt(cls, body: object) -> object:
+        # A body with a prompt starts a session, valid or not.
+        if isinstance(body, dict) and "prompt" in body:
+            raise ValueError("a body with a prompt starts a session")
+        return body
+
+    async def existing(self, login: str, *, email: str | None = None) -> dict[str, JsonValue]:
+        """The thread as the Agent Server answers a create of one that exists.
+
+        A missing thread and one the caller can't read are the same 404, so the route
+        tells no one which thread ids exist.
+        """
+        thread = await THREADS.get(str(self.thread_id))
+        if thread is None:
+            raise HTTPException(404, "thread not found")
+        assert_thread_readable(thread.metadata, login, email)
+        if self.if_exists != "do_nothing":
+            raise HTTPException(409, f"Thread {self.thread_id} already exists")
+        return thread.as_langgraph()
 
 
 async def create_dashboard_session(
@@ -1470,13 +1508,15 @@ async def steer_running_thread(
     turn: OpenTurn | None,
     email: str | None = None,
     relayed_origin: RunOrigin | None = None,
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
     The message joins ``turn`` instead of opening a new one: it is recorded on
     the transcript right away and left for the run to pick up before its next
     model call. The reply mirrors the protocol's success envelope so the caller
-    cannot tell a steer from a start.
+    cannot tell a steer from a start. A run started for the message because the
+    live one ended meanwhile streams in ``run_format``.
     """
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1574,7 +1614,12 @@ async def steer_running_thread(
     if not await _run_is_live(client, thread_id, live_run_id):
         try:
             dispatched = await dispatch_pending_follow_ups(
-                thread_id, login, metadata, client=client, multitask_strategy="reject"
+                thread_id,
+                login,
+                metadata,
+                client=client,
+                multitask_strategy="reject",
+                run_format=run_format,
             )
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -1639,6 +1684,7 @@ async def queue_follow_up_run(
     metadata: dict[str, Any],
     email: str | None = None,
     relayed_origin: RunOrigin | None = None,
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> dict[str, Any]:
     """Hold a ``run.start`` sent while a run is live until that run ends.
 
@@ -1646,6 +1692,7 @@ async def queue_follow_up_run(
     so the platform starts it when the thread goes idle, from any client and
     with this browser long gone. The transcript records the turn as requested
     right away and learns the run id so it can be cancelled before it starts.
+    The run streams in ``run_format``.
     """
     params = command.get("params")
     # An agent's relayed message is not its sender's own: it acts as no one.
@@ -1684,6 +1731,7 @@ async def queue_follow_up_run(
             multitask_strategy="enqueue",
             # On a channel's thread it starts as its sender, as their message would.
             as_sender=not relayed,
+            run_format=run_format,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else None
         if not isinstance(run_id, str) or not run_id:
@@ -1759,6 +1807,7 @@ async def dispatch_pending_follow_ups(
     *,
     client: Any,
     multitask_strategy: str = "interrupt",
+    run_format: RunFormat = PROTOCOL_V2,
 ) -> str | None:
     """Start a run for follow-ups a finished run never got to.
 
@@ -1785,6 +1834,7 @@ async def dispatch_pending_follow_ups(
         client=client,
         multitask_strategy=multitask_strategy,
         as_sender=sender is not None,
+        run_format=run_format,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None
     return run_id if isinstance(run_id, str) else None

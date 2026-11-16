@@ -148,6 +148,33 @@ async def test_create_durable_run_applies_defaults(
     assert isinstance(invocation_id, str)
 
 
+async def test_a_runs_api_run_streams_as_its_client_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run the runs routes queue keeps its client's stream, and is never protocol v2:
+    its thread may keep the marker on from an earlier run."""
+    client = _FakeClient()
+    stream = {"stream_mode": ["values", "messages-tuple"], "stream_resumable": True}
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": [{"role": "user", "content": "hi"}]},
+        source="dashboard",
+        thread_title=None,
+        config={"configurable": {"thread_id": "thread-1"}},
+        client=client,
+        multitask_strategy="enqueue",
+        run_format=dispatch.RunFormat.runs_api(stream),
+    )
+
+    [created] = client.runs.created
+    assert created["config"]["configurable"]["__event_streaming_v2"] is False
+    assert created["stream_mode"] == ["values", "messages-tuple"]
+    assert created["stream_resumable"] is True
+    assert "stream_subgraphs" not in created
+
+
 async def test_run_metadata_uses_users_id_across_slack_and_github(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

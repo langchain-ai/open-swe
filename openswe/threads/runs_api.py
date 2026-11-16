@@ -1,0 +1,422 @@
+"""The runs API ``@langchain/react`` 2.0 calls, served under ``/dashboard/api``.
+
+MDA trusts every request the backend sends with its key, so every route checks the
+caller against the thread before it calls the thread's runtime. MDA threads are read
+on MDA directly, reads held open on its stream pool; threads from before it through
+the loopback, which serves them from this deployment's Agent Server. A runtime's error
+comes back as its HTTP status, never an SSE error frame, so the SDK can act on it, and
+``Location`` and ``Content-Location`` are paths the SDK resolves under its ``apiUrl``.
+"""
+
+import json
+import logging
+from collections.abc import AsyncIterator
+from typing import Final, Literal
+
+import httpx2
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
+
+from openswe.dashboard.ttft import SUBMITTED_AT_HEADER, DashboardClient
+from openswe.dispatch import RunFormat
+from openswe.threads.index import IndexedThread
+from openswe.threads.principals import Principal
+from openswe.threads.proxy import ThreadSend, langgraph_proxy_headers
+from openswe.threads.runtimes import RUNTIMES, MdaRun
+from openswe.threads.store import THREADS, CommandReply
+from openswe.utils.http_pool import pooled_transport
+from openswe.utils.thread_ops import langgraph_url
+
+logger = logging.getLogger(__name__)
+
+# Says the message ``runs/stream`` was sent joined the live run instead of starting one.
+STEERED_HEADER: Final = "x-robin-steered"
+_RETURNED_RESPONSE_HEADERS: Final = ("content-type", "cache-control")
+_LOOPBACK_TIMEOUT: Final = httpx2.Timeout(30.0, connect=5.0)
+# Loopback streams held open by tabs watching threads from before MDA, apart from the
+# loopback's other calls.
+_LOOPBACK_STREAMS: Final = httpx2.Limits(max_connections=100)
+_UNREACHABLE: Final = "the thread's runtime could not be reached"
+_run_or_runs: Final = TypeAdapter(list[dict[str, JsonValue]] | dict[str, JsonValue])
+_json_value: Final = TypeAdapter(JsonValue)
+_CONFIG_EVENTS: Final = frozenset({b"checkpoints", b"debug"})
+
+
+class _ClientEvents:
+    """A runtime's event stream as a client may read it.
+
+    A checkpoint's ``config`` and ``parent_config`` hold the run's configurable, the run
+    token among it, so ``checkpoints`` and ``debug`` events lose both and keep their
+    ``checkpoint`` ids. One that can't be read is dropped. Every other event passes
+    through byte for byte, held back only until it ends.
+    """
+
+    def __init__(self) -> None:
+        self._pending = bytearray()
+        # Where the search for the end of the pending event resumes, so a large event
+        # arriving in many chunks is scanned once.
+        self._searched = 0
+
+    def feed(self, chunk: bytes) -> bytes:
+        self._pending += chunk
+        done: list[bytes] = []
+        while (end := self._end_of_event()) >= 0:
+            event = bytes(self._pending[:end])
+            del self._pending[:end]
+            self._searched = 0
+            done.append(self._readable(event))
+        return b"".join(done)
+
+    def rest(self) -> bytes:
+        event = bytes(self._pending)
+        self._pending.clear()
+        return self._readable(event) if event else b""
+
+    def _end_of_event(self) -> int:
+        start = max(0, self._searched - 3)
+        ends = [
+            at + len(blank_line)
+            for blank_line in (b"\r\n\r\n", b"\n\n")
+            if (at := self._pending.find(blank_line, start)) >= 0
+        ]
+        self._searched = len(self._pending)
+        return min(ends) if ends else -1
+
+    @staticmethod
+    def _readable(event: bytes) -> bytes:
+        data_at = event.find(b"data:")
+        head = event if data_at < 0 else event[:data_at]
+        name = next(
+            (
+                line.partition(b":")[2].strip()
+                for line in head.splitlines()
+                if line.startswith(b"event:")
+            ),
+            b"",
+        )
+        if name.partition(b"|")[0] not in _CONFIG_EVENTS:
+            return event
+        lines = event.splitlines()
+        data = b"\n".join(
+            line.removeprefix(b"data:").removeprefix(b" ")
+            for line in lines
+            if line.startswith(b"data:")
+        )
+        try:
+            payload = _json_value.validate_json(data)
+        except ValidationError:
+            # Without the error: it quotes the event, whose config holds the run token.
+            logger.warning(
+                "Dropped a run stream event that could not be read",
+                extra={"stream_event": name.decode(errors="replace"), "event_bytes": len(event)},
+            )
+            return b""
+        for part in (payload, payload.get("payload") if isinstance(payload, dict) else None):
+            if isinstance(part, dict):
+                part.pop("config", None)
+                part.pop("parent_config", None)
+        newline = b"\r\n" if b"\r\n" in event else b"\n"
+        fields = [line for line in lines if line and not line.startswith(b"data:")]
+        fields.append(b"data: " + json.dumps(payload).encode())
+        return newline.join(fields) + newline * 2
+
+
+class SdkCommand(BaseModel):
+    """What a run answers an interrupt with: the answers, and the state update and jump
+    that come with them, as ``input.respond`` takes them on ``/commands``."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    resume: JsonValue = None
+    update: JsonValue = None
+    goto: JsonValue = None
+
+
+class SdkConfig(BaseModel):
+    """A run's config as a client may send it: only ``configurable``, of which the backend
+    reads the keys ``/commands`` does and builds the rest."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    configurable: dict[str, JsonValue] | None = None
+
+
+class SdkRun(BaseModel):
+    """A run the SDK asks for, with only the fields a client may set.
+
+    Every other field is dropped: ``webhook``, ``context``, ``assistant_id``, the
+    interrupt fields, ``if_not_exists`` and ``after_seconds`` among them. The backend
+    builds the run's context, which carries MDA's run token, catalog and owner, itself.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    input: JsonValue = None
+    command: SdkCommand | None = None
+    config: SdkConfig | None = None
+    metadata: dict[str, JsonValue] | None = None
+    stream_mode: str | list[str] | None = None
+    stream_subgraphs: bool | None = None
+    stream_resumable: bool | None = None
+    on_disconnect: Literal["cancel", "continue"] | None = None
+    multitask_strategy: Literal["reject", "interrupt", "rollback", "enqueue"] | None = None
+    checkpoint: dict[str, JsonValue] | None = None
+    durability: Literal["sync", "async", "exit"] | None = None
+
+    def run_format(self) -> RunFormat:
+        """The runs API format the run streams in, as the client asked, except that it is
+        always resumable: the stream joins the run after starting it, and only a resumable
+        run keeps the events it sent before that for the join to replay."""
+        return RunFormat.runs_api(
+            {
+                **self.model_dump(
+                    include={"stream_mode", "stream_subgraphs", "checkpoint", "durability"},
+                    exclude_none=True,
+                ),
+                "stream_resumable": True,
+            }
+        )
+
+    def start_command(self) -> dict[str, JsonValue]:
+        """The run as the ``run.start`` command ``/commands`` would have been sent."""
+        params: dict[str, JsonValue] = {"input": self.input}
+        if self.config is not None and self.config.configurable is not None:
+            params["config"] = {"configurable": self.config.configurable}
+        if self.metadata is not None:
+            params["metadata"] = self.metadata
+        if self.multitask_strategy is not None:
+            params["multitask_strategy"] = self.multitask_strategy
+        return {"method": "run.start", "params": params}
+
+    async def stream(self, thread_id: str, principal: Principal, request: Request) -> Response:
+        """Send the run as ``/commands`` sends a message, and stream the run it ended up
+        in: a new run, the live run it steered into, or the queued run.
+
+        A missing thread is 404: the client creates it with ``POST /threads`` first.
+        """
+        start = ThreadSend(
+            thread_id,
+            principal,
+            self.start_command(),
+            run_format=self.run_format(),
+            creates=False,
+            client=DashboardClient.of_user_agent(request.headers.get("user-agent")),
+            submitted_at=request.headers.get(SUBMITTED_AT_HEADER),
+        )
+        reply = (
+            await start.answer(self.command.model_dump(exclude_none=True))
+            if self.command is not None
+            else await start.start()
+        )
+        started = self._started(reply)
+        if isinstance(started, Response):
+            return started
+        run_id, steered = started
+        thread = await ThreadOnRuntime.readable(thread_id, principal)
+        if run_id is None:
+            # Steered into a run nobody recorded: delivered, with nothing to join.
+            return StreamingResponse(iter(()), media_type="text/event-stream")
+        namespaces: list[tuple[str, str | int | float | None]] = [
+            ("namespace", value) for value in request.query_params.getlist("namespace")
+        ]
+        run_path = f"/threads/{thread_id}/runs/{run_id}"
+        # A run the message steered into is someone else's to stop.
+        cancel = "1" if self.on_disconnect == "cancel" and not steered else "0"
+        # Joined from its first event, which a resumable run keeps for a join.
+        joined = await thread.stream(
+            f"{run_path}/stream",
+            query=httpx2.QueryParams([*namespaces, ("cancel_on_disconnect", cancel)]),
+            last_event_id="-",
+        )
+        if joined.status_code >= 400:
+            return joined
+        # A reconnect rejoins with the namespaces it asked for, as MDA's own runs/stream says.
+        reconnect = httpx2.QueryParams(namespaces)
+        joined.headers["location"] = f"{run_path}/stream" + (f"?{reconnect}" if reconnect else "")
+        joined.headers["content-location"] = run_path
+        if steered:
+            joined.headers[STEERED_HEADER] = "true"
+        return joined
+
+    @staticmethod
+    def _started(reply: CommandReply) -> tuple[str | None, bool] | Response:
+        """From ``run.start``'s protocol v2 answer, the run the message is in and whether
+        it was steered there, or the error a runs API client gets as an HTTP status."""
+        if reply.status >= 400:
+            return Response(reply.content, status_code=reply.status, media_type=reply.media_type)
+        try:
+            answer = json.loads(reply.content)
+        except json.JSONDecodeError, UnicodeDecodeError:
+            logger.warning(
+                "A run start answered with something other than JSON",
+                exc_info=True,
+                extra={"start": {"status_code": reply.status}},
+            )
+            answer = None
+        if not isinstance(answer, dict):
+            return JSONResponse({"detail": "the run could not be started"}, status_code=502)
+        if answer.get("type") == "error":
+            status = answer.get("status")
+            if not isinstance(status, int):
+                # A channel's thread that can't be written to, or the runtime refused.
+                status = 409 if answer.get("error") == "invalid_argument" else 502
+            return JSONResponse({"detail": answer.get("message")}, status_code=status)
+        result = answer.get("result")
+        result = result if isinstance(result, dict) else {}
+        run_id = result.get("run_id")
+        steered = result.get("steered") is True
+        return (run_id if isinstance(run_id, str) and run_id else None), steered
+
+
+class ThreadOnRuntime:
+    """One thread on the runtime it runs on, read for a caller allowed to read it."""
+
+    def __init__(self, thread: IndexedThread) -> None:
+        self.thread = thread
+
+    @classmethod
+    async def readable(cls, thread_id: str, principal: Principal) -> ThreadOnRuntime:
+        """The thread, when ``principal`` may read it; 404 for everyone else alike."""
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            raise HTTPException(404, "thread not found")
+        principal.assert_can_read(thread.metadata)
+        return cls(thread)
+
+    async def runs(self, path: str, params: httpx2.QueryParams | None = None) -> Response:
+        """One of the thread's runs, or a page of them, each as a client may see it
+        (:meth:`MdaRun.client_view`)."""
+        async with self._client(held=False) as client:
+            try:
+                response = await client.get(path, params=params)
+            except httpx2.TransportError as exc:
+                raise HTTPException(502, _UNREACHABLE) from exc
+        if response.is_error:
+            return Response(
+                response.content,
+                status_code=response.status_code,
+                headers=self.client_headers(response),
+            )
+        answer = _run_or_runs.validate_json(response.content)
+        return JSONResponse(
+            [MdaRun.client_view(run) for run in answer]
+            if isinstance(answer, list)
+            else MdaRun.client_view(answer),
+            status_code=response.status_code,
+        )
+
+    async def stream_as_sent(self, path: str, request: Request) -> Response:
+        """A read held open for ``request``, with its query and ``Last-Event-ID`` as sent."""
+        return await self.stream(
+            path, query=request.url.query, last_event_id=request.headers.get("last-event-id")
+        )
+
+    async def join(self, run_id: str, request: Request) -> Response:
+        """Rejoin one of the thread's runs, and only one of the thread's, to watch it.
+
+        MDA skips its own check that the run is the thread's for a join that sends
+        ``Last-Event-ID``, so the run is read here first. The join never cancels the run
+        when the caller leaves, whatever ``cancel_on_disconnect`` it sent: a caller who may
+        only read the thread must not stop its run, which the cancel route checks.
+        """
+        run_path = f"/threads/{self.thread.thread_id}/runs/{run_id}"
+        async with self._client(held=False) as client:
+            try:
+                run = await client.get(run_path)
+            except httpx2.TransportError as exc:
+                raise HTTPException(502, _UNREACHABLE) from exc
+        if run.is_error:
+            return Response(
+                run.content, status_code=run.status_code, headers=self.client_headers(run)
+            )
+        query = [
+            (name, value)
+            for name, value in request.query_params.multi_items()
+            if name != "cancel_on_disconnect"
+        ]
+        return await self.stream(
+            f"{run_path}/stream",
+            query=httpx2.QueryParams([*query, ("cancel_on_disconnect", "0")]),
+            last_event_id=request.headers.get("last-event-id"),
+        )
+
+    async def stream(
+        self, path: str, *, query: httpx2.QueryParams | str, last_event_id: str | None
+    ) -> Response:
+        """A read held open, streamed back until the runtime or the caller ends it, its
+        events as a client may read them (:class:`_ClientEvents`).
+
+        A refusal comes back with the runtime's status, before anything streams.
+        """
+        client = self._client(held=True)
+        headers = {"accept": "text/event-stream"}
+        if last_event_id is not None:
+            headers["last-event-id"] = last_event_id
+        try:
+            response = await client.send(
+                client.build_request("GET", path, params=query, headers=headers), stream=True
+            )
+        except BaseException as exc:
+            await client.aclose()
+            if isinstance(exc, httpx2.TransportError):
+                raise HTTPException(502, _UNREACHABLE) from exc
+            raise
+        if response.is_error:
+            try:
+                content = await response.aread()
+            finally:
+                await response.aclose()
+                await client.aclose()
+            return Response(
+                content, status_code=response.status_code, headers=self.client_headers(response)
+            )
+
+        async def events() -> AsyncIterator[bytes]:
+            readable = _ClientEvents()
+            try:
+                async for chunk in response.aiter_bytes():
+                    if sent := readable.feed(chunk):
+                        yield sent
+                if rest := readable.rest():
+                    yield rest
+            finally:
+                await response.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            events(), status_code=response.status_code, headers=self.client_headers(response)
+        )
+
+    def _client(self, *, held: bool) -> httpx2.AsyncClient:
+        """The runtime's client. Nothing here makes the thread on MDA first, a call that
+        costs every read: a run's start made sure of its thread, a run can't be on a thread
+        MDA lacks, and the thread page's ``/state`` read makes the backend's own again."""
+        if self.thread.runtime == "mda":
+            mda = RUNTIMES.mda_runtime
+            return mda.stream_http if held else mda.read_http
+        # Threads from before MDA, which this deployment's Agent Server keeps.
+        return httpx2.AsyncClient(
+            base_url=langgraph_url(),
+            headers=langgraph_proxy_headers(),
+            timeout=httpx2.Timeout(None) if held else _LOOPBACK_TIMEOUT,
+            # A pool of their own when held, so open tabs never starve other requests.
+            transport=pooled_transport("loopback-stream", limits=_LOOPBACK_STREAMS)
+            if held
+            else pooled_transport(),
+        )
+
+    @staticmethod
+    def client_headers(response: httpx2.Response) -> dict[str, str]:
+        """The runtime's response headers a client reads, its paths resolving under the
+        SDK's ``apiUrl``: the runtime's ``/threads/...`` path, whatever came before it."""
+        headers = {
+            name: value
+            for name in _RETURNED_RESPONSE_HEADERS
+            if (value := response.headers.get(name)) is not None
+        }
+        for name in ("location", "content-location"):
+            if (value := response.headers.get(name)) is not None:
+                start = value.find("/threads/")
+                headers[name] = value[start:] if start >= 0 else value
+        return headers
