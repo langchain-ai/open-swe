@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import anthropic
 import httpx
 import httpx2
 import openai
@@ -499,6 +500,41 @@ async def test_a_model_the_workspace_cannot_use_says_so() -> None:
     assert isinstance(content, str) and "OpenAI returned: The model does not exist." in content
     assert attempts.models == [_ANTHROPIC]
     assert is_model_failure_reply(answer.result[0])
+
+
+@pytest.mark.parametrize("fallback", [None, lambda: _OPENAI])
+@pytest.mark.parametrize("error_type", [openai.APIStatusError, anthropic.APIStatusError])
+async def test_a_gateway_spend_limit_ends_with_an_actionable_reply(
+    fallback: Callable[[], BaseChatModel] | None,
+    error_type: type[openai.APIStatusError] | type[anthropic.APIStatusError],
+) -> None:
+    body = {"error": {"message": "request blocked by gateway policies: private-policy"}}
+    response = httpx2.Response(
+        402, request=httpx2.Request("POST", "https://gateway.example.com"), json=body
+    )
+    attempts = _Attempts(error_type("request rejected", response=response, body=body))
+
+    answer = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]), attempts, fallback
+    )
+
+    content = answer.result[0].text
+    assert "spending limit" in content
+    assert "admin" in content
+    assert "private-policy" not in content
+    assert is_model_failure_reply(answer.result[0])
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_a_gateway_rate_limit_still_retries() -> None:
+    attempts = _Attempts(
+        _status_error(429, {"error": {"message": "request blocked by gateway policies: rate"}})
+    )
+
+    answer = await _fallback_call(attempts)
+
+    assert answer.result[0].content == "answered"
+    assert attempts.models == [_ANTHROPIC, _OPENAI]
 
 
 async def test_a_run_whose_login_lapsed_tells_the_person_instead_of_calling(

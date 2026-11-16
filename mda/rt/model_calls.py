@@ -207,6 +207,15 @@ def _nested_str(data: dict[str, Any], *keys: str) -> str | None:
 
 def model_access_message(exc: BaseException) -> str | None:
     """What to tell the person when the workspace may not use the call's model."""
+    if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
+        provider_message = _nested_str(_error_body(exc), "error", "message") or str(exc)
+        if exc.status_code == 402 and "blocked by gateway policies" in provider_message.lower():
+            return (
+                "The model gateway blocked this request because a spending limit was reached. "
+                "Ask a LangSmith organization admin to review the gateway's cost policies "
+                "and usage before retrying. Sending the same request again will not "
+                "resolve the limit."
+            )
     if isinstance(exc, anthropic.BadRequestError):
         body = _error_body(exc)
         if _nested_str(body, "error", "details", "error_code") == "model_not_available":
@@ -252,9 +261,11 @@ async def call_with_fallback(
     """
     if use_gateway and (unavailable := await RUN_GATEWAY.unavailable()) is not None:
         return _failure_reply(unavailable, "model_access")
-    if fallback is None:
-        return await handler(request)
-    schedule = tuple(BACKOFF_SCHEDULE if backoff_schedule is None else backoff_schedule)
+    schedule = (
+        tuple(BACKOFF_SCHEDULE if backoff_schedule is None else backoff_schedule)
+        if fallback is not None
+        else ()
+    )
     clock = asyncio.get_running_loop()
     deadline = clock.time() + budget.total_seconds()
     fallback_request: ModelRequest | None = None
@@ -270,7 +281,7 @@ async def call_with_fallback(
             if clock.time() + delay >= deadline:
                 break
         try:
-            if attempt % 2 == 1 and fallback_unbuilt:
+            if attempt % 2 == 1 and fallback_unbuilt and fallback is not None:
                 fallback_unbuilt = False
                 try:
                     fallback_request = request.override(model=fallback())
@@ -293,7 +304,7 @@ async def call_with_fallback(
                     extra={"model_access_error": exception_fields(exc)},
                 )
                 return _failure_reply(message, "model_access")
-            if not is_transient(exc):
+            if fallback is None or not is_transient(exc):
                 raise
             last = exc
             # The next attempt answers instead: what this one streamed is taken back.
