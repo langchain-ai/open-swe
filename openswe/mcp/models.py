@@ -45,8 +45,8 @@ class MCPConnection(BaseModel):
         """Raise for a response the MCP transport would reduce to a bare protocol error."""
         return
 
-    def unusable_tools(self, meta: object) -> set[str]:
-        """Tools a listing names but marks, in its ``_meta``, as unusable for the caller."""
+    async def unusable_tools(self) -> set[str]:
+        """Tools the server lists that the caller cannot use, left out of discovery."""
         return set()
 
     @property

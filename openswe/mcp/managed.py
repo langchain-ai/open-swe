@@ -60,7 +60,6 @@ KITS_PATH = "/v1/managed-tools/kits"
 ME_KIT = "me"
 KIT_CONNECTION = "lmt"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
-_MISSING_CREDENTIALS_META = "com.langchain.langsmith/missingCredentials"
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
 _LISTING_FRESH_FOR = timedelta(minutes=1)
@@ -234,9 +233,29 @@ def _wrapped[E: BaseException](error: BaseException | None, kind: type[E]) -> E 
     return _wrapped(error.__cause__, kind)
 
 
+class _KitServer(BaseModel):
+    """One server a kit uses, from ``GET /kits/{kit}/connections``: whether the caller
+    can use it, and the kit's tools that call it."""
+
+    connected: bool
+    # "unavailable" means LangSmith could not check, not that the caller is unconnected.
+    credential_status: str | None = None
+    tool_names: list[str] = []
+
+    @property
+    def unknown(self) -> bool:
+        return self.credential_status == "unavailable"
+
+
+class _KitServerPage(BaseModel):
+    items: list[_KitServer] = []
+    next_cursor: str | None = None
+
+
 class _KitConnection(MCPConnection):
     """The kit's route, carrying the caller's current credential in memory, never stored."""
 
+    kit: str
     headers: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
     connected_only: bool = False
     """Leave out the tools of services the caller has no credential for, which nobody
@@ -258,17 +277,42 @@ class _KitConnection(MCPConnection):
         if response.status_code in (409, 428):
             raise MCPCredentialMissing(admin_only=response.status_code == 409)
 
-    def unusable_tools(self, meta: object) -> set[str]:
-        if not self.connected_only or not isinstance(meta, dict):
+    async def unusable_tools(self) -> set[str]:
+        if not self.connected_only:
             return set()
-        entries = meta.get(_MISSING_CREDENTIALS_META)
-        return {
-            tool["name"]
-            for entry in (entries if isinstance(entries, list) else [])
-            if isinstance(entry, dict)
-            for tool in (entry.get("tools") if isinstance(entry.get("tools"), list) else [])
-            if isinstance(tool, dict) and isinstance(tool.get("name"), str)
-        }
+        servers = await self._servers()
+        return {name for server in servers if not server.connected for name in server.tool_names}
+
+    async def _servers(self) -> list[_KitServer]:
+        """The caller's connection to each server the kit uses. A failed read, or a status
+        LangSmith could not check, fails discovery rather than caching a guess as the
+        kit's tools."""
+        path = f"{KITS_PATH}/{quote(self.kit, safe='')}/connections"
+        servers: list[_KitServer] = []
+        async with mcp_http_client(
+            langsmith_issuer(), timeout=httpx2.Timeout(_TIMEOUT_SECONDS)
+        ) as client:
+            cursor: str | None = None
+            for _ in range(_MAX_PAGES):
+                params = {"page_size": "100", **({"cursor": cursor} if cursor else {})}
+                response = await client.get(
+                    langsmith_issuer() + path, headers=self.headers, params=params
+                )
+                if not response.is_success:
+                    raise MCPDiscoveryError(
+                        f"Could not check which services the kit's caller has connected ({_failure(response)})"
+                    )
+                page = _KitServerPage.model_validate(response.json())
+                servers.extend(page.items)
+                if (cursor := page.next_cursor) is None:
+                    break
+            else:
+                raise MCPDiscoveryError("LangSmith returned too many pages of kit connections")
+        if any(server.unknown for server in servers):
+            raise MCPDiscoveryError(
+                "LangSmith could not check which services the kit's caller has connected"
+            )
+        return servers
 
 
 class ManagedTools(ABC):
@@ -459,6 +503,7 @@ class ManagedTools(ABC):
         return [
             _KitConnection(
                 name=KIT_CONNECTION,
+                kit=kit,
                 url=f"{langsmith_issuer()}{KITS_PATH}/{quote(kit, safe='')}/mcp",
                 revision=revision,
                 headers=headers,

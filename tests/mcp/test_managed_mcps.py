@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from mcp.types import Tool
 
 from openswe.mcp import cards, managed, routes, runtime
-from openswe.mcp.transport import MCPCredentialMissing
+from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError
 from openswe.users.models import User
 
 ORIGINAL_PAGES = managed.ManagedTools._pages
@@ -301,19 +301,12 @@ async def test_the_bot_calls_its_own_kit_as_its_profile_with_robins_key(monkeypa
 async def test_the_bot_leaves_out_tools_of_services_its_profile_has_not_connected(monkeypatch):
     from mcp.types import ListToolsResult
 
-    meta = {
-        managed._MISSING_CREDENTIALS_META: [
-            {"slug": "notion", "tools": [{"name": "notion_search"}]},
-        ]
-    }
     pages = [
         ListToolsResult(
             tools=[Tool(name="linear_list_issues", input_schema={"type": "object"})],
             next_cursor="2",
         ),
-        ListToolsResult(
-            tools=[Tool(name="notion_search", input_schema={"type": "object"})], meta=meta
-        ),
+        ListToolsResult(tools=[Tool(name="notion_search", input_schema={"type": "object"})]),
     ]
 
     class Client:
@@ -326,15 +319,46 @@ async def test_the_bot_leaves_out_tools_of_services_its_profile_has_not_connecte
         async def list_tools_mcp(self, *, cursor=None, cache_mode="use"):
             return pages[0 if cursor is None else 1]
 
+    def connections(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == f"/v1/managed-tools/kits/{BOT_KIT_ID}/connections"
+        if request.url.params.get("cursor") == "2":
+            notion = {"id": "notion", "connected": False, "tool_names": ["notion_search"]}
+            return httpx.Response(200, json={"items": [notion]})
+        linear = {"id": "linear", "connected": True, "tool_names": ["linear_list_issues"]}
+        return httpx.Response(200, json={"items": [linear], "next_cursor": "2"})
+
     monkeypatch.setattr(runtime, "_client", lambda record: Client())
+    monkeypatch.setattr(
+        managed,
+        "mcp_http_client",
+        lambda url, timeout: httpx.AsyncClient(transport=httpx.MockTransport(connections)),
+    )
     bot = (await managed.BotTools().connections())[0]
     assert [tool.name for tool in await runtime._discover_tools(bot)] == ["linear_list_issues"]
+    # A person can connect what they lack, so their kit keeps every tool.
     private_thread(monkeypatch, "alice")
     person = (await managed.PersonalTools("alice").connections())[0]
     assert [tool.name for tool in await runtime._discover_tools(person)] == [
         "linear_list_issues",
         "notion_search",
     ]
+
+
+async def test_the_bot_fails_discovery_when_langsmith_cannot_check_its_connections(monkeypatch):
+    """An unchecked status would otherwise cache a guess as the bot's tools."""
+    unavailable = {"id": "notion", "connected": False, "credential_status": "unavailable"}
+    monkeypatch.setattr(
+        managed,
+        "mcp_http_client",
+        lambda url, timeout: httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(200, json={"items": [unavailable]})
+            )
+        ),
+    )
+    bot = (await managed.BotTools().connections())[0]
+    with pytest.raises(MCPDiscoveryError, match="could not check"):
+        await bot.unusable_tools()
 
 
 @pytest.mark.parametrize(
@@ -345,7 +369,7 @@ async def test_a_missing_credential_tells_the_model_what_to_do(status, expected)
     """MCP transports reduce LMT's 428 and 409 to a bare protocol error, so the kit's
     connection raises its own from the HTTP response, which the tool call explains."""
     kit = managed._KitConnection(
-        name="lmt", url="https://lmt.example/mcp", revision="r", updated_at=""
+        name="lmt", kit="kit", url="https://lmt.example/mcp", revision="r", updated_at=""
     )
     await kit.check_response(httpx2.Response(200))
     try:

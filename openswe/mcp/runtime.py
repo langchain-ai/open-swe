@@ -162,17 +162,16 @@ def _client(record: MCPConnection) -> Client[SSETransport | StreamableHttpTransp
 
 async def _discover_tools(record: MCPConnection) -> list[Tool]:
     tools: list[Tool] = []
-    unusable: set[str] = set()
     async with _client(record) as client:
         cursor: str | None = None
         for _ in range(_MAX_TOOL_PAGES):
             page = await client.list_tools_mcp(cursor=cursor, cache_mode="bypass")
             tools.extend(page.tools)
-            unusable |= record.unusable_tools(page.meta)
             if (cursor := page.next_cursor) is None:
                 break
         else:
             raise MCPDiscoveryError("MCP server returned too many pages of tools")
+    unusable = await record.unusable_tools()
     tools = [tool for tool in tools if tool.name not in unusable]
     if len({tool.name for tool in tools}) != len(tools):
         raise MCPDiscoveryError("MCP server returned duplicate tool names")
