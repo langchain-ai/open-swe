@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
 
 import { api } from "@/lib/api"
+import { copyText } from "@/features/reviews/lib/copyText"
 import { RecentReviewPagesMenu } from "./RecentReviewPagesMenu"
 import { reviewQueries, type PullRequestRef } from "./queries"
 
@@ -93,9 +94,20 @@ export function PullRequestTitle({ pr }: { pr: PullRequestRef }) {
       <h1 className="flex min-w-0 items-center">
         <RecentReviewPagesMenu pr={pr}>
           {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
-          <span className="font-normal text-secondary"> #{pr.number}</span>
         </RecentReviewPagesMenu>
       </h1>
+      <Button
+        type="button"
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={`Copy PR number #${pr.number}`}
+        title="Copy PR number"
+        className="h-auto shrink-0 border-0 px-space-1 py-0 font-normal tabular-nums"
+        onClick={() => copyText(`#${pr.number}`, "Copied the PR number")}
+      >
+        #{pr.number}
+      </Button>
       {detail && (
         <IconButton
           ref={editButton}

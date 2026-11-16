@@ -178,7 +178,20 @@ test.describe("review page", () => {
       .filter({ hasText: "Add constant modules" });
     const menu = title.getByRole("link", { name: /Add constant modules/ });
     await expect(menu).toContainText("Add constant modules");
-    await expect(menu).toContainText(`#${pr.number}`);
+    await expect(menu).not.toContainText(`#${pr.number}`);
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
+    const number = page.getByRole("button", {
+      name: `Copy PR number #${pr.number}`,
+      exact: true,
+    });
+    await expect(number).toHaveText(`#${pr.number}`);
+    await number.click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(`#${pr.number}`);
+    await expect(page.getByRole("menu")).toBeHidden();
     const link = page.getByRole("link", {
       name: "Open on GitHub",
       exact: true,
