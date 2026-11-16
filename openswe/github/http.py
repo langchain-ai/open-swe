@@ -795,21 +795,25 @@ class RepoClient:
         permission = payload.get("permission") if isinstance(payload, dict) else None
         return permission in {"admin", "maintain", "write"}
 
-    async def open_pull_for_branch(self, branch: str) -> dict[str, Any] | None:
-        """The first open pull request whose head is ``branch`` in this repository."""
+    async def open_pull_for_branch(
+        self, branch: str, *, strict: bool = False
+    ) -> dict[str, Any] | None:
+        """The first open PR headed by ``branch``; ``strict`` raises on lookup failures."""
         try:
             payload = await self.get(
                 "pulls", {"head": f"{self.owner}:{branch}", "state": "open", "per_page": "1"}
             )
+            if not isinstance(payload, list) or (payload and not isinstance(payload[0], dict)):
+                raise ValueError("GitHub answered open pull requests without a list of objects")
+            return payload[0] if payload else None
         except httpx2.HTTPError, ValueError:
+            if strict:
+                raise
             logger.warning(
                 "Failed to find open PR for branch",
                 extra={"repo_full_name": self.full_name, "branch": branch},
             )
             return None
-        if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-            return payload[0]
-        return None
 
     async def info(self, *, retry_rate_limits: bool = True) -> dict[str, Any]:
         """The repository itself: default branch, merge settings, visibility."""

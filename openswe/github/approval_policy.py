@@ -1,7 +1,8 @@
 """The ``Robin Approves`` check: Robin's one gate on whether a pull request may merge yet.
 
-Robin posts this check only where the target branch requires it, so anything Robin
-decides should hold back a merge goes through it, whoever has approved. Its first
+Robin posts this check where the target branch requires it, or for stacked pull
+requests where the repository default branch requires it, so anything Robin decides
+should hold back a merge goes through it, whoever has approved. Its first
 rule closes a gap in GitHub's own: GitHub never lets a pull request's author approve
 it, but when Robin authors a pull request as itself (an Ask channel) the person who
 asked for it is not the author. Such a pull request passes
@@ -192,6 +193,27 @@ class PullRequestApproval:
             lines.append("No approval of the latest commit yet.")
         return False, "\n\n".join(lines)
 
+    @staticmethod
+    async def should_publish(pull: PullRequestClient, base: str) -> bool:
+        """Publish for opted-in targets or stacks in an opted-in repository."""
+        owner, repo = pull.repo.owner, pull.repo.name
+        if (
+            await Repository.requires_approval_check(owner, repo, base, include_any_source=True)
+            is True
+        ):
+            return True
+        default_branch = await Repository.resolve_default_branch(owner, repo)
+        if not default_branch or default_branch == base:
+            return False
+        if (
+            await Repository.requires_approval_check(
+                owner, repo, default_branch, include_any_source=True
+            )
+            is not True
+        ):
+            return False
+        return await pull.repo.open_pull_for_branch(base, strict=True) is not None
+
     @classmethod
     async def evaluate(
         cls, owner: str, repo: str, number: int, *, force_publish: bool = False
@@ -204,13 +226,7 @@ class PullRequestApproval:
             if payload.get("state") != "open":
                 return
             base = (payload.get("base") or {}).get("ref")
-            if not base or (
-                not force_publish
-                and await Repository.requires_approval_check(
-                    owner, repo, base, include_any_source=True
-                )
-                is not True
-            ):
+            if not base or (not force_publish and not await cls.should_publish(pull, base)):
                 return
             approval = await cls.read(pull, payload)
             if not approval.head_sha:

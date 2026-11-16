@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx2
 import pytest
 
 from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.ci import RequiredCheck
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
@@ -173,17 +174,44 @@ async def test_the_check_is_posted_where_the_base_requires_it(
     assert pull.comment.await_count == (conclusion == "failure")
 
 
-@pytest.mark.parametrize("required", [False, None])
+@pytest.mark.parametrize(
+    ("required", "default_required", "default_branch", "stacked", "published"),
+    [
+        pytest.param(False, True, "main", True, True, id="stacked-target"),
+        pytest.param(False, True, "main", False, False, id="non-stacked-target"),
+        pytest.param(None, True, "main", True, True, id="unknown-stacked-target"),
+        pytest.param(None, True, "main", False, False, id="unknown-non-stacked-target"),
+        pytest.param(False, False, "main", True, False, id="not-opted-in"),
+        pytest.param(False, None, "main", True, False, id="unknown-repository"),
+        pytest.param(None, None, "main", True, False, id="unknown-requirements"),
+        pytest.param(False, True, "stack-base", True, False, id="target-is-default"),
+        pytest.param(False, True, "", True, False, id="missing-default"),
+    ],
+)
 @pytest.mark.parametrize("force_publish", [False, True])
 async def test_optional_publication_does_not_override_the_approval_verdict(
     monkeypatch: pytest.MonkeyPatch,
     required: bool | None,
+    default_required: bool | None,
+    default_branch: str,
+    stacked: bool,
+    published: bool,
     force_publish: bool,
 ) -> None:
     pull = _client(monkeypatch, "open", _ROBIN)
-    monkeypatch.setattr(Repository, "requires_approval_check", AsyncMock(return_value=required))
+    pull.pull.return_value["base"]["ref"] = "stack-base"
+    pull.repo.get = AsyncMock(return_value=[{"number": 6}] if stacked else [])
+    pull.repo.open_pull_for_branch = RepoClient.open_pull_for_branch.__get__(pull.repo)
+    monkeypatch.setattr(
+        Repository, "resolve_default_branch", AsyncMock(return_value=default_branch)
+    )
+    monkeypatch.setattr(
+        Repository,
+        "requires_approval_check",
+        AsyncMock(side_effect=[required, default_required]),
+    )
     result = await PullRequestApproval.evaluate("acme", "app", 7, force_publish=force_publish)
-    if force_publish:
+    if force_publish or published:
         assert result is not None and result[0] is False
         (check,), _ = pull.repo.create_check_run.call_args
         assert check["conclusion"] == "failure"
@@ -195,6 +223,34 @@ async def test_optional_publication_does_not_override_the_approval_verdict(
         assert result is None
         pull.repo.create_check_run.assert_not_awaited()
         pull.comment.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ["http", "json", "malformed"])
+async def test_failed_stack_lookup_can_be_retried_before_publishing(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    pull = _client(monkeypatch, "open", _ROBIN)
+    pull.pull.return_value["base"]["ref"] = "stack-base"
+    response = httpx2.Response(503, request=httpx2.Request("GET", "https://api.github.com"))
+    error = GitHubError(response) if failure == "http" else ValueError("Invalid JSON")
+    failed_lookup = {} if failure == "malformed" else error
+    pull.repo.get = AsyncMock(side_effect=[failed_lookup, failed_lookup, [{"number": 6}]])
+    pull.repo.open_pull_for_branch = RepoClient.open_pull_for_branch.__get__(pull.repo)
+    monkeypatch.setattr(Repository, "resolve_default_branch", AsyncMock(return_value="main"))
+    monkeypatch.setattr(
+        Repository, "requires_approval_check", AsyncMock(side_effect=[False, True, False, True])
+    )
+    assert await pull.repo.open_pull_for_branch("stack-base") is None
+    job = SimpleNamespace(payload={"owner": "acme", "repo": "app", "number": 7})
+    with pytest.raises(GitHubError if failure == "http" else ValueError):
+        await PullRequestApproval.evaluate_job(job)
+    pull.repo.create_check_run.assert_not_awaited()
+    pull.comment.assert_not_awaited()
+    await PullRequestApproval.evaluate_job(job)
+    (check,), _ = pull.repo.create_check_run.call_args
+    assert check["conclusion"] == "failure"
+    (note,), _ = pull.comment.call_args
+    assert "does not pass" in note
 
 
 @pytest.mark.parametrize(
