@@ -611,6 +611,7 @@ function AnalyticsCoverage({
             className="shrink-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             leftDecorator={ArrowClockwiseIcon}
             disabled={refreshing}
+            loading={refreshing}
             onClick={(event) => {
               event.preventDefault()
               onRefresh()

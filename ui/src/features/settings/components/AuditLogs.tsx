@@ -359,6 +359,7 @@ export function AuditLogs() {
             variant="outlined"
             leftDecorator={ArrowClockwiseIcon}
             disabled={logs.isFetching}
+            loading={logs.isFetching}
             onClick={() => void logs.refetch()}
           >
             Reload

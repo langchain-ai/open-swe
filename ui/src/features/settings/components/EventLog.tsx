@@ -397,6 +397,7 @@ export function EventLog() {
             variant="outlined"
             leftDecorator={ArrowClockwiseIcon}
             disabled={events.isFetching}
+            loading={events.isFetching}
             onClick={() => void events.refetch()}
           >
             Reload

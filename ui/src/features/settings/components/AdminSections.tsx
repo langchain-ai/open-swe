@@ -7,6 +7,7 @@ import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 
@@ -131,6 +132,8 @@ export function RunningAgentsSection() {
             variant="outlined"
             onClick={() => void threads.refetch()}
             disabled={threads.isFetching}
+            loading={threads.isFetching}
+            leftDecorator={ArrowClockwiseIcon}
           >
             {threads.isFetching ? "Refreshing…" : "Refresh"}
           </Button>

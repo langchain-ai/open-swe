@@ -7,6 +7,7 @@ import {
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Button } from "@langchain/macaw-components/Button"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Icon } from "@langchain/macaw-components/Icon"
@@ -466,7 +467,9 @@ export function OpenPullRequests({
               size="xs"
               color="secondary"
               variant="outlined"
+              leftDecorator={ArrowClockwiseIcon}
               disabled={query.isFetching}
+              loading={query.isFetching}
               onClick={() => {
                 setSettled({})
                 for (const [

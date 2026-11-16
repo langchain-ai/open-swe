@@ -36,9 +36,11 @@ function Notice({ children, error }: { children: ReactNode; error?: boolean }) {
 
 function PolicyForm({
   settings,
+  isRefreshing,
   onReload,
 }: {
   settings: IncidentSettingsPayload
+  isRefreshing: boolean
   onReload: () => void
 }) {
   const queryClient = useQueryClient()
@@ -167,7 +169,8 @@ function PolicyForm({
             variant="outlined"
             leftDecorator={ArrowsClockwiseIcon}
             onClick={onReload}
-            disabled={save.isPending}
+            loading={isRefreshing}
+            disabled={save.isPending || isRefreshing}
           >
             Reload settings
           </Button>
@@ -279,6 +282,7 @@ export function IncidentSettings() {
       <PolicyForm
         key={formVersion}
         settings={settings.data}
+        isRefreshing={settings.isFetching}
         onReload={() => {
           void settings.refetch().then((result) => {
             if (result.isSuccess) setFormVersion((version) => version + 1)

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Card } from "@langchain/macaw-components/Card"
 import { Button } from "@langchain/macaw-components/Button"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
@@ -36,7 +37,10 @@ export function GatewaySpend({ userId }: { userId: string }) {
         <Button
           variant="outlined"
           size="sm"
+          color="secondary"
+          leftDecorator={ArrowClockwiseIcon}
           disabled={spend.isFetching}
+          loading={spend.isFetching}
           onClick={() => void spend.refetch()}
         >
           Refresh

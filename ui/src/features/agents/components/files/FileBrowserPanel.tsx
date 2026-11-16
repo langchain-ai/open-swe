@@ -242,6 +242,7 @@ export function FileBrowserPanel({
           color="secondary"
           variant="plain"
           loading={isPending}
+          disabled={isPending}
           onClick={() => {
             refresh()
             onRefreshSelectedFile?.()

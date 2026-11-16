@@ -1,6 +1,5 @@
 import { CheckIcon, GlobeRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
-import { SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import {
   Typeahead,
@@ -92,7 +91,8 @@ export function RefreshSlackChannels({
       variant="plain"
       size="xs"
       disabled={isRefreshing}
-      leftDecorator={isRefreshing ? SpinnerIcon : ArrowClockwiseIcon}
+      leftDecorator={ArrowClockwiseIcon}
+      loading={isRefreshing}
       onClick={() => refresh()}
     >
       {isRefreshing ? "Refreshing channels…" : "Refresh channels"}
