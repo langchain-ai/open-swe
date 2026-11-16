@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.users.models import UserIdentity
 from openswe.users.records import UnknownUser, user_id_for_login
 
 type OAuthProvider = Literal["langsmith", "langsmith_login"]
@@ -41,6 +42,25 @@ class OAuthCredential(Base):
     login_authorized_org_id: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+    async def signed_in_since(self, since: datetime) -> bool:
+        """Require an interactive sign-in preceding this credential snapshot."""
+        if self.updated_at is None:
+            return False
+        async with postgres.session() as session:
+            return (
+                await session.scalar(
+                    select(UserIdentity.user_id)
+                    .where(
+                        UserIdentity.user_id == self.user_id,
+                        UserIdentity.provider == "langsmith",
+                        UserIdentity.last_seen_at >= since,
+                        UserIdentity.last_seen_at <= self.updated_at,
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
 
     async def authorize_login(self, org_id: str, until: datetime) -> bool:
         async with postgres.session() as session:

@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
 from runtime_api.loop import GatewayCredential
+from sqlalchemy import update
 
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
@@ -21,11 +22,13 @@ from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
 from openswe.dashboard.profiles import router as profiles_router
 from openswe.dashboard.user_preferences import USER_PREFERENCES
+from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.github import dashboard_routes
 from openswe.review.routes import router as review_router
 from openswe.threads.principals import Principal
 from openswe.users import AccountConflict, UnauthorizedUser, User
+from openswe.users.models import UserIdentity
 
 ISSUER = "https://api.smith.langchain.com"
 ALLOWED_ORG = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
@@ -455,6 +458,71 @@ async def test_expired_login_tokens_refresh_and_revoked_grants_fail_closed(
         assert stored is not None and decrypt_token(stored.encrypted_access_token) == "access"
         assert (await client.get("/dashboard/api/me")).status_code == 200
     assert server.refreshes == 1
+
+
+@pytest.mark.parametrize("expired", [False, True])
+@pytest.mark.parametrize("older", [False, True])
+async def test_workspace_consent_requires_interactive_sign_in(
+    langsmith_client, expired: bool, older: bool
+) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    subject = oauth.decode_session(exchanged.json()["session"])["sub"]
+    credential = await load_credential("langsmith_login", subject)
+    assert credential is not None
+    signed_in_at = langsmith_login.LANGSMITH_WORKSPACE_LOGIN_SINCE - timedelta(seconds=int(older))
+    async with postgres.session() as session:
+        await session.execute(
+            update(UserIdentity)
+            .where(
+                UserIdentity.user_id == credential.user_id,
+                UserIdentity.provider == "langsmith",
+            )
+            .values(last_seen_at=signed_in_at)
+        )
+    login = langsmith_login.LangSmithLogin()
+    await login.require_configured()
+    await login.save(
+        subject,
+        {"access_token": "access", "expires_in": 1 if expired else 3600},
+        ISSUER + "/oauth/token",
+        previous=credential,
+        authorized_until=datetime.now(UTC) + timedelta(seconds=60),
+    )
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    assert (await client.get("/dashboard/api/me")).status_code == (401 if older else 200)
+    assert server.refreshes == int(expired and not older)
+    assert await langsmith_oauth.langsmith_access_token(subject) == (None if older else "access")
+    if older:
+        assert await load_credential("langsmith_login", subject) is not None
+        fresh = await server.exchange(client, await server.desktop_login(client))
+        client.cookies.set(oauth.COOKIE_NAME, fresh.json()["session"])
+        assert (await client.get("/dashboard/api/me")).status_code == 200
+        assert await langsmith_oauth.langsmith_access_token(subject) == "access"
+
+
+async def test_incomplete_sign_in_does_not_authorize_the_previous_grant(langsmith_client) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    subject = oauth.decode_session(exchanged.json()["session"])["sub"]
+    previous = await load_credential("langsmith_login", subject)
+    assert previous is not None
+    await User.sign_in(
+        "langsmith",
+        server.subject,
+        authorization=LangSmithAccount(sub=server.subject, ls_org_id=ALLOWED_ORG),
+    )
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    assert (await client.get("/dashboard/api/me")).status_code == 401
+    assert server.refreshes == 0
+    assert await load_credential("langsmith_login", subject) is not None
+    fresh = await server.exchange(client, await server.desktop_login(client))
+    stored = await load_credential("langsmith_login", subject)
+    assert stored is not None and stored.created_at == previous.created_at
+    assert not await previous.signed_in_since(langsmith_login.LANGSMITH_WORKSPACE_LOGIN_SINCE)
+    assert await load_credential("langsmith_login", subject) is not None
+    client.cookies.set(oauth.COOKIE_NAME, fresh.json()["session"])
+    assert (await client.get("/dashboard/api/me")).status_code == 200
 
 
 async def test_changed_provider_subject_cannot_rebind_a_session(langsmith_client) -> None:

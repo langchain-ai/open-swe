@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LANGSMITH_AUTHORIZATION_TTL = timedelta(seconds=60)
+LANGSMITH_WORKSPACE_LOGIN_SINCE = datetime(2026, 11, 12, 4, 15, 14, tzinfo=UTC)
 # The callback already registered on the LangSmith OAuth client.
 LANGSMITH_LOGIN_CALLBACK_PATH = "/dashboard/api/langsmith/callback"
 LANGSMITH_STATE_COOKIE_PATH = "/dashboard/api/langsmith"
@@ -356,6 +357,10 @@ class LangSmithLogin:
         credential = await load_credential("langsmith_login", key)
         if credential is None or credential.client_id != self.client_id:
             raise HTTPException(401, "LangSmith login expired — sign in again")
+        if not await credential.signed_in_since(LANGSMITH_WORKSPACE_LOGIN_SINCE):
+            raise HTTPException(
+                401, "Sign in with LangSmith again to authorize Robin in its workspace"
+            )
         return credential
 
     def needs_refresh(self, credential: OAuthCredential) -> bool:
