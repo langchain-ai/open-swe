@@ -442,6 +442,7 @@ export function SidebarThreadRow({
   const selection = useSidebarThreadSelection()
   const actionsZIndex = useZIndex(zIndices.popover) + 1
   const selected = selection?.selected.has(item.id) ?? false
+  const draggable = item.status !== "running" && !item.waitingForDelegatedWork
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
   const setViewed = useSetAgentThreadViewed()
@@ -626,7 +627,7 @@ export function SidebarThreadRow({
         }}
         onKeyDown={openContextMenuFromKeyboard}
         {...rowProps}
-        draggable
+        draggable={draggable}
         data-selectable-thread={item.id}
         data-thread-title={item.title}
         data-thread-pinned={pinned}
@@ -642,7 +643,7 @@ export function SidebarThreadRow({
         onClick={handleNavigate}
         onKeyDown={openContextMenuFromKeyboard}
         {...rowProps}
-        draggable
+        draggable={draggable}
         data-selectable-thread={item.id}
         data-thread-title={item.title}
         data-thread-pinned={pinned}

@@ -78,6 +78,10 @@ export function ThreadDragDrop({
           )
           const id = row?.dataset.selectableThread
           if (!id || !row) return
+          if (row.draggable === false) {
+            event.preventDefault()
+            return
+          }
 
           // Disable default drag image served by browser
           if (nativeDragImage.current) {
@@ -90,8 +94,10 @@ export function ThreadDragDrop({
                 event.currentTarget.querySelectorAll<HTMLElement>(
                   "[data-selectable-thread]"
                 )
-              ).filter((entry) =>
-                selected.has(entry.dataset.selectableThread ?? "")
+              ).filter(
+                (entry) =>
+                  entry.draggable &&
+                  selected.has(entry.dataset.selectableThread ?? "")
               )
             : [row]
 

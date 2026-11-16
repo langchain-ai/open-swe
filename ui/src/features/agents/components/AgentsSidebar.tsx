@@ -831,14 +831,7 @@ export function AgentsSidebar({
     return groups.map((group, index) => ({
       key: group.key,
       content: (
-        <section
-          key={group.key}
-          className={
-            group.key === "recents:status:running"
-              ? "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2 py-space-2"
-              : "mb-space-3"
-          }
-        >
+        <section key={group.key} className="mb-space-3">
           <SidebarSectionHeader
             label={group.label}
             collapsed={sectionCollapsed(group.key)}
@@ -973,6 +966,33 @@ export function AgentsSidebar({
       </div>
 
       <SidebarThreadSelection>
+        <div
+          className={cn(
+            "shrink-0 px-space-2",
+            pendingStarts.length === 0 && "sidebar-content",
+            user && profile.isPending && "invisible"
+          )}
+        >
+          <SidebarNav
+            className={cn(
+              isDesktop ? "pb-space-3" : "pb-space-4",
+              !prefsHydrated && "invisible"
+            )}
+            onNavigate={layout.closeOnMobile}
+          />
+        </div>
+        <div
+          className={cn(
+            "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2",
+            user && profile.isPending && "invisible"
+          )}
+        >
+          {
+            recentSections.find(
+              (section) => section.key === "recents:status:running"
+            )?.content
+          }
+        </div>
         <ThreadDragDrop
           pinnedSectionRef={pinnedSectionRef}
           onAction={(actions) => {
@@ -1004,32 +1024,12 @@ export function AgentsSidebar({
           }}
         >
           <div
-            ref={scrollViewport}
             className={cn(
-              "sidebar-content scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
+              "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2",
+              pendingStarts.length === 0 && "sidebar-content",
               user && profile.isPending && "invisible"
             )}
-            data-sidebar-retained-starts={
-              pendingStarts.length > 0 ? "" : undefined
-            }
           >
-            <SidebarNav
-              className={cn(
-                isDesktop ? "pb-space-3" : "pb-space-4",
-                !prefsHydrated && "invisible"
-              )}
-              onNavigate={layout.closeOnMobile}
-            />
-            {cloudError && (
-              <ThreadSourceError
-                label="Cloud threads unavailable"
-                onRetry={() => {
-                  void pinnedQuery.refetch()
-                  void recentsQuery.refetch()
-                  if (repoMode) void sidebarReposQuery.refetch()
-                }}
-              />
-            )}
             {(pinnedPending ||
               filteredPinnedItems.length > 0 ||
               pinnedGroups.length > 0 ||
@@ -1075,6 +1075,25 @@ export function AgentsSidebar({
                   </>
                 )}
               </section>
+            )}
+          </div>
+          <div
+            ref={scrollViewport}
+            className={cn(
+              "scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
+              pendingStarts.length === 0 && "sidebar-content",
+              user && profile.isPending && "invisible"
+            )}
+          >
+            {cloudError && (
+              <ThreadSourceError
+                label="Cloud threads unavailable"
+                onRetry={() => {
+                  void pinnedQuery.refetch()
+                  void recentsQuery.refetch()
+                  if (repoMode) void sidebarReposQuery.refetch()
+                }}
+              />
             )}
 
             {repoMode && (
@@ -1162,11 +1181,6 @@ export function AgentsSidebar({
               </p>
             )}
           </div>
-          {
-            recentSections.find(
-              (section) => section.key === "recents:status:running"
-            )?.content
-          }
         </ThreadDragDrop>
       </SidebarThreadSelection>
       <div className="flex items-center gap-space-2 p-space-2">

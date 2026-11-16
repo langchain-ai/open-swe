@@ -29,12 +29,12 @@
   scrollbar-color: color-mix(in srgb, var(--text-primary) 18%, transparent) transparent;
 }
 
-.sidebar-content:not([data-sidebar-retained-starts]):has(> :is([data-sidebar-loading], :has([data-sidebar-loading]))) ~ * {
+.sidebar-content:has([data-sidebar-loading]) ~ * {
   visibility: hidden;
 }
 
-.sidebar-content:not([data-sidebar-retained-starts]) > :is([data-sidebar-loading], :has([data-sidebar-loading])) ~ *,
-.sidebar-content:not([data-sidebar-retained-starts]) .sidebar-groups > .sidebar-group:has([data-sidebar-loading]) ~ .sidebar-group {
+.sidebar-content > :is([data-sidebar-loading], :has([data-sidebar-loading])) ~ *,
+.sidebar-content .sidebar-groups > .sidebar-group:has([data-sidebar-loading]) ~ .sidebar-group {
   visibility: hidden;
 }
 

@@ -61,10 +61,12 @@ function Row({
   id,
   pinned = false,
   archived = false,
+  draggable = true,
 }: {
   id: string
   pinned?: boolean
   archived?: boolean
+  draggable?: boolean
 }) {
   const register = useContext(SidebarThreadDragPreviewContext)
   useEffect(() => {
@@ -75,7 +77,7 @@ function Row({
     <div data-sidebar-thread-row>
       <a
         href={`/agents/${id}`}
-        draggable
+        draggable={draggable}
         data-selectable-thread={id}
         data-thread-title={id}
         data-thread-pinned={pinned}
@@ -126,6 +128,26 @@ it.each(["pin", "archive"] as const)(
     expect(second.parentElement?.style.opacity).toBe("")
   }
 )
+
+it("excludes running rows from a dragged selection and prevents starting their drag", () => {
+  const onAction = vi.fn()
+  render(
+    <ThreadDragDrop onAction={onAction}>
+      <Row id="first" />
+      <Row id="second" draggable={false} />
+    </ThreadDragDrop>
+  )
+  const first = screen.getByRole("link", { name: "first" })
+  const second = screen.getByRole("link", { name: "second" })
+  expect(fireEvent.dragStart(second)).toBe(false)
+  expect(screen.queryByRole("region", { name: /to pin$/i })).toBeNull()
+  fireEvent.dragStart(first, {
+    dataTransfer: { setData: vi.fn(), setDragImage: vi.fn() },
+  })
+  expect(second.parentElement?.style.opacity).toBe("")
+  fireEvent.drop(screen.getByRole("region", { name: /to pin$/i }))
+  expect(onAction).toHaveBeenCalledWith([{ threadId: "first", action: "pin" }])
+})
 
 it("returns every selected row before revealing the originals after cancellation", () => {
   const onAction = vi.fn()
