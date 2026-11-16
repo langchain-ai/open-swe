@@ -1,6 +1,7 @@
-"""Approval criteria from a repository's ``.open-swe`` directory and its approval mode.
+"""Approval criteria from a repository's ``.robin`` directory and its approval mode.
 
-Criteria come from one rule per Markdown file in ``.open-swe/auto-approve-rules/``.
+Criteria come from one rule per Markdown file in ``.robin/auto-approve-rules/`` and the legacy
+``.open-swe/auto-approve-rules/``; rules in both apply.
 A rule's frontmatter may scope it with ``match-all-files`` (every changed file matches
 one of the globs) or ``match-any-files`` (some changed file does). A legacy,
 undocumented ``.open-swe/APPROVALS.md`` still applies to every pull request.
@@ -14,18 +15,15 @@ or parsed fails the whole policy closed, since it may be the one requiring human
 
 import asyncio
 import logging
-import re
 from collections.abc import Sequence
-from fnmatch import fnmatchcase
 
-import httpx2
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.http import GitHubClient, RepoClient, RepoFileUnreadableError
 from openswe.github.repo_files import SETTINGS_MAX_CHARS, SETTINGS_PATH, RepoSettings
 from openswe.github.repo_names import RepoFullName
+from openswe.github.rule_directory import RULE_MAX_CHARS, RuleDirectory, ScopedRule
 from openswe.prompts import prompt
 from openswe.review.styles import (
     REVIEW_STYLES,
@@ -36,99 +34,27 @@ from openswe.review.styles import (
 logger = logging.getLogger(__name__)
 
 APPROVALS_PATH = ".open-swe/APPROVALS.md"
-AUTO_APPROVE_RULES_DIR = ".open-swe/auto-approve-rules"
-APPROVALS_MAX_CHARS = 15_000
+AUTO_APPROVE_RULES = "auto-approve-rules"
+# Every place auto-approve rules may live; the first is where new rules go.
+AUTO_APPROVE_RULES_DIRS = RuleDirectory.paths(AUTO_APPROVE_RULES)
+AUTO_APPROVE_RULES_DIR = AUTO_APPROVE_RULES_DIRS[0]
+APPROVALS_MAX_CHARS = RULE_MAX_CHARS
 _CHANGED_FILE_PAGES = 30
 _APPROVAL_LOGIC_PATHS = (
     "openswe/review/",
     "openswe/expedited_review/",
+    "openswe/github/rule_directory.py",
     "openswe/tools/publish_review.py",
     "openswe/reviewer.py",
     "openswe/resources/prompts/reviewer/",
 )
-_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-
-
-class InvalidRuleError(ValueError):
-    """An auto-approve rule file that cannot be applied as written."""
-
-
-class _RuleFrontmatter(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    match_all_files: list[str] = Field(default_factory=list, alias="match-all-files")
-    match_any_files: list[str] = Field(default_factory=list, alias="match-any-files")
-
-
-class AutoApproveRule(BaseModel):
-    """One file in ``.open-swe/auto-approve-rules/``: criteria and the changes they cover."""
-
-    path: str
-    match_all_files: list[str] = Field(default_factory=list)
-    match_any_files: list[str] = Field(default_factory=list)
-    criteria: str
-
-    @classmethod
-    def parse(cls, path: str, text: str | None) -> AutoApproveRule:
-        """The rule ``text`` declares; raises ``InvalidRuleError`` saying why it cannot apply."""
-        if text is None:
-            raise InvalidRuleError(f"`{path}`: GitHub returned no text (binary or too large)")
-        frontmatter: object = None
-        body = text
-        if match := _FRONTMATTER.match(text):
-            body = text[match.end() :]
-            try:
-                frontmatter = yaml.safe_load(match.group(1))
-            except yaml.YAMLError as exc:
-                raise InvalidRuleError(f"`{path}`: frontmatter is not valid YAML: {exc}") from exc
-        body = body.strip()
-        if not body:
-            raise InvalidRuleError(f"`{path}`: the rule has no body")
-        if len(body) > APPROVALS_MAX_CHARS:
-            raise InvalidRuleError(f"`{path}`: the rule exceeds {APPROVALS_MAX_CHARS} characters")
-        try:
-            scope = _RuleFrontmatter.model_validate(frontmatter or {})
-        except ValidationError as exc:
-            raise InvalidRuleError(
-                f"`{path}`: invalid frontmatter: {RepoSettings.describe(exc)}"
-            ) from exc
-        return cls(
-            path=path,
-            match_all_files=scope.match_all_files,
-            match_any_files=scope.match_any_files,
-            criteria=body,
-        )
-
-    @property
-    def scoped(self) -> bool:
-        return bool(self.match_all_files or self.match_any_files)
-
-    def applies_to(self, changed: Sequence[str] | None) -> bool:
-        """Whether the changed paths satisfy every scope the rule declares.
-
-        ``None`` means the changes are unknown: ``match-all-files`` cannot hold, while
-        ``match-any-files`` is assumed to, so a scoped restriction is never skipped.
-        """
-        if self.match_all_files and (
-            changed is None or not all(self.matches(path, self.match_all_files) for path in changed)
-        ):
-            return False
-        return (
-            not self.match_any_files
-            or changed is None
-            or any(self.matches(path, self.match_any_files) for path in changed)
-        )
-
-    @staticmethod
-    def matches(path: str, globs: Sequence[str]) -> bool:
-        return any(fnmatchcase(path, glob) for glob in globs)
 
 
 class ApprovalPolicy(BaseModel):
     """A repository's approval criteria, and why any of them could not be read."""
 
     approvals_md: str | None = None
-    rules: list[AutoApproveRule] = Field(default_factory=list)
+    rules: list[ScopedRule] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
     @property
@@ -143,23 +69,15 @@ class ApprovalPolicy(BaseModel):
     async def fetch(cls, repo: RepoClient, ref: str | None = None) -> ApprovalPolicy:
         """The criteria at ``ref`` (the default branch when ``None``)."""
         errors: list[str] = []
-        approvals_md, rule_files = await asyncio.gather(
-            cls._approvals_md(repo, ref, errors), cls._rule_files(repo, ref, errors)
+        approvals_md, directory = await asyncio.gather(
+            cls._approvals_md(repo, ref, errors),
+            RuleDirectory.fetch(repo, AUTO_APPROVE_RULES, ref),
         )
-        rules: list[AutoApproveRule] = []
-        for path, text in sorted(rule_files.items()):
-            if not path.endswith(".md"):
-                continue
-            try:
-                rules.append(AutoApproveRule.parse(path, text))
-            except InvalidRuleError as exc:
-                errors.append(str(exc))
-        if errors:
-            logger.warning(
-                "Auto-approve rules are unusable",
-                extra={"repository": repo.full_name, "ref": ref or "", "problems": errors},
-            )
-        return cls(approvals_md=approvals_md, rules=rules, errors=errors)
+        return cls(
+            approvals_md=approvals_md,
+            rules=directory.rules,
+            errors=[*errors, *directory.errors],
+        )
 
     @classmethod
     async def _approvals_md(
@@ -175,21 +93,6 @@ class ApprovalPolicy(BaseModel):
         except RepoFileUnreadableError as exc:
             errors.append(str(exc))
             return None
-
-    @classmethod
-    async def _rule_files(
-        cls, repo: RepoClient, ref: str | None, errors: list[str]
-    ) -> dict[str, str | None]:
-        try:
-            return await repo.read_dir(AUTO_APPROVE_RULES_DIR, ref)
-        except (httpx2.HTTPError, ValueError) as exc:
-            logger.warning(
-                "Could not read auto-approve rules",
-                extra={"repository": repo.full_name},
-                exc_info=True,
-            )
-            errors.append(f"Could not read `{AUTO_APPROVE_RULES_DIR}/`: {exc}")
-            return {}
 
     @classmethod
     async def load(cls, owner: str, repo: str, *, token: str | None) -> ApprovalPolicy:
@@ -210,7 +113,7 @@ class ApprovalPolicy(BaseModel):
         return prompt(
             "reviewer/approval-policy",
             approvals_md=self.approvals_md or "",
-            rules=[(rule.path, rule.criteria) for rule in self.rules],
+            rules=[(rule.path, rule.body) for rule in self.rules],
         )
 
     async def for_pull(self, repo: RepoClient, number: int) -> ApprovalPolicy:
@@ -224,9 +127,14 @@ class ApprovalPolicy(BaseModel):
         )
 
     @staticmethod
-    def changes_approval(path: str) -> bool:
+    def changes_rules(path: str) -> bool:
+        """Whether ``path`` is in a directory auto-approve rules may be read from."""
+        return any(path.startswith(f"{directory}/") for directory in AUTO_APPROVE_RULES_DIRS)
+
+    @classmethod
+    def changes_approval(cls, path: str) -> bool:
         """Whether ``path`` is auto-approval policy or Robin's approval logic, which never self-approves."""
-        if path.startswith(f"{AUTO_APPROVE_RULES_DIR}/") or path == APPROVALS_PATH:
+        if cls.changes_rules(path) or path == APPROVALS_PATH:
             return True
         return path.removeprefix("open-swe/").startswith(_APPROVAL_LOGIC_PATHS)
 
@@ -247,7 +155,7 @@ class ApprovalPolicy(BaseModel):
         if changed is None:
             return []
         errors: list[str] = []
-        if any(path.startswith(f"{AUTO_APPROVE_RULES_DIR}/") for path in changed):
+        if any(cls.changes_rules(path) for path in changed):
             errors.extend((await cls.fetch(repo, head_sha)).errors)
         if SETTINGS_PATH in changed:
             try:

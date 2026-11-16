@@ -1,6 +1,7 @@
 # Auto-approve rules
 
-A repository tells Robin which pull requests it may approve with Markdown files in `.open-swe/auto-approve-rules/`, one rule per file.
+A repository tells Robin which pull requests it may approve with Markdown files in `.robin/auto-approve-rules/`, one rule per file.
+Rules in the legacy `.open-swe/auto-approve-rules/` still apply alongside them, so moving rules never drops one.
 Robin reads them from the repository's default branch, so a pull request cannot rewrite the rules it is judged by.
 
 ```markdown
@@ -21,7 +22,7 @@ Robin may approve a pull request that only changes documentation.
     Use it for restrictions on part of the repository, such as requiring human review for changes under `auth/`.
   - With both, both must hold; with neither, the rule applies to every pull request.
 - If any rule on the default branch cannot be read or parsed (invalid YAML, an unknown frontmatter key, an empty body), no rule applies: the review says why auto approval did not run, and nothing is approved or left off an expedited card.
-- When a pull request changes `.open-swe/auto-approve-rules/` or `.open-swe/settings.json` and the result is invalid, Robin's review requests changes and lists the problems.
+- When a pull request changes `.robin/auto-approve-rules/`, `.open-swe/auto-approve-rules/` or `.open-swe/settings.json` and the result is invalid, Robin's review requests changes and lists the problems.
 
 The reviewer assesses a pull request against the rules that apply to it, and `expedite_pr_approval` may leave hunks those rules cover off its card ([expedited Slack review](expedited-slack-review.md)).
 The repository's approval mode decides what an approving assessment does: `off` skips the assessment, `dry_run` (the default) posts it as a comment, and `approve` submits a GitHub approval.

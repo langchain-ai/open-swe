@@ -13,8 +13,9 @@ from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert
 from openswe.github import http as github_http
 from openswe.github import webhook as github_webhooks
 from openswe.github.http import GitHubClient
+from openswe.github.rule_directory import ScopedRule
 from openswe.review import assessment_feedback
-from openswe.review.approvals import ApprovalPolicy, AutoApproveRule
+from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
@@ -133,7 +134,7 @@ async def test_pr_ready_for_review_submits_approval_withheld_on_draft(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     head = "a" * 40
-    policy = ApprovalPolicy(rules=[AutoApproveRule(path="dead.md", criteria="Dead code.")])
+    policy = ApprovalPolicy(rules=[ScopedRule(path="dead.md", body="Dead code.")])
     await PublishedAssessment(
         review_id=10,
         owner="lc",
@@ -195,7 +196,7 @@ async def test_pr_ready_for_review_submits_approval_withheld_on_draft(
     findings.return_value = [{"id": "f1", "status": "open"}]
     await github_webhooks.process_github_pr_ready(payload)
     current_policy.return_value = ApprovalPolicy(
-        rules=[AutoApproveRule(path="docs.md", criteria="Docs only.")]
+        rules=[ScopedRule(path="docs.md", body="Docs only.")]
     )
     findings.return_value = []
     await github_webhooks.process_github_pr_ready(payload)

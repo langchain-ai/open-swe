@@ -1,4 +1,5 @@
-"""Approval criteria come from .open-swe on the default branch; the repository's mode gates them."""
+"""Approval criteria come from .robin (or legacy .open-swe) on the default branch; the repository's
+mode gates them."""
 
 from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
@@ -22,9 +23,13 @@ def _github(status: int, text: str = "", rules: dict[str, str | None] | None = N
     async def respond(_client: object, method: str, url: str, **kwargs: object) -> httpx2.Response:
         request = httpx2.Request(method, url)
         if url.endswith("/graphql"):
+            json = kwargs["json"]
+            assert isinstance(json, dict)
+            directory = json["variables"]["expression"].split(":", 1)[1]
             entries = [
                 {"path": path, "type": "blob", "object": {"text": text}}
                 for path, text in (rules or {}).items()
+                if path.startswith(f"{directory}/")
             ]
             tree = {"entries": entries} if rules is not None else None
             return httpx2.Response(
@@ -43,8 +48,21 @@ async def test_fetch_reads_the_criteria_from_the_default_branch() -> None:
     calls = {call.args[2]: call for call in request.await_args_list}
     contents = calls["https://api.github.com/repos/o/r/contents/.open-swe/APPROVALS.md"]
     assert contents.kwargs["params"] is None
-    graphql = calls["https://api.github.com/graphql"].kwargs["json"]["variables"]
-    assert graphql["expression"] == "HEAD:.open-swe/auto-approve-rules"
+
+
+async def test_rules_in_robin_and_the_legacy_open_swe_directory_both_apply() -> None:
+    # A restriction left in .open-swe keeps applying while rules move to .robin.
+    rules = {
+        ".robin/auto-approve-rules/docs.md": "Docs may be approved.",
+        ".robin/auto-approve-rules/README": "Not a rule.",
+        ".open-swe/auto-approve-rules/exclusions.md": "Migrations need human review.",
+    }
+    with patch("openswe.github.http.github_request", _github(404, rules=rules)):
+        policy = await ApprovalPolicy.load("o", "r", token="t")
+    assert sorted(rule.path for rule in policy.rules) == [
+        ".open-swe/auto-approve-rules/exclusions.md",
+        ".robin/auto-approve-rules/docs.md",
+    ]
 
 
 async def test_rules_apply_by_their_file_scopes() -> None:
@@ -118,14 +136,17 @@ async def test_config_errors_cover_changed_settings_and_rules_at_the_head() -> N
     repo.pull_request = lambda number: AsyncMock(files=AsyncMock(return_value=files))
     repo.read_file = AsyncMock(return_value='{"supplementaryReviews": [{"id": "Bad id"}]}')
     repo.read_dir = AsyncMock(
-        return_value={".open-swe/auto-approve-rules/x.md": "---\n- a\n---\nBody"}
+        side_effect=lambda directory, _ref: (
+            {f"{directory}/x.md": "---\n- a\n---\nBody"}
+            if directory == ".open-swe/auto-approve-rules"
+            else {}
+        )
     )
     repo.full_name = "o/r"
     errors = await ApprovalPolicy.config_errors(repo, 1, head)
     assert len(errors) == 2
     assert errors[0].startswith("`.open-swe/auto-approve-rules/x.md`: invalid frontmatter")
     assert errors[1].startswith("`.open-swe/settings.json`: supplementaryReviews[0]")
-    repo.read_dir.assert_awaited_with(".open-swe/auto-approve-rules", head)
 
 
 async def test_unset_mode_is_dry_run_and_off_skips_the_file(registry_db: None) -> None:
@@ -192,9 +213,11 @@ async def test_tool_rechecks_private_admin_and_repo_access(
     ("path", "expected"),
     [
         (".open-swe/auto-approve-rules/03-documentation.md", True),
+        (".robin/auto-approve-rules/03-documentation.md", True),
         (".open-swe/APPROVALS.md", True),
         ("open-swe/openswe/review/approvals.py", True),
         ("openswe/expedited_review/eligibility.py", True),
+        ("open-swe/openswe/github/rule_directory.py", True),
         ("open-swe/openswe/resources/prompts/reviewer/approval-policy.md.jinja", True),
         ("open-swe/openswe/resources/prompts/reviewer/main.md.jinja", True),
         ("open-swe/openswe/review/publish.py", True),
