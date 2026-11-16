@@ -1215,6 +1215,7 @@ export const ChatComposer = memo(function ChatComposer({
                 color="secondary"
                 icon={PlusIcon}
                 label="More composer options"
+                tooltipProps={{ disabled: true }}
                 variant="plain"
               />
             </DropdownMenuTrigger>
