@@ -18,9 +18,16 @@ from openswe.slack.client import (
     post_slack_thread_message_with_ts,
     post_slack_top_level_message_with_ts,
 )
-from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    SlackConfigurationError,
+    SlackRequestError,
+    slack_error,
+)
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.payloads import SlackChannelPayload
+from openswe.tools import access as tool_access
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -34,6 +41,19 @@ class SlackChannel(TypedDict):
     id: str
     name: str
     is_private: bool
+
+
+class SlackDirectoryChannel(TypedDict):
+    id: str
+    name: str
+    purpose: str
+    topic: str
+    num_members: int | None
+
+
+class SlackDirectoryResults(TypedDict):
+    success: Literal[True]
+    channels: list[SlackDirectoryChannel]
 
 
 class SlackChannelError(TypedDict):
@@ -69,6 +89,43 @@ class SlackMessageReceipt(TypedDict):
     message_ts: str
     details_ts: NotRequired[str]
     details_error: NotRequired[str]
+
+
+@tool_access.access(tool_access.Policy(trusted="anywhere"), per_call=lambda _: None)
+async def slack_search_channel_directory(
+    query: str, limit: int = 10
+) -> SlackDirectoryResults | SlackChannelError:
+    """Search the cached directory for public, internal Slack channels."""
+    cfg = RunConfig.from_runtime()
+    slack = cfg.slack_thread
+    if slack is not None and not slack.is_dm:
+        try:
+            destination = await ChannelDirectory.load(slack.channel_id)
+        except SlackConfigurationError:
+            logger.warning("Slack channel verification failed: bot token is unavailable")
+            destination = None
+        if destination is None or destination.id != slack.channel_id or not destination.public:
+            return {
+                "success": False,
+                "error": "The Slack thread's channel cannot be verified as public and internal.",
+            }
+    matches = await ChannelDirectory.search_directory(query, limit)
+    channels: list[SlackDirectoryChannel] = []
+    for channel in matches:
+        details = channel.details
+        members = channel.payload.get("num_members")
+        channels.append(
+            {
+                "id": channel.id,
+                "name": details.name or channel.name,
+                "purpose": details.purpose,
+                "topic": details.topic,
+                "num_members": members
+                if isinstance(members, int) and not isinstance(members, bool)
+                else None,
+            }
+        )
+    return {"success": True, "channels": channels}
 
 
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:

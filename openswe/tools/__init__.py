@@ -83,6 +83,7 @@ _TOOL_MODULES = {
     "slack_attach_html": "openswe.slack.tools.attach_html",
     "slack_list_channel_members": "openswe.slack.tools.channels",
     "slack_list_channels": "openswe.slack.tools.channels",
+    "slack_search_channel_directory": "openswe.slack.tools.channels",
     "slack_move_thread": "openswe.slack.tools.move_thread",
     "slack_no_reply_needed": "openswe.slack.tools.no_reply_needed",
     "slack_post_message": "openswe.slack.tools.channels",
@@ -180,6 +181,7 @@ __all__ = [
     "slack_attach_html",
     "slack_list_channel_members",
     "slack_list_channels",
+    "slack_search_channel_directory",
     "slack_move_thread",
     "slack_no_reply_needed",
     "slack_post_message",
@@ -203,6 +205,7 @@ if TYPE_CHECKING:
         slack_list_channel_members,
         slack_list_channels,
         slack_post_message,
+        slack_search_channel_directory,
     )
     from openswe.slack.tools.move_thread import slack_move_thread
     from openswe.slack.tools.no_reply_needed import slack_no_reply_needed

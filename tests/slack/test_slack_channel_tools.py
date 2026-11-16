@@ -1,11 +1,15 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy import update
 
 from openswe import tools
+from openswe.database import postgres
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
+from openswe.slack.http import SlackBotToken, SlackConfigurationError
 from openswe.slack.tools.search import SlackSearchGrant
 from openswe.users import User
 from tests.support.slack_api import SlackAPI
@@ -36,6 +40,133 @@ def member_run(monkeypatch: pytest.MonkeyPatch) -> None:
         "from_runtime",
         lambda: RunConfig.parse({"slack_thread": {"channel_id": "C123", "thread_ts": "1.0"}}),
     )
+
+
+async def test_directory_search_uses_cached_data_without_slack(
+    slack_api: SlackAPI, member_run: None
+) -> None:
+    public = {
+        "is_channel": True,
+        "is_private": False,
+        "is_archived": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+    }
+    await SlackChannel.save_all(
+        {**public, "id": "C123", "name": "destination"},
+        {
+            **public,
+            "id": "C456",
+            "name": "billing",
+            "purpose": {"value": "Billing questions"},
+            "topic": "Payments",
+            "num_members": 42,
+        },
+    )
+
+    result = await tools.slack_search_channel_directory("BILLING")
+
+    assert result == {
+        "success": True,
+        "channels": [
+            {
+                "id": "C456",
+                "name": "billing",
+                "purpose": "Billing questions",
+                "topic": "Payments",
+                "num_members": 42,
+            }
+        ],
+    }
+    assert not slack_api.calls
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "public",
+        "missing_public",
+        "external",
+        "private",
+        "unavailable",
+        "malformed",
+        "wrong_channel",
+    ],
+)
+async def test_directory_search_verifies_a_stale_destination(
+    slack_api: SlackAPI, member_run: None, status: str
+) -> None:
+    public = {
+        "id": "C123",
+        "name": "destination",
+        "is_channel": True,
+        "is_private": False,
+        "is_archived": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+    }
+    await SlackChannel.save_all(
+        {**public, "id": "C456", "name": "billing", "purpose": "Billing questions"}
+    )
+    if status != "missing_public":
+        await SlackChannel.save_all(public)
+        async with postgres.session() as session:
+            await session.execute(
+                update(SlackChannel)
+                .where(SlackChannel.id == "C123")
+                .values(fetched_at=datetime.fromtimestamp(0, UTC))
+            )
+    if status == "unavailable":
+        slack_api.respond({"ok": False, "error": "channel_not_found"})
+    else:
+        slack_api.respond(
+            {
+                "ok": True,
+                "channel": {
+                    **public,
+                    "id": "C789" if status == "wrong_channel" else "C123",
+                    "is_ext_shared": None if status == "malformed" else status == "external",
+                    "is_private": status == "private",
+                },
+            }
+        )
+
+    result = await tools.slack_search_channel_directory("billing")
+
+    assert result["success"] is (status in {"public", "missing_public"})
+    if result["success"]:
+        assert [channel["id"] for channel in result["channels"]] == ["C456"]
+        assert await tools.slack_search_channel_directory("billing") == result
+    assert [(method, params["channel"]) for method, params in slack_api.calls] == [
+        ("conversations.info", "C123")
+    ]
+
+
+async def test_directory_search_refuses_missing_token(
+    slack_api: SlackAPI, member_run: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(SlackBotToken, "read", AsyncMock(side_effect=SlackConfigurationError()))
+    assert (await tools.slack_search_channel_directory("billing"))["success"] is False
+    assert not slack_api.calls
+
+
+async def test_directory_search_refuses_unverifiable_or_external_destination(
+    slack_api: SlackAPI, member_run: None
+) -> None:
+    slack_api.respond({"ok": False, "error": "channel_not_found"})
+    assert (await tools.slack_search_channel_directory("billing"))["success"] is False
+    await SlackChannel.save_all(
+        {
+            "id": "C123",
+            "name": "external",
+            "is_channel": True,
+            "is_private": False,
+            "is_ext_shared": True,
+            "is_pending_ext_shared": False,
+        }
+    )
+    assert (await tools.slack_search_channel_directory("billing"))["success"] is False
+    assert [method for method, _ in slack_api.calls] == ["conversations.info"]
 
 
 async def test_list_members_preserves_pagination_and_only_exposes_public_identity(

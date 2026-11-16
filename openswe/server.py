@@ -246,6 +246,7 @@ from openswe.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_search,
+    slack_search_channel_directory,
     snapshotctl,
     start_thread,
     submit_thread_feedback,
@@ -735,6 +736,7 @@ AGENT_TOOLS: Final = (
     slack_attach_html,
     slack_list_channel_members,
     slack_list_channels,
+    slack_search_channel_directory,
     slack_move_thread,
     slack_no_reply_needed,
     slack_post_message,
@@ -2002,6 +2004,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_attach_html,
         slack_list_channel_members,
         slack_list_channels,
+        slack_search_channel_directory,
         slack_move_thread,
         slack_no_reply_needed,
         slack_post_message,
@@ -2043,7 +2046,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     if not cfg.slack_context:
         # An automation run has no Slack thread, but its prompt may ask it to
         # report to a channel.
-        kept = (slack_list_channels, slack_post_message) if cfg.source == "schedule" else ()
+        kept = (
+            (slack_list_channels, slack_post_message, slack_search_channel_directory)
+            if cfg.source == "schedule"
+            else ()
+        )
         static_tools = [tool for tool in static_tools if tool not in slack_tools or tool in kept]
     elif _slack_concierge_run(cfg):
         static_tools = [

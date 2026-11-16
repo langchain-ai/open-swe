@@ -210,6 +210,82 @@ async def test_channel_resolution_distinguishes_transient_failures(
 
 
 @pytest.mark.usefixtures("registry_db")
+async def test_directory_search_filters_ranks_and_caps_results() -> None:
+    from sqlalchemy import update
+
+    from openswe.database import postgres
+
+    public = {
+        "is_channel": True,
+        "is_private": False,
+        "is_archived": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+        "is_im": False,
+        "is_mpim": False,
+    }
+    await SlackChannel.save_all(
+        {**public, "id": "CNAME", "name": "database-help", "num_members": 1},
+        {
+            **public,
+            "id": "CDESC",
+            "name": "help",
+            "purpose": {"value": "Database"},
+            "num_members": 100,
+        },
+        {**public, "id": "CTOPIC", "name": "questions", "topic": "DATABASE", "num_members": 30},
+        {**public, "id": "CPRIVATE", "name": "database-private", "is_private": True},
+        {**public, "id": "CARCHIVE", "name": "database-old", "is_archived": True},
+        {**public, "id": "CEXT", "name": "database-external", "is_ext_shared": True},
+        {**public, "id": "CPENDING", "name": "database-pending", "is_pending_ext_shared": True},
+        {**public, "id": "CUNKNOWN", "name": "database-unknown", "is_private": "false"},
+        {**public, "id": "CMISSING", "name": "database-missing", "is_ext_shared": None},
+        {**public, "id": "CDM", "name": "database-dm", "is_im": True},
+        {**public, "id": "CMPIM", "name": "database-mpim", "is_mpim": True},
+        {**public, "id": "CUNLISTED", "name": "database-unlisted"},
+    )
+    async with postgres.session() as session:
+        await session.execute(
+            update(SlackChannel).where(SlackChannel.id == "CUNLISTED").values(listed=False)
+        )
+
+    results = await SlackChannel.search_directory("DaTaBaSe unrelated")
+    assert [channel.id for channel in results] == ["CNAME", "CDESC", "CTOPIC"]
+    assert len(await SlackChannel.search_directory("database", limit=0)) == 1
+    assert not await SlackChannel.search_directory("   ")
+    assert not await SlackChannel.search_directory("%")
+    assert not await SlackChannel.search_directory("_")
+    await SlackChannel.save_all(
+        {**public, "id": "CBOTH", "name": "database", "purpose": "help", "num_members": 1},
+        {
+            **public,
+            "id": "CTWO",
+            "name": "questions",
+            "purpose": "database help",
+            "num_members": 100,
+        },
+    )
+    assert [
+        channel.id for channel in (await SlackChannel.search_directory("database help"))[:3]
+    ] == [
+        "CNAME",
+        "CDESC",
+        "CBOTH",
+    ]
+    assert [
+        channel.id for channel in (await SlackChannel.search_directory("database questions"))[:2]
+    ] == [
+        "CTWO",
+        "CTOPIC",
+    ]
+
+    await SlackChannel.save_all(
+        *({**public, "id": f"C{i}", "name": f"database-{i}", "num_members": i} for i in range(30))
+    )
+    assert len(await SlackChannel.search_directory("database", limit=1000)) == 25
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_refreshing_brings_the_next_walk_forward(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     await channel_options.ensure_directory_sync()

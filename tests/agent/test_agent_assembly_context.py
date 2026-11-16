@@ -630,6 +630,7 @@ SLACK_TOOL_NAMES = {
     "slack_move_thread",
     "slack_list_channel_members",
     "slack_list_channels",
+    "slack_search_channel_directory",
     "slack_no_reply_needed",
     "slack_post_message",
     "slack_breakout_thread",
@@ -686,7 +687,11 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
     # A prompt can ask it to report somewhere; the thread-bound tools stay out.
-    assert tool_names & SLACK_TOOL_NAMES == {"slack_list_channels", "slack_post_message"}
+    assert tool_names & SLACK_TOOL_NAMES == {
+        "slack_list_channels",
+        "slack_post_message",
+        "slack_search_channel_directory",
+    }
 
 
 @pytest.mark.asyncio
@@ -717,6 +722,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_attach_html",
         "slack_list_channel_members",
         "slack_list_channels",
+        "slack_search_channel_directory",
         "slack_move_thread",
         "slack_post_message",
         "slack_breakout_thread",
