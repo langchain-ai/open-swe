@@ -603,6 +603,53 @@ test.describe("Human review in Slack", () => {
     );
   });
 
+  test("a card for Robin's own pull request names Robin, and Robin's echoed card starts no run", async ({
+    page,
+    request,
+  }) => {
+    await setReviewChannel(request);
+    await loginAs(page, ALICE);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Robin tidies the greeting",
+      author: "robin-agent[bot]",
+      check_runs: GREEN,
+    });
+    const asked = await page.request.post(
+      `/dashboard/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`,
+      { headers: SAME_ORIGIN_HEADERS, data: {} },
+    );
+    expect(asked.ok(), await asked.text()).toBeTruthy();
+    const posted = await latestRequest(request);
+    const card = await reviewCard(request, posted);
+    expect(cardText(card)).toContain("By <@U0BOT>");
+    expect(cardText(card)).not.toContain("robin-agent");
+
+    // Slack delivers Robin's own posts back to it; the mention on its card must not wake it.
+    const echoed = (await control(request, "/mock/slack/send", {
+      channel: REVIEW_CHANNEL,
+      thread_ts: card.ts,
+      user: "U0BOT",
+      text: cardText(card),
+    })) as { thread_id: string | null; webhook: unknown };
+    expect(echoed.webhook).toEqual({
+      status: "ignored",
+      reason: "Event from a bot",
+    });
+    expect(echoed.thread_id).toBeNull();
+
+    await click(request, posted, "Dismiss", BOB.slack);
+    await expect
+      .poll(async () => (await latestRequest(request)).state, {
+        timeout: 30_000,
+      })
+      .toBe("cancelled");
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      "authored by <@U0BOT>",
+    );
+    expect(await reviewRequests(request)).toHaveLength(1);
+  });
+
   test("approved pull requests do not offer Slack review requests", async ({
     page,
     request,

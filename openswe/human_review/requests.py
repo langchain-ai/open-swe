@@ -39,9 +39,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
+from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.expedited_review.eligibility import ExcludedHunk
+from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
@@ -226,6 +228,9 @@ class HumanReviewRequest(Base):
     async def author_mention(self) -> str:
         pr = self.pull_request
         author = await User.get(pr.author_user_id) if pr.author_user_id else None
+        if author is None and pr.author.lower() in OPEN_SWE_AUTHOR_LOGINS:
+            bot_user_id = ENV.SLACK_BOT_USER_ID.get()
+            return f"<@{bot_user_id}>" if bot_user_id else "@robin"
         return slack_mention(author, pr.author or "the author")
 
     async def author_login(self) -> str:

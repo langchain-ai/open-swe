@@ -2,12 +2,16 @@
 
 import json
 from typing import Any, cast
+from unittest.mock import AsyncMock
+
+import pytest
 
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review import card
 from openswe.human_review.pick_modals import DECLINE_REASONS, SNOOZE_DURATIONS
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.app_modals import VALUE_LIMIT
+from openswe.users import User, UserIdentity
 
 
 def _request() -> HumanReviewRequest:
@@ -15,6 +19,42 @@ def _request() -> HumanReviewRequest:
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
     return request
+
+
+@pytest.mark.parametrize("login", ["robin-agent[bot]", "robin-agent", "open-swe[bot]", "Open-SWE"])
+@pytest.mark.parametrize("bot_user_id", ["UBOT", ""])
+async def test_robin_authored_card_mentions_slack_bot(
+    monkeypatch: pytest.MonkeyPatch, login: str, bot_user_id: str
+) -> None:
+    monkeypatch.setenv("SLACK_BOT_USER_ID", bot_user_id)
+    request = _request()
+    request.pull_request.author = login
+
+    text, _ = await card.closed_card(
+        request,
+        title="Fix",
+        author=await request.author_mention(),
+        outcome="approved",
+        review_states={},
+    )
+
+    assert f"authored by {'<@UBOT>' if bot_user_id else '@robin'}" in text
+    request.pull_request.author = "ada"
+    assert await request.author_mention() == "@ada"
+
+
+async def test_bot_authored_draft_mentions_linked_author(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    author = User(identities=[UserIdentity(provider="slack", external_id="UADA", login="ada")])
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=author))
+    request = _request()
+    request.kind = "expedited"
+    request.awaiting_ready = True
+    request.pull_request.author = "robin-agent[bot]"
+    request.pull_request.author_user_id = author.id
+
+    assert await request.author_mention() == "<@UADA>"
+    assert request.is_author(author.id, "ada")
 
 
 def test_signing_up_and_accepting_open_the_review() -> None:
