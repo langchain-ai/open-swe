@@ -5,7 +5,15 @@ from typing import Final
 
 
 class RunOrigin(StrEnum):
-    """The bounded triggering surfaces recorded on root traces, independent of thread source."""
+    """What started this run, recorded as ``metadata.origin`` on its root trace.
+
+    ``source`` says where the thread lives and never changes; ``origin`` says what
+    woke this particular run. A Slack thread (``source="slack"``) is woken by a
+    teammate's reply (``origin="slack"``), a review on its PR (``origin="github"``)
+    or Robin's own timer (``origin="automation"``). Work a person deferred, like a
+    background task they started, keeps their origin; work Robin schedules itself,
+    like a review deadline, is ``automation``.
+    """
 
     SLACK = "slack"
     GITHUB = "github"

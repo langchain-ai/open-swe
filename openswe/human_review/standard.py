@@ -1654,7 +1654,10 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         return "rotating"
     trigger = PickTrigger("expired", tuple(p.github_login for p in idle))
     suggestions = [Suggestion(choice, area)]
-    if not await _wake_picker(current, asked=False, trigger=trigger, suggestions=suggestions):
+    # A deadline, not a person, wakes the picker: origin "automation", whatever its source.
+    if not await _wake_picker(
+        current, asked=False, trigger=trigger, suggestions=suggestions, origin="automation"
+    ):
         await current.log_event("assignment.rotation_failed")
         return "rotation_failed"
     return "rotating"
@@ -1789,9 +1792,11 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
                 request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
             )
             return {"status": "approved"}
-        return {
-            "status": (await start_auto_assign(request, trigger=PickTrigger("unclaimed"))).status
-        }
+        # A deadline, not a person, wakes the picker: origin "automation", whatever its source.
+        assigned = await start_auto_assign(
+            request, trigger=PickTrigger("unclaimed"), origin="automation"
+        )
+        return {"status": assigned.status}
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}

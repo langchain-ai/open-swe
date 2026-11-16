@@ -121,7 +121,9 @@ class RunConfig(BaseModel):
     plugin_chat: PluginChatConfig | None = None
     # The dashboard page the message came from, which the run queues page commands for.
     page: PageSession | None = None
+    # Where the thread lives, set when it is created (a Slack thread stays "slack").
     source: str | None = None
+    # What started this run, which can differ from source; see RunOrigin.
     origin: RunOrigin | None = None
     task: str | None = None
     environment: str | None = None

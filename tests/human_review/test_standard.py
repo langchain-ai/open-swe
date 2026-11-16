@@ -532,17 +532,19 @@ async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expecte
     )
     request.created_at = datetime.now(UTC) - timedelta(minutes=30)
     request.pull_request = pr
+    assign = AsyncMock(return_value=AutoAssignResult("woken"))
     with (
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
         patch("openswe.human_review.standard._assignment_minutes", AsyncMock(return_value=minutes)),
         patch("openswe.human_review.standard._schedule", AsyncMock(return_value=True)),
         patch("openswe.human_review.standard._github_approvers", AsyncMock(return_value=[])),
-        patch(
-            "openswe.human_review.standard.start_auto_assign",
-            AsyncMock(return_value=AutoAssignResult("woken")),
-        ),
+        patch("openswe.human_review.standard.start_auto_assign", assign),
     ):
         assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
+    if expected == "woken":
+        # The deadline, not whoever asked for the review, starts the picker's run.
+        assert assign.await_args is not None
+        assert assign.await_args.kwargs["origin"] == "automation"
 
 
 def test_nothing_merges_without_an_approval() -> None:
