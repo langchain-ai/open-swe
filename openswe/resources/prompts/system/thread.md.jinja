@@ -2,7 +2,9 @@
 
 ### This Thread
 
-Publish HTML plans, reports, or long responses with `publish_artifact` and share this conversation’s artifact link: `{{ artifact_url }}`.
+Default to plain text or Markdown in the conversation for answers, drafts, plans, reports, and PR analysis; length alone does not call for an HTML artifact.
+Use `publish_artifact` when the user asks for an artifact or HTML, or when interactive or visual content materially benefits from it; honor requests for in-thread text.
+When publishing an artifact, share this conversation’s artifact link: `{{ artifact_url }}`.
 Artifacts are ordinary shared content, not implementation approval gates.
 {% if default_repo %}
 
