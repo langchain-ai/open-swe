@@ -27,7 +27,7 @@ import {
   RESULT_TOOL,
   type CliResult,
   type RunOutcome,
-} from "./stream.ts"
+} from "./follow.ts"
 
 const USAGE = `robin — run a cloud Robin agent against this directory
 
@@ -50,9 +50,6 @@ reports: 0 done or yes, 1 failed or no, 2 could not tell.
 The agent runs shell commands and reads and writes files in the current
 directory, on this machine, without a sandbox.
 `
-
-const EVENT_CHANNELS = ["lifecycle", "tools"] as const
-const EVENT_DEPTH = 5
 
 function out(text: string): void {
   process.stdout.write(`${text}\n`)
@@ -245,13 +242,9 @@ async function runCommand(options: RunOptions): Promise<number> {
     bridgeId: bridge.session.bridgeId,
     root,
   })
-  note(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
-  const thread = api.coordinator(threadId, {
-    channels: EVENT_CHANNELS,
-    namespaces: [[]],
-    depth: EVENT_DEPTH,
-    since: 0,
-  })
+  const threadUrl = api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)
+  note(`Thread ${threadUrl}`)
+  const thread = api.coordinator(threadId)
 
   let exitCode = 0
   // 128 + SIGINT, as shells report an interrupted command, so `robin run … &&` stops.
@@ -309,9 +302,11 @@ async function runCommand(options: RunOptions): Promise<number> {
   let outcome: RunOutcome | null = null
   try {
     following = true
-    const runId = await api.startRun(threadId, configurable, prompt)
-    outcome = await followTask(thread, runId, {
-      onReconnect: (attempt, reason) =>
+    // Minted here, so the answer is read from the messages after this one.
+    const promptId = randomUUID()
+    const runId = await api.startRun(threadId, configurable, prompt, promptId)
+    outcome = await followTask(thread, runId, promptId, {
+      onRetry: (attempt, reason) =>
         note(
           `Lost the connection to the backend (${reason}); retrying, attempt ${attempt}`
         ),
@@ -338,7 +333,7 @@ async function runCommand(options: RunOptions): Promise<number> {
     fail(
       outcome.status === "completed"
         ? `the agent finished without calling ${RESULT_TOOL}`
-        : `run ${outcome.status}${outcome.error ? `: ${outcome.error}` : ""}`
+        : `run ${outcome.status}; see ${threadUrl}`
     )
     exitCode = 1
   }

@@ -1,26 +1,21 @@
 """The task a thread coordinates, for a client that serves its sandbox until it settles."""
 
-import logging
-
 from fastapi import APIRouter, HTTPException
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.tasks.activity import CoordinatorActivity
 from openswe.threads.principals import PrincipalDep
-from openswe.utils.json_types import JsonObject, thread_metadata
-from openswe.utils.thread_ops import langgraph_client
-
-logger = logging.getLogger(__name__)
+from openswe.threads.store import THREADS
+from openswe.utils.json_types import JsonObject
 
 router = APIRouter()
 
 
 async def _metadata(thread_id: str) -> JsonObject:
-    try:
-        return thread_metadata(await langgraph_client().threads.get(thread_id))
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Thread lookup failed", extra={"agent_thread_id": thread_id}, exc_info=True)
-        raise HTTPException(404, "thread not found") from exc
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    return thread.metadata
 
 
 @router.get("/threads/{thread_id}/workers")

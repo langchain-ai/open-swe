@@ -13,7 +13,9 @@ from fastapi import HTTPException
 from openswe.api_keys.models import ApiKey
 from openswe.federation.github_oidc import GitHubActionsClaims
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from openswe.threads import runs
+from openswe.tasks import activity
+from openswe.tasks.routes import api_thread_workers
+from openswe.threads import index, runs
 from openswe.threads.principals import STARTED_BY_ID, Principal
 from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.cursor import TurnPageCursor, encode_turn_cursor
@@ -49,9 +51,15 @@ class _FakeThreads:
         return {"thread_id": thread_id, "status": "idle", "metadata": record["metadata"]}
 
 
+class _FakeRuns:
+    async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, object]]:
+        return []
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.threads = _FakeThreads()
+        self.runs = _FakeRuns()
 
 
 def _command(prompt: str, **configurable: Any) -> dict[str, Any]:
@@ -379,6 +387,23 @@ async def test_a_key_reads_the_transcript_of_only_the_thread_it_started(
     await read(transcript, mine)
     with pytest.raises(HTTPException) as refused:
         await read(transcript, theirs)
+    assert refused.value.status_code == 404
+
+
+async def test_a_key_reads_the_workers_of_only_the_thread_it_started(
+    machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mine = await _key_caller()
+    theirs = await _key_caller()
+    thread_id = str(uuid7())
+    await index.create(
+        thread_id, runtime="mda", metadata={"source": "api", STARTED_BY_ID: mine.started_by_id}
+    )
+    monkeypatch.setattr(activity, "langgraph_client", lambda: machine)
+
+    assert (await api_thread_workers(thread_id, mine)).settled
+    with pytest.raises(HTTPException) as refused:
+        await api_thread_workers(thread_id, theirs)
     assert refused.value.status_code == 404
 
 

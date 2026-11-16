@@ -119,13 +119,16 @@ What happens:
 1. A thread is created on the deployment, with `origin` repo detected from `git remote get-url origin`, and its dashboard URL is printed to stderr.
 1. The agent works.
    Nothing it says or runs is printed; follow it on the dashboard.
-   If the event stream drops, for example while the backend restarts, the CLI reconnects with backoff; it gives up after 10 reconnects in a row that each lasted under a minute.
+   The CLI asks the backend about once a second whether the thread has anything left to run.
+   If the backend can't answer, for example while it restarts, the CLI retries with backoff; it gives up after 10 retries in a row.
 1. The agent ends the run by calling `cli_result` with `stdout` and an `exit_code`.
-   The CLI prints that `stdout` verbatim as its only output on stdout, releases the bridge, and exits with that code.
+   Once the thread has nothing left to run, the CLI reads that call from the thread's messages, prints its `stdout` verbatim as its only output on stdout, releases the bridge, and exits with that code.
+   Only calls after the CLI's own prompt count, so on a thread continued with `--thread`, an earlier command's result is never printed.
 
 The agent may hand parts of the work to task workers, which run on this machine through the same bridge.
-While any worker is still running, a result is not final: the CLI keeps the bridge open, notes each worker's dashboard link and state on stderr as it changes, and follows the agent through the runs that workers' reports wake it for.
-It exits on the result of the last run, once no worker is left running and no report is still on its way to the agent.
+While any worker is still running, a result is not final: the CLI keeps the bridge open, notes each worker's dashboard link and state on stderr as it changes, and waits through the runs that workers' reports wake the agent for.
+It exits on the last result the agent reported, once no worker is left running and no report is still on its way to the agent.
+A later result marked `unchanged` keeps the one before it.
 
 So a run composes like any other command:
 
@@ -135,7 +138,8 @@ git diff | robin run "review this diff" > review.txt
 ```
 
 The agent reports exit codes the way `grep` and `test` do: 0 when the task was done or the answer is yes, 1 when it failed or the answer is no, 2 when it could not tell.
-A run that fails, or ends without calling `cli_result`, prints the reason to stderr and exits 1.
+A run that fails or is cancelled prints its status and the thread's dashboard URL to stderr, and exits 1.
+A task that ends without calling `cli_result` says so on stderr, and exits 1 too.
 The server re-prompts the agent twice before giving up on a missing result.
 
 Ctrl-C once cancels the run and every worker still running, releases the bridge and exits with 130, as an interrupted command does.

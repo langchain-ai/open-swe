@@ -33,19 +33,38 @@ const activitySchema = z.object({
   workers: z.array(workerSchema),
 })
 
+const stateSchema = z.object({
+  values: z.object({ messages: z.array(z.unknown()) }),
+  interrupts: z.array(z.unknown()).nullish(),
+  tasks: z
+    .array(z.object({ interrupts: z.array(z.unknown()).nullish() }))
+    .nullish(),
+})
+
+const runSchema = z.object({ status: z.string() })
+
 export type WorkerActivity = z.infer<typeof workerSchema>
 
 /**
- * What a thread's coordinator is still doing: its runs since the one the CLI
- * last followed, oldest first, and the workers it launched.
+ * What a thread's coordinator is still doing: its runs created after the one
+ * the CLI started, oldest first, and the workers it launched.
  */
 export type TaskActivity = z.infer<typeof activitySchema>
 
+/** What the CLI reads of a thread's state. */
+export interface ThreadState {
+  /** The coordinator's own messages, oldest first. */
+  messages: unknown[]
+  /** Paused on `interrupt()`: its run ended as `success`, and only the state shows the pause. */
+  waiting: boolean
+}
+
 /** One thread the CLI serves, as its coordinator and that coordinator's workers. */
 export interface CoordinatorThread {
-  events(): Promise<Response>
-  /** Null when the backend predates task workers, so there are none to wait for. */
-  activity(after: string | null): Promise<TaskActivity | null>
+  activity(after: string | null): Promise<TaskActivity>
+  state(): Promise<ThreadState>
+  /** The status of one of the coordinator's runs, as its runtime reports it, such as `success` or `error`. */
+  runStatus(runId: string): Promise<string>
   /** Cancels the workers still running, then the coordinator's own runs. */
   stop(): Promise<void>
 }
@@ -71,13 +90,6 @@ export class ProtocolError extends Error {
 interface RawBody {
   data: Uint8Array
   headers: Record<string, string>
-}
-
-export interface EventStreamInput {
-  channels: readonly string[]
-  namespaces: readonly string[][]
-  depth: number
-  since: number
 }
 
 const MAX_DETAIL_CHARS = 600
@@ -124,26 +136,21 @@ export class ApiClient {
     return `${this.backend}/dashboard/api${path}`
   }
 
-  private async headers(accept: string): Promise<Record<string, string>> {
+  private async headers(): Promise<Record<string, string>> {
     return {
       ...(await this.credential.headers(this.backend)),
       "Content-Type": "application/json",
-      Accept: accept,
+      Accept: "application/json",
     }
   }
 
   private async send(
     method: string,
     path: string,
-    options: {
-      body?: unknown
-      raw?: RawBody
-      accept?: string
-      signal?: AbortSignal
-    } = {}
+    options: { body?: unknown; raw?: RawBody; signal?: AbortSignal } = {}
   ): Promise<Response> {
     const headers = {
-      ...(await this.headers(options.accept ?? "application/json")),
+      ...(await this.headers()),
       ...options.raw?.headers,
     }
     const response = await fetch(this.url(path), {
@@ -193,11 +200,15 @@ export class ApiClient {
     )
   }
 
-  /** Start a run on `threadId`; returns the run id when the server reports one. */
+  /**
+   * Start a run on `threadId`; returns the run id when the server reports one.
+   * The prompt keeps `messageId`, so the thread's state shows where it starts.
+   */
   async startRun(
     threadId: string,
     configurable: JsonObject,
-    prompt: string
+    prompt: string,
+    messageId: string
   ): Promise<string | null> {
     const payload = await this.json(
       "POST",
@@ -207,7 +218,9 @@ export class ApiClient {
           id: 1,
           method: "run.start",
           params: {
-            input: { messages: [{ type: "human", content: prompt }] },
+            input: {
+              messages: [{ id: messageId, type: "human", content: prompt }],
+            },
             config: { configurable },
           },
         },
@@ -234,22 +247,43 @@ export class ApiClient {
   async taskActivity(
     threadId: string,
     after: string | null
-  ): Promise<TaskActivity | null> {
+  ): Promise<TaskActivity> {
     const query = after === null ? "" : `?after=${encodeURIComponent(after)}`
-    let payload: unknown
-    try {
-      payload = await this.json(
+    const parsed = activitySchema.safeParse(
+      await this.json(
         "GET",
         `/threads/${encodeURIComponent(threadId)}/workers${query}`
       )
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 404) return null
-      throw cause
-    }
-    const parsed = activitySchema.safeParse(payload)
+    )
     if (!parsed.success)
       throw new ProtocolError("worker activity response is malformed")
     return parsed.data
+  }
+
+  async threadState(threadId: string): Promise<ThreadState> {
+    const parsed = stateSchema.safeParse(
+      await this.json("GET", `/threads/${encodeURIComponent(threadId)}/state`)
+    )
+    if (!parsed.success)
+      throw new ProtocolError("thread state response is malformed")
+    const { values, interrupts, tasks } = parsed.data
+    return {
+      messages: values.messages,
+      waiting:
+        (interrupts?.length ?? 0) > 0 ||
+        (tasks ?? []).some((task) => (task.interrupts?.length ?? 0) > 0),
+    }
+  }
+
+  async runStatus(threadId: string, runId: string): Promise<string> {
+    const parsed = runSchema.safeParse(
+      await this.json(
+        "GET",
+        `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}`
+      )
+    )
+    if (!parsed.success) throw new ProtocolError("run response is malformed")
+    return parsed.data.status
   }
 
   async cancelWorkers(threadId: string): Promise<void> {
@@ -263,10 +297,11 @@ export class ApiClient {
     }
   }
 
-  coordinator(threadId: string, events: EventStreamInput): CoordinatorThread {
+  coordinator(threadId: string): CoordinatorThread {
     return {
-      events: () => this.openEventStream(threadId, events),
       activity: (after) => this.taskActivity(threadId, after),
+      state: () => this.threadState(threadId),
+      runStatus: (runId) => this.runStatus(threadId, runId),
       stop: async () => {
         try {
           await this.cancelWorkers(threadId)
@@ -275,18 +310,6 @@ export class ApiClient {
         }
       },
     }
-  }
-
-  async openEventStream(
-    threadId: string,
-    input: EventStreamInput,
-    signal?: AbortSignal
-  ): Promise<Response> {
-    return await this.send(
-      "POST",
-      `/threads/${encodeURIComponent(threadId)}/stream/events`,
-      { body: input, accept: "text/event-stream", signal }
-    )
   }
 }
 
