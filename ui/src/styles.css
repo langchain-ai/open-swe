@@ -49,8 +49,8 @@
     }
 }
 
-.scroll-mask-t { --scroll-mask-fade-from-t: calc(100% - 1rem); }
-.scroll-mask-b { --scroll-mask-fade-from-b: calc(100% - 1rem); }
+.scroll-mask-t { --scroll-mask-fade-from-t: calc(100% - 0.5rem); }
+.scroll-mask-b { --scroll-mask-fade-from-b: calc(100% - 0.5rem); }
 
 /* A passage being replied to keeps its selection look after focus moves to the
    reply field (SelectionReply). */

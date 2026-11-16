@@ -1,3 +1,4 @@
+import { useScrollIntoView } from "@/lib/useScrollIntoView"
 import {
   ThreadDragCountContext,
   useThreadDragPreviewContent,
@@ -141,11 +142,15 @@ function SidebarRowTitle({ title }: { title: string }) {
   const moreCount = useContext(ThreadDragCountContext)
   return moreCount > 0 ? (
     <span className="flex min-w-0 flex-1 items-center gap-space-1 text-sm">
-      <span className="truncate">{title}</span>
+      <span data-sidebar-row-title className="truncate">
+        {title}
+      </span>
       <span className="shrink-0">(+ {moreCount} more)</span>
     </span>
   ) : (
-    <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+    <span data-sidebar-row-title className="min-w-0 flex-1 truncate text-sm">
+      {title}
+    </span>
   )
 }
 
@@ -223,7 +228,7 @@ function sidebarRowProps({
         ? "bg-selected group-hover/row:bg-selected-hover group-has-data-[hover-preview=open]/row:bg-selected-hover"
         : "group-hover/row:bg-surface-level-2-hover group-has-data-[hover-preview=open]/row:bg-surface-level-2-hover"
     ),
-    style: { paddingLeft: (indent ? 16 : 8) + depth * TREE_STEP },
+    style: { paddingLeft: (indent ? 32 : 8) + depth * TREE_STEP },
   }
 }
 
@@ -351,7 +356,7 @@ function SidebarTree({
   depth: number
   children: React.ReactNode
 }) {
-  const guide = (indent ? 16 : 8) + (depth - 1) * TREE_STEP + 6
+  const guide = (indent ? 32 : 8) + (depth - 1) * TREE_STEP + 6
   return (
     <ul
       aria-label={label}
@@ -391,9 +396,13 @@ export function PendingSidebarThreadRow({
   indent?: boolean
   onNavigate: () => void
 }) {
+  const activeRowRef = useRef<HTMLAnchorElement>(null)
+  useScrollIntoView(activeRowRef, isActive)
+
   return (
     <div data-sidebar-thread-row className="group/row relative mb-0.5">
       <Link
+        ref={activeRowRef}
         to="/agents/$threadId"
         params={{ threadId: item.id }}
         aria-current={isActive ? "page" : undefined}
@@ -499,6 +508,10 @@ export function SidebarThreadRow({
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && subagentsCollapsed)
+
+  const activeRowRef = useRef<HTMLAnchorElement>(null)
+  useScrollIntoView(activeRowRef, rowIsActive)
+
   const unread = !item.viewed
   const isDeleting =
     deleteThread.isPending && deleteThread.variables === item.id
@@ -620,6 +633,7 @@ export function SidebarThreadRow({
       <div {...rowProps}>{rowContent}</div>
     ) : review ? (
       <Link
+        ref={activeRowRef}
         {...reviewPageRoute(review)}
         onClick={(event) => {
           handleNavigate(event)
@@ -638,6 +652,7 @@ export function SidebarThreadRow({
       </Link>
     ) : (
       <Link
+        ref={activeRowRef}
         to="/agents/$threadId"
         params={{ threadId: item.id }}
         onClick={handleNavigate}
@@ -855,8 +870,12 @@ function SidebarSubagentRow({
   depth: number
   onNavigate?: () => void
 }) {
+  const activeRowRef = useRef<HTMLAnchorElement>(null)
+  useScrollIntoView(activeRowRef, isActive)
+
   const link = (
     <Link
+      ref={activeRowRef}
       to="/agents/$threadId"
       params={{ threadId }}
       search={{ subagent: subagent.toolCallId }}
@@ -1000,6 +1019,15 @@ function RowHoverCard({
       <HoverCardTrigger
         asChild
         data-hover-preview={activeCardId === id ? "open" : "closed"}
+        onPointerEnter={(event) => {
+          if (dragging || event.pointerType === "touch") return
+          const title = event.currentTarget.querySelector<HTMLElement>(
+            "[data-sidebar-row-title]"
+          )
+          if (title && title.scrollWidth > title.clientWidth) {
+            onOpenChange(id, true)
+          }
+        }}
         onPointerLeave={onPointerLeave}
       >
         <div>
@@ -1171,6 +1199,8 @@ function SidebarTaskWorkerRow({
     isActive &&
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
+  const activeRowRef = useRef<HTMLAnchorElement>(null)
+  useScrollIntoView(activeRowRef, rowIsActive)
   const status = worker.pendingWorkflowApproval
     ? "Awaiting approval"
     : worker.status === "finished"
@@ -1185,6 +1215,7 @@ function SidebarTaskWorkerRow({
   return (
     <li className="group/row relative mb-0.5">
       <Link
+        ref={activeRowRef}
         to="/agents/$threadId"
         params={{ threadId: worker.id }}
         search={{}}

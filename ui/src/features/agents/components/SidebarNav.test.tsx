@@ -2,19 +2,71 @@
 
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { afterEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import { pluginsApi } from "@/features/plugins/lib/api"
 import { SidebarNav } from "./SidebarNav"
 
+const location = vi.hoisted(() => ({ pathname: "/agents" }))
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  )
+})
+
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+  Link: ({ children, ref }: React.ComponentProps<"a">) => (
+    <a ref={ref}>{children}</a>
+  ),
   useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
-    select({ location: { pathname: "/agents" } }),
+    select({ location }),
   useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  location.pathname = "/agents"
+})
+
+it("temporarily shows an active hidden item", () => {
+  const client = new QueryClient()
+  client.setQueryData(["session"], null)
+  const savedPrefs = window.localStorage.getItem(
+    "open-swe.agents.sidebar-prefs"
+  )
+  const view = (
+    <QueryClientProvider client={client}>
+      <SidebarNav onNavigate={() => {}} />
+    </QueryClientProvider>
+  )
+  const { rerender } = render(view)
+  expect(screen.queryByText("Skills")).toBeNull()
+
+  location.pathname = "/agents/skills/new"
+  rerender(
+    <QueryClientProvider client={client}>
+      <SidebarNav onNavigate={() => {}} />
+    </QueryClientProvider>
+  )
+  expect(screen.getByText("Skills")).toBeTruthy()
+  expect(window.localStorage.getItem("open-swe.agents.sidebar-prefs")).toBe(
+    savedPrefs
+  )
+
+  location.pathname = "/agents"
+  rerender(
+    <QueryClientProvider client={client}>
+      <SidebarNav onNavigate={() => {}} />
+    </QueryClientProvider>
+  )
+  expect(screen.queryByText("Skills")).toBeNull()
+})
 
 it("shows navigation when signed out rather than waiting for disabled apps", () => {
   const client = new QueryClient()

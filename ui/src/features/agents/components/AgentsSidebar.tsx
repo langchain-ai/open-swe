@@ -1,4 +1,5 @@
-import { SlackLinks } from "@/lib/slack-links"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -16,11 +17,9 @@ import {
   DropdownMenuSubContent,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner, SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
@@ -28,7 +27,6 @@ import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import {
   useQueries,
-  useQuery,
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query"
@@ -36,7 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
-import { api, type SessionUser } from "@/lib/api"
+import type { SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
 import type {
   PullRequestSnapshot,
@@ -125,13 +123,14 @@ import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
-import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 import { usePendingVariables } from "@/lib/optimistic"
 import {
   pendingThreadStarts,
   usePendingThreadStarts,
 } from "@/features/agents/lib/pendingThreadStarts"
+import { Icon } from "@langchain/macaw-components"
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 
 interface AgentsSidebarProps {
   user: SessionUser
@@ -148,7 +147,7 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 }
 
 const NAV_ROW_CLASS =
-  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
 const GROUP_ROW_CLASS =
   "h-auto min-w-0 flex-1 justify-start gap-space-2 border-0 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:bg-transparent hover:text-primary dark:hover:bg-transparent"
 const GROUP_CARET_CLASS = "size-3.5 shrink-0"
@@ -201,13 +200,6 @@ export function AgentsSidebar({
   const pinnedSectionRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
   const profile = useProfile()
-  const newThreadShortcut = useShortcutLabel("mod+n")
-  const concierge = useQuery({
-    queryKey: ["concierge", user?.login],
-    queryFn: api.concierge,
-    enabled: !!profile.data?.concierge_mode,
-    refetchInterval: 30_000,
-  })
   const scrollViewport = useRef<HTMLDivElement>(null)
   const { openPalette } = useAppCommandControls()
   const queryClient = useQueryClient()
@@ -233,6 +225,9 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const newThreadShortcut = useShortcutLabel(
+    isDesktop ? "mod+n" : "mod+shift+o"
+  )
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
@@ -910,7 +905,7 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
+      <div className="shrink-0 px-space-2 pb-space-1">
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
@@ -925,68 +920,9 @@ export function AgentsSidebar({
             {newThreadShortcut}
           </Kbd>
         </Link>
-        {profile.data?.concierge_mode &&
-          (concierge.data?.thread_id ? (
-            <Link
-              to="/agents/$threadId"
-              params={{ threadId: concierge.data.thread_id }}
-              onClick={layout.closeOnMobile}
-              aria-current={
-                activeThreadId === concierge.data.thread_id ? "page" : undefined
-              }
-              className={cn(
-                NAV_ROW_CLASS,
-                activeThreadId === concierge.data.thread_id &&
-                  "bg-selected hover:bg-selected-hover"
-              )}
-            >
-              <ChatCircleIcon size={16} weight="regular" />
-              Concierge
-            </Link>
-          ) : (
-            <a
-              href={
-                concierge.data?.channel_id
-                  ? SlackLinks.open(concierge.data.channel_id)
-                  : undefined
-              }
-              onClick={layout.closeOnMobile}
-              className={NAV_ROW_CLASS}
-            >
-              <ChatCircleIcon size={16} weight="regular" />
-              Concierge
-            </a>
-          ))}
       </div>
 
       <SidebarThreadSelection>
-        <div
-          className={cn(
-            "shrink-0 px-space-2",
-            pendingStarts.length === 0 && "sidebar-content",
-            user && profile.isPending && "invisible"
-          )}
-        >
-          <SidebarNav
-            className={cn(
-              isDesktop ? "pb-space-3" : "pb-space-4",
-              !prefsHydrated && "invisible"
-            )}
-            onNavigate={layout.closeOnMobile}
-          />
-        </div>
-        <div
-          className={cn(
-            "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2",
-            user && profile.isPending && "invisible"
-          )}
-        >
-          {
-            recentSections.find(
-              (section) => section.key === "recents:status:running"
-            )?.content
-          }
-        </div>
         <ThreadDragDrop
           pinnedSectionRef={pinnedSectionRef}
           onAction={(actions) => {
@@ -1018,60 +954,6 @@ export function AgentsSidebar({
           }}
         >
           <div
-            className={cn(
-              "scroll-mask-t scroll-mask-b max-h-[50%] shrink-0 overflow-y-auto px-space-2",
-              pendingStarts.length === 0 && "sidebar-content",
-              user && profile.isPending && "invisible"
-            )}
-          >
-            {(pinnedPending ||
-              filteredPinnedItems.length > 0 ||
-              pinnedGroups.length > 0 ||
-              (repoMode && noRepoPinned && noRepoAvailable)) && (
-              <section
-                ref={pinnedSectionRef}
-                className="mb-space-3"
-                data-sidebar-loading={pinnedPending ? "" : undefined}
-              >
-                <SidebarSectionHeader
-                  label="Pinned"
-                  collapsed={sectionCollapsed("pinned")}
-                  onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
-                />
-                {!sectionCollapsed("pinned") && (
-                  <>
-                    <SortableThreadList
-                      label="pinned threads"
-                      items={
-                        pinnedPending && pendingStarts.length === 0
-                          ? []
-                          : filteredPinnedItems
-                      }
-                      threadIds={pendingThreadStarts.reorderableIds(
-                        pinnedThreads
-                      )}
-                      disabled={reorderPins.isPending || pendingPins.length > 0}
-                      onReorder={(ids) => reorderPins.mutate(ids)}
-                      renderRow={(item) => renderRow(item)}
-                    />
-                    {pinnedPending && (
-                      <ThreadListSkeleton label="Loading pinned threads" />
-                    )}
-                    {(!pinnedPending || pendingStarts.length > 0) && (
-                      <div className="sidebar-groups">
-                        {pinnedGroups.map(renderRepoGroup)}
-                        {repoMode &&
-                          noRepoPinned &&
-                          noRepoAvailable &&
-                          renderRepoGroup(noRepoGroup)}
-                      </div>
-                    )}
-                  </>
-                )}
-              </section>
-            )}
-          </div>
-          <div
             ref={scrollViewport}
             className={cn(
               "scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2",
@@ -1079,6 +961,72 @@ export function AgentsSidebar({
               user && profile.isPending && "invisible"
             )}
           >
+            <SidebarNav
+              activeThreadId={activeThreadId}
+              containerClassName="px-0"
+              className={cn(
+                isDesktop ? "pb-space-3" : "pb-space-4",
+                !prefsHydrated && "invisible"
+              )}
+              onNavigate={layout.closeOnMobile}
+            />
+            <div className="sticky top-0 z-sticky-header -mx-space-2 flex max-h-[50%] flex-col bg-surface-level-2 px-space-2 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:hidden after:h-2 after:bg-linear-to-b after:from-surface-level-2 after:to-transparent has-[section]:after:block has-[section]:after:content-['']">
+              <div className="min-h-0 overflow-y-auto">
+                {
+                  recentSections.find(
+                    (section) => section.key === "recents:status:running"
+                  )?.content
+                }
+                {(pinnedPending ||
+                  filteredPinnedItems.length > 0 ||
+                  pinnedGroups.length > 0 ||
+                  (repoMode && noRepoPinned && noRepoAvailable)) && (
+                  <section
+                    ref={pinnedSectionRef}
+                    className="mb-space-3"
+                    data-sidebar-loading={pinnedPending ? "" : undefined}
+                  >
+                    <SidebarSectionHeader
+                      label="Pinned"
+                      collapsed={sectionCollapsed("pinned")}
+                      onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
+                    />
+                    {!sectionCollapsed("pinned") && (
+                      <>
+                        <SortableThreadList
+                          label="pinned threads"
+                          items={
+                            pinnedPending && pendingStarts.length === 0
+                              ? []
+                              : filteredPinnedItems
+                          }
+                          threadIds={pendingThreadStarts.reorderableIds(
+                            pinnedThreads
+                          )}
+                          disabled={
+                            reorderPins.isPending || pendingPins.length > 0
+                          }
+                          onReorder={(ids) => reorderPins.mutate(ids)}
+                          renderRow={(item) => renderRow(item)}
+                        />
+                        {pinnedPending && (
+                          <ThreadListSkeleton label="Loading pinned threads" />
+                        )}
+                        {(!pinnedPending || pendingStarts.length > 0) && (
+                          <div className="sidebar-groups">
+                            {pinnedGroups.map(renderRepoGroup)}
+                            {repoMode &&
+                              noRepoPinned &&
+                              noRepoAvailable &&
+                              renderRepoGroup(noRepoGroup)}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </section>
+                )}
+              </div>
+            </div>
             {cloudError && (
               <ThreadSourceError
                 label="Cloud threads unavailable"
@@ -1248,7 +1196,7 @@ function WorkspaceGroupSection({
           className={GROUP_ROW_CLASS}
         >
           <StackRegularIcon size={16} className="shrink-0" />
-          <SidebarGroupHeading label={workspace.name} className="flex-1" />
+          <SidebarGroupHeading label={workspace.name} />
           <Caret
             weight="regular"
             className={cn(
@@ -1402,15 +1350,17 @@ function RepoGroup({
           className={GROUP_ROW_CLASS}
         >
           <Folder size={16} weight="regular" className="shrink-0" />
-          <SidebarGroupHeading label={group.label} className="flex-1" />
-          <Caret
-            weight="regular"
-            className={cn(
-              GROUP_CARET_CLASS,
-              !collapsed &&
-                "invisible group-focus-within/folder:visible group-hover/folder:visible"
-            )}
-          />
+          <span className="flex min-w-0 items-center gap-space-1">
+            <SidebarGroupHeading label={group.label} />
+            <Caret
+              weight="regular"
+              className={cn(
+                GROUP_CARET_CLASS,
+                !collapsed &&
+                  "invisible group-focus-within/folder:visible group-hover/folder:visible"
+              )}
+            />
+          </span>
         </Button>
         {group.project && <ProjectFolderMenu project={group.project} />}
         <IconButton
@@ -1465,15 +1415,15 @@ function RepoGroup({
             renderRow={(item) => renderRow(item, pullRequestFor(item))}
           />
           {pending && (
-            <div className="pl-space-3">
+            <div className="pl-space-5">
               <ThreadListSkeleton label={`Loading chats in ${group.label}`} />
             </div>
           )}
-          {shown.length === 0 && !loading && !repo.isError && (
-            <p className="py-space-1 pr-space-2 pl-space-5 text-xs text-tertiary">
+          {shown.length === 0 && !loading && !repo.isError ? (
+            <p className="py-space-1 pr-space-2 pl-space-6 text-xs text-tertiary">
               No chats
             </p>
-          )}
+          ) : null}
           {repo.isError && (
             <Button
               color="secondary"
@@ -1482,9 +1432,15 @@ function RepoGroup({
               aria-label="Retry loading chats"
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full justify-start py-space-1 pr-space-2 pl-space-5 text-left text-error-secondary"
+              className="h-6 w-full justify-start py-space-1 pr-space-2 pl-space-6 text-left"
             >
-              Retry loading chats
+              <Icon
+                icon={ArrowCounterClockwiseIcon}
+                className="text-error-secondary"
+              />
+              <span className="text-sm text-error-secondary">
+                Retry loading chats
+              </span>
             </Button>
           )}
           {hasMore && !pending && (
@@ -1500,10 +1456,12 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="h-auto w-full justify-start gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left whitespace-normal text-tertiary hover:text-primary disabled:cursor-wait disabled:bg-transparent disabled:opacity-60"
+              className="h-6 w-full justify-start gap-space-2 rounded-lg border-none py-space-1 pr-space-2 pl-space-6 text-left whitespace-normal hover:text-primary disabled:cursor-wait disabled:bg-transparent disabled:text-primary disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
-              {loading ? "Loading…" : "Show more"}
+              <span className="text-sm text-quaternary">
+                {loading ? "Loading…" : "Show more..."}
+              </span>
             </Button>
           )}
         </>

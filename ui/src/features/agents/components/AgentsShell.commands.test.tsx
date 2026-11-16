@@ -3,7 +3,7 @@
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { afterEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import { SidebarThreadRow } from "./SidebarThreadRow"
 import { cloudSidebarThread } from "../lib/sidebarThreads"
@@ -137,8 +137,19 @@ window.matchMedia = ((query: string) => ({
   removeEventListener: vi.fn(),
 })) as unknown as typeof window.matchMedia
 
+beforeEach(() => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  )
+})
+
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   localStorage.clear()
   stub.emptyList.items = []
   vi.clearAllMocks()
