@@ -58,6 +58,8 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
     threadId,
     // A message sent during a run waits in the server's queue as a run of its own.
     queue: "server",
+    // The view reads only messages, so opening a thread skips the agent's large state keys.
+    stateKeys: [],
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect,
