@@ -88,6 +88,26 @@ github_login: carol
     })
   })
 
+  it("uses the Slack post time only when the event identifies that post", () => {
+    expect(
+      parseStructuredInput(
+        '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1767225610.123456" slack_message_ts="1767225610.123456">Hello</input-message>'
+      )
+    ).toMatchObject({ slackOccurredAt: 1767225610.123456 })
+    for (const timestamp of ["invalid", "99999999999999999999.000000"]) {
+      expect(
+        parseStructuredInput(
+          `<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="${timestamp}" slack_message_ts="${timestamp}">Hello</input-message>`
+        )
+      ).not.toHaveProperty("slackOccurredAt")
+    }
+    expect(
+      parseStructuredInput(
+        '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1767225620.000000" slack_message_ts="1767225610.000000">Edited</input-message>'
+      )
+    ).not.toHaveProperty("slackOccurredAt")
+  })
+
   it("does not link an action timestamp without an identified source post", () => {
     expect(
       parseStructuredInput(

@@ -144,27 +144,42 @@ export interface TranscriptState {
   entities: ReadonlyMap<string, StructuredEntity>
 }
 
+class TranscriptTimestamp {
+  static seconds(timestamp: string): number {
+    const fraction = /\.(\d+)/.exec(timestamp)?.[1] ?? ""
+    return (
+      Date.parse(timestamp) / 1000 +
+      Number((fraction.slice(3) + "000").slice(0, 3)) / 1_000_000
+    )
+  }
+}
+
 function orderItems(
   messages: ReadonlyArray<TranscriptMessageState>,
   toolCalls: ReadonlyArray<TranscriptToolCallState>
 ): Array<TurnItem> {
-  const entries: Array<{ item: TurnItem; at: string; rank: number }> = [
-    ...messages.map((message) => ({
-      item: { kind: "message" as const, id: message.messageId },
-      at: message.createdAt,
-      rank: 0,
-    })),
+  const entries: Array<{ item: TurnItem; at: number; rank: number }> = [
+    ...messages.map((message) => {
+      const parsed =
+        message.role === "human" ? parseStructuredInput(message.text) : null
+      return {
+        item: { kind: "message" as const, id: message.messageId },
+        at:
+          parsed?.type === "message" && parsed.slackOccurredAt !== undefined
+            ? parsed.slackOccurredAt
+            : TranscriptTimestamp.seconds(message.createdAt),
+        rank: 0,
+      }
+    }),
     ...toolCalls.map((call) => ({
       item: { kind: "tool" as const, id: call.toolCallId },
-      at: call.startedAt,
+      at: TranscriptTimestamp.seconds(call.startedAt),
       rank: 1,
     })),
   ]
   entries.sort(
     (a, b) =>
-      a.at.localeCompare(b.at) ||
-      a.rank - b.rank ||
-      a.item.id.localeCompare(b.item.id)
+      a.at - b.at || a.rank - b.rank || a.item.id.localeCompare(b.item.id)
   )
   return entries.map((entry) => entry.item)
 }
@@ -1074,7 +1089,10 @@ function buildHumanMessage(
       parsed.type === "message" && parsed.senderKind === "system"
         ? "system"
         : "user",
-    timestamp: row.createdAt,
+    timestamp:
+      parsed.type === "message" && parsed.slackOccurredAt !== undefined
+        ? new Date(parsed.slackOccurredAt * 1000).toISOString()
+        : row.createdAt,
     chunks,
     ...(parsed.type === "message"
       ? {
@@ -1083,6 +1101,9 @@ function buildHumanMessage(
           structuredSurface: parsed.surface,
           ...(parsed.slackMessageUrl
             ? { slackMessageUrl: parsed.slackMessageUrl }
+            : {}),
+          ...(parsed.slackOccurredAt !== undefined
+            ? { slackOccurredAt: parsed.slackOccurredAt }
             : {}),
           ...(replies ? { replies } : {}),
           structuredSenderName:
@@ -1207,7 +1228,26 @@ function turnMessages(
     agent.chunks.push(...chunks)
   }
 
-  for (const item of turn.items) {
+  const turnRows = turn.items.flatMap((item) => {
+    const row = item.kind === "message" ? state.messages[item.id] : undefined
+    return row ? [row] : []
+  })
+  const hasSlackTime = turnRows.some((row) => {
+    if (row.role !== "human") return false
+    const parsed = parseStructuredInput(row.text, state.entities)
+    return parsed.type === "message" && parsed.slackOccurredAt !== undefined
+  })
+  const items = hasSlackTime
+    ? orderItems(
+        turnRows,
+        turn.items.flatMap((item) => {
+          const call =
+            item.kind === "tool" ? state.toolCalls[item.id] : undefined
+          return call ? [call] : []
+        })
+      )
+    : turn.items
+  for (const item of items) {
     if (item.kind === "message") {
       const row = state.messages[item.id]
       if (!row || !sameNamespace(row.namespace, namespace)) continue
@@ -1309,13 +1349,37 @@ export function toMessages(state: TranscriptState): Array<Message> {
   ) {
     return cached.messages
   }
-  const messages: Array<Message> = []
+  let messages: Array<Message> = []
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
     // Queued follow-ups render in the queue, not the record, until they run.
     if (!turn || isQueuedTurn(state, turn) || isCancelledBeforeStart(turn))
       continue
     messages.push(...turnMessages(state, turn, []))
+  }
+  const slackMessages = messages
+    .filter((message) => message.slackOccurredAt !== undefined)
+    .sort((a, b) => (a.slackOccurredAt ?? 0) - (b.slackOccurredAt ?? 0))
+  if (slackMessages.length) {
+    const otherMessages = messages.filter(
+      (message) => message.slackOccurredAt === undefined
+    )
+    const ordered: Array<Message> = []
+    let cursor = 0
+    for (const message of slackMessages) {
+      const at = message.slackOccurredAt ?? 0
+      while (cursor < otherMessages.length) {
+        const other = otherMessages[cursor]!
+        const otherAt = TranscriptTimestamp.seconds(
+          other.startedAt ?? other.timestamp
+        )
+        if (otherAt > at) break
+        ordered.push(other)
+        cursor += 1
+      }
+      ordered.push(message)
+    }
+    messages = ordered.concat(otherMessages.slice(cursor))
   }
   messagesCache.set(state.turns, {
     turnOrder: state.turnOrder,

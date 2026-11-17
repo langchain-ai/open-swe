@@ -39,6 +39,7 @@ export type ParsedStructuredInput =
       senderKind: StructuredSenderKind
       surface?: string
       slackMessageUrl?: string
+      slackOccurredAt?: number
       taskEvent?: TaskEventMetadata
       replies?: Array<PassageReply>
     }
@@ -310,6 +311,17 @@ export function parseStructuredInput(
         attributes.surface === "slack" && slackChannel && slackTimestamp
           ? SlackLinks.open(slackChannel, slackTimestamp)
           : undefined
+      const eventTimestamp = /^\d+\.\d{6}$/.test(attributes.timestamp ?? "")
+        ? Number(attributes.timestamp)
+        : NaN
+      const slackOccurredAt =
+        slackMessageUrl &&
+        attributes.timestamp === slackTimestamp &&
+        (attributes.kind === "human" || attributes.kind === "person") &&
+        Number.isFinite(eventTimestamp) &&
+        Number.isFinite(new Date(eventTimestamp * 1000).getTime())
+          ? eventTimestamp
+          : undefined
       return {
         type: "message",
         content: decodeXmlText(split.content),
@@ -318,6 +330,7 @@ export function parseStructuredInput(
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
         ...(slackMessageUrl ? { slackMessageUrl } : {}),
+        ...(slackOccurredAt !== undefined ? { slackOccurredAt } : {}),
         ...(taskEvent ? { taskEvent } : {}),
       }
     }

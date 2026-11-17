@@ -251,6 +251,7 @@ export interface Message {
   structuredSenderIsBot?: boolean
   structuredSurface?: string
   slackMessageUrl?: string
+  slackOccurredAt?: number
   /** Passages the sender selected and replied to, carried in the message's envelope. */
   replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
