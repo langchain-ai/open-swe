@@ -1635,10 +1635,7 @@ export function AgentsShell({
     enabled: Boolean(activeThreadId),
   })
   const activeThread = useActiveAgentThread(
-    startingActiveThread ? undefined : activeThreadId,
-    {
-      enabled: Boolean(activeThreadId) && !startingActiveThread,
-    }
+    startingActiveThread ? undefined : activeThreadId
   )
   const sidebarCommands = useMemo(() => {
     const commands = [

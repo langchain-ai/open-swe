@@ -17,7 +17,12 @@ import { useEffect, useRef } from "react"
 import { agentsApi } from "./api"
 import { localThreadKeys } from "./desktopLocal"
 import { pendingThreadStarts } from "./pendingThreadStarts"
-import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
+import type {
+  InfiniteData,
+  QueryCache,
+  QueryClient,
+  QueryKey,
+} from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   ThreadBrowser,
@@ -145,6 +150,30 @@ export class ThreadSummaryCache {
       exact: true,
     })
     invalidateAgentThreadLists(this.queryClient)
+  }
+
+  /**
+   * A thread page's summary. As a thread opens, its sidebar row asks for the
+   * same summary under a key of its own, just before the page does. Until the
+   * page holds a summary it takes that request rather than sending a copy, so
+   * the response can't predate a change made since. A shared request that
+   * fails or is cancelled is retried as the page's own. The sidebar never waits
+   * for the page, so neither can end up waiting on the other.
+   */
+  static fetchForPage(
+    queries: QueryCache,
+    threadId: string,
+    held: boolean
+  ): Promise<AgentThread> {
+    const sidebar = held
+      ? undefined
+      : queries.find<AgentThread>({
+          queryKey: agentThreadKeys.sidebarActive(threadId),
+          exact: true,
+        })
+    return sidebar && sidebar.state.fetchStatus !== "idle"
+      ? sidebar.fetch().catch(() => agentsApi.getThread(threadId))
+      : agentsApi.getThread(threadId)
   }
 }
 
@@ -838,14 +867,20 @@ function useFetchedSidebarThread(
   }).data
 }
 
-/** The open thread itself, for commands that act on it. */
+/**
+ * The open thread itself, for commands that act on it. It shares the page's
+ * summary query, so with the page open there is one request between them.
+ * With no page, such as a review chat in a closed side sheet, it loads the
+ * thread itself and polls a live run as the page would.
+ */
 export function useActiveAgentThread(
-  threadId: string | undefined,
-  { enabled = true } = {}
+  threadId: string | undefined
 ): AgentThread | undefined {
-  const detail = useCachedAgentThread(threadId)
-  const fetched = useFetchedSidebarThread(threadId, enabled && !detail)
-  return detail ?? fetched
+  const queryClient = useQueryClient()
+  return useQuery({
+    ...agentThreadDetailOptions(threadId ?? "", queryClient),
+    enabled: Boolean(threadId),
+  }).data
 }
 
 /**
@@ -1031,23 +1066,22 @@ function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
   return queryOptions({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: async ({ queryKey }) => {
-      const thread = await agentsApi.getThread(threadId)
+      const thread = await ThreadSummaryCache.fetchForPage(
+        queryClient.getQueryCache(),
+        threadId,
+        queryClient.getQueryData(queryKey) !== undefined
+      )
       const cached = queryClient.getQueryData<AgentThread>(queryKey)
       const pendingMessages = cached?.pendingMessages
       if (!pendingMessages?.length) return thread
       return { ...thread, pendingMessages }
     },
-  })
-}
-
-export function useAgentThread(threadId: string, active = true) {
-  const queryClient = useQueryClient()
-  const query = useQuery({
-    ...agentThreadDetailOptions(threadId, queryClient),
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
-    // session cookie), so a dropped event stream must not leave the view — and
-    // its stop button — believing the run already ended.
+    // session cookie), so a dropped event stream must not leave the view, or
+    // its stop button, believing the run already ended. With no page open, the
+    // shell's observer is what keeps the sidebar row fresh. Every fetch
+    // restarts each observer's timer, so the page and the shell poll as one.
     refetchInterval: (current) =>
       current.state.data?.status === "running" ||
       current.state.data?.waitingForDelegatedWork
@@ -1060,6 +1094,11 @@ export function useAgentThread(threadId: string, active = true) {
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
+}
+
+export function useAgentThread(threadId: string, active = true) {
+  const queryClient = useQueryClient()
+  const query = useQuery(agentThreadDetailOptions(threadId, queryClient))
 
   const { mutate: setViewed } = useSetAgentThreadViewed()
   const readVisit = useRef<{
