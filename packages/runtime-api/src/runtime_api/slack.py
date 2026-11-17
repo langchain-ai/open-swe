@@ -21,10 +21,10 @@ thread went (``slack_moved``). Both act on the run's own thread, from its token.
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Final, Literal
+from typing import Annotated, ClassVar, Final, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 from runtime_api.operations import RunRequest
@@ -36,6 +36,39 @@ SEND_TRACE_ID_KEY: Final = "slack_send_trace_id"
 SEND_DOTTED_ORDER_KEY: Final = "slack_send_dotted_order"
 # The project the channel traced it in, which may not be the one the backend traces runs in.
 SEND_PROJECT_KEY: Final = "slack_send_project"
+
+
+class SlackMessageOrigin(BaseModel):
+    """The verified Slack message a person's run input was built from.
+
+    Whoever builds the input from Slack's verified event records it on the person's
+    message, beside its provenance: the backend's ``/webhooks/slack`` and MDA's Slack
+    channel. ``thread_ts`` is the conversation's key, as the run's ``slack_thread`` names
+    it. Clients never set it: their messages are rebuilt before a run receives them.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    KEY: ClassVar[str] = "slack_message_origin"
+
+    channel_id: str = Field(min_length=1)
+    thread_ts: str = Field(min_length=1)
+    message_ts: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    # The message's actual Slack thread, even when thread_ts is the concierge key.
+    reply_thread_ts: str = ""
+
+    def stamp(self, additional_kwargs: Mapping[str, object] | None = None) -> dict[str, object]:
+        """``additional_kwargs`` recording this origin, keeping what they already record."""
+        return {
+            **(additional_kwargs or {}),
+            self.KEY: self.model_dump(mode="json", exclude_defaults=True),
+        }
+
+    @classmethod
+    def of(cls, additional_kwargs: Mapping[str, object]) -> Self | None:
+        """The origin a person's message records; ``None`` when it records none."""
+        raw = additional_kwargs.get(cls.KEY)
+        return None if raw is None else cls.model_validate(raw)
 
 
 class SlackMessage(BaseModel):

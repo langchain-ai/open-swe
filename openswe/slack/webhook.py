@@ -14,7 +14,7 @@ import httpx2
 from fastapi import HTTPException
 from langchain_core.messages.content import create_text_block
 from pydantic import JsonValue
-from runtime_api.slack import SlackNotice, SlackTurnPrompt
+from runtime_api.slack import SlackMessageOrigin, SlackNotice, SlackTurnPrompt
 
 from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -351,6 +351,7 @@ def _slack_context_input(
     trigger_system: SystemIdentity | None = None,
     explicit_mention: bool = False,
     web_only: bool = False,
+    message_origin: SlackMessageOrigin | None = None,
 ) -> RunInput:
     channel_entity_id = channel["id"]
     link_source = not context_channel_id or context_channel_id == channel_entity_id.removeprefix(
@@ -519,6 +520,10 @@ def _slack_context_input(
             },
         )
     )
+    if message_origin is not None and trigger_kind == "human" and not web_only:
+        run_messages[-1]["additional_kwargs"] = message_origin.stamp(
+            run_messages[-1].get("additional_kwargs")
+        )
     return {"messages": run_messages}
 
 
@@ -1507,16 +1512,6 @@ async def _process_slack_mention_impl(
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 
-    # An edit corrects a request the agent already has, so it belongs in the
-    # thread's message queue rather than in a run of its own. Nothing drains that
-    # queue while the thread is idle; an edit made after the agent finished waits
-    # for the next message.
-    if message_update and await queue_message_for_thread(
-        thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
-    ):
-        common.logger.info("Queued Slack message edit for thread %s", thread_id)
-        return False
-
     # A channel run doesn't stage files here: MDA's channel starts its sandbox.
     if persisted and channel_run is None:
         staged_files = await queue_slack_files(thread_id, slack_file_entries(source_messages))
@@ -1594,7 +1589,25 @@ async def _process_slack_mention_impl(
         if allowed_bot is not None
         else request.trigger_system,
         explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
+        message_origin=SlackMessageOrigin(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            message_ts=original_message_ts,
+            user_id=user_id,
+            reply_thread_ts=reply_thread_ts or "",
+        )
+        if user_id
+        else None,
     )
+    # An edit joins the next model call with its original message's provenance.
+    if message_update:
+        queued = as_json_object(run_input["messages"][-1])
+        blocks = queued.get("content")
+        if isinstance(blocks, list):
+            queued["content"] = [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *blocks]
+        if await queue_message_for_thread(thread_id, queued):
+            common.logger.info("Queued Slack message edit for thread %s", thread_id)
+            return False
     receipt_ts = original_message_ts if concierge_mode and not message_update else ""
     if receipt_ts:
         await slack_utils.add_slack_reaction(channel_id, receipt_ts, "hourglass_flowing_sand")

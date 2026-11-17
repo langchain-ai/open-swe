@@ -252,6 +252,7 @@ from openswe.tools import (
     submit_thread_feedback,
     suggest_task,
     switch_to_performance_model,
+    transcribe_audio,
     trigger_automation,
     unshare_project,
     update_automation,
@@ -679,6 +680,7 @@ AGENT_TOOLS: Final = (
     http_request,
     fetch_url,
     web_search,
+    transcribe_audio,
     classify,
     background_execute,
     background_task,
@@ -970,7 +972,13 @@ _NOT_FROM_CODE = frozenset({"task"}) | frozenset(
 # Everyday tools code mode still offers the model directly. Every other tool it calls
 # from code, where the run's tools can differ from person to person and run to run without
 # changing the tools offered to the model, which the provider's prompt cache keys on.
-_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {SEARCH_TOOLS, "monitor", "web_search", "fetch_url"}
+_DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
+    SEARCH_TOOLS,
+    "monitor",
+    "web_search",
+    "fetch_url",
+    "transcribe_audio",
+}
 
 
 def callable_from_code(name: str) -> bool:

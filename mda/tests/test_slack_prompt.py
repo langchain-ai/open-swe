@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 import pytest
 import rt.slack_prompt as slack_prompt
 from managed_deepagents._channels.types import ChannelError
+from runtime_api.slack import SlackMessageOrigin
 
 _BACKEND = json.loads((Path(__file__).parent / "slack_prompt_backend.json").read_text())
 _SETS = {"dispatched_timestamps", "run_described_person_ids"}
@@ -21,6 +22,8 @@ _SETS = {"dispatched_timestamps", "run_described_person_ids"}
 
 def _case(name: str) -> dict[str, Any]:
     case = json.loads(json.dumps(_BACKEND["cases"][name]))
+    if "message_origin" in case:
+        case["message_origin"] = SlackMessageOrigin(**case["message_origin"])
     return {key: set(value) if key in _SETS else value for key, value in case.items()}
 
 

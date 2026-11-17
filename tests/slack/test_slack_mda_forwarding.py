@@ -770,6 +770,7 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
     # The run-complete webhook takes the ⏳ off the concierge message it names.
     assert start["run"]["metadata"]["slack_concierge_message_ts"] == "1.1"
     [(request, repo)] = [prepare.await_args.args]
+    assert request.source_message_ts == "1.2"
     assert (request.thread_id, request.thread_ts, request.event_ts, request.text) == (
         _MDA_THREAD,
         "1.2",
@@ -1219,6 +1220,7 @@ async def test_a_breakout_opens_its_new_thread_and_runs_its_first_turn_there(
     [(source, command)] = seen
     # Seeded from the Slack thread it was typed in, whoever holds it: nothing is claimed.
     assert source.thread_id == (owner or backend_thread)
+    assert source.source_message_ts == ""
     assert cast(slack_channel.BreakoutCommand, command).instruction == "fix the flaky test"
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
     cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
@@ -1946,6 +1948,7 @@ async def test_an_edit_in_an_mda_conversation_reaches_the_agent_as_a_correction(
     # The builder notes the correction for a run in progress, or makes it a turn.
     assert request.message_update
     assert (request.original_message_ts, request.event_ts) == ("1.2", "1.9")
+    assert request.source_message_ts == "1.2"
     assert request.thread_id == _MDA_THREAD
     assert prepare.await_args.kwargs["read"] is None
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()

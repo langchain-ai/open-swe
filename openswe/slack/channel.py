@@ -289,6 +289,9 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
         thread_ts=key_ts,
         event_ts=turn.message_ts,
         original_message_ts=turn.message_ts,
+        source_message_ts=turn.message_ts
+        if turn.kind in {"turn", "edit"} and turn.user_id and not turn.bot_id
+        else "",
         retry_message_ts=turn.message_ts,
         # One per message, so a call sent again claims nothing twice.
         event_id=f"mda-slack:{turn.channel_id}:{turn.message_ts}",

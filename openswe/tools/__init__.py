@@ -97,6 +97,7 @@ _TOOL_MODULES = {
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
+    "transcribe_audio": ".transcribe_audio",
     "web_search": ".web_search",
 }
 
@@ -195,6 +196,7 @@ __all__ = [
     "trigger_automation",
     "update_automation",
     "update_finding",
+    "transcribe_audio",
     "web_search",
 ]
 
@@ -289,6 +291,7 @@ if TYPE_CHECKING:
         reorder_thread_pins,
         start_thread,
     )
+    from openswe.tools.transcribe_audio import transcribe_audio
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
     from openswe.tools.web_search import web_search

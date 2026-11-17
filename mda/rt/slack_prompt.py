@@ -34,7 +34,7 @@ from managed_deepagents._channels.slack.api import (  # noqa: PLC2701
 )
 from managed_deepagents._channels.types import ChannelError  # noqa: PLC2701
 from runtime_api.loop import VISIBLE_FROM
-from runtime_api.slack import SlackNotice
+from runtime_api.slack import SlackMessageOrigin, SlackNotice
 
 from rt.images import extract_image_urls, fetch_image_block
 from rt.input_messages import (
@@ -723,12 +723,14 @@ def build_input(
     bot_username: str = "",
     source_message_ts: str = "",
     context_channel_id: str = "",
+    message_origin: SlackMessageOrigin | None = None,
 ) -> RunInput:
     """The run's input for a Slack message: who and where, what came before it, then it.
 
     ``bot_username`` is the backend's ``SLACK_BOT_USERNAME``, which it reads globally.
     Each message names its Slack timestamp (``slack_message_ts``) so the dashboard links
     to it, unless the history comes from another channel (``context_channel_id``).
+    A person's request records ``message_origin``, the verified Slack message it is.
     """
     channel_entity_id = channel["id"]
     link_source = not context_channel_id or context_channel_id == channel_entity_id.removeprefix(
@@ -875,6 +877,22 @@ def build_input(
     )
     if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
+    if message_origin is not None and not (trigger_is_system or web_only):
+        files = current_message.get("files")
+        voice_ids = (
+            [
+                file["id"]
+                for file in files
+                if isinstance(file, dict)
+                and file.get("subtype") == "slack_audio"
+                and isinstance(file.get("id"), str)
+                and re.fullmatch(r"F[A-Z0-9]+", file["id"])
+            ]
+            if isinstance(files, list)
+            else []
+        )
+        if voice_ids:
+            request_text += "\n" + prompt("slack_voice_clips", file_ids=voice_ids)
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     trigger_context: InputMessageContext = {
         "sender_id": trigger_sender_id,
@@ -895,6 +913,10 @@ def build_input(
         if trigger_is_system
         else human_input(blocks, trigger_context)
     )
+    if message_origin is not None and not trigger_is_system and not web_only:
+        run_messages[-1]["additional_kwargs"] = message_origin.stamp(
+            run_messages[-1].get("additional_kwargs")
+        )
     return {"messages": run_messages}
 
 

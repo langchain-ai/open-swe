@@ -9,7 +9,10 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi import HTTPException
+from langchain_core.messages import convert_to_messages, messages_from_dict, messages_to_dict
 from pydantic import JsonValue
+from runtime_api.provenance import PROVENANCE_KEY, Provenance
+from runtime_api.slack import SlackMessageOrigin
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
@@ -1419,6 +1422,38 @@ def test_cross_channel_context_does_not_link_source_timestamps_to_destination(
     )
 
 
+@pytest.mark.parametrize("surface", ["human", "bot", "web"])
+def test_only_direct_human_slack_input_carries_voice_origin(surface: str) -> None:
+    origin = SlackMessageOrigin(
+        channel_id="C123", thread_ts="1.0", message_ts="9.0", user_id="U123"
+    )
+    run_input = slack_webhooks._slack_context_input(
+        [{"ts": "2.0", "user": "U456", "text": "historical recording"}],
+        {"U123": "Alice", "U456": "Bob"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack", "thread_id": "1.0"},
+        bot_user_id="UBOT",
+        event_ts="10.0",
+        trigger_user_id="U123",
+        request_text="voice",
+        request_blocks=[{"type": "text", "text": "voice"}],
+        message_origin=origin,
+        web_only=surface == "web",
+        trigger_system={"id": "system:bot", "display_name": "Bot"} if surface == "bot" else None,
+    )
+    delivered = messages_from_dict(messages_to_dict(convert_to_messages(run_input["messages"])))
+    origins = [
+        m.additional_kwargs[SlackMessageOrigin.KEY]
+        for m in delivered
+        if SlackMessageOrigin.KEY in m.additional_kwargs
+    ]
+    assert origins == ([origin.model_dump(exclude_defaults=True)] if surface == "human" else [])
+    assert all(SlackMessageOrigin.KEY not in m.additional_kwargs for m in delivered[:-1])
+    # The origin joins the request's recorded provenance rather than replacing it.
+    provenance = Provenance.model_validate(delivered[-1].additional_kwargs[PROVENANCE_KEY])
+    assert provenance.kind == ("system" if surface == "bot" else "human")
+
+
 def test_multiline_trigger_appends_only_forwarded_context() -> None:
     contents = _context_input(
         [
@@ -1692,6 +1727,8 @@ def test_queued_slack_edit_names_people_and_public_channels(
                     "channel_id": "C123",
                     "thread_ts": "1700000000.000100",
                     "event_ts": "1700000000.000300",
+                    "original_message_ts": "1700000000.000100",
+                    "source_message_ts": "1700000000.000100",
                     "user_id": "U123",
                     "text": "<@UBOT> ask <@U456> in <#C9|> not <#C8|>",
                     "bot_user_id": "UBOT",
@@ -1705,11 +1742,21 @@ def test_queued_slack_edit_names_people_and_public_channels(
         )
     )
 
-    text = "\n".join(
-        block["text"]
-        for block in cast(list, captured["queued"])
-        if isinstance(block, dict) and block.get("text")
-    )
+    queued = captured["queued"]
+    assert isinstance(queued, dict)
+    delivered = convert_to_messages([queued])[0]
+    assert Provenance.model_validate(delivered.additional_kwargs[PROVENANCE_KEY]).human
+    assert delivered.additional_kwargs[SlackMessageOrigin.KEY] == {
+        "channel_id": "C123",
+        "thread_ts": "1700000000.000100",
+        "message_ts": "1700000000.000100",
+        "user_id": "U123",
+    }
+    blocks = queued["content"]
+    assert isinstance(blocks, list)
+    envelope = ElementTree.fromstring(blocks[-1]["text"])
+    assert envelope.get("slack_message_ts") == "1700000000.000100"
+    text = envelope.text or ""
     assert "ask <@U456|Teammate> in <#C9|eng> not <#C8|>" in text
     assert "U777" in cast(list, captured["user_ids"])
 

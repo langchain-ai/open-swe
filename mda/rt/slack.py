@@ -47,6 +47,7 @@ from runtime_api.slack import (
     SlackMessage,
     SlackMessageFacts,
     SlackMessageFactsRequest,
+    SlackMessageOrigin,
     SlackNotice,
     SlackTurnDeclined,
     SlackTurnStart,
@@ -403,6 +404,7 @@ async def _start_turn(
                     "text": message.text,
                     "user": message.user_id,
                     "attachments": message.attachments,
+                    "files": event.payload.get("files", []),
                     **(
                         {"bot_id": message.bot_id, "bot_profile": {"name": facts.bot_name}}
                         if message.bot_id
@@ -410,8 +412,11 @@ async def _start_turn(
                     ),
                 }
             )
-        elif message.attachments and not current.get("attachments"):
-            current["attachments"] = message.attachments
+        else:
+            if message.attachments and not current.get("attachments"):
+                current["attachments"] = message.attachments
+            if not current.get("files"):
+                current["files"] = event.payload.get("files", [])
         await slack_prompt.await_link_unfurls(
             message.channel_id,
             context_ts,
@@ -517,6 +522,15 @@ async def _start_turn(
             bot_user_id=bot_user_id,
             event_ts=message.message_ts,
             source_message_ts=message.message_ts,
+            message_origin=SlackMessageOrigin(
+                channel_id=message.channel_id,
+                thread_ts=root_ts,
+                message_ts=message.message_ts,
+                user_id=message.user_id,
+                reply_thread_ts=message.reply_thread_ts,
+            )
+            if message.user_id and not message.bot_id
+            else None,
             trigger_user_id=message.user_id,
             request_text=turn.clean_text,
             request_blocks=[
