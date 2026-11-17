@@ -903,6 +903,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         "model_selection": "auto",
     }
     created: dict[str, object] = {} if creating else {"metadata": metadata}
+    monkeypatch.setattr(thread_runs, "queue_slack_files", AsyncMock(return_value=[]))
     _patch_new_thread_deps(
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},

@@ -192,16 +192,16 @@ class DashboardImageBody(BaseModel):
             raise HTTPException(422, f"at most {_MAX_DASHBOARD_FILES} files are supported")
         return files
 
-    @classmethod
+    @staticmethod
     async def stage_files(
-        cls, thread_id: str, params: dict[str, Any]
-    ) -> tuple[list[DashboardImageBody], list[str]]:
-        """Queue a command's files for the thread's sandbox; return them and their sandbox paths."""
-        content = _command_message_content(params)
-        files = cls.files_in(content)
-        if not files or not isinstance(content, list):
-            return [], []
-        message_id = _command_message_id(params)
+        thread_id: str,
+        files: Sequence[DashboardImageBody],
+        *,
+        message_id: str | None = None,
+    ) -> list[str]:
+        """Queue attachments for the sandbox and return their paths."""
+        if not files:
+            return []
         for position, file in enumerate(files):
             _decode_dashboard_image(file)
             if message_id:
@@ -209,15 +209,14 @@ class DashboardImageBody(BaseModel):
                 file.attachment_id = uuid.uuid5(
                     uuid.NAMESPACE_URL, f"{thread_id}/{message_id}/{position}"
                 )
+            if not file.file_name and file.mime_type in _SUPPORTED_IMAGE_MIME_TYPES:
+                file.file_name = f"{file.attachment_id}.{file.mime_type.split('/')[-1]}"
         staged = await queue_slack_files(
             thread_id,
             [SlackFileEntry(name=f.file_name or "", attachment_id=f.attachment_id) for f in files],
             directory=DASHBOARD_FILE_DIR,
         )
-        params["input"]["messages"][-1]["content"] = [
-            b for b in content if not (isinstance(b, dict) and b.get("type") == "file")
-        ]
-        return files, [file.sandbox_path for file in staged]
+        return [file.sandbox_path for file in staged]
 
 
 class ThreadRenameBody(BaseModel):
@@ -860,13 +859,6 @@ def _transcript_attachments(
     return metadata, tuple(pending)
 
 
-def _validate_command_images(content: Any, *, model_id: str | None) -> None:
-    """Reject images for text-only models / oversize attachments (raises 422)."""
-    images = _dashboard_images_from_content(content)
-    if images:
-        _image_blocks(images, model_id=model_id)
-
-
 async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge | None:
     """The live bridge a thread asked to run on, validated before anything is stamped."""
     if requested is None:
@@ -1167,10 +1159,12 @@ async def _enrich_run_start_command(
             _plugin_context(metadata, client_configurable, plugin_chat) if plugin_chat else ([], [])
         )
         command_images = _dashboard_images_from_content(content)
-        if files := DashboardImageBody.files_in(content):
+        command_files = DashboardImageBody.files_in(content)
+        command_attachments = [*command_images, *command_files]
+        if command_files:
             if not creating and metadata.get("transcript") != TRANSCRIPT_VERSION:
                 raise HTTPException(422, "this thread is too old to accept files")
-            for file in files:
+            for file in command_files:
                 _decode_dashboard_image(file)
         invocation_id = new_invocation_id()
         invocation_started_at = datetime.now(UTC).isoformat()
@@ -1225,7 +1219,7 @@ async def _enrich_run_start_command(
                 or client_configurable.get("repo_explicitly_none") is True,
                 visibility=visibility,
                 prompt=_command_prompt_text(content)
-                or ", ".join(f.file_name or "file" for f in DashboardImageBody.files_in(content)),
+                or ", ".join(f.file_name or "file" for f in command_files),
                 images=command_images,
                 model_id=client_configurable.get("agent_model_id"),
                 effort=client_configurable.get("agent_effort"),
@@ -1254,7 +1248,7 @@ async def _enrich_run_start_command(
                 run_model, run_effort = _with_vision_fallback(
                     run_model, run_effort, has_images=True
                 )
-            _validate_command_images(content, model_id=run_model)
+            _image_blocks(command_images, model_id=run_model)
 
         overrides["local_access_bridge_id"] = await LocalAccess.offer_for_run(
             client_configurable.get("local_access_bridge_id"),
@@ -1265,8 +1259,15 @@ async def _enrich_run_start_command(
 
         prior = await history if history is not None else _ThreadHistory()
         profile = await profile_read or {}
-        command_files, attached_paths = await DashboardImageBody.stage_files(thread_id, params)
-        content = _command_message_content(params)
+        attached_paths = await DashboardImageBody.stage_files(
+            thread_id, command_attachments, message_id=_command_message_id(params)
+        )
+        if isinstance(content, list):
+            content = [
+                block
+                for block in content
+                if not (isinstance(block, dict) and block.get("type") == "file")
+            ]
     finally:
         reads = (profile_read,) if history is None else (history, profile_read)
         for read in reads:
@@ -1339,9 +1340,7 @@ async def _enrich_run_start_command(
             # deduplicates it — and the run then has to join the turn that was
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
-            attachments, pending = _transcript_attachments(
-                [*command_images, *command_files], message_id
-            )
+            attachments, pending = _transcript_attachments(command_attachments, message_id)
             attachments.extend(context_attachments)
             appended = await append(
                 thread_id,
