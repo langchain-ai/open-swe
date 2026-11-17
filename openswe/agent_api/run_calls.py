@@ -6,6 +6,8 @@ them; the backend answers the typed API both sides import (``runtime_api``):
 
 - ``prepare`` readies the run's turn: its prompt and model, from what the token
   says starting the run decided (``RunSettings``), without reaching the sandbox MDA keeps.
+  It binds the thread to the sandbox MDA opened before it, or leaves that to ``bind_sandbox``
+  where MDA opens the sandbox behind the preparation and the run's first model call.
   What the turn's start records (its transcript turn, the thread's model and usage) is
   the ``run_started`` report, off the run's path
 - the inbox and skills, and the named calls MDA's middleware makes around a model call
@@ -55,6 +57,7 @@ from runtime_api import files as file_api
 from runtime_api.catalog import JOINED_TASK_CONTEXT, ModelSpec
 from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
+    BIND_SANDBOX,
     BROWSER,
     FINISH_SCOUT_PLAN,
     GATEWAY_CREDENTIAL,
@@ -76,6 +79,7 @@ from runtime_api.loop import (
     TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
+    BindSandbox,
     BrowserReport,
     ChosenModel,
     Done,
@@ -96,6 +100,7 @@ from runtime_api.loop import (
     Routed,
     RunEnded,
     RunStarted,
+    SandboxBound,
     SandboxGone,
     ScoutPlanEnd,
     TaskContext,
@@ -185,6 +190,7 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
     take_stale_boot,
 )
+from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
@@ -468,15 +474,20 @@ class TokenRun:
         """Ready the run's turn from its token and the conversation.
 
         Nothing here waits on the sandbox MDA keeps: the run readies the sandbox it opened, and
-        its loop keeps the sandbox's GitHub token fresh (``refresh_github_proxy``).
+        its loop keeps the sandbox's GitHub token fresh (``refresh_github_proxy``). A run still
+        opening its sandbox (``Prepare.bind_later``) reports it afterwards (``bind_sandbox``).
         """
         started = datetime.now(UTC)
+        bind_later = request.in_sandbox and request.bind_later
         preparation = await self.kind.preparation(
-            self.config, self.run.settings, sandbox_id=request.sandbox_id
+            self.config,
+            self.run.settings,
+            sandbox_id=request.sandbox_id,
+            sandbox_pending=bind_later,
         )
-        if request.in_sandbox:
+        if request.in_sandbox and not bind_later:
             # MDA opened the sandbox before preparing; the thread is bound to it from here on.
-            await self._sandbox.bind(request)
+            await self._sandbox.bind_or_tell(request.sandbox_id, open_error=request.sandbox_error)
         await self._report_stale_workspace()
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
@@ -485,7 +496,8 @@ class TokenRun:
 
         async def prepared(runtime: Runtime) -> Prepared:
             result = await run_hooks(preparation, "before_agent", state, runtime)
-            await self._sandbox.finish_git_identity()
+            if not bind_later:
+                await self._sandbox.finish_git_identity()
             # A sandbox the backend connected to, such as a bridged machine, got a fresh token.
             expires_at = proxy_token_set_since(self.run.thread_id, started)
             return Prepared(
@@ -501,7 +513,67 @@ class TokenRun:
         result = await in_graph_context(
             {**self.config, "run_name": "before_agent"}, prepared, events=emitted
         )
-        return result.model_copy(update={"events": [jsonable(e) for e in emitted]})
+        result = result.model_copy(update={"events": [jsonable(e) for e in emitted]})
+        return await self._asked_ahead(request, result)
+
+    async def _asked_ahead(self, request: Prepare, prepared: Prepared) -> Prepared:
+        """``prepared``, with what ``request`` asks for the run's first model call.
+
+        Asked once the turn is ready, as the run itself would ask next: the inbox read, and
+        alongside it the sandbox's GitHub token when the run says one is due and preparing
+        put none there.
+        """
+        if prepared.jump_to is not None:
+            return prepared
+        refreshing = asyncio.ensure_future(self._refreshed_ahead(request, prepared))
+        try:
+            inbox = None if request.inbox is None else await self.inbox(request.inbox)
+            return prepared.model_copy(update={"inbox": inbox, "github_proxy": await refreshing})
+        finally:
+            refreshing.cancel()
+
+    async def _refreshed_ahead(
+        self, request: Prepare | BindSandbox, prepared: Prepared | None = None
+    ) -> GitHubProxyRefreshed | None:
+        """The token the sandbox's GitHub proxy holds once ``request`` is answered: the one
+        preparing put there, or a fresh one where the run says one is due."""
+        if prepared is not None and prepared.github_proxy is not None:
+            return prepared.github_proxy
+        if not request.refresh_github_proxy:
+            return None
+        try:
+            return await self.refresh_github_proxy(RefreshGitHubProxy(run_id=request.run_id))
+        except Exception:
+            # The run asks again before the call that needs it, and keeps going without it.
+            logger.warning(
+                "Could not refresh the sandbox's GitHub token ahead of the run's first call",
+                extra={"agent_thread_id": self.run.thread_id},
+                exc_info=True,
+            )
+            return None
+
+    async def bind_sandbox(self, request: BindSandbox) -> SandboxBound:
+        """Bind the thread to the sandbox the run opened behind its preparation, and give the
+        sandbox the GitHub token the run says is due, as preparing does for a run that opens
+        its sandbox first.
+
+        A thread left with no sandbox to work in is answered, not told: the run goes on
+        without one, and tells the person through ``sandbox_unreachable`` once a call needs it.
+        """
+        try:
+            await self._sandbox.bind(request.sandbox_id, open_error=request.sandbox_error)
+        except SandboxUnreachableError as exc:
+            logger.warning(
+                "The run's thread has no sandbox to work in",
+                extra={"agent_thread_id": self.run.thread_id},
+                exc_info=True,
+            )
+            return SandboxBound(unreachable=exc.reason or str(exc))
+        await self._report_stale_workspace()
+        if request.sandbox_id is None:
+            # The thread keeps the sandbox it was bound to before, which the run opens again.
+            return SandboxBound()
+        return SandboxBound(github_proxy=await self._refreshed_ahead(request))
 
     async def _report_stale_workspace(self) -> None:
         if stale := take_stale_boot(self.run.thread_id):
@@ -884,6 +956,7 @@ class TokenRun:
 # Every call a run makes, answered from its token and request.
 CALLS: Final = Handlers[TokenRun]()
 CALLS.serve(PREPARE, TokenRun.prepare)
+CALLS.serve(BIND_SANDBOX, TokenRun.bind_sandbox)
 CALLS.serve(BROWSER, TokenRun.browser)
 CALLS.serve(SKILLS, TokenRun.skills)
 CALLS.serve(TOOL_SPECS, TokenRun.tool_specs)

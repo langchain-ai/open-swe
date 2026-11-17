@@ -1120,8 +1120,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     Built from what starting the run decided (``AgentTurnSettings``), so preparing a turn
     plans nothing. MDA's loop classifies the route of a run it loops itself, alongside this;
     a run its plan answers is routed here. A thread
-    whose sandbox MDA keeps (``sandbox``, its name) is not reached here: its work dir is
-    the sandbox's own, and MDA readied the sandbox as it opened it.
+    whose sandbox MDA keeps (``sandbox_id``, its name) is not reached here: its work dir is
+    the sandbox's own, and MDA readied the sandbox as it opened it. Nor is one MDA is still
+    opening (``sandbox_pending``), which the thread is bound to only after the turn is ready.
     """
 
     def __init__(
@@ -1131,6 +1132,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         *,
         repo_instructions: str | None,
         sandbox_id: str | None = None,
+        sandbox_pending: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
     ) -> None:
         cfg = RunConfig.from_config(config)
@@ -1143,6 +1145,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._turn = turn
         self._thread_id = cfg.thread_id
         self._sandbox_id = sandbox_id
+        self._sandbox_pending = sandbox_pending
         self._bridge_client = turn.bridge_client
         self._saved_requested_model = turn.saved_requested_model
         self._requested_models = (
@@ -1318,15 +1321,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
 
-    async def _prepare_with_decision(
-        self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
-    ) -> dict[str, object]:  # noqa: ARG002
-        schedule_thread_title_generation(
-            thread_id=self._thread_id,
-            messages=state.get("messages") or [],
-            model=self._title_model,
-            client=client,
-        )
+    async def _requested_model(
+        self, state: PrepareRunState, decision: ModelSelectionDecision
+    ) -> tuple[str | None, str | None]:
+        """The model and effort the thread's opening message asked for, which its first turn
+        classifies and saves and every later turn reads back; the run then runs on them."""
         requested_model: str | None = None
         requested_effort: str | None = None
         if self._requested_models is not None:
@@ -1434,6 +1433,37 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.reason = "validated_and_persisted"
                 self._model_id = requested_model
                 self._effort = requested_effort
+        return requested_model, requested_effort
+
+    async def _github_token(self) -> str:
+        async with aphase(self._thread_id, "prepare.github_token"):
+            github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
+        return github_token
+
+    async def _prepare_with_decision(
+        self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
+    ) -> dict[str, object]:  # noqa: ARG002
+        schedule_thread_title_generation(
+            thread_id=self._thread_id,
+            messages=state.get("messages") or [],
+            model=self._title_model,
+            client=client,
+        )
+        # Whose token the run works with is the same whatever model it asked for, so it is
+        # resolved while a thread's first turn classifies that.
+        resolving_token = asyncio.create_task(self._github_token())
+        try:
+            requested_model, requested_effort = await self._requested_model(state, decision)
+        except BaseException:
+            resolving_token.cancel()
+            [unread] = await asyncio.gather(resolving_token, return_exceptions=True)
+            if isinstance(unread, Exception):
+                logger.warning(
+                    "Resolving the run's GitHub token failed unread",
+                    extra={"agent_thread_id": self._thread_id},
+                    exc_info=unread,
+                )
+            raise
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
@@ -1441,13 +1471,16 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         render_prompt = not (
             state.get("system_prompt_fixed") and state.get("rendered_system_prompt")
         )
-        async with aphase(self._thread_id, "prepare.github_token"):
-            github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
+        github_token = await resolving_token
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
         bound = await get_sandbox_metadata(self._thread_id)
-        if self._sandbox_id is not None and not slack_files_pending(bound):
+        # Files a Slack message brought are written once the sandbox is bound: by this turn's
+        # preparation, or by the next one's where MDA is still opening the sandbox.
+        if self._sandbox_pending or (
+            self._sandbox_id is not None and not slack_files_pending(bound)
+        ):
             triggering_user_identity = await triggering_user_identity_task
             work_dir, bridged = sandbox_setup.WORK_DIR, False
         else:

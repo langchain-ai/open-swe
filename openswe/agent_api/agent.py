@@ -54,7 +54,12 @@ class AgentKind(RunKind):
         await agent_catalog(config, surface)
 
     async def preparation(
-        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
+        self,
+        config: RunnableConfig,
+        settings: RunSettings,
+        *,
+        sandbox_id: str | None,
+        sandbox_pending: bool = False,
     ) -> list[AgentMiddleware]:
         turn = settings.agent
         if turn is None:
@@ -69,6 +74,7 @@ class AgentKind(RunKind):
             turn,
             repo_instructions=repo_instructions if isinstance(repo_instructions, str) else None,
             sandbox_id=None if turn.reaches_sandbox else sandbox_id,
+            sandbox_pending=sandbox_pending and not turn.reaches_sandbox,
         )
         return [prepare]
 

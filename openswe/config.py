@@ -234,6 +234,14 @@ ENV.var(
     "without one. Unset: the backend writes every sandbox's proxy config with a token it mints.",
 )
 ENV.var(
+    "MDA_BIND_SANDBOX_AFTER_PREPARE",
+    "Whether a run on MDA may prepare, and make its first model call, while its sandbox is "
+    "still being opened, bound to its thread and given its GitHub token; its first tool call "
+    "waits for those. Defaults to false, where every run opens its sandbox before it prepares, "
+    "until every backend replica answers `bind_sandbox`.",
+    default="false",
+)
+ENV.var(
     "MDA_EXA_CONNECTION",
     "Slug of the MDA deployment's agent connection holding the Exa API key, e.g. "
     "open-swe-exa: runs' web_search reads its key there. Unset: EXA_API_KEY.",

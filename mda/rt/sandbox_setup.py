@@ -55,13 +55,13 @@ class SandboxSetup:
         self,
         files: object,
         identity: GitIdentity,
-        boot: Callable[[SandboxBackendProtocol], Awaitable[Boot]] | None = None,
+        boot: Callable[[], Awaitable[Boot]] | None = None,
     ) -> None:
         """Ready the sandbox ``files`` reaches in the background, once ``boot`` says it has
         booted; without ``boot``, it already has."""
         if not isinstance(files, SandboxBackendProtocol):
             return
-        self._booted = None if boot is None else asyncio.ensure_future(boot(files))
+        self._booted = None if boot is None else asyncio.ensure_future(boot())
         self._ready = asyncio.ensure_future(self._setup(files, identity))
 
     async def booted(self) -> None:

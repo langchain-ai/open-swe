@@ -48,6 +48,32 @@ class RunCall(RunRequest):
     namespace: list[str] = []
 
 
+class InboxItems(BaseModel):
+    """What an inbox reply carries: its queued follow-ups, its events and task messages."""
+
+    queued: list[int] = []
+    events: list[UUID] = []
+
+
+class InboxRead(RunRequest):
+    # The catalog's ``inbox``; None reads nothing.
+    spec: InboxSpec | None = None
+    # What earlier model calls received whose receipt the backend may not have yet:
+    # received before reading, so none of it comes again.
+    received: InboxItems = InboxItems()
+
+
+class Inbox(BaseModel):
+    """What was sent to the thread since the last model call, oldest first."""
+
+    messages: list[dict[str, JsonValue]] = []
+    # Graph state taking them changes, such as the surface replies move to.
+    update: dict[str, JsonValue] = {}
+    # Owed until the run hands them back through ``inbox_received``, once the model
+    # call it read them for goes ahead.
+    items: InboxItems = InboxItems()
+
+
 class Prepare(RunCall):
     # Whether the runtime keeps the thread's sandbox, and the sandbox it opened before preparing;
     # None when it could not. An MDA deployed before the field was renamed sends ``in_box``.
@@ -55,6 +81,14 @@ class Prepare(RunCall):
     sandbox_id: str | None = None
     # Why the runtime could not open it, secrets removed.
     sandbox_error: str | None = None
+    # What the run's first model call would ask next, asked with the preparation so that
+    # call waits on no round trip of its own: the inbox read, and the sandbox's GitHub
+    # token where it is due. A backend from before these answers neither.
+    inbox: InboxRead | None = None
+    refresh_github_proxy: bool = False
+    # The runtime is still opening the sandbox, and reports it once it is open
+    # (``BIND_SANDBOX``): preparing binds the thread to none and reaches none.
+    bind_later: bool = False
 
 
 class PhaseResult(BaseModel):
@@ -76,6 +110,25 @@ class GitHubProxyRefreshed(BaseModel):
 
     # When that token expires; None when the thread's sandbox has no GitHub proxy to refresh.
     expires_at: datetime | None = None
+
+
+class BindSandbox(RunRequest):
+    """The sandbox the runtime opened behind the run's preparation (``Prepare.bind_later``)."""
+
+    # None when the runtime could not open it, and why, secrets removed.
+    sandbox_id: str | None = None
+    sandbox_error: str | None = None
+    # Whether the sandbox's GitHub token is due, as ``Prepare.refresh_github_proxy`` says.
+    refresh_github_proxy: bool = False
+
+
+class SandboxBound(BaseModel):
+    """The thread is bound to the sandbox the runtime opened, or has none to work in."""
+
+    # Why the thread has no sandbox to work in, as the person is told once a call needs it.
+    unreachable: str | None = None
+    # The token the sandbox's GitHub proxy was given; None when none was due or it failed.
+    github_proxy: GitHubProxyRefreshed | None = None
 
 
 class GatewayCredential(BaseModel):
@@ -120,6 +173,9 @@ class Prepared(PhaseResult):
     # The token preparation put on the sandbox, which the first model call then keeps; None
     # when it put none there.
     github_proxy: GitHubProxyRefreshed | None = None
+    # What ``Prepare.inbox`` read once the turn was ready; None when nothing read it, and
+    # the first model call reads it itself (``INBOX``).
+    inbox: Inbox | None = None
     # What the turn's transcript shows, which the run hands back with ``run_started``: the
     # replica that opens the turn need not be the one that prepared it.
     notices: list[RunNotice] = []
@@ -261,32 +317,6 @@ class BrowserReport(RunRequest):
     opened: bool = True
 
 
-class InboxItems(BaseModel):
-    """What an inbox reply carries: its queued follow-ups, its events and task messages."""
-
-    queued: list[int] = []
-    events: list[UUID] = []
-
-
-class InboxRead(RunRequest):
-    # The catalog's ``inbox``; None reads nothing.
-    spec: InboxSpec | None = None
-    # What earlier model calls received whose receipt the backend may not have yet:
-    # received before reading, so none of it comes again.
-    received: InboxItems = InboxItems()
-
-
-class Inbox(BaseModel):
-    """What was sent to the thread since the last model call, oldest first."""
-
-    messages: list[dict[str, JsonValue]] = []
-    # Graph state taking them changes, such as the surface replies move to.
-    update: dict[str, JsonValue] = {}
-    # Owed until the run hands them back through ``inbox_received``, once the model
-    # call it read them for goes ahead.
-    items: InboxItems = InboxItems()
-
-
 class InboxReceipt(RunRequest):
     items: InboxItems
 
@@ -330,6 +360,11 @@ INBOX_RECEIVED = Endpoint(
 MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, Done, seconds=LOOP_CALL_SECONDS)
+# The runtime opened the thread's sandbox behind the run's preparation: the backend binds the
+# thread to it and gives it its GitHub token. Binding the same sandbox again changes nothing.
+BIND_SANDBOX = Endpoint(
+    "bind_sandbox", BindSandbox, SandboxBound, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
 # The runtime replaced the thread's sandbox: the backend connects to the fresh one.
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the sandbox gone: the backend tells the person.

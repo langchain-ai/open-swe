@@ -7,6 +7,9 @@ backend's files instead. MDA keeps one sandbox per thread whatever the backend's
 become, which apply only when MDA creates it. Before the run prepares, the sandbox is
 asked for and its name reported, so the backend binds the thread to it; it boots while
 the run prepares and calls the model, and the first call that needs it waits for it.
+Where preparing reaches no sandbox (``SandboxSpec.bind_after_prepare``), the sandbox is
+asked for while the run prepares and calls the model, and reported once it is open
+(``rt.sandbox_binding``); the run's first tool call, whichever it is, waits for that.
 Opening and booting are retried while the sandbox service fails transiently; otherwise
 the backend hears why, from preparing or from the call that needed the sandbox.
 ``recreate_sandbox`` on such a sandbox comes back from the backend as what to replace it
@@ -17,13 +20,16 @@ The backend writes the sandbox's proxy config, unless the catalog names the conn
 the sandbox's GitHub rules carry (``SandboxSpec.github_proxy``). Then MDA writes all of
 it, before each command it runs there: GitHub's rules, with the token it reads from
 that connection, and the backend's part, which names the sandbox, so it is asked for
-once the sandbox is open (``runtime_api.sandbox_proxy``). It writes it before the run
-prepares too, retrying for as long as the host takes to suspend an idle sandbox, while
-the sandbox API takes no proxy config, and then a failure ends the run, since the
-backend writes none of it. It writes it again every few minutes before a model or
-tool call, for the commands the backend runs in the sandbox, and after a replacement,
-which keeps the config it was created with until then. A backend that refuses the
-call writes it itself.
+once the sandbox is open (``runtime_api.sandbox_proxy``). The first write waits for the
+sandbox to boot, so it is made behind the run's preparation and first model call, and
+the run's first tool call waits for it, whichever tool it is, since the backend may run
+it in the sandbox: it is retried for as long as the host takes to suspend an idle
+sandbox, while the sandbox API takes no proxy config, and then a failure ends the run at
+that call, since the backend writes none of it. Where preparing may use GitHub in the
+sandbox (``SandboxSpec.prepare_uses_github``), the run writes it before it prepares
+instead. It writes it again every few minutes before a model or tool call, for the
+commands the backend runs in the sandbox, and after a replacement, which keeps the
+config it was created with until then. A backend that refuses the call writes it itself.
 """
 
 import asyncio
@@ -64,7 +70,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import SandboxCreate, SandboxSpec
 from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import call
-from runtime_api.loop import SANDBOX_REPLACED
+from runtime_api.loop import SANDBOX_REPLACED, SANDBOX_UNREACHABLE, SandboxGone
 from runtime_api.operations import RunRequest
 from runtime_api.sandbox_proxy import (
     GIT_TOKEN_USERNAME,
@@ -82,7 +88,8 @@ from rt.backend import (
     RunLocal,
     current_run,
 )
-from rt.sandbox_setup import sandbox_setup
+from rt.sandbox_binding import SandboxBinding
+from rt.sandbox_setup import SandboxUnavailableError, sandbox_setup
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -106,7 +113,7 @@ _SECRET = re.compile(
 _PROXY_REWRITE_SECONDS: Final = 300.0
 _PROXY_RETRY_SECONDS: Final = 60.0
 # The sandbox API takes no proxy config while the host suspends an idle sandbox, which takes
-# up to about three minutes: the write before the run prepares outlasts that, as the
+# up to about three minutes: the write a sandbox's boot makes outlasts that, as the
 # backend's own does.
 PROXY_WRITE_BACKOFF_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 PROXY_WRITE_MAX_ELAPSED_SECONDS: Final = 180.0
@@ -184,6 +191,9 @@ class SandboxProxyWriter:
         # The backend refused to hand its part over, so it writes the config itself.
         self._refused = False
         self._due_at = 0.0
+        # The sandbox whose first write is left to its boot, until it lands, and that write.
+        self._deferred: str | None = None
+        self._writing: asyncio.Future[None] | None = None
 
     def config(self, github: ConnectionRef) -> dict[str, object] | None:
         """All of it, GitHub's rules reading ``github``; None until the backend's part is known."""
@@ -203,6 +213,56 @@ class SandboxProxyWriter:
         with: never the old sandbox's workspace rules.
         """
         self._backend_config = None
+        self._deferred = None
+        self._writing = None
+
+    def defer(self, sandbox_id: str) -> None:
+        """Leave the first write on sandbox ``sandbox_id`` to its boot (``write_deferred``).
+
+        None is due before it lands, so a model call never waits for the sandbox to boot.
+        """
+        self._deferred = sandbox_id
+        self._writing = None
+
+    async def write_deferred(self, runtime: object) -> None:
+        """Make the write left to the sandbox's boot, once for every call that waits for it;
+        raises when it could not be made, so none of them goes ahead."""
+        if self._deferred is None:
+            return
+        if self._writing is None:
+            self._writing = asyncio.ensure_future(self.write_first(runtime, self._deferred))
+        await asyncio.shield(self._writing)
+
+    async def write_first(self, runtime: object, sandbox_id: str) -> None:
+        """Write it on sandbox ``sandbox_id`` for the first time, retrying while it fails for as
+        long as the host takes to suspend an idle sandbox; raises, the cause logged, after."""
+        deadline = time.monotonic() + PROXY_WRITE_MAX_ELAPSED_SECONDS
+        for backoff in (*PROXY_WRITE_BACKOFF_SECONDS, None):
+            try:
+                await self.write(runtime, sandbox_id)
+            except GraphBubbleUp:
+                raise
+            except Exception as exc:
+                delay = None if backoff is None else backoff * random.uniform(0.8, 1.2)
+                if (
+                    isinstance(exc, _PERMANENT_WRITE_FAILURES)
+                    or delay is None
+                    or time.monotonic() + delay > deadline
+                ):
+                    logger.error(
+                        "Could not write the sandbox's proxy config, so the run ends",
+                        extra={"sandbox_id": sandbox_id, "cause": _cause(exc)},
+                    )
+                    raise
+                logger.warning(
+                    "Writing the sandbox's proxy config failed; retrying",
+                    extra={"sandbox_id": sandbox_id, "delay_seconds": delay, "cause": _cause(exc)},
+                )
+                await asyncio.sleep(delay)
+            else:
+                if self._deferred == sandbox_id:
+                    self._deferred = None
+                return
 
     async def write(self, runtime: object, sandbox_id: str | None = None) -> None:
         """Have MDA write it on sandbox ``sandbox_id`` (the run's) now; raises when it could not.
@@ -229,8 +289,11 @@ class SandboxProxyWriter:
         self._due_at = time.monotonic() + _PROXY_REWRITE_SECONDS
 
     async def keep_fresh(self, runtime: object) -> None:
-        """Write it again when due; a failure is tried again later, the sandbox keeping the last."""
-        if self._refused or time.monotonic() < self._due_at:
+        """Write it again when due; a failure is tried again later, the sandbox keeping the last.
+
+        None is due while the sandbox's boot has its first write to make.
+        """
+        if self._refused or self._deferred is not None or time.monotonic() < self._due_at:
             return
         try:
             await self.write(runtime)
@@ -345,56 +408,48 @@ def _not_opened(exc: Exception) -> OpenedSandbox:
 
 
 async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
-    """Adopt the thread's sandbox or ask for it now, without waiting for it to boot, and write
-    its proxy config where MDA does.
+    """Adopt the thread's sandbox or ask for it now, without waiting for it to boot.
 
     The backend reports a sandbox MDA could not open as unreachable when it prepares, with the
-    cause; one that cannot boot is reported by the first call that needs it (``booted_sandbox``).
-    Where MDA writes the proxy config, writing it waits for the sandbox to boot; one it could not
-    write, after retrying while the host may be suspending the sandbox, raises, which ends the
-    run: the backend writes none of it there, so the sandbox may have none, nor the workspace's
-    egress rules.
+    cause, or the run's first tool call does where the run reports the sandbox behind its
+    preparation; one that cannot boot is reported by the first call that needs it
+    (``booted_sandbox``).
+    Where MDA writes the proxy config, writing it waits for the sandbox to boot, so the first
+    write is left to the boot, unless preparing may use GitHub in the sandbox
+    (``SandboxSpec.prepare_uses_github``): then it is written here, and one MDA could not
+    write raises, which ends the run.
     """
     opened = await _opening(getattr(runtime, "backend", None), wait=False)
-    if opened.sandbox_id is not None and (proxy := _written_proxy(runtime)) is not None:
-        # Preparing may already work in the sandbox with GitHub, as a checkout handed over does.
-        await _first_write(proxy, runtime, opened.sandbox_id)
+    if opened.sandbox_id is None or (proxy := _written_proxy(runtime)) is None:
+        return opened
+    spec = _run_of(runtime).planned.sandbox
+    if spec is None or spec.prepare_uses_github:
+        await proxy.write_first(runtime, opened.sandbox_id)
+    else:
+        proxy.defer(opened.sandbox_id)
     return opened
 
 
-async def booted_sandbox(files: object) -> OpenedSandbox:
-    """The sandbox ``files`` reaches once it has booted, or why it could not."""
-    return await _opening(files, wait=True)
+async def booted_sandbox(runtime: Runtime) -> OpenedSandbox:
+    """The run's sandbox once it has booted, with the proxy config MDA writes on a sandbox the
+    run opened, or why it could not.
 
-
-async def _first_write(proxy: SandboxProxyWriter, runtime: Runtime, sandbox_id: str) -> None:
-    """Write the proxy config MDA writes on sandbox ``sandbox_id``, retrying while it fails for
-    as long as the host takes to suspend an idle sandbox; raises, the cause logged, after."""
-    deadline = time.monotonic() + PROXY_WRITE_MAX_ELAPSED_SECONDS
-    for backoff in (*PROXY_WRITE_BACKOFF_SECONDS, None):
+    The backend writes none of that config, so a sandbox MDA could not write it on may have
+    none, nor the workspace's egress rules: it counts as one that never booted. So does one
+    the run reports behind its preparation that the thread could not be bound to.
+    """
+    if (planned := _planned(runtime)) is not None:
+        bound = await SandboxBinding.of(planned[0]).settled()
+        if bound is not None and bound.error is not None:
+            return OpenedSandbox(error=bound.error)
+    if (proxy := _written_proxy(runtime)) is not None:
         try:
-            await proxy.write(runtime, sandbox_id)
+            await proxy.write_deferred(runtime)
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            delay = None if backoff is None else backoff * random.uniform(0.8, 1.2)
-            if (
-                isinstance(exc, _PERMANENT_WRITE_FAILURES)
-                or delay is None
-                or time.monotonic() + delay > deadline
-            ):
-                logger.error(
-                    "Could not write the sandbox's proxy config, so the run ends",
-                    extra={"sandbox_id": sandbox_id, "cause": _cause(exc)},
-                )
-                raise
-            logger.warning(
-                "Writing the sandbox's proxy config failed; retrying",
-                extra={"sandbox_id": sandbox_id, "delay_seconds": delay, "cause": _cause(exc)},
-            )
-            await asyncio.sleep(delay)
-        else:
-            return
+            return OpenedSandbox(error=_cause(exc))
+    return await _opening(getattr(runtime, "backend", None), wait=True)
 
 
 async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
@@ -431,8 +486,8 @@ async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
 
 
 class ManagedSandboxMiddleware(AgentMiddleware):
-    """Carry out ``recreate_sandbox`` for the sandbox MDA owns, and keep the proxy config
-    MDA writes there fresh."""
+    """Carry out ``recreate_sandbox`` for the sandbox MDA owns, keep the proxy config MDA
+    writes there fresh, and hold every tool call until the thread is bound to the sandbox."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
@@ -444,17 +499,41 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        if (proxy := _written_proxy(request.runtime)) is not None:
-            await proxy.keep_fresh(request.runtime)
+        planned = _planned(request.runtime)
+        # A model call never waits for a sandbox the run is still opening.
+        if (
+            planned is not None
+            and planned[1].github_proxy is not None
+            and not SandboxBinding.of(planned[0]).pending
+        ):
+            await _PROXIES.get(planned[0]).keep_fresh(request.runtime)
         return await handler(request)
+
+    @staticmethod
+    async def _bound(run: Run) -> None:
+        """Wait for ``run``'s thread to be bound to the sandbox the run opened behind its
+        preparation; a run left with none ends here, once the person is told why."""
+        try:
+            await SandboxBinding.of(run).usable()
+        except SandboxUnavailableError as exc:
+            logger.exception("The run has no sandbox to work in")
+            run.outbox.notify(SANDBOX_UNREACHABLE, SandboxGone(run_id=run_id(), reason=str(exc)))
+            raise
 
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        # No call goes ahead of the thread's binding to its sandbox: the backend may run it
+        # there, with the GitHub token binding puts there.
+        if (planned := _planned(request.runtime)) is not None:
+            await self._bound(planned[0])
         proxy = _written_proxy(request.runtime)
         if proxy is not None:
+            # No call goes ahead of the sandbox's first proxy config: the backend may run it
+            # there, and a replacement asks for the backend's part again.
+            await proxy.write_deferred(request.runtime)
             # A resumed run reaches a tool call before any model call, and its sandbox may
             # hold a token that expired while it waited.
             await proxy.keep_fresh(request.runtime)

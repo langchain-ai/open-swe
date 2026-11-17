@@ -76,6 +76,7 @@ from rt.backend import (
     run_call,
 )
 from rt.routing import Route, RouteClassifier
+from rt.sandbox_binding import SandboxBinding
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -430,13 +431,17 @@ class RunLoop:
 
         The call is awaited, so the model's first command never runs on an expired
         token. A failure leaves the run going and the call is made again a minute later.
+        A sandbox the run is still opening gets its token as the thread is bound to it
+        (``rt.sandbox_binding``), which the run's first tool call waits for, not a model call.
         """
-        if not self.rules.refresh_github_proxy:
-            return {}
         now = datetime.now(UTC)
-        due = _moment(held.get(_GITHUB_PROXY_DUE))
-        if due is not None and now < due:
+        if not self.github_proxy_due(held, now):
             return {}
+        binding = SandboxBinding.of(self._backend.run)
+        if binding.pending:
+            return {}
+        if (bound := binding.take_github_proxy()) is not None:
+            return _github_proxy_due(bound, now)
         try:
             refreshed = await call(
                 self._backend, REFRESH_GITHUB_PROXY, RefreshGitHubProxy(run_id=run_id())
@@ -445,6 +450,14 @@ class RunLoop:
             logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
         return _github_proxy_due(refreshed, now)
+
+    def github_proxy_due(self, held: Mapping[str, object], now: datetime | None = None) -> bool:
+        """Whether the sandbox's GitHub token is due a new one: none was put there yet, or
+        the one there is about to expire."""
+        if not self.rules.refresh_github_proxy:
+            return False
+        due = _moment(held.get(_GITHUB_PROXY_DUE))
+        return due is None or (now or datetime.now(UTC)) >= due
 
     def prepared(self, prepared: Prepared) -> dict[str, JsonValue]:
         """Held state that keeps the token preparation put on the sandbox until it is due."""

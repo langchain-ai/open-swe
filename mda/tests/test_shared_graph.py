@@ -99,6 +99,7 @@ _TOOLS_RULE: dict[str, JsonValue] = {
 
 type BackendCalls = list[tuple[str, str, str | None]]
 type Prepared = list[tuple[JsonValue, JsonValue]]
+type Bound = list[tuple[JsonValue, JsonValue]]
 type Browsers = list[tuple[JsonValue, JsonValue]]
 
 
@@ -110,6 +111,8 @@ def _thread(thread_id: str) -> ManagedRunConfig:
 _CATALOGS: dict[str, Catalog] = {}
 # What the fake backend's preparation writes to each run's state.
 _PREPARE_UPDATE: dict[str, JsonValue] = {}
+# What the fake backend answers a run that reports its sandbox behind its preparation.
+_BIND_ANSWER: dict[str, JsonValue] = {}
 
 
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
@@ -130,6 +133,8 @@ def _catalog(
     *,
     snapshot: str | None = None,
     github_proxy: ConnectionRef | None = None,
+    prepare_uses_github: bool = True,
+    bind_after_prepare: bool = False,
 ) -> Catalog:
     return Catalog(
         operations=[
@@ -148,6 +153,8 @@ def _catalog(
                 delete_after_stop_seconds=60,
             ),
             github_proxy=github_proxy,
+            prepare_uses_github=prepare_uses_github,
+            bind_after_prepare=bind_after_prepare,
         ),
     )
 
@@ -170,6 +177,12 @@ def prepared() -> Prepared:
 
 
 @pytest.fixture
+def bound() -> Bound:
+    """The sandbox each run reported behind its preparation, and why it could not open one."""
+    return []
+
+
+@pytest.fixture
 def browsers() -> Browsers:
     """Each browser a run reported, and whether the agent had opened it."""
     return []
@@ -185,6 +198,7 @@ def operation_contents() -> dict[str, str]:
 def backend_calls(
     monkeypatch: pytest.MonkeyPatch,
     prepared: Prepared,
+    bound: Bound,
     browsers: Browsers,
     operation_contents: dict[str, str],
 ) -> BackendCalls:
@@ -206,6 +220,9 @@ def backend_calls(
         if hook == "prepare":
             prepared.append((json.get("sandbox_id"), json.get("sandbox_error")))
             return httpx2.Response(200, request=request, json={"update": _PREPARE_UPDATE})
+        if hook == "bind_sandbox":
+            bound.append((json.get("sandbox_id"), json.get("sandbox_error")))
+            return httpx2.Response(200, request=request, json=_BIND_ANSWER)
         if hook == "browser":
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
@@ -904,32 +921,235 @@ async def test_mda_writes_the_whole_proxy_config_before_the_run_prepares(
     ]
 
 
-async def test_a_run_that_cannot_write_its_sandboxs_proxy_config_never_uses_the_sandbox(
+async def test_a_runs_first_model_call_goes_ahead_while_its_sandbox_boots_and_no_tool_call_does(
     monkeypatch: pytest.MonkeyPatch,
     backend_calls: BackendCalls,
     proxy_writes: list[tuple[str, object]],
     sandbox_commands: list[str],
 ) -> None:
+    """Where preparing uses no GitHub in the sandbox, the proxy config MDA writes, which waits
+    for the sandbox to boot, is written behind the run's first model call; its first tool
+    call, one the backend runs included, waits for it."""
+    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
+    answering = threading.Event()
+    booted_behind_the_model: list[bool] = []
+    resolve = mda_runtime._resolve_managed_sandbox
+
+    def boot(
+        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
+    ) -> SandboxBackendProtocol:
+        # A sandbox that boots only once the model is answering.
+        booted_behind_the_model.append(answering.wait(timeout=10))
+        return resolve(sandbox, config)
+
+    def replies() -> Iterator[AIMessage]:
+        answering.set()
+        yield AIMessage(content="", tool_calls=[ToolCall(name="web_search", args={}, id="1")])
+        yield AIMessage(
+            content="", tool_calls=[ToolCall(name="execute", args={"command": "ls"}, id="2")]
+        )
+        yield AIMessage(content="done")
+
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", boot)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
+    github = ConnectionRef(slug="mda/github-token", owner="agent")
+    catalog = _catalog(
+        "web_search", "g1", snapshot="a", github_proxy=github, prepare_uses_github=False
+    )
+
+    await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
+
+    assert booted_behind_the_model and all(booted_behind_the_model)
+    hooks = [hook for hook, _, _ in backend_calls]
+    assert (
+        hooks.index("prepare")
+        < hooks.index("sandbox_proxy")
+        < hooks.index("proxy_config")
+        < hooks.index("operation")
+    )
+    assert [name for name, _ in proxy_writes] == ["sandbox-thread-1"]
+    assert "ls" in sandbox_commands
+
+
+@pytest.mark.parametrize("mda_writes_proxy", [False, True])
+async def test_a_run_answers_its_first_model_call_while_its_sandbox_is_opened_and_bound(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    proxy_writes: list[tuple[str, object]],
+    sandbox_commands: list[str],
+    prepared: Prepared,
+    bound: Bound,
+    mda_writes_proxy: bool,
+) -> None:
+    """Where the catalog lets a run report its sandbox behind its preparation, the run prepares
+    and its model answers before the sandbox is even open; its first tool call, one the
+    backend runs included, waits for the sandbox to be opened, bound to the thread and given
+    its proxy config. The GitHub token that is due comes with the binding, so no model call
+    asks for it."""
+    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
+    monkeypatch.setitem(_BIND_ANSWER, "github_proxy", {"expires_at": "2099-01-01T00:00:00Z"})
+    answering = threading.Event()
+    opened_behind_the_model: list[bool] = []
+
+    def claim(sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object) -> str:
+        # A sandbox that opens only once the model is answering.
+        opened_behind_the_model.append(answering.wait(timeout=10))
+        return "sandbox-thread-1"
+
+    def replies() -> Iterator[AIMessage]:
+        answering.set()
+        yield AIMessage(content="", tool_calls=[ToolCall(name="web_search", args={}, id="1")])
+        yield AIMessage(
+            content="", tool_calls=[ToolCall(name="execute", args={"command": "ls"}, id="2")]
+        )
+        yield AIMessage(content="done")
+
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", claim)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
+    catalog = _catalog(
+        "web_search",
+        "g1",
+        snapshot="a",
+        github_proxy=ConnectionRef(slug="mda/github-token", owner="agent")
+        if mda_writes_proxy
+        else None,
+        prepare_uses_github=False,
+        bind_after_prepare=True,
+    ).model_copy(update={"loop": LoopRules(refresh_github_proxy=True)})
+
+    await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
+
+    assert opened_behind_the_model and all(opened_behind_the_model)
+    # Preparing named no sandbox; the backend heard of it once it was open.
+    assert prepared == [(None, None)]
+    assert bound == [("sandbox-thread-1", None)]
+    hooks = [hook for hook, _, _ in backend_calls]
+    order = [
+        "prepare",
+        "bind_sandbox",
+        *(["proxy_config"] if mda_writes_proxy else []),
+        "operation",
+    ]
+    assert [hooks.index(hook) for hook in order] == sorted(hooks.index(hook) for hook in order)
+    assert "refresh_github_proxy" not in hooks
+    assert [name for name, _ in proxy_writes] == (["sandbox-thread-1"] if mda_writes_proxy else [])
+    assert "ls" in sandbox_commands
+
+
+@pytest.mark.parametrize("failure", ["open", "bind"])
+async def test_a_sandbox_that_cannot_be_opened_or_bound_behind_the_model_ends_the_run_at_its_first_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    proxy_writes: list[tuple[str, object]],
+    sandbox_commands: list[str],
+    bound: Bound,
+    failure: str,
+) -> None:
+    """A run that reports its sandbox behind its preparation learns only after its model
+    answered that it has none: its first tool call, whichever it is, ends the run, the
+    backend hears why so it can tell the person, and nothing reaches a sandbox."""
+    unreachable: list[JsonValue] = []
+    reason = "SandboxAuthenticationError: Invalid api_key=[redacted]"
+    if failure == "open":
+        monkeypatch.setattr(
+            mda_runtime,
+            "_claim_managed_sandbox",
+            MagicMock(side_effect=SandboxAuthenticationError("Invalid api_key=lsv2-secret")),
+        )
+    # The thread is bound to no sandbox, or to another than the run opened.
+    monkeypatch.setitem(_BIND_ANSWER, "unreachable", reason)
+    notify = Outbox.notify
+
+    def recorded(outbox: Outbox, endpoint: Endpoint, request: RunRequest) -> None:
+        if endpoint is SANDBOX_UNREACHABLE:
+            unreachable.append(request.model_dump(mode="json")["reason"])
+        notify(outbox, endpoint, request)
+
+    monkeypatch.setattr(Outbox, "notify", recorded)
+    monkeypatch.setattr(
+        agent, "_DEFAULT_MODEL", _calling(ToolCall(name="web_search", args={}, id="1"))
+    )
+    catalog = _catalog(
+        "web_search", "g1", snapshot="a", prepare_uses_github=False, bind_after_prepare=True
+    )
+
+    with pytest.raises(SandboxUnavailableError, match="Invalid api_key"):
+        await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
+
+    assert bound == [(None, reason) if failure == "open" else ("sandbox-thread-1", None)]
+    assert unreachable == [reason]
+    hooks = [hook for hook, _, _ in backend_calls]
+    assert "operation" not in hooks
+    assert sandbox_commands == []
+
+
+async def test_a_run_that_calls_no_tool_ends_as_usual_whatever_became_of_its_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    proxy_writes: list[tuple[str, object]],
+    bound: Bound,
+) -> None:
+    """A run that reports its sandbox behind its preparation and only answers never waits
+    for the sandbox to answer, and ends normally though the sandbox could not be opened;
+    the backend still hears of it before the run ends, so the thread's binding is settled."""
+    answering = threading.Event()
+    failed_behind_the_model: list[bool] = []
+
+    def claim(sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object) -> str:
+        failed_behind_the_model.append(answering.wait(timeout=10))
+        raise SandboxAuthenticationError("Invalid api_key=lsv2-secret")
+
+    def replies() -> Iterator[AIMessage]:
+        answering.set()
+        yield AIMessage(content="42")
+
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", claim)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
+    catalog = _catalog(
+        "web_search", "g1", snapshot="a", prepare_uses_github=False, bind_after_prepare=True
+    )
+
+    await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
+
+    assert failed_behind_the_model == [True]
+    assert bound == [(None, "SandboxAuthenticationError: Invalid api_key=[redacted]")]
+    assert SANDBOX_UNREACHABLE.name not in [hook for hook, _, _ in backend_calls]
+
+
+@pytest.mark.parametrize("prepare_uses_github", [True, False])
+async def test_a_run_that_cannot_write_its_sandboxs_proxy_config_never_uses_the_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    proxy_writes: list[tuple[str, object]],
+    sandbox_commands: list[str],
+    prepare_uses_github: bool,
+) -> None:
     """The backend writes no proxy config on a sandbox whose config MDA writes, so a fresh sandbox
     MDA cannot write it on has none, nor the workspace's egress rules: the run ends before
-    it prepares, and no command reaches the sandbox."""
+    it prepares, or at its first tool call where the write is left to the sandbox's boot, and
+    no command reaches the sandbox, nor a tool the backend may run there."""
     monkeypatch.delenv("MDA_DEV_MDA__GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        agent, "_DEFAULT_MODEL", _calling(ToolCall(name="web_search", args={}, id="1"))
+    )
     sleep = AsyncMock()
     monkeypatch.setattr("rt.managed_sandbox.asyncio.sleep", sleep)
     github = ConnectionRef(slug="mda/github-token", owner="agent")
+    catalog = _catalog(
+        "web_search",
+        "g1",
+        snapshot="a",
+        github_proxy=github,
+        prepare_uses_github=prepare_uses_github,
+    )
 
     with pytest.raises(RuntimeError, match="Could not resolve sandbox proxy connections"):
-        await _run(
-            InMemoryStore(),
-            "thread-1",
-            _context(
-                "agent", "token-1", _catalog("web_search", "g1", snapshot="a", github_proxy=github)
-            ),
-        )
+        await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
 
     hooks = [hook for hook, _, _ in backend_calls]
     assert "sandbox_proxy" in hooks
-    assert "prepare" not in hooks
+    assert ("prepare" in hooks) is not prepare_uses_github
+    assert "operation" not in hooks
     assert proxy_writes == []
     assert sandbox_commands == []
     # Tried for as long as the host may take to suspend the sandbox before the run ends.

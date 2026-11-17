@@ -4,7 +4,6 @@ from datetime import datetime
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.loop import Prepare
 from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.agent_api.runs import in_graph_context
@@ -53,6 +52,8 @@ class RunSandbox:
             allow_github=self._cfg.github_linked,
             github_repositories=repositories,
             github_permissions=permissions,
+            # A review's preparation works in the sandbox: its checkout and its diff.
+            prepare_reaches_sandbox=self.reviews,
         )
 
     async def git_identity(self) -> GitIdentity:
@@ -62,20 +63,26 @@ class RunSandbox:
         metadata = await lifecycle.get_sandbox_metadata(self._cfg.thread_id)
         return await ThreadMetadata.model_validate(metadata).git_identity()
 
-    async def bind(self, request: Prepare) -> None:
+    async def bind(self, sandbox_id: str | None, *, open_error: str | None) -> None:
+        """Bind the thread to the sandbox MDA opened, ``sandbox_id``, or to none when it could
+        not (``open_error`` says why); raises ``SandboxUnreachableError`` for a thread left
+        with no sandbox to work in."""
+        if self._cfg.thread_id is None:
+            raise ValueError("This run has no thread")
+        await bind_mda_sandbox(
+            self._cfg.thread_id,
+            sandbox_id,
+            open_error=open_error,
+            workspace_slug=self._cfg.workspace_slug,
+        )
+
+    async def bind_or_tell(self, sandbox_id: str | None, *, open_error: str | None) -> None:
         """Bind the thread to the sandbox MDA opened before preparing.
 
         A thread with no sandbox to work in ends the run once the person knows why.
         """
-        if self._cfg.thread_id is None:
-            raise ValueError("This run has no thread")
         try:
-            await bind_mda_sandbox(
-                self._cfg.thread_id,
-                request.sandbox_id,
-                open_error=request.sandbox_error,
-                workspace_slug=self._cfg.workspace_slug,
-            )
+            await self.bind(sandbox_id, open_error=open_error)
         except SandboxUnreachableError as exc:
             await self.tell_gone(reason=exc.reason)
             raise

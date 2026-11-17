@@ -47,6 +47,7 @@ from rt.backend import OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
+from rt.gateway import RUN_GATEWAY
 from rt.kinds import Graph
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
@@ -269,7 +270,7 @@ def _parts(graph: Graph) -> _Parts:
                 backend,
                 opened_sandbox,
                 booted_sandbox,
-                read_ahead=[skill_files.list_ahead],
+                read_ahead=[skill_files.list_ahead, RUN_GATEWAY.read_ahead],
             ),
             managed_sandbox,
             AutomationBudgetMiddleware(backend),

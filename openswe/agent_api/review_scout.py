@@ -41,9 +41,14 @@ class ReviewScoutKind(RunKind):
         await review_scout_catalog(config, surface)
 
     async def preparation(
-        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
+        self,
+        config: RunnableConfig,
+        settings: RunSettings,
+        *,
+        sandbox_id: str | None,
+        sandbox_pending: bool = False,
     ) -> list[AgentMiddleware]:
-        del settings, sandbox_id
+        del settings, sandbox_id, sandbox_pending
         return [PrepareReviewScoutRunMiddleware(thread_id=_thread_id(config), config=config)]
 
     async def files(self, config: RunnableConfig) -> BackendProtocol:

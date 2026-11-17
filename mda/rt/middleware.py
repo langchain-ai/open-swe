@@ -38,7 +38,7 @@ from functools import partial
 from typing import Annotated, Final, NotRequired, cast
 
 import httpx
-from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol
 from deepagents.middleware import async_subagents
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -113,6 +113,7 @@ from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles, RunArtifacts
+from rt.sandbox_binding import SandboxBinding
 from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
@@ -279,6 +280,20 @@ class _Answered:
 _ANSWERED: Final = RunLocal(_Answered)
 
 
+class _PreparedInbox:
+    """The inbox read the run's preparation answered with, for its first model call alone."""
+
+    def __init__(self) -> None:
+        self._read: Inbox | None = None
+
+    def keep(self, read: Inbox | None) -> None:
+        self._read = read
+
+    def take(self) -> Inbox | None:
+        read, self._read = self._read, None
+        return read
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
 
@@ -290,7 +305,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
-        boot_sandbox: Callable[[SandboxBackendProtocol], Awaitable[OpenedSandbox]] | None = None,
+        boot_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
         read_ahead: Sequence[Callable[[], None]] = (),
     ) -> None:
         self._backend = backend
@@ -301,11 +316,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         # Asks for the thread's sandbox before preparing, so the backend binds the thread to it,
-        # and waits for it to boot behind the run's other work.
+        # or behind preparing where the catalog lets the run report it afterwards, and waits
+        # for it to boot behind the run's other work, its first model call included.
         self._open_sandbox = open_sandbox
         self._boot_sandbox = boot_sandbox
         # What later hooks read from the backend, started while the run prepares.
         self._read_ahead = read_ahead
+        self._prepared_inbox = RunLocal(_PreparedInbox)
 
     @property
     def _inbox(self) -> InboxSpec | None:
@@ -365,7 +382,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # A sandbox MDA could not open is not asked for again here: the run's first tool
             # call opens it, or says why it cannot.
             files = getattr(runtime, "backend", None) if opened else None
-            sandbox_setup(run).start(files, run.git_identity, self._boot_sandbox)
+            boot = self._boot_sandbox
+            sandbox_setup(run).start(
+                files, run.git_identity, None if boot is None else partial(boot, runtime)
+            )
         else:
             # Without a sandbox of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)
@@ -374,8 +394,22 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @property
     def _in_sandbox(self) -> bool:
-        """Whether the run's files are in MDA's sandbox, which it asks for before preparing."""
+        """Whether the run's files are in MDA's sandbox, which it asks for as it starts."""
         return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
+
+    @property
+    def _binds_later(self) -> bool:
+        """Whether the run prepares while its sandbox is opened, and reports it afterwards.
+
+        Never where preparing may use GitHub in the sandbox, which needs it open first.
+        """
+        spec = self._backend.run.planned.sandbox
+        return (
+            self._open_sandbox is not None
+            and spec is not None
+            and spec.bind_after_prepare
+            and not spec.prepare_uses_github
+        )
 
     async def _before_agent(
         self, state: RunState, runtime: Runtime
@@ -403,12 +437,20 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._load_tool_specs()
             return None, True
         # Asking for the sandbox takes a round trip; reading the tool specs needs none of
-        # it, and classifying the thread's route neither, which goes on while it prepares.
+        # it, nor does preparing need them, and classifying the thread's route neither,
+        # which goes on while it prepares.
         opening = asyncio.create_task(self._opened(runtime))
+        loading = asyncio.create_task(self._load_tool_specs())
         classifying = self._loop.classify_ahead(state)
+        binding = SandboxBinding.of(self._backend.run)
+        proxy_due = self._loop.github_proxy_due(_held(state))
+        binds_later = self._binds_later
+        if binds_later:
+            # Neither preparing nor the first model call needs the sandbox: the backend hears
+            # of it once it is open, and the run's first tool call waits for that.
+            binding.start(self._backend, run_id(), opening, refresh_github_proxy=proxy_due)
         try:
-            await self._load_tool_specs()
-            opened = await opening
+            opened = OpenedSandbox() if binds_later else await opening
             # Not behind the outbox: what an earlier run left unsent changes nothing here.
             prepared = await call(
                 self._backend,
@@ -420,8 +462,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                     in_sandbox=self._in_sandbox,
                     sandbox_id=opened.sandbox_id,
                     sandbox_error=opened.error,
+                    # What the first model call would ask next comes back with the preparation.
+                    inbox=self._inbox_read().model_dump(mode="json")
+                    if self._inbox is not None
+                    else None,
+                    refresh_github_proxy=proxy_due and not binds_later,
+                    bind_later=binds_later,
                 ),
             )
+            await loading
+            self._prepared_inbox.get(self._backend.run).keep(prepared.inbox)
             # What the backend's preparation writes wins over where a turn starts from.
             starting = self._loop.starting()
             prepared.update.update(self._loop.prepared(prepared))
@@ -433,8 +483,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # What Jev said the request is, on both arms of the routing experiment.
             if classified := self._backend.run.classified:
                 trace.update(classified)
+        except BaseException:
+            # The run ends here, so nothing waits for the sandbox it was reporting.
+            binding.abandon()
+            raise
         finally:
-            opening.cancel()
+            if not binds_later:
+                opening.cancel()
+            loading.cancel()
             if classifying is not None:
                 classifying.cancel()
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
@@ -444,16 +500,20 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             messages = update.get("messages", [])
             update["messages"] = [
                 *(messages if isinstance(messages, list) else []),
-                harness_message(
-                    "The sandbox provider confirmed that this thread's bound workspace "
-                    "was deleted. A fresh workspace was created under the same name. "
-                    "Tell the user that local files and unpushed work from the deleted "
-                    "workspace are unavailable; do not claim they were recovered.",
-                    message_id=f"run-guidance:workspace-lost:{invocation}",
-                    source="run_guidance",
-                ),
+                self._workspace_lost(),
             ]
         return update, opened.error is None
+
+    def _workspace_lost(self) -> BaseMessage:
+        """What the model is told once the thread's bound workspace turned out deleted."""
+        return harness_message(
+            "The sandbox provider confirmed that this thread's bound workspace "
+            "was deleted. A fresh workspace was created under the same name. "
+            "Tell the user that local files and unpushed work from the deleted "
+            "workspace are unavailable; do not claim they were recovered.",
+            message_id=f"run-guidance:workspace-lost:{self._invocation()}",
+            source="run_guidance",
+        )
 
     def _started(self, state: RunState, prepared: Prepared) -> RunStarted:
         """The run's start, for the transcript to open its turn and the thread to record it."""
@@ -535,10 +595,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if inbox.items.queued or inbox.items.events:
             # Alongside the call it is answered by, as the transcript's reports go.
             self._backend.outbox.received(InboxReceipt(run_id=run_id(), items=inbox.items))
+        # A sandbox opened behind the run's preparation was found lost only after it.
+        lost = (
+            _json_dicts.validate_python(messages_to_dict([self._workspace_lost()]))
+            if SandboxBinding.of(self._backend.run).take_workspace_lost()
+            else []
+        )
         update = _apply(
             planned.model_copy(
                 update={
-                    "messages": [*inbox.messages, *planned.messages],
+                    "messages": [*inbox.messages, *planned.messages, *lost],
                     "update": {**inbox.update, **planned.update},
                 }
             )
@@ -548,13 +614,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return update
 
     async def _read_inbox(self) -> Inbox:
+        if (prepared := self._prepared_inbox.get(self._backend.run).take()) is not None:
+            return prepared
         if self._inbox is None:
             return Inbox()
+        return await call(self._backend, INBOX, self._inbox_read())
+
+    def _inbox_read(self) -> InboxRead:
         # With what earlier calls received, so none of it comes again.
-        read = InboxRead(
+        return InboxRead(
             run_id=run_id(), spec=self._inbox, received=self._backend.outbox.receiving()
         )
-        return await call(self._backend, INBOX, read)
 
     async def awrap_model_call(
         self,
@@ -705,7 +775,22 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
         finally:
-            run.trace.end(self._trace_metadata(), turn_git(run).metadata)
+            try:
+                await self._bound_at_end()
+            finally:
+                run.trace.end(self._trace_metadata(), turn_git(run).metadata)
+
+    async def _bound_at_end(self) -> None:
+        """Let a sandbox the run opened behind its preparation be bound to the thread before
+        the run ends, so the thread is never left with a sandbox it is not bound to.
+
+        A run that called no tool ends as it would have with a sandbox it could not open.
+        """
+        bound = await SandboxBinding.of(self._backend.run).settled()
+        if bound is not None and bound.error is not None:
+            logger.warning(
+                "The run ended without a sandbox it never needed", extra={"cause": bound.error}
+            )
 
 
 class ReportRepliesMiddleware(AgentMiddleware):

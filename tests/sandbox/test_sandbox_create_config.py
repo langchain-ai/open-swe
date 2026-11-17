@@ -68,7 +68,15 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
     ("metadata", "host", "owner"),
     [
         ({}, {}, "own"),
+        # Moved off a Mac: connecting to its new sandbox carries the checkout over from GitHub.
+        ({"sandbox_handoff_from": "bridge:mac"}, {}, "own"),
         ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, {}, "own"),
+        # Files a Slack message brought wait for preparing to write them in the sandbox.
+        (
+            {"slack_files_pending": [{"url": "https://files.invalid/a", "path": "/tmp/a"}]},
+            {},
+            "own",
+        ),
         ({"sandbox_id": "backend-sandbox"}, {}, None),
         # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
         ({"sandbox_id": "gone-sandbox"}, {}, "own"),
@@ -83,9 +91,12 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
     ],
 )
 async def test_mda_owns_new_threads_and_its_own_sandboxes(
-    monkeypatch, metadata: dict[str, str], host: dict[str, str], owner: str | None
+    monkeypatch, metadata: dict[str, object], host: dict[str, str], owner: str | None
 ) -> None:
-    """MDA creates new threads' sandboxes; a sandbox the backend made before is kept; workers share MDA's."""
+    """MDA creates new threads' sandboxes; a sandbox the backend made before is kept; workers share MDA's.
+
+    A run reports its sandbox behind its preparation only where preparing reaches none, and
+    the deployment has not turned that off."""
     from openswe.sandboxes.managed import ManagedSandbox
 
     workspace = Workspace(
@@ -113,8 +124,8 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
     async def load(slug: str | None) -> Workspace:
         return workspace
 
-    async def read_metadata(thread_id: str) -> dict[str, str]:
-        return host if thread_id == _HOST else metadata
+    async def read_metadata(thread_id: str) -> dict[str, object]:
+        return {**host} if thread_id == _HOST else metadata
 
     async def exists(sandbox_id: str) -> bool:
         return sandbox_id != "gone-sandbox"
@@ -128,8 +139,9 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
     monkeypatch.setattr("openswe.sandboxes.providers.langsmith.sandbox_exists", exists)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
+    monkeypatch.setenv("MDA_BIND_SANDBOX_AFTER_PREPARE", "true")
 
-    sandbox = await ManagedSandbox.for_thread("thread-1", None)
+    sandbox = await ManagedSandbox.for_thread("thread-1", None, prepare_reaches_sandbox=False)
 
     handed_over = metadata.get("sandbox_id") == "gone-sandbox"
     assert unbound == (
@@ -146,6 +158,16 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
         if owner == _HOST or metadata.get("sandbox_owner") == "mda"
         else None
     )
+    assert sandbox.prepare_uses_github is ("sandbox_handoff_from" in metadata)
+    assert sandbox.bind_after_prepare is (
+        owner == "own" and not {"sandbox_handoff_from", "slack_files_pending"} & set(metadata)
+    )
+    # A review prepares in its sandbox, and the late report is off unless the deployment turns it on.
+    review = await ManagedSandbox.for_thread("thread-1", None)
+    monkeypatch.delenv("MDA_BIND_SANDBOX_AFTER_PREPARE")
+    disabled = await ManagedSandbox.for_thread("thread-1", None, prepare_reaches_sandbox=False)
+    assert review is not None and not review.bind_after_prepare
+    assert disabled is not None and not disabled.bind_after_prepare
     assert sandbox.create.snapshot_id == "snap-1"
     assert sandbox.create.extra_fields == {
         **workspace.create_params,

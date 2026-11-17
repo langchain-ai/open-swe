@@ -45,6 +45,7 @@ class _KeptCredential:
         self._credential: GatewayCredential | None = None
         self._fetched_at = 0.0
         self._lock = asyncio.Lock()
+        self._ahead: asyncio.Task[GatewayCredential] | None = None
 
     async def get(self, run: Run) -> GatewayCredential:
         clock = asyncio.get_running_loop()
@@ -57,6 +58,21 @@ class _KeptCredential:
                     extra={"gateway_credential": self._credential.kind},
                 )
             return self._credential
+
+    def read_ahead(self, run: Run) -> None:
+        """Start asking for it, once: whoever asks next waits on this read, not their own."""
+        if self._ahead is None:
+            self._ahead = asyncio.create_task(self.get(run))
+            self._ahead.add_done_callback(self._log_failure)
+
+    @staticmethod
+    def _log_failure(read: asyncio.Task[GatewayCredential]) -> None:
+        if not read.cancelled() and (error := read.exception()) is not None:
+            # The model call asks again itself.
+            logger.warning(
+                "Could not read the run's gateway credential ahead of its first model call",
+                exc_info=error,
+            )
 
 
 class RunGateway:
@@ -96,6 +112,14 @@ class RunGateway:
             return await handler(request)
         finally:
             self._route.reset(token)
+
+    def read_ahead(self) -> None:
+        """Start reading the gateway credential of a run that calls models, so its first
+        model call, which checks it before the provider hears, finds it kept."""
+        run = current_run()
+        if run.catalog.models is None or not run.has_run or run.awaiting_adoption:
+            return
+        self._kept.get(run).read_ahead(run)
 
     async def credential(self) -> GatewayCredential:
         """The run's credential; this deployment's key outside a run that may ask for one.

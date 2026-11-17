@@ -54,8 +54,10 @@ class RunKind:
         settings: RunSettings,  # noqa: ARG002
         *,
         sandbox_id: str | None,  # noqa: ARG002
+        sandbox_pending: bool = False,  # noqa: ARG002
     ) -> Sequence[AgentMiddleware]:
-        """What readies a turn of the run, which MDA opened ``sandbox_id`` for."""
+        """What readies a turn of the run, which MDA opened ``sandbox_id`` for, or is still
+        opening a sandbox for (``sandbox_pending``)."""
         return ()
 
     def sender(self, config: RunnableConfig, settings: RunSettings) -> RunSender | None:  # noqa: ARG002

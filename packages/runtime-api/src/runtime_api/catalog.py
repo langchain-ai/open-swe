@@ -120,6 +120,14 @@ class SandboxSpec(BaseModel):
     # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
     # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
     github_proxy: ConnectionRef | None = None
+    # Whether preparing a turn may use GitHub in the sandbox, as carrying over the checkout of
+    # a thread that moved does: MDA then writes the proxy config before it prepares, not
+    # behind its first model call. A backend from before this field may, and says nothing.
+    prepare_uses_github: bool = True
+    # Whether the run may prepare before its sandbox is open and report the sandbox afterwards
+    # (``runtime_api.loop.BIND_SANDBOX``), so its first model call waits for neither: nothing
+    # preparing this run does reaches the sandbox. A backend from before that call says nothing.
+    bind_after_prepare: bool = False
     # Who commits in the sandbox: the thread's owner, written before the run's first command.
     git_identity: GitIdentity = GitIdentity()
 

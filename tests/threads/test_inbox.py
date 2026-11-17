@@ -149,7 +149,7 @@ async def test_inbox_receives_only_the_follow_ups_it_read(
 async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
     registry_db: None,
 ) -> None:
-    from runtime_api.loop import Prepare
+    from runtime_api.loop import InboxRead, Prepare
 
     from openswe.agent_api.run_calls import TokenRun
     from openswe.agent_api.run_kinds import RunKind
@@ -177,6 +177,14 @@ async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
     )
 
     # The thread has no sandbox here: MDA opened none for the run.
-    await TokenRun.answer(Parts(), run, "prepare", Prepare(run_id="run-1").model_dump(mode="json"))
+    asked = Prepare(
+        run_id="run-1",
+        inbox=InboxRead(run_id="run-1", spec=InboxSpec(events=True, surface="web")),
+    )
+    prepared = await TokenRun.answer(Parts(), run, "prepare", asked.model_dump(mode="json"))
 
     assert [match.id for match in await EventMatch.owed("thread-1")] == [pending.id]
+    # The first model call's inbox read comes back with the preparation: it holds what
+    # the run was not started with, which stays owed until the run receives it.
+    assert isinstance(prepared, dict) and isinstance(inbox := prepared["inbox"], dict)
+    assert inbox["items"] == {"queued": [], "events": [str(pending.id)]}

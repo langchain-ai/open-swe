@@ -3,6 +3,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 
 import jwt
 import pytest
@@ -334,7 +335,11 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     updated = AsyncMock()
     usage = AsyncMock()
     prompts: list[dict[str, object]] = []
+    expires_at = datetime(2030, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
+    monkeypatch.setattr(
+        run_sandbox, "refresh_thread_github_proxy", AsyncMock(return_value=expires_at)
+    )
     # Binding the sandbox found its workspace image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
     monkeypatch.setattr(run_calls, "StaleWorkspaceReporter", MagicMock(report=AsyncMock()))
@@ -373,10 +378,18 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
         parts,
         run,
         "prepare",
-        {"run_id": "run-1", "messages": asked, "in_sandbox": True, "sandbox_id": "sandbox-1"},
+        {
+            "run_id": "run-1",
+            "messages": asked,
+            "in_sandbox": True,
+            "sandbox_id": "sandbox-1",
+            "refresh_github_proxy": True,
+        },
     )
 
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
+    # The token the run said was due is on the sandbox before its first model call asks.
+    assert prepared["github_proxy"] == {"expires_at": "2030-01-01T00:00:00Z"}
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
     assert len(prompts) == 1
@@ -428,6 +441,116 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert usage.await_args.kwargs["github_login"] == "earlier-sender"
     assert usage.await_args.kwargs["source"] == "slack"
     assert updated.await_count == 1
+
+
+async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_afterwards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run that reports its sandbox behind its preparation is prepared with the thread bound
+    to none and no sandbox reached, files a Slack message brought left for its next turn;
+    reporting the sandbox binds the thread and puts the due GitHub token there. A thread left
+    with no sandbox is answered why, and the person told only once a call needs it."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.messages import messages_to_dict
+
+    from openswe import server
+    from openswe.agent_api import agent, run_calls, run_sandbox
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.prompt import SystemPrompt
+    from openswe.sandboxes.state import SandboxUnreachableError
+
+    def never_reached(thread_id: str) -> object:
+        raise AssertionError("Preparing a turn never reaches a sandbox MDA is still opening")
+
+    bound = AsyncMock()
+    refresh = AsyncMock(return_value=datetime(2030, 1, 1, tzinfo=UTC))
+    stale = MagicMock(report=AsyncMock())
+    told = AsyncMock()
+    pending = {"slack_files_pending": [{"url": "https://files.invalid/a", "path": "/tmp/a"}]}
+    monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
+    monkeypatch.setattr(run_sandbox, "refresh_thread_github_proxy", refresh)
+    monkeypatch.setattr(run_sandbox, "post_sandbox_unreachable_notification", told)
+    monkeypatch.setattr(run_calls, "StaleWorkspaceReporter", stale)
+    monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value=pending))
+    monkeypatch.setattr(server, "client", MagicMock(threads=MagicMock(update=AsyncMock())))
+    monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
+    monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
+    monkeypatch.setattr(
+        server, "construct_system_prompt", lambda **kwargs: SystemPrompt(shared="", thread="")
+    )
+    for name in (
+        "resolve_triggering_user_identity",
+        "load_workspace",
+        "_resolve_prompt_default_repo",
+    ):
+        monkeypatch.setattr(server, name, AsyncMock(return_value=None))
+    parts = _NeverPlanned()
+    run = RUN.model_copy(
+        update={
+            "assistant_id": "agent",
+            "configurable": {"source": "dashboard", "invocation_id": "invocation-1"},
+            "settings": RunSettings(
+                model_id="openai:gpt-6.1-sol",
+                agent=AgentTurnSettings(title_model_id="openai:gpt-6-luna"),
+            ),
+            "grant_id": "grant-1",
+        }
+    )
+
+    prepared = await TokenRun.answer(
+        parts,
+        run,
+        "prepare",
+        {
+            "run_id": "run-1",
+            "messages": messages_to_dict([_said("What is a monad?", "human-1")]),
+            "in_sandbox": True,
+            "bind_later": True,
+        },
+    )
+
+    assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
+    assert update["work_dir"] == "/workspace"
+    assert prepared["github_proxy"] is None
+    bound.assert_not_awaited()
+    refresh.assert_not_awaited()
+
+    # Binding the sandbox found its workspace image stale.
+    monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
+    answered = await TokenRun.answer(
+        parts,
+        run,
+        "bind_sandbox",
+        {"run_id": "run-1", "sandbox_id": "sandbox-1", "refresh_github_proxy": True},
+    )
+
+    assert answered == {"unreachable": None, "github_proxy": {"expires_at": "2030-01-01T00:00:00Z"}}
+    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
+    refresh.assert_awaited_once()
+    stale.report.assert_awaited_once()
+
+    # MDA could not open a sandbox for a thread bound to none.
+    refresh.reset_mock()
+    bound.side_effect = SandboxUnreachableError(
+        "thread-1", None, "could not open", reason="SandboxClientError: HTTP 503"
+    )
+    answered = await TokenRun.answer(
+        parts,
+        run,
+        "bind_sandbox",
+        {
+            "run_id": "run-1",
+            "sandbox_error": "SandboxClientError: HTTP 503",
+            "refresh_github_proxy": True,
+        },
+    )
+
+    assert answered == {"unreachable": "SandboxClientError: HTTP 503", "github_proxy": None}
+    refresh.assert_not_awaited()
+    told.assert_not_awaited()
 
 
 async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_worker_refused(

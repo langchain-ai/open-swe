@@ -47,9 +47,14 @@ class ReviewerKind(RunKind):
         await reviewer_catalog(config, surface)
 
     async def preparation(
-        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
+        self,
+        config: RunnableConfig,
+        settings: RunSettings,
+        *,
+        sandbox_id: str | None,
+        sandbox_pending: bool = False,
     ) -> list[AgentMiddleware]:
-        del settings, sandbox_id
+        del settings, sandbox_id, sandbox_pending
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
             raise ValueError("A review run needs a thread")

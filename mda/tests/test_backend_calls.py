@@ -77,6 +77,7 @@ from rt.backend import (
     held_state,
 )
 from rt.file_tools import FileToolsMiddleware
+from rt.gateway import RUN_GATEWAY
 from rt.git_evidence import TurnGit, turn_git
 from rt.kinds import KINDS
 from rt.managed_sandbox import declared_sandbox
@@ -577,9 +578,12 @@ async def test_an_unreachable_backend_fails_the_run(
         await graph.ainvoke({"messages": [("user", "hello")]})
 
 
+@pytest.mark.parametrize("prepared_reads", [False, True])
 async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answers(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, prepared_reads: bool
 ) -> None:
+    """A backend that reads the inbox as it prepares answers the first model call's read;
+    one from before that is asked for it."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     # Nothing waits long for the receipt, which the backend takes only after the next read.
@@ -592,20 +596,27 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     received: list[InboxReceipt] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "prepare" and prepared_reads:
+            asked = Prepare.model_validate(body).inbox
+            assert asked is not None
+            name, body = "inbox", asked.model_dump(mode="json")
         if name == "inbox":
             reads.append(InboxRead.model_validate(body))
             if len(reads) > 1:
                 read_again.set()
             # What a receipt or the read itself names as received is owed no more.
-            if received or reads[-1].received == items:
-                return Inbox()
-            return Inbox.model_validate(
-                {
-                    "messages": messages_to_dict([report]),
-                    "update": {"reply_surface": "web"},
-                    "items": items.model_dump(mode="json"),
-                }
+            read = (
+                Inbox()
+                if received or reads[-1].received == items
+                else Inbox.model_validate(
+                    {
+                        "messages": messages_to_dict([report]),
+                        "update": {"reply_surface": "web"},
+                        "items": items.model_dump(mode="json"),
+                    }
+                )
             )
+            return Prepared(inbox=read) if len(reads) == 1 and prepared_reads else read
         if name == "inbox_received":
             await read_again.wait()
             received.append(InboxReceipt.model_validate(body))
@@ -1063,8 +1074,10 @@ async def test_a_run_whose_login_lapsed_answers_why_even_without_a_fallback(
     )
     preparing = _preparing(rendered_system_prompt="You are Open SWE.")
     replies: list[dict[str, JsonValue]] = []
+    asked: list[str] = []
 
     async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        asked.append(name)
         if name == GATEWAY_CREDENTIAL.name:
             return GatewayCredential(unavailable="Sign in to Robin again.")
         if name == MODEL_RESULT.name:
@@ -1075,7 +1088,10 @@ async def test_a_run_whose_login_lapsed_answers_why_even_without_a_fallback(
     monkeypatch.setattr("rt.gateway.current_run", lambda: backend.run)
     middleware = cast(
         list[AgentMiddleware],
-        [BackendRunMiddleware(backend), *model_call_guards(timeout_seconds=1.0)],
+        [
+            BackendRunMiddleware(backend, read_ahead=[RUN_GATEWAY.read_ahead]),
+            *model_call_guards(timeout_seconds=1.0),
+        ],
     )
     graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
 
@@ -1083,6 +1099,8 @@ async def test_a_run_whose_login_lapsed_answers_why_even_without_a_fallback(
 
     assert result["messages"][-1].content == "Sign in to Robin again."
     assert model.sent == []
+    # Asked for once, while the run prepares: the model call's check waits on that read.
+    assert asked.count(GATEWAY_CREDENTIAL.name) == 1
     reported = [ModelResult.model_validate(body).response for body in replies]
     # The transcript records a reply under its id.
     assert [(m.content, bool(m.id)) for r in reported for m in messages_from_dict(r)] == [
