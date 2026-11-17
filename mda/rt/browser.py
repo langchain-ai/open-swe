@@ -5,8 +5,8 @@ deployment. Each run tells the backend that name when it starts, so a person
 can open the browser from the thread's Browser panel before the agent has, and
 again once the agent first browses, so the panel opens on its own.
 
-The coding agent always has its browser. A review has one only when its catalog
-asks for it (``Catalog.browser``), for an app it works for. The pages it opens
+A review has a browser only when its catalog asks for it (``Catalog.browser``),
+for an app it works for. The pages it opens
 run code the pull request's author wrote, so a review's browser never reaches the
 review's sandbox, and takes sign-in sessions only for the domains its catalog names.
 """
@@ -60,8 +60,6 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     def __init__(self, backend: OpenSweBackend, *, graph: str) -> None:
         super().__init__()
         self._backend = backend
-        # Every graph has the middleware, so all of them share one shape. The coding
-        # agent's always browses; a review's only in a run whose catalog asks it to.
         self._always = graph == "agent"
         self._enabled = self._always or graph == "reviewer"
         # No browser_handoff: Open SWE runs only what its backend signs, so MDA's watcher

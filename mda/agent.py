@@ -130,7 +130,7 @@ class GraphInputs(BaseModel):
 
     They are the same for every run of the deployment that plays the graph on the same
     models, so MDA builds each graph once per process and shares it. Every graph has
-    the same middleware, so a thread's state reads alike through any of them.
+    a persisted state schema covered by the reviewer's graph for thread reads.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -169,8 +169,8 @@ class GraphInputs(BaseModel):
 async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
     execution = runtime.execution_runtime
     if execution is None:
-        # A read: through the agent's graph, which has every graph's shape.
-        return GraphInputs()
+        # A read: through the reviewer's graph, which has every graph's persisted state.
+        return GraphInputs(graph="reviewer")
     context = RunContext.model_validate(execution.context or {})
     return GraphInputs.of(context.graph, context.run().planned)
 
@@ -281,10 +281,7 @@ def _parts(graph: Graph) -> _Parts:
             RunToolsMiddleware(toolsets, backend_tools=backend_tools),
             _code_mode(graph, toolsets, files, backend_tools),
             DescribedToolsMiddleware(backend),
-            # A LangSmith browser per thread the dashboard shows: the coding agent's, and
-            # a review's whose apps ask for one; the deployment's workspace needs the
-            # LangSmith browser beta.
-            ReportedBrowserMiddleware(backend, graph=graph),
+            *([ReportedBrowserMiddleware(backend, graph=graph)] if graph == "reviewer" else []),
             # The system prompt in the order of how many runs share each part, for the
             # provider's prompt cache (``rt.run_prompt``).
             RunPromptMiddleware(),

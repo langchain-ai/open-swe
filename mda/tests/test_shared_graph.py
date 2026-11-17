@@ -286,12 +286,11 @@ async def _run(
     return graph
 
 
+@pytest.mark.parametrize("graph", ["agent", "reviewer", "review-scout"])
 async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itself(
-    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, graph: str
 ) -> None:
-    """Two threads with catalogs of their own run on one compiled graph, each offered and
-    calling its own operations with its own token and grants; a replica that never ran
-    either reads them through a graph with the same channels."""
+    """Runs share their graph and scope credentials; fresh replicas can read every graph."""
     monkeypatch.setattr(
         agent,
         "_DEFAULT_MODEL",
@@ -303,10 +302,10 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
     store = InMemoryStore()
 
     first = await _run(
-        store, "thread-1", _context("reviewer", "token-1", _catalog("web_search", "grant-1"))
+        store, "thread-1", _context(graph, "token-1", _catalog("web_search", "grant-1"))
     )
     second = await _run(
-        store, "thread-2", _context("reviewer", "token-2", _catalog("list_findings", "grant-2"))
+        store, "thread-2", _context(graph, "token-2", _catalog("list_findings", "grant-2"))
     )
 
     assert second.nodes["model"] is first.nodes["model"]
@@ -327,7 +326,7 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
         async_subagent_graphs=_WORKERS,
     )
 
-    assert set(read.channels) == set(first.channels)
+    assert set(first.channels) <= set(read.channels)
     # Code mode's and the run's skills' state, which every graph has.
     assert {"_quickjs_snapshot_payload", "skills_metadata"} <= set(read.channels)
 
@@ -1728,12 +1727,10 @@ async def test_a_shared_factory_builds_once_per_inputs_and_never_sees_the_run(
     assert other.nodes["model"] is not first.nodes["model"]
 
 
-async def test_the_coding_agent_and_a_review_that_asks_browse_but_never_hand_the_browser_over(
+async def test_only_app_requested_reviews_receive_browser_tools_and_instructions(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, browsers: Browsers, tmp_path: Path
 ) -> None:
-    """The coding agent gets the browser's tools and instructions but no browser_handoff,
-    and its first browse reports the browser it named when the run started; a review has
-    the browser only when its catalog asks for it."""
+    """Only app-requested reviews get browser tools and instructions."""
     offered: dict[str, set[str]] = {}
     instructed: dict[str, bool] = {}
 
@@ -1777,15 +1774,12 @@ async def test_the_coding_agent_and_a_review_that_asks_browse_but_never_hand_the
     await asyncio.sleep(0)
 
     tools = {"browser_run", "browser_snapshot", "browser_screenshot"}
-    for run in ("agent", "capturing"):
-        assert tools <= offered[run] and "browser_handoff" not in offered[run]
-    assert not {name for name in offered["reviewer"] if name.startswith("browser_")}
-    assert instructed == {"agent": True, "capturing": True, "reviewer": False}
-    browsed = mda_browser._browser_name("thread:browsed")
+    assert tools <= offered["capturing"] and "browser_handoff" not in offered["capturing"]
+    for run in ("agent", "reviewer"):
+        assert not {name for name in offered[run] if name.startswith("browser_")}
+    assert instructed == {"agent": False, "capturing": True, "reviewer": False}
     captured = mda_browser._browser_name("thread:captured")
-    assert sorted(browsers) == sorted(
-        [(captured, False), (captured, True), (browsed, False), (browsed, True)]
-    )
+    assert sorted(browsers) == sorted([(captured, False), (captured, True)])
 
 
 async def test_a_review_installs_sign_in_sessions_only_for_its_own_domains(
@@ -1948,8 +1942,8 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
 async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, failure: str
 ) -> None:
-    from rt.browser import ReportedBrowserMiddleware
     from rt.middleware import BackendRunMiddleware
+    from rt.skills import RunSkillsMiddleware
 
     interpreter = next(
         item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
@@ -1970,7 +1964,7 @@ async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
 
     monkeypatch.setattr(interpreter, "abefore_agent", prepare)
     if failure == "before_agent":
-        monkeypatch.setattr(ReportedBrowserMiddleware, "abefore_agent", later_setup)
+        monkeypatch.setattr(RunSkillsMiddleware, "abefore_agent", later_setup)
     if failure == "before_model":
         monkeypatch.setattr(BackendRunMiddleware, "_read_inbox", read_inbox)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
