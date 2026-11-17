@@ -95,8 +95,9 @@ it.each([
     const request = vi
       .spyOn(api, "requestHumanReview")
       .mockReturnValue(result.promise)
+    const client = new QueryClient()
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <TooltipProvider>
           <RequestHumanReview pr={pr} />
         </TooltipProvider>
@@ -130,6 +131,20 @@ it.each([
     expect(
       screen.queryByRole("button", { name: "Review requested" })
     ).toBeNull()
+    await act(async () => {
+      client.setQueryData(["human-review-availability", pr.repo, pr.number], {
+        available: true,
+        active: true,
+        permalink,
+        blockers: [],
+      })
+    })
+    const requested = await screen.findByRole(permalink ? "link" : "button", {
+      name: "Review requested",
+    })
+    expect(requested.getAttribute("aria-busy")).toBe("false")
+    expectOpensInSlack(requested, permalink)
+    expect(screen.queryByText("Requesting…")).toBeNull()
     await act(async () =>
       result.resolve({
         success: true,

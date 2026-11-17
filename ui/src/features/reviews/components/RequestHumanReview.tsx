@@ -97,10 +97,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           : needsChannel
             ? "No default Slack review channel is configured. Choose a review channel manually to enable this button."
             : null
-  const label = requestReview.isPending
-    ? "Requesting…"
-    : active
-      ? "Review requested"
+  const requesting = requestReview.isPending && !active
+  const label = active
+    ? "Review requested"
+    : requesting
+      ? "Requesting…"
       : requestReview.isError
         ? "Retry review request"
         : "Request review in Slack"
@@ -125,7 +126,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         label={label}
         icon={active ? SlackLogoIcon : undefined}
         href={active && permalink ? permalink : undefined}
-        loading={requestReview.isPending}
+        loading={requesting}
         disabled={Boolean(hint)}
         onClick={
           active
