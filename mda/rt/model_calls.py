@@ -39,6 +39,7 @@ from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
+from runtime_api.provenance import Provenance
 
 from rt.gateway import RUN_GATEWAY
 from rt.model_retries import ModelOutput, ModelRetriesMiddleware
@@ -340,13 +341,33 @@ class _ModelCallGuard(AgentMiddleware):
 class ReplayableHistoryMiddleware(_ModelCallGuard):
     """Send each call a history the provider it goes to accepts, in a stable order."""
 
+    @staticmethod
+    def _context_order(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+        """Keep personal context last within each uninterrupted group of context messages."""
+        ordered: list[AnyMessage] = []
+        personal: list[AnyMessage] = []
+        for message in messages:
+            provenance = Provenance.of(message)
+            if provenance is None or provenance.kind != "context":
+                ordered.extend(personal)
+                personal.clear()
+            elif provenance.sender.startswith("user:") or provenance.sender == "run:recent-threads":
+                personal.append(message)
+                continue
+            ordered.append(message)
+        ordered.extend(personal)
+        return ordered
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         model = _chat_model(request.model)
-        messages = [_for_provider(message, model) for message in _in_call_order(request.messages)]
+        messages = [
+            _for_provider(message, model)
+            for message in _in_call_order(self._context_order(request.messages))
+        ]
         if any(a is not b for a, b in zip(messages, request.messages, strict=True)):
             request = request.override(messages=messages)
         return await handler(request)

@@ -50,6 +50,7 @@ from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog, LoopRules, RoutingRules, RunModels
 from runtime_api.loop import GatewayCredential
 from runtime_api.model_errors import is_model_failure_reply
+from runtime_api.provenance import Provenance
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
 _OPENAI = ChatOpenAI(
@@ -118,6 +119,57 @@ async def test_parallel_results_are_replayed_in_tool_call_order() -> None:
     assert [getattr(m, "tool_call_id", None) for m in forwarded.messages[2:5]] == ["a", "b", "c"]
     assert forwarded.messages[5] is messages[5]
     assert messages == original
+
+
+@pytest.mark.parametrize("stamped", [True, False])
+async def test_personal_context_follows_shared_context_without_crossing_conversation(
+    stamped: bool,
+) -> None:
+    contexts = [
+        HumanMessage(
+            content=f'<dynamic-context kind="{kind}" id="{key}">{text}</dynamic-context>',
+            additional_kwargs=Provenance(kind="context", sender=sender).stamp() if stamped else {},
+        )
+        for kind, key, text, sender in [
+            ("person", "user:ada", "Ada", "user:ada"),
+            ("run", "environment", "Sandbox", "run:environment"),
+            ("run", "recent-threads", "Recent work", "run:recent-threads"),
+            ("person", "user:grace", "Grace", "user:grace"),
+            ("run", "source", "Slack", "run:source"),
+            ("run", "task-role", "Coordinator", "run:task-role"),
+            ("run", "code-tools", "Tools", "run:code-tools"),
+        ]
+    ]
+    person, environment, recent, teammate, source, task, tools = contexts
+    human = HumanMessage("Keep this conversation in order")
+    reply = AIMessage("Working")
+    call = _calls("a", "b")
+    a, b = _result("a"), _result("b")
+    messages: list[AnyMessage] = [human, *contexts, reply, call, b, a, person, tools, human]
+    original = list(messages)
+
+    forwarded = await _forwarded(ReplayableHistoryMiddleware(), messages, _OPENAI)
+
+    assert forwarded.messages == [
+        human,
+        environment,
+        source,
+        task,
+        tools,
+        person,
+        recent,
+        teammate,
+        reply,
+        call,
+        a,
+        b,
+        tools,
+        person,
+        human,
+    ]
+    assert messages == original
+    replayed = await _forwarded(ReplayableHistoryMiddleware(), forwarded.messages, _OPENAI)
+    assert replayed.messages == forwarded.messages
 
 
 async def test_empty_thinking_blocks_are_dropped_only_for_anthropic() -> None:
