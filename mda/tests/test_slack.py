@@ -759,9 +759,18 @@ def test_other_pull_request_links_stay_unwatched(
     assert backend.handed_back == []
 
 
+@pytest.mark.parametrize(
+    "event",
+    [
+        _event("and the tests", key="message"),
+        _event("<@UBOT> and the tests", key="message"),
+        _event(payload={"type": "app_mention", "text": "<@UBOT> and the tests"}),
+    ],
+    ids=["untagged", "mentioned-message", "app-mention"],
+)
 @pytest.mark.usefixtures("slack_reads")
-def test_an_untagged_kitchen_channel_message_or_solo_followup_is_a_turn(
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_kitchen_channel_message_or_solo_followup_is_a_turn(
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent
 ) -> None:
     for facts in (
         SlackMessageFacts(kitchen_channel=True, conversation="new"),
@@ -769,9 +778,11 @@ def test_an_untagged_kitchen_channel_message_or_solo_followup_is_a_turn(
     ):
         backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
 
-        assert asyncio.run(slack.start_turn(_event("and the tests", key="message"), _thread()))
+        assert asyncio.run(slack.start_turn(event, _thread()))
         [turn] = backend.turns
-        assert turn.treat_all_messages_as_mentions
+        assert turn.treat_all_messages_as_mentions is (
+            facts.solo_followup or not turn.explicit_mention
+        )
         assert turn.kitchen_channel is facts.kitchen_channel
 
 

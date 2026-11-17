@@ -528,14 +528,15 @@ class SlackEventsDelivery:
             if text == previous_message.text:
                 return ignored("No user-visible message changes")
 
+        in_dm_channel = event.channel_type == "im" or is_dm_channel(channel_context)
+        kitchen_channel = not in_dm_channel and await is_kitchen_channel(
+            channel_id, slack_user_id=user_id
+        )
         in_kitchen_channel = (
-            event.channel_type != "im"
-            and not is_dm_channel(channel_context)
+            kitchen_channel
             and event.type == "message"
             and not (bot_user_id and f"<@{bot_user_id}>" in text)
-            and await is_kitchen_channel(channel_id, slack_user_id=user_id)
         )
-        in_dm_channel = event.channel_type == "im" or is_dm_channel(channel_context)
         # Concierge mode, only for someone who turned it on: their DM is one private
         # conversation for as long as it exists, so every message routes to the same
         # agent thread rather than opening a Slack thread per request. Everyone else
@@ -787,7 +788,7 @@ class SlackEventsDelivery:
                     treat_all_messages_as_mentions=is_direct_message
                     or in_kitchen_channel
                     or solo_followup,
-                    kitchen_channel=in_kitchen_channel,
+                    kitchen_channel=kitchen_channel,
                     explicit_mention=explicit_mention,
                     concierge_mode=in_concierge_mode,
                     reply_thread_ts=reply_thread_ts if in_concierge_mode else "",

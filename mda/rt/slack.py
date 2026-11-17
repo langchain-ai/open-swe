@@ -308,7 +308,8 @@ def _decide(
         and any(link in message.text for link in _PULL_REQUEST_LINKS)
         else None
     )
-    kitchen = facts.kitchen_channel and not dm and is_message and not explicit
+    kitchen_channel = facts.kitchen_channel and not dm
+    kitchen = kitchen_channel and is_message and not explicit
     leading = _LEADING_MENTION.match(message.text)
     if not dm and not bot and leading and leading[1] != bot_user_id:
         # Addressed to another person.
@@ -331,7 +332,7 @@ def _decide(
         **message.model_dump(),
         kind=kind,
         concierge=facts.concierge,
-        kitchen_channel=kitchen,
+        kitchen_channel=kitchen_channel,
         treat_all_messages_as_mentions=direct_message or kitchen or facts.solo_followup,
         performance_command=performance_command,
         workspace_tag=parsed.workspace or "",

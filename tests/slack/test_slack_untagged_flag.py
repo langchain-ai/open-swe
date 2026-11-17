@@ -218,7 +218,7 @@ async def test_kitchen_messages_preserve_explicit_mentions(
     request = cast(SlackRequest, background_tasks.tasks[0][1][0])
     assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
     assert request.treat_all_messages_as_mentions is (event_type == "message")
-    assert request.kitchen_channel is (event_type == "message")
+    assert request.kitchen_channel
     assert request.explicit_mention is (event_type == "app_mention")
 
 
