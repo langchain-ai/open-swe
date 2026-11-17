@@ -1,6 +1,7 @@
 """Runs are read from the project the MDA deployment traces them into."""
 
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -43,7 +44,7 @@ class _DatadogSpan:
         return None
 
 
-def test_datadogs_spans_of_a_runs_work_are_posted_under_it(
+def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     processors: list[object] = []
@@ -63,9 +64,13 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it(
     monkeypatch.setattr(DatadogSpans, "_installed", False)
     DatadogSpans.install()
     posted: list[dict[str, object]] = []
-    run = RunTree(
-        name="build_run", ls_client=SimpleNamespace(create_run=lambda **r: posted.append(r))
-    )
+    posting_threads: set[str] = set()
+
+    def create_run(**run: object) -> None:
+        posted.append(run)
+        posting_threads.add(threading.current_thread().name)
+
+    run = RunTree(name="build_run", ls_client=SimpleNamespace(create_run=create_run))
 
     with DatadogSpans.under(run):
         pass
@@ -80,7 +85,9 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it(
         ]
     )
 
+    DatadogSpans.drain(timeout=5)
     names = {str(r["name"]): r for r in posted}
     assert set(names) == {"http.request https://x.test/a", "postgres.query"}
     assert names["http.request https://x.test/a"]["parent_run_id"] == run.id
     assert names["postgres.query"]["parent_run_id"] == names["http.request https://x.test/a"]["id"]
+    assert threading.current_thread().name not in posting_threads

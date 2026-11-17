@@ -3,14 +3,16 @@
 Where Datadog traces this backend, ddtrace spans each library call (asyncpg, httpx,
 redis, gRPC, Jinja2 and more). ``DatadogSpans.under(run)`` opens a ddtrace marker span
 for a LangSmith run, so the calls made in its block are the marker's descendants. A
-ddtrace trace processor posts each of them, as it finishes, under the run, nested as
-Datadog nests them. Children finish before their parents, so a span waits until its
-parent's run is known. Without ddtrace, nothing is traced, and tracing never raises
-into the work it traces.
+ddtrace trace processor queues each of them, as it finishes, to be posted under the
+run, nested as Datadog nests them. Children finish before their parents, so a span
+waits until its parent's run is known. Without ddtrace, nothing is traced, and tracing
+never raises into the work it traces.
 """
 
 import logging
+import queue
 import threading
+import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -25,6 +27,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MARKER: Final = "langsmith.run"
+# Past this many runs waiting to be posted, a span's run is dropped rather than
+# letting a stalled LangSmith upload grow memory.
+_POST_BACKLOG: Final = 10_000
 
 
 class DatadogSpans:
@@ -38,10 +43,16 @@ class DatadogSpans:
     _waiting: ClassVar[dict[int, dict[int, Span]]] = {}
     # How many markers of each Datadog trace have not finished yet.
     _open: ClassVar[dict[int, int]] = {}
+    # Posting a run writes it into the LangSmith client's compressed buffer under a
+    # lock its upload thread also takes, so it is done on a thread of its own: on
+    # the event loop it held every request on the process for a second at a time.
+    _posts: ClassVar[queue.Queue[RunTree]] = queue.Queue(_POST_BACKLOG)
 
     @classmethod
     def install(cls) -> None:
         """Have Datadog's tracer, when it traces this process, hand its spans over."""
+        if cls._installed:
+            return
         try:
             from ddtrace.trace import TraceFilter, tracer
         except ImportError:
@@ -56,7 +67,26 @@ class DatadogSpans:
 
         # The Agent Server registers no trace processors of its own.
         tracer.configure(trace_processors=[_Processor()])
+        threading.Thread(target=cls._post_queued, name="datadog-spans", daemon=True).start()
         cls._installed = True
+
+    @classmethod
+    def drain(cls, timeout: float) -> None:
+        """Wait up to ``timeout`` seconds for the spans already queued to be posted."""
+        deadline = time.monotonic() + timeout
+        while cls._posts.unfinished_tasks and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+    @classmethod
+    def _post_queued(cls) -> None:
+        while True:
+            run = cls._posts.get()
+            try:
+                run.post()
+            except Exception:
+                logger.debug("Could not post a Datadog span to LangSmith", exc_info=True)
+            finally:
+                cls._posts.task_done()
 
     @classmethod
     @contextmanager
@@ -101,12 +131,18 @@ class DatadogSpans:
         while ready:
             span = ready.pop()
             del waiting[span.span_id]
-            parent = cls._runs[trace_id, span.parent_id]
-            cls._runs[trace_id, span.span_id] = cls._post(span, parent)
+            run = cls._post(span, cls._runs[trace_id, span.parent_id])
+            if run is None:
+                # Dropped: its children wait for a run that never comes, and go with the trace.
+                continue
+            cls._runs[trace_id, span.span_id] = run
             ready.extend(child for child in waiting.values() if child.parent_id == span.span_id)
 
-    @staticmethod
-    def _post(span: Span, parent: RunTree) -> RunTree:
+    @classmethod
+    def _post(cls, span: Span, parent: RunTree) -> RunTree | None:
+        if cls._posts.full():
+            logger.debug("Dropped a Datadog span: its LangSmith posts are backed up")
+            return None
         name = f"{span.name} {span.resource}" if span.resource != span.name else span.name
         if url := span.get_tag("http.url"):
             # Without the query string, which can carry credentials.
@@ -119,5 +155,5 @@ class DatadogSpans:
             error=span.get_tag("error.message") or "error" if span.error else None,
             extra={"metadata": {"datadog_service": span.service, "datadog_name": span.name}},
         )
-        run.post()
+        cls._posts.put_nowait(run)
         return run

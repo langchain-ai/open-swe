@@ -1,5 +1,6 @@
 """FastAPI application composition."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -145,6 +146,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await stop_worker()
         await close_http_pool()
         await database.close()
+        # Spans still queued at exit would miss the LangSmith client's own flush.
+        await asyncio.to_thread(DatadogSpans.drain, 5)
 
 
 async def _conflict(_request: Request, exc: Exception) -> JSONResponse:
