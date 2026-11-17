@@ -68,9 +68,7 @@ def voice(monkeypatch: pytest.MonkeyPatch) -> VoiceMessage:
     monkeypatch.setattr(audio, "fetch_slack_thread_message_by_ts", fetch)
     monkeypatch.setattr(audio, "download_slack_file", download)
     monkeypatch.setattr(
-        audio.SpeechProvider,
-        "configured",
-        AsyncMock(return_value=SimpleNamespace(transcribe=transcribe)),
+        audio.SpeechProvider, "configured", lambda: SimpleNamespace(transcribe=transcribe)
     )
     messages: list[BaseMessage] = [
         HumanMessage(
@@ -88,27 +86,22 @@ def voice(monkeypatch: pytest.MonkeyPatch) -> VoiceMessage:
     return VoiceMessage(config, message, clip, fetch, download, transcribe, messages)
 
 
-@pytest.mark.parametrize("gateway", [True, False])
-async def test_transcription_respects_workspace_routing(
-    monkeypatch: pytest.MonkeyPatch, gateway: bool
+@pytest.mark.parametrize("gateway_key", ["gateway-key", ""])
+def test_transcription_only_goes_through_the_gateway(
+    monkeypatch: pytest.MonkeyPatch, gateway_key: str
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "direct-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://direct.example/v1")
-    monkeypatch.setattr(
-        audio,
-        "cached_workspace_settings",
-        AsyncMock(return_value=SimpleNamespace(effective_gateway_enabled=gateway)),
-    )
-    monkeypatch.setattr(
-        audio,
-        "gateway_overrides",
-        lambda model: {"base_url": "https://gateway.example/openai/v1", "api_key": "gateway-key"},
-    )
-    provider = await audio.SpeechProvider.configured(RunConfig(workspace="default"))
-    assert provider.api_key == ("gateway-key" if gateway else "direct-key")
-    assert provider.base_url == (
-        "https://gateway.example/openai/v1" if gateway else "https://direct.example/v1"
-    )
+    monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", gateway_key)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "")
+    if not gateway_key:
+        with pytest.raises(ValueError, match="LANGSMITH_GATEWAY_API_KEY or LANGSMITH_API_KEY"):
+            audio.SpeechProvider.configured()
+    else:
+        provider = audio.SpeechProvider.configured()
+        assert provider.base_url == "https://gateway.example/openai/v1"
+        assert provider.api_key == "gateway-key"
 
 
 @pytest.mark.parametrize("root", [False, True])

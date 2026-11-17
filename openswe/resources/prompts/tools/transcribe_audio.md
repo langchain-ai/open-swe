@@ -6,7 +6,7 @@ By default, the tool uses the most recent delivered direct Slack request.
 Supply the request envelope's `slack_message_ts` as `message_ts` to select another delivered request; an edit uses the original message's timestamp.
 The tool verifies that message and its own sender through Slack and downloads the original clip from Slack.
 Paths, URLs, ordinary audio uploads, clips found only in history and forwarded files are not eligible.
-This sends the recording to the deployment's configured OpenAI transcription provider, through the workspace's gateway when enabled.
+This sends the recording to OpenAI transcription through the LangSmith LLM Gateway.
 It does not use local Parakeet inference.
 
 Args:

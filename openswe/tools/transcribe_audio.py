@@ -12,8 +12,6 @@ from pydantic import BaseModel, Field, ValidationError
 from runtime_api.models import gateway_overrides
 from runtime_api.slack import SlackMessageOrigin
 
-from openswe.config import ENV
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     SlackFileDownloadError,
@@ -177,23 +175,8 @@ class SpeechProvider(BaseModel):
     api_key: str = Field(repr=False)
 
     @classmethod
-    async def configured(cls, config: RunConfig) -> SpeechProvider:
-        settings = await cached_workspace_settings(config.workspace_slug)
-        if settings.effective_gateway_enabled:
-            overrides = gateway_overrides("openai:gpt-transcribe")
-            if overrides is None:
-                raise ValueError(
-                    "Audio transcription is unavailable: gateway credentials are missing."
-                )
-            return cls.model_validate(overrides)
-        key = ENV.OPENAI_API_KEY.optional()
-        if not key:
-            raise ValueError(
-                "Audio transcription requires configured OpenAI or gateway credentials."
-            )
-        return cls(
-            base_url=ENV.OPENAI_BASE_URL.optional() or "https://api.openai.com/v1", api_key=key
-        )
+    def configured(cls) -> SpeechProvider:
+        return cls.model_validate(gateway_overrides("openai:gpt-transcribe"))
 
     async def transcribe(self, name: str, content: bytes) -> str:
         async with httpx2.AsyncClient(transport=pooled_transport(), timeout=120) as client:
@@ -221,7 +204,7 @@ async def transcribe_audio(
     config = RunConfig.from_runtime()
     try:
         clip = await SlackVoiceClip.resolve(config, file_id, messages or [], message_ts)
-        provider = await SpeechProvider.configured(config)
+        provider = SpeechProvider.configured()
         content = await download_slack_file(clip.url_private)
         if not 0 < len(content) <= MAX_AUDIO_BYTES:
             raise ValueError("Audio must be nonempty and no larger than 24 MB.")
