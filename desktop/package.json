@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.3.18",
+  "version": "0.3.19",
   "private": true,
   "description": "Experimental Robin desktop client",
   "main": "build/main.cjs",
