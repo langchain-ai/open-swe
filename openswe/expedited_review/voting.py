@@ -294,11 +294,7 @@ async def process_vote(
                     ):
                         await update(message_blocks)
                     elif current is not None and not completed:
-                        await ReviewCard(current).refresh(
-                            outcome=current.detail or current.state
-                            if current.state != "open"
-                            else None,
-                        )
+                        await ReviewCard(current).refresh()
                 except Exception:
                     logger.warning("Could not restore expedited review click", exc_info=True)
 

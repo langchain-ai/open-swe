@@ -352,8 +352,7 @@ async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
         if row is None or row.state != "open":
             return _failure("This review request closed before its summary could change.")
         row.tldr = tldr
-        # Under the lock, so a concurrent dismissal waits and renders its closed card last.
-        await ReviewCard(row).refresh()
+    await ReviewCard(active).refresh()
     current = await HumanReviewRequest.get(active.id)
     if current is None:
         return _failure("This review request vanished.")
@@ -1219,20 +1218,23 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
             return True
+        result = None
+        hold = None
         if not row.auto_merge:
             row.detail = "approved — awaiting manual merge"
-            await ReviewCard(row).refresh()
-            return True
-        if hold := await _auto_merge_hold(row):
+        elif hold := await _auto_merge_hold(row):
             row.detail = hold
-            await _schedule(row, "auto_merge", _DEADLINE_RETRY)
-            await ReviewCard(row).refresh()
-            return True
-        result = await merge_pull_request(
-            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
-        )
-        if result.status != "merged":
-            row.detail = result.message
+        else:
+            result = await merge_pull_request(
+                row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
+            )
+            if result.status != "merged":
+                row.detail = result.message
+    if hold is not None:
+        await _schedule(row, "auto_merge", _DEADLINE_RETRY)
+    if result is None:
+        await ReviewCard(row).refresh()
+        return True
     if result.status == "merged":
         await ReviewCard(request).mark_merged()
         return True

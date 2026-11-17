@@ -347,6 +347,8 @@ async def test_a_failed_card_publish_is_retried_by_its_deadline(
     dm_updates: list[str] = []
 
     async def update_dm(channel: str, ts: str, text: str, **_: object) -> None:
+        if channel != "D_ADA":
+            return
         dm_updates.append(channel)
         if len(dm_updates) <= failed_posts + 1:
             raise SlackRequestError("ratelimited")
@@ -507,12 +509,15 @@ async def test_draft_card_is_not_posted_until_ready(
         assert "+first" in str(posted.call_args)
     assert (stored.slack_dm_channel_id, stored.slack_dm_message_ts) == ("D_ADA", "4.0")
     deleted.assert_not_awaited()
-    assert "Ready for review" in str(updated.call_args)
-    assert "https://origin" in str(updated.call_args)
-    assert "actions" not in str(updated.call_args)
+    [dm_update] = [call for call in updated.await_args_list if call.args[0] == "D_ADA"]
+    assert "Ready for review" in str(dm_update)
+    assert "https://origin" in str(dm_update)
+    assert "actions" not in str(dm_update)
     assert await ReviewCard(await _stored(approval)).refresh_author_dm(None)
     assert await ReviewCard(approval).refresh_author_dm(None)
-    assert updated.await_count == notes.await_count == 1
+    assert (
+        sum(call.args[0] == "D_ADA" for call in updated.await_args_list) == notes.await_count == 1
+    )
     approval.state = "cancelled"
     approval.detail = "dismissed by <@U_ADA>"
     await approval.save()

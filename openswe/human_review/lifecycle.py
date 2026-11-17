@@ -532,8 +532,18 @@ class ReviewCard:
                 "Could not broadcast expedited review card", extra={"slack_error": error}
             )
 
-    async def refresh(self, *, outcome: str | None = None) -> None:
-        """Re-render the posted card from current state; used after clicks and outcomes."""
+    async def refresh(self) -> None:
+        """Reconcile the posted card with persisted state, including changes during Slack writes."""
+        while (current := await HumanReviewRequest.get(self.request.id)) is not None:
+            self.request = current
+            before = current.event_state()
+            outcome = current.detail or current.state if current.state != "open" else None
+            await self._refresh(outcome)
+            latest = await HumanReviewRequest.get(current.id)
+            if latest is None or latest.event_state() == before:
+                return
+
+    async def _refresh(self, outcome: str | None) -> None:
         request = self.request
         dm_updated = await self.refresh_author_dm(outcome)
         if request.unpublished and outcome is None:
@@ -583,7 +593,7 @@ class ReviewCard:
         if old_ts == request.slack_thread_ts:
             request.slack_broadcast = broadcast
             await request.save()
-            await self.refresh(outcome=outcome)
+            await self.refresh()
             return True
         request.slack_broadcast = broadcast
         text, blocks = await self.render(outcome)
@@ -778,7 +788,7 @@ class ReviewCard:
         if not self.request.slack_broadcast or not await self._repost(
             broadcast=False, outcome=outcome
         ):
-            await self.refresh(outcome=outcome)
+            await self.refresh()
 
     async def remove_superseded(self) -> None:
         """Delete older cards for this request's PR, so its thread only ever shows one."""

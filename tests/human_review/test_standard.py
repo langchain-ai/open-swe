@@ -28,6 +28,7 @@ from openswe.human_review.standard import (
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserIdentity
+from openswe.utils.json_types import JsonObject
 from tests.conftest import FakeUserRecords, serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -620,6 +621,90 @@ async def test_merged_card_names_only_actual_approvers(
         else:
             assert "approved by" not in message
         assert "linus" not in message
+
+
+@pytest.mark.parametrize("change_at", ["before", "render", "write"])
+@pytest.mark.parametrize("change", ["merged", "summary", "reviewer", "detail"])
+async def test_late_refresh_preserves_the_current_card(
+    change_at: str, change: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    request = await HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        slack_channel_id="C1",
+        slack_message_ts="1.0",
+        tldr="Original summary",
+    ).save()
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+    written: tuple[str, list[JsonObject]] | None = None
+
+    async def files(card: ReviewCard) -> list[ChangedFile]:
+        if change_at == "render" and not paused.is_set():
+            paused.set()
+            await resume.wait()
+        return []
+
+    async def update(
+        channel_id: str, message_ts: str, text: str, *, blocks: list[JsonObject]
+    ) -> None:
+        nonlocal written
+        if change_at == "write" and not paused.is_set():
+            paused.set()
+            await resume.wait()
+        written = text, blocks
+
+    async def change_card() -> None:
+        if change == "merged":
+            await ReviewCard(request).retire("merged", "merged")
+            return
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            assert row is not None
+            if change == "summary":
+                row.tldr = "Updated summary"
+            elif change == "detail":
+                row.detail = "Updated merge hold"
+            else:
+                user = User(display_name="grace")
+                reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+                reviewer.user = user
+                row.participants.append(reviewer)
+        await ReviewCard(request).refresh()
+
+    monkeypatch.setattr("openswe.human_review.lifecycle.update_slack_message", update)
+    monkeypatch.setattr(ReviewCard, "_review_states", AsyncMock(return_value={}))
+    monkeypatch.setattr(ReviewCard, "_files", files)
+    monkeypatch.setattr(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada"))
+
+    async with asyncio.timeout(5):
+        if change_at == "before":
+            await change_card()
+            await ReviewCard(request).refresh()
+        else:
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(ReviewCard(request).refresh())
+                await paused.wait()
+                await change_card()
+                resume.set()
+
+    assert written is not None
+    text, blocks = written
+    rendered = str(blocks)
+    if change == "merged":
+        assert "merged" in text
+        assert "Review requested" not in text
+        assert not any(block["type"] == "actions" for block in blocks)
+    else:
+        assert "Review requested" in text
+        if change == "summary":
+            assert "Updated summary" in rendered
+            assert "Original summary" not in rendered
+        elif change == "detail":
+            assert "Updated merge hold" in rendered
+        else:
+            assert "@grace" in rendered
 
 
 @pytest.mark.parametrize("available", [True, False])
