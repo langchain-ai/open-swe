@@ -819,8 +819,12 @@ async def api_get_thread_state(
             principal=principal,
         )
     except (httpx.HTTPStatusError, httpx2.HTTPStatusError) as exc:
-        # The runtime validates the read, `select` included; what it refuses goes back as it said.
-        if exc.response.status_code != httpx.codes.UNPROCESSABLE_ENTITY:
+        # The runtime validates the read, `select` included, and an old thread the index
+        # still lists may be gone from it: what it refuses goes back as it said.
+        if exc.response.status_code not in (
+            httpx.codes.UNPROCESSABLE_ENTITY,
+            httpx.codes.NOT_FOUND,
+        ):
             raise
         return Response(
             content=exc.response.content,

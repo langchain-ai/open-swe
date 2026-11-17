@@ -1560,6 +1560,19 @@ async def test_thread_state_refuses_a_select_the_threads_runtime_refuses(
     assert "Invalid select columns: ['bogus']" in response.text
 
 
+async def test_thread_state_of_an_old_thread_the_agent_server_swept_is_not_found(
+    monkeypatch,
+) -> None:
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        if request.url.path.endswith("/state"):
+            return httpx.Response(404, json={"detail": "Thread not found"})
+        return httpx.Response(200, json=[])
+
+    response = await _read_thread_state(monkeypatch, "local", agent_server, select=[])
+
+    assert response.status_code == 404
+
+
 @pytest.mark.parametrize(("started_by_id", "status_code"), [("api_key:1", 200), ("api_key:2", 404)])
 async def test_a_machine_reads_the_state_of_only_the_threads_it_started(
     monkeypatch, started_by_id: str, status_code: int
