@@ -23,6 +23,14 @@ COUNTS = {
     "comments": 2,
 }
 COUNT_KEYS = {f"pr_{name}" for name in COUNTS}
+ACTIVITY_KEYS = {
+    "pr_robin_comments",
+    "pr_bot_comments",
+    "pr_author_comments",
+    "pr_reviewer_comments",
+    "pr_reviewer_approvals",
+    "pr_reviewer_changes_requested",
+}
 MERGE_KEYS = {"pr_merged", f"github_pr_merged:{PR_URL}"}
 
 # Feedback rows by thread, then by key; a later write to the same row replaces it.
@@ -58,6 +66,38 @@ def _payload(
 @asynccontextmanager
 async def _unlocked(*args: object, **kwargs: object):
     yield
+
+
+def _user(login: str, user_id: int, kind: str = "User") -> dict[str, object]:
+    return {"login": login, "id": user_id, "type": kind}
+
+
+ROBIN = _user("open-swe[bot]", 99, "Bot")
+REVIEW_BOT = _user("review-bot[bot]", 77)
+CI_APP = _user("ci-app", 78, "Bot")
+AUTHOR = _user("pr-author", 11)
+REQUESTER = _user("requester", 22)
+REVIEWER = _user("reviewer", 33)
+
+
+@pytest.fixture(autouse=True)
+def activity(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, object]]]:
+    """What GitHub lists on PR #7: inline comments, conversation comments and reviews."""
+    listed: dict[str, list[dict[str, object]]] = {
+        "review_comments": [],
+        "issue_comments": [],
+        "reviews": [],
+    }
+    pull = MagicMock()
+    for name in listed:
+        setattr(pull, name, AsyncMock(side_effect=lambda name=name: listed[name]))
+
+    @asynccontextmanager
+    async def as_app(owner: str, repo: str, number: int):
+        yield pull
+
+    monkeypatch.setattr(pull_requests.PullRequestClient, "as_app", as_app)
+    return listed
 
 
 @pytest.fixture
@@ -176,7 +216,7 @@ async def test_merged_pr_records_its_merge_on_every_thread_and_counts_on_the_ope
 ) -> None:
     await _deliver(_payload("closed", merged=True, sender={"login": "carol", "id": 33}))
 
-    assert written[OPENER].keys() == MERGE_KEYS | COUNT_KEYS | {"pr_closed"}
+    assert written[OPENER].keys() == MERGE_KEYS | COUNT_KEYS | ACTIVITY_KEYS | {"pr_closed"}
     assert written[OPENER]["pr_closed"]["value"] == "merged"
     assert _stats(written[OPENER])["pr_review_comments"] == 5.0
     assert written[FIX].keys() == MERGE_KEYS
@@ -250,6 +290,113 @@ async def test_pr_closed_without_merge_names_who_closed_it(
     assert _stats(written[OPENER])["pr_additions"] == 120.0
 
 
+def _activity(rows: dict[str, dict[str, object]]) -> dict[str, object]:
+    return {key: row["score"] for key, row in rows.items() if key in ACTIVITY_KEYS}
+
+
+@pytest.mark.parametrize(
+    ("author", "asked", "expected"),
+    [
+        (
+            AUTHOR,
+            None,
+            {
+                "pr_robin_comments": 2.0,
+                "pr_bot_comments": 2.0,
+                "pr_author_comments": 2.0,
+                "pr_reviewer_comments": 2.0,
+                "pr_reviewer_approvals": 2.0,
+                "pr_reviewer_changes_requested": 1.0,
+            },
+        ),
+        (
+            ROBIN,
+            ({"requester"}, {22}),
+            {
+                "pr_robin_comments": 2.0,
+                "pr_bot_comments": 2.0,
+                "pr_author_comments": 1.0,
+                "pr_reviewer_comments": 3.0,
+                "pr_reviewer_approvals": 1.0,
+                "pr_reviewer_changes_requested": 1.0,
+            },
+        ),
+    ],
+    ids=["person_authored", "robin_authored_for_a_requester"],
+)
+@pytest.mark.usefixtures("robin_pr")
+async def test_closed_pr_records_review_activity_by_who_wrote_it(
+    written: Rows,
+    activity: dict[str, list[dict[str, object]]],
+    requesters: dict[str, tuple[set[str], set[int]]],
+    author: dict[str, object],
+    asked: tuple[set[str], set[int]] | None,
+    expected: dict[str, float],
+) -> None:
+    if asked is not None:
+        requesters["lc/repo#7"] = asked
+    activity["review_comments"] = [
+        {"user": ROBIN},
+        {"user": REVIEW_BOT},
+        {"user": {**AUTHOR, "login": "pr-author-renamed"}},
+        {"user": REVIEWER},
+    ]
+    activity["issue_comments"] = [
+        {"user": ROBIN},
+        {"user": CI_APP},
+        {"user": AUTHOR},
+        {"user": {**REQUESTER, "login": "Requester"}},
+    ]
+    activity["reviews"] = [
+        {"user": REVIEWER, "state": "CHANGES_REQUESTED"},
+        {"user": REVIEWER, "state": "COMMENTED"},
+        {"user": REVIEWER, "state": "APPROVED"},
+        {"user": REQUESTER, "state": "APPROVED"},
+        {"user": ROBIN, "state": "APPROVED"},
+        {"user": REVIEW_BOT, "state": "CHANGES_REQUESTED"},
+    ]
+
+    await _deliver(
+        _payload(
+            "closed",
+            merged=True,
+            author=str(author["login"]),
+            author_id=int(author["id"]),
+            sender=REVIEWER,
+        )
+    )
+
+    assert _activity(written[OPENER]) == expected
+    assert {written[OPENER][key]["event_id"] for key in ACTIVITY_KEYS} == {PR_URL}
+    assert _stats(written[OPENER])["pr_review_comments"] == 5.0
+
+
+@pytest.mark.usefixtures("robin_pr")
+async def test_only_a_close_reads_review_activity(written: Rows) -> None:
+    await _deliver(_payload("opened", author="pr-author", sender=AUTHOR))
+    await _deliver(_payload("reopened", author="pr-author", sender=AUTHOR))
+
+    assert not written[OPENER].keys() & ACTIVITY_KEYS
+    assert written[OPENER].keys() == COUNT_KEYS | {"pr_closed"}
+
+
+@pytest.mark.usefixtures("robin_pr")
+async def test_unlistable_review_activity_still_records_counts_and_closure(
+    written: Rows, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    @asynccontextmanager
+    async def no_app(owner: str, repo: str, number: int):
+        raise RuntimeError("no installation token")
+        yield
+
+    monkeypatch.setattr(pull_requests.PullRequestClient, "as_app", no_app)
+
+    await _deliver(_payload("closed", author="pr-author", sender=AUTHOR))
+
+    assert written[OPENER].keys() == COUNT_KEYS | {"pr_closed"}
+    assert written[OPENER]["pr_closed"]["value"] == "requester"
+
+
 @pytest.mark.usefixtures("robin_pr")
 async def test_other_deliveries_record_nothing(written: Rows) -> None:
     await _deliver(_payload("edited", sender={"login": "carol", "id": 33}))
@@ -308,7 +455,7 @@ async def test_a_rejected_save_records_counts_on_the_opener_the_stored_row_names
 
     await _deliver(_payload("closed", sender={"login": "alice", "id": 11}))
 
-    assert written[OPENER].keys() == COUNT_KEYS | {"pr_closed"}
+    assert written[OPENER].keys() == COUNT_KEYS | ACTIVITY_KEYS | {"pr_closed"}
     assert written[OPENER]["pr_closed"]["value"] == "requester"
     assert FIX not in written
 

@@ -27,6 +27,7 @@ key callers address a PR by.
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import Literal, Self, TypedDict
@@ -57,8 +58,8 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
-from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
-from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
+from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
@@ -758,6 +759,62 @@ class PullRequestPayload(BaseModel):
         return {name: count for name, count in counts.items() if count is not None}
 
 
+# ``author`` is whoever the pull request is for (``PullRequestEvent.opened_for``).
+ReviewAuthor = Literal["robin", "bot", "author", "reviewer"]
+
+
+class ReviewActivity(BaseModel):
+    """A pull request's comments by who wrote them, and its reviewers' verdicts.
+
+    Comments are inline review comments plus conversation comments. Reviews count only as
+    verdicts, one per review event rather than per person, since most review bodies just
+    wrap inline comments.
+    """
+
+    robin_comments: int = 0
+    bot_comments: int = 0
+    author_comments: int = 0
+    reviewer_comments: int = 0
+    reviewer_approvals: int = 0
+    reviewer_changes_requested: int = 0
+
+    @classmethod
+    async def read(cls, pull: PullRequestClient, opened_for: tuple[set[str], set[int]]) -> Self:
+        inline, conversation, reviews = await asyncio.gather(
+            pull.review_comments(), pull.issue_comments(), pull.reviews()
+        )
+        comments = Counter(
+            cls.author(item.get("user"), opened_for) for item in inline + conversation
+        )
+        verdicts = Counter(
+            review.get("state")
+            for review in reviews
+            if cls.author(review.get("user"), opened_for) == "reviewer"
+        )
+        return cls(
+            robin_comments=comments["robin"],
+            bot_comments=comments["bot"],
+            author_comments=comments["author"],
+            reviewer_comments=comments["reviewer"],
+            reviewer_approvals=verdicts["APPROVED"],
+            reviewer_changes_requested=verdicts["CHANGES_REQUESTED"],
+        )
+
+    @staticmethod
+    def author(user: object, opened_for: tuple[set[str], set[int]]) -> ReviewAuthor:
+        user = user if isinstance(user, Mapping) else {}
+        login = user.get("login")
+        login = login.lower() if isinstance(login, str) else ""
+        if login in INTERNAL_BOT_LOGINS:
+            return "robin"
+        if user.get("type") == "Bot" or login.endswith("[bot]"):
+            return "bot"
+        logins, ids = opened_for
+        if (login and login in logins) or user.get("id") in ids:
+            return "author"
+        return "reviewer"
+
+
 PR_CLOSED_FEEDBACK_KEY = "pr_closed"
 # Deliveries whose pull request counts are recorded as ``pr_<field>`` feedback.
 _PR_STATS_ACTIONS = frozenset(["opened", "closed"])
@@ -817,26 +874,35 @@ class PullRequestEvent(BaseModel):
             return "unknown"
         if sender in OPEN_SWE_GITHUB_LOGINS:
             return "robin"
-        author = self.pull_request.author.lower()
-        if author and author not in OPEN_SWE_GITHUB_LOGINS:
-            same_id = self.sender_id is not None and self.sender_id == self.pull_request.author_id
-            return "requester" if same_id or sender == author else "other"
-        if self.identity is None:
-            return "unknown"
-        logins, ids = await PullRequest.requesters(*self.identity)
+        logins, ids = await self.opened_for()
         if not logins and not ids:
             return "unknown"
         return "requester" if sender in logins or self.sender_id in ids else "other"
+
+    async def opened_for(self) -> tuple[set[str], set[int]]:
+        """The lowercased logins and ids of whom the pull request is for.
+
+        That is its author, or, when Robin authored it as itself, anyone recorded as asking
+        for it.
+        """
+        author = self.pull_request.author.lower()
+        if author and author not in OPEN_SWE_GITHUB_LOGINS:
+            author_id = self.pull_request.author_id
+            return {author}, set() if author_id is None else {author_id}
+        if self.identity is None:
+            return set(), set()
+        return await PullRequest.requesters(*self.identity)
 
     async def record_feedback(self, thread_id: str) -> None:
         """Record the pull request's counts and outcome as feedback on the thread that opened it.
 
         An opened or closed delivery writes each count it carries as ``pr_<field>`` with the
-        count as the score. A closed or reopened delivery writes ``pr_closed`` with its
-        ``closure`` as the value and no score; dashboards count closes without a merge as
-        ``value in (requester, robin, other, unknown)``. Each key keeps one row per pull
-        request, keyed by its URL, so a later delivery replaces the earlier value. A failure
-        is logged, never raised.
+        count as the score. A closed delivery also writes each ``ReviewActivity`` count, which
+        it skips when GitHub can't list them. A closed or reopened delivery writes
+        ``pr_closed`` with its ``closure`` as the value and no score; dashboards count closes
+        without a merge as ``value in (requester, robin, other, unknown)``. Each key keeps one
+        row per pull request, keyed by its URL, so a later delivery replaces the earlier value.
+        A failure is logged, never raised.
         """
         pull_request = self.to_pull_request()
         if pull_request is None:
@@ -853,6 +919,19 @@ class PullRequestEvent(BaseModel):
             closure = "unknown"
         source_info = {"source": "github_pull_request", "thread_id": thread_id, "pr_url": pr_url}
         counts = self.pull_request.stats if self.action in _PR_STATS_ACTIONS else {}
+        if self.action == "closed":
+            try:
+                async with PullRequestClient.as_app(
+                    pull_request.owner, pull_request.repo, pull_request.number
+                ) as pull:
+                    activity = await ReviewActivity.read(pull, await self.opened_for())
+                counts = {**counts, **activity.model_dump()}
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Could not read who commented on a pull request",
+                    extra={"thread_id": thread_id, "pr_url": pr_url},
+                    exc_info=True,
+                )
         writes = [
             create_langsmith_thread_feedback(
                 thread_id,
