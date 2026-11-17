@@ -116,7 +116,7 @@ class Actor:
                 "Task operations require the thread owner; another user's credentials cannot be used"
             )
         assert_thread_readable(access_metadata, self.login, self.email)
-        assert_thread_postable(access_metadata, self.login, self.email)
+        await assert_thread_postable(access_metadata, self.login, self.email)
         if metadata.owner_user_id is None:
             await langgraph_client().threads.update(
                 thread_id, metadata={"owner_user_id": str(owner.id)}
@@ -240,7 +240,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         profile = await get_profile(login) or {}
         email = await resolve_run_email(login, profile)
         values |= {"owner_login": login}
-        assert_thread_postable(values, login, email)
+        await assert_thread_postable(values, login, email)
         if metadata.owner_user_id is None:
             await langgraph_client().threads.update(
                 thread_id, metadata={"owner_user_id": str(owner.id)}

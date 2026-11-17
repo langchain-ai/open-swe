@@ -183,7 +183,7 @@ async def proxy_dashboard_thread_commands(
     metadata = dict(thread.metadata)
     post_command = method in POSTING_COMMANDS
     if post_command:
-        principal.assert_can_post(metadata)
+        await principal.assert_can_post(metadata)
     else:
         principal.assert_can_read(metadata)
     if not (post_command and metadata.get("admin_thread") is True):
@@ -280,7 +280,7 @@ class ThreadSend:
             thread_busy = False
         else:
             metadata = dict(thread.metadata)
-            self.principal.assert_can_post(metadata)
+            await self.principal.assert_can_post(metadata)
             metadata_run_status = metadata.get("latest_run_status")
             thread_busy = thread.status == "busy" or metadata_run_status in {"pending", "running"}
 
@@ -407,7 +407,7 @@ class ThreadSend:
         if thread is None:
             raise HTTPException(404, "thread not found")
         metadata = dict(thread.metadata)
-        self.principal.assert_can_post(metadata)
+        await self.principal.assert_can_post(metadata)
         if metadata.get("admin_thread") is not True:
             self.principal.assert_can_read(metadata)
         if self.principal.machine:
@@ -746,7 +746,7 @@ async def proxy_dashboard_thread_run_enqueue(
     if thread is None:
         raise HTTPException(404, "thread not found")
     metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
+    await _assert_thread_postable(metadata, login, email)
 
     command = {
         "method": "run.start",
@@ -784,7 +784,7 @@ async def proxy_dashboard_thread_run_cancel(
     email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     metadata = await _authorized_thread_metadata(thread_id, login, email=email)
-    _assert_thread_postable(metadata, login, email)
+    await _assert_thread_postable(metadata, login, email)
     try:
         run = await langgraph_client().runs.get(thread_id, run_id)
     except Exception as exc:  # noqa: BLE001

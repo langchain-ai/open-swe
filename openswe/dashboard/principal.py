@@ -70,6 +70,7 @@ class DashboardPrincipal:
             "bridges",
             "skills",
             "notifications",
+            "schedules",
             "github/login",
             "github/desktop/exchange",
             "slack/login",

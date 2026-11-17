@@ -4,5 +4,7 @@ Only admins edit system automations, and pass ``system`` to make one personal or
 
 ``triggers`` replaces every trigger, in the same shape ``create_automation`` takes; pass the full list, including triggers you are keeping.
 An automation keeps at least one trigger.
+Schedule triggers accept an IANA ``timezone`` such as ``America/New_York``, defaulting to UTC when omitted.
+Preserve each existing trigger’s time zone when replacing triggers unless the user requests a change; use a region time zone for schedules that follow local daylight saving time.
 
 Pass ``workspace`` (a workspace slug) to move the automation: later runs launch in that workspace.

@@ -140,11 +140,11 @@ class Principal:
             return
         assert_thread_readable(metadata, self.login, self.email)
 
-    def assert_can_post(self, metadata: JsonObject) -> None:
+    async def assert_can_post(self, metadata: JsonObject) -> None:
         if self.machine:
             self._assert_started_it(metadata)
             return
-        _assert_thread_postable(metadata, self.person, self.email)
+        await _assert_thread_postable(metadata, self.person, self.email)
 
     def _assert_started_it(self, metadata: JsonObject) -> None:
         # Deliberately not "is this thread in my workspace": a key is not an

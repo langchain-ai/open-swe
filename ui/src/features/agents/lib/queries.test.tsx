@@ -979,6 +979,37 @@ describe("useShareThreadWithWorkspace", () => {
 })
 
 describe("active thread menu metadata", () => {
+  it("refetches an unknown automation capability and keeps verified detail on sidebar refresh", async () => {
+    const client = testClient()
+    const summary = {
+      ...optimisticThread("automation-1", { prompt: "" }),
+      threadCategory: "automation",
+      automationCanPost: null,
+    } as AgentThread
+    const detail = { ...summary, automationCanPost: true }
+    const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(detail)
+    const { rerender } = renderHook(
+      ({ threads }) => useSeedAgentThreadDetails(threads),
+      { initialProps: { threads: [summary] }, wrapper: wrapperFor(client) }
+    )
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(summary.id))
+        ?.automationCanPost
+    ).toBeNull()
+    const { result } = renderHook(() => useAgentThread(summary.id), {
+      wrapper: wrapperFor(client),
+    })
+    await waitFor(() =>
+      expect(result.current.data?.automationCanPost).toBe(true)
+    )
+    expect(getThread).toHaveBeenCalledTimes(1)
+    rerender({ threads: [{ ...summary, updatedAt: summary.updatedAt + 1 }] })
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(summary.id))
+        ?.automationCanPost
+    ).toBe(true)
+  })
+
   it("refreshes menu actions from the sidebar without replacing live detail", () => {
     const client = testClient()
     const detail = optimisticThread("thread-1", { prompt: "Pending prompt" })

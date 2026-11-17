@@ -26,6 +26,7 @@ from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.workflow_review import WorkflowReview
+from openswe.users import User
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -221,23 +222,31 @@ def _assert_thread_promptable(
         raise HTTPException(403, "The memory curator's thread is read-only.")
 
 
-def _assert_thread_postable(
+async def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
     _assert_thread_promptable(metadata, login)
     # A run here would start without the history the upload is about to seed.
     if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
         raise HTTPException(409, "this thread is waiting for its session upload")
-    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not (
-        not login.startswith("user:") and is_admin(email, login=login)
-    ):
+    if email is None and _is_automation_thread(metadata):
+        email = await User.email_for_login(login)
+    admin = ThreadIdentity(login).is_admin(email)
+    if metadata.get("admin_thread") is True and not admin:
         raise HTTPException(403, "only admins can send messages in this thread")
+    if _is_automation_thread(metadata) and not admin:
+        from openswe.schedules.policy import AutomationPolicy
+
+        policy = await AutomationPolicy.for_thread(metadata)
+        actor = AutomationPolicy(await ThreadIdentity(login).user())
+        if not policy.owned_by(actor):
+            raise HTTPException(403, "only the creator or an admin can message this automation run")
 
 
-def assert_thread_postable(
+async def assert_thread_postable(
     metadata: Mapping[str, object], login: str, email: str | None = None
 ) -> None:
-    _assert_thread_postable(metadata, login, email)
+    await _assert_thread_postable(metadata, login, email)
 
 
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -557,6 +566,7 @@ async def _thread_summary(
     viewer_login: str | None = None,
     read_states: Mapping[str, JsonObject] | None = None,
     owner_ids: Mapping[str, str] | None = None,
+    include_automation_capability: bool = True,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     workflow_review = WorkflowReview(WorkflowReview.parse(metadata))
@@ -622,6 +632,15 @@ async def _thread_summary(
                 owner_id = owner_ids.get(owner_login.lower())
             elif owner_user := await identity.user():
                 owner_id = str(owner_user.id)
+    automation_can_post = None
+    if include_automation_capability:
+        automation_can_post = False
+        if _is_automation_thread(metadata) and viewer_login:
+            try:
+                await _assert_thread_postable(metadata, viewer_login)
+                automation_can_post = True
+            except HTTPException:
+                logger.debug("Automation composer is read-only", extra={"thread_id": thread_id})
     run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
@@ -661,6 +680,7 @@ async def _thread_summary(
         "threadCategory": thread_category,
         "triggerKind": trigger_kind,
         "triggeringBot": _triggering_bot(metadata),
+        "automationCanPost": automation_can_post,
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
         "automationActionPosted": (

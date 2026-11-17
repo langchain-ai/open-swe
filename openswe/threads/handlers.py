@@ -271,7 +271,7 @@ async def cancel_dashboard_thread(
     if bot_triggered:
         assert_thread_readable(metadata, login, email)
     else:
-        _assert_thread_postable(metadata, login, email)
+        await _assert_thread_postable(metadata, login, email)
 
     try:
         cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
@@ -310,7 +310,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
         thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-    principal.assert_can_post(thread_metadata(thread))
+    await principal.assert_can_post(thread_metadata(thread))
     try:
         cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -364,7 +364,7 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
+    await _assert_thread_postable(metadata, login, email)
 
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:

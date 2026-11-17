@@ -69,7 +69,7 @@ async def share_workflow_approval(
 ) -> dict[str, object]:
     """Present a pending approval in its own Slack thread or its coordinator's."""
     metadata = await fetch_thread_metadata(thread_id)
-    assert_thread_postable(metadata, actor_login)
+    await assert_thread_postable(metadata, actor_login)
     if not thread_is_owner(metadata, actor_login):
         raise HTTPException(403, "only the implementation thread owner can share this approval")
     if current_thread_id != thread_id:
@@ -77,7 +77,7 @@ async def share_workflow_approval(
         if membership is None or membership.task.coordinator_thread_id != current_thread_id:
             raise HTTPException(403, "approval can only be shared with its task coordinator")
     destination = await fetch_thread_metadata(current_thread_id)
-    assert_thread_postable(destination, actor_login)
+    await assert_thread_postable(destination, actor_login)
     if thread_is_private(metadata) and not thread_is_private(destination):
         raise HTTPException(403, "private workflow approvals cannot be shared into public threads")
     location = SourceContext.from_metadata(destination).slack_thread

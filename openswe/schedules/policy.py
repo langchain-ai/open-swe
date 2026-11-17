@@ -1,33 +1,14 @@
-"""Ownership and resource limits shared by automation entrypoints."""
+"""Ownership rules shared by automation entrypoints."""
 
 import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import ClassVar, Final, TypedDict
 from uuid import UUID
 
 from fastapi import HTTPException
-from runtime_api.catalog import AUTOMATION_DAILY_TOKENS
-from runtime_api.loop import AutomationUsage
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.dashboard.admin import is_admin
-from openswe.threads.index import ThreadSearch
-from openswe.threads.store import THREADS
 from openswe.users import User
-
-# Thread metadata holding a member's automation thread's budget counter, as its run last
-# reported it.
-AUTOMATION_USAGE_KEY: Final = "automation_usage"
-
-
-class ThreadUsage(TypedDict):
-    """The automation thread that spent the most of its budget today."""
-
-    threadId: str
-    tokens: int
 
 
 @dataclass(frozen=True)
@@ -35,18 +16,13 @@ class AutomationPolicy:
     """Who an automation belongs to, and so what it may do.
 
     A system automation belongs to the environment: only admins manage it, and its runs
-    are unbounded. A personal one belongs to its creator, admin or not: it counts toward
-    their three, and runs on the workspace Fast model within a daily token budget per
-    thread. A viewer's policy is their own, personal.
+    run on the workspace's default model. A personal one belongs to its creator, admin or
+    not: it runs as them and is billed to them, on Auto model routing, with no cap on how
+    many they keep or how much each spends. A viewer's policy is their own, personal.
     """
 
     owner: User | None
     system: bool = False
-
-    MAX_AUTOMATIONS: ClassVar = 3
-    DAILY_TOKENS: ClassVar = AUTOMATION_DAILY_TOKENS
-    # The most of today's automation threads read for usage; the counter is best-effort.
-    USAGE_THREADS: ClassVar = 1000
 
     @classmethod
     async def for_login(cls, login: str) -> AutomationPolicy:
@@ -88,6 +64,31 @@ class AutomationPolicy:
             for record, user_id in zip(records, ids, strict=True)
         ]
 
+    @classmethod
+    async def for_thread(cls, metadata: Mapping[str, object]) -> AutomationPolicy:
+        """Resolve a run's saved owner without assigning an orphan to another person."""
+        if metadata.get("automation_system") is True:
+            return cls(None, system=True)
+        if creator_id := metadata.get("automation_creator_user_id"):
+            user_id = User.key_id(f"user:{creator_id}")
+            return cls(await User.get(user_id) if user_id is not None else None)
+        from openswe.schedules.store import get_agent_schedule
+
+        schedule_id = metadata.get("schedule_id")
+        if not isinstance(schedule_id, str) or not schedule_id:
+            return cls(None)
+        record = await get_agent_schedule(schedule_id)
+        if record is None or record.get("workspace") != metadata.get("workspace"):
+            return cls(None)
+        policy = await cls.for_record(record)
+        creator = metadata.get("created_by")
+        if not isinstance(creator, str) or not creator:
+            return cls(None, system=policy.system)
+        saved_creator = await User.for_login("github", creator)
+        if policy.owner is None or saved_creator is None or saved_creator.id != policy.owner.id:
+            return cls(None, system=policy.system)
+        return policy
+
     def as_system(self, system: bool) -> AutomationPolicy:
         """This automation's policy once it is made a system one, or a personal one."""
         return AutomationPolicy(self.owner, system=system)
@@ -98,8 +99,9 @@ class AutomationPolicy:
         return self.owner is not None and is_admin(self.owner.email, login=self.owner.github_login)
 
     @property
-    def restricted(self) -> bool:
-        """Whether the automation runs pinned to Fast, within the daily token budget."""
+    def personal(self) -> bool:
+        """Whether the automation is its creator's own: run as them, on Auto, and never
+        as an admin thread."""
         return not self.system
 
     def owned_by(self, actor: AutomationPolicy) -> bool:
@@ -132,56 +134,11 @@ class AutomationPolicy:
             raise HTTPException(403, "Only admins can list every user's automations")
 
     def lists(self, automation: AutomationPolicy, *, all_users: bool) -> bool:
-        """Whether this viewer's list shows ``automation``: their own and system ones, and
-        every personal one too in an admin's ``all_users`` view."""
-        return all_users or automation.system or automation.owned_by(self)
+        """Whether this viewer's list shows ``automation``: their own, system ones for an
+        admin, and every personal one too in an admin's ``all_users`` view."""
+        return all_users or automation.owned_by(self) or (automation.system and self.admin)
 
-    async def check_creation(self, conn: AsyncConnection) -> None:
-        """Refuse a personal automation past its creator's three, paused ones included;
-        a system automation has no such limit."""
-        if self.system:
-            return
-        if self.owner is None:
+    def check_creation(self) -> None:
+        """Refuse a personal automation nobody owns; a system automation needs no owner."""
+        if not self.system and self.owner is None:
             raise HTTPException(403, "A linked Robin account is required")
-        await conn.execute(
-            text("SELECT id FROM users WHERE id = :id FOR UPDATE"), {"id": self.owner.id}
-        )
-        count = await conn.scalar(
-            text("SELECT count(*) FROM automation WHERE created_by_user_id = :id AND NOT system"),
-            {"id": self.owner.id},
-        )
-        if count is not None and count >= self.MAX_AUTOMATIONS:
-            raise HTTPException(
-                422,
-                f"Each user can have at most {self.MAX_AUTOMATIONS} personal automations "
-                "(including paused automations)",
-            )
-
-    @staticmethod
-    async def record_usage(thread_id: str, usage: AutomationUsage) -> None:
-        """Keep the budget counter a run of a member's automation reported on its thread."""
-        await THREADS.update(thread_id, {AUTOMATION_USAGE_KEY: usage.model_dump()})
-
-    @classmethod
-    async def usage_today(cls) -> dict[str, ThreadUsage]:
-        """Each automation's thread that spent the most of today's budget, by automation id."""
-        today = datetime.now(UTC).date().isoformat()
-        threads = await THREADS.search(
-            ThreadSearch(
-                metadata={AUTOMATION_USAGE_KEY: {"day": today}},
-                limit=cls.USAGE_THREADS,
-                sort_by="updated_at",
-            )
-        )
-        busiest: dict[str, ThreadUsage] = {}
-        for thread in threads:
-            schedule_id = thread.metadata.get("schedule_id")
-            usage = thread.metadata.get(AUTOMATION_USAGE_KEY)
-            if not isinstance(schedule_id, str) or not isinstance(usage, dict):
-                continue
-            tokens = usage.get("tokens")
-            if not isinstance(tokens, int):
-                continue
-            if schedule_id not in busiest or tokens > busiest[schedule_id]["tokens"]:
-                busiest[schedule_id] = {"threadId": thread.thread_id, "tokens": tokens}
-        return busiest

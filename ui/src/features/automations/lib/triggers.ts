@@ -18,6 +18,7 @@ export type TriggerDraft =
       key: string
       kind: "schedule"
       cron: string
+      timezone: string
       /** Edit the cron as text rather than through a preset. */
       custom: boolean
     }
@@ -28,6 +29,7 @@ export type TriggerDraft =
       events: Array<GitHubTriggerEvent>
       headBranchesExclude: BranchPatterns
       baseBranches: BranchPatterns
+      allowPublicRepo: boolean
     }
   | {
       key: string
@@ -76,11 +78,12 @@ export class BranchPatterns {
 let nextKey = 0
 const draftKey = () => `trigger-${++nextKey}`
 
-export function scheduleDraft(cron: string) {
+export function scheduleDraft(cron: string, timezone = "UTC") {
   return {
     key: draftKey(),
     kind: "schedule" as const,
     cron,
+    timezone,
     custom: !isDescribableCron(cron),
   }
 }
@@ -95,6 +98,7 @@ export function githubDraft(
     events: trigger?.events ?? ([] as Array<GitHubTriggerEvent>),
     headBranchesExclude: BranchPatterns.of(trigger?.head_branches_exclude),
     baseBranches: BranchPatterns.of(trigger?.base_branches),
+    allowPublicRepo: trigger?.allow_public_repo ?? false,
   }
 }
 
@@ -134,7 +138,7 @@ export function draftsFor(
   return schedule.triggers.map((trigger): TriggerDraft => {
     switch (trigger.kind) {
       case "schedule":
-        return scheduleDraft(trigger.cron)
+        return scheduleDraft(trigger.cron, trigger.timezone)
       case "github":
         return githubDraft(trigger)
       case "slack":
@@ -149,14 +153,24 @@ function runsPerHour(value: string): number | null {
   return value.trim() ? Number(value) : null
 }
 
-/** Why a draft cannot be saved yet, or null when it can. */
-export function draftProblem(draft: TriggerDraft): string | null {
+/**
+ * Why a draft cannot be saved yet, or null when it can. `isPublicRepo` says whether a
+ * repository is known not to be private: anyone can write its issues and pull requests,
+ * so its trigger has to be confirmed.
+ */
+export function draftProblem(
+  draft: TriggerDraft,
+  isPublicRepo: (repo: string) => boolean = () => false
+): string | null {
   switch (draft.kind) {
     case "schedule":
       return draft.cron.trim() ? null : "Enter a cron schedule."
     case "github":
       if (!draft.repo) return "Pick the repository whose events run this."
       if (draft.events.length === 0) return "Pick at least one event."
+      if (isPublicRepo(draft.repo) && !draft.allowPublicRepo) {
+        return "Confirm this trigger may run on a public repository."
+      }
       return (
         draft.headBranchesExclude.problem("Skip head branches") ??
         draft.baseBranches.problem("Base branches")
@@ -189,7 +203,13 @@ export function toTriggers(
     if (draftProblem(draft)) return []
     switch (draft.kind) {
       case "schedule":
-        return [{ kind: "schedule", cron: draft.cron.trim() }]
+        return [
+          {
+            kind: "schedule",
+            cron: draft.cron.trim(),
+            timezone: draft.timezone,
+          },
+        ]
       case "github":
         return draft.repo
           ? [
@@ -199,6 +219,7 @@ export function toTriggers(
                 events: draft.events,
                 head_branches_exclude: draft.headBranchesExclude.entries,
                 base_branches: draft.baseBranches.entries,
+                ...(draft.allowPublicRepo ? { allow_public_repo: true } : {}),
               },
             ]
           : []
@@ -236,7 +257,9 @@ export function toTriggers(
 /** One part per trigger, e.g. "GitHub acme/oss: PR closed, PR merged". */
 export function describeTriggers(schedule: AgentSchedule): string {
   const parts = schedule.triggers.map((trigger) => {
-    if (trigger.kind === "schedule") return describeCron(trigger.cron)
+    if (trigger.kind === "schedule") {
+      return describeCron(trigger.cron, trigger.timezone ?? "UTC")
+    }
     const provider = AUTOMATION_EVENT_PROVIDERS[trigger.kind]
     const events: Record<string, string> = provider.events
     const named = trigger.events.map((event) => events[event]).join(", ")

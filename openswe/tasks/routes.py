@@ -31,6 +31,6 @@ async def api_thread_workers(
 @audit_endpoint
 async def api_cancel_thread_workers(thread_id: str, principal: PrincipalDep) -> CoordinatorActivity:
     """Stop every worker of the thread's task that is still running, without it reporting back."""
-    principal.assert_can_post(await _metadata(thread_id))
+    await principal.assert_can_post(await _metadata(thread_id))
     await (await CoordinatorActivity.of(thread_id)).stop_workers()
     return await CoordinatorActivity.of(thread_id)

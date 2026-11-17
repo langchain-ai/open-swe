@@ -67,14 +67,14 @@ def _code(login: str) -> str:
 
 async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, object]) -> None:
     with pytest.raises(HTTPException) as early:
-        assert_thread_postable(reserved, "alice")
+        await assert_thread_postable(reserved, "alice")
     assert early.value.status_code == 409
 
     uploaded = await _upload(_code("alice"))
     assert uploaded is not None
     assert uploaded["id"] == "t1"
     assert reserved["session_upload_pending"] is False
-    assert_thread_postable(reserved, "alice")
+    await assert_thread_postable(reserved, "alice")
     seeded = session_upload.langgraph_client().threads.update_state
     seeds = seeded.await_count
     assert await _upload(_code("alice")) is None

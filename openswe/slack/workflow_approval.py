@@ -60,7 +60,7 @@ async def handle_button(
         return await refuse("This workflow approval is not associated with an agent thread.")
     try:
         metadata = await fetch_thread_metadata(thread_id)
-        assert_thread_postable(metadata, login)
+        await assert_thread_postable(metadata, login)
     except HTTPException:
         logger.info("Workflow approval target is not promptable", extra={"thread_id": thread_id})
         return await refuse("You cannot answer this workflow approval request.")

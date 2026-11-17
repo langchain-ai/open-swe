@@ -73,13 +73,29 @@ async def test_sole_writer_sees_only_an_acknowledgement(
     assert result == {"ok": True, "automation": {"id": "schedule-1"}}
 
 
-async def test_member_can_create_from_own_private_thread(monkeypatch, grant_tool_access) -> None:  # noqa: ANN001
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_member_can_create_from_own_private_thread(  # noqa: ANN001
+    monkeypatch, grant_tool_access, scheduled: bool
+) -> None:
+    if scheduled:
+        monkeypatch.setattr(
+            automations,
+            "configurable",
+            lambda: RunConfig(
+                source="schedule", github_login="alice", user_email="alice@example.com"
+            ),
+        )
     grant_tool_access(private=True, owner=True)
     monkeypatch.setattr(automations, "actor_is_admin", AsyncMock(return_value=False))
     create = AsyncMock(return_value={"id": "schedule-1"})
     monkeypatch.setattr(automations.schedules, "create_agent_schedule", create)
     result = await automations.create_automation(
-        "Report", "default", [automations.schedules.ScheduleTrigger(cron="0 9 * * *")]
+        "Report",
+        "default",
+        [automations.schedules.ScheduleTrigger(cron="0 9 * * *", timezone="America/New_York")],
     )
     assert result["ok"] is True
     assert create.call_args.kwargs["allow_admin_thread"] is False
+    assert create.call_args.args[1].triggers[0].timezone == "America/New_York"
+    assert create.call_args.kwargs["use_workspace_credentials"] is False
+    assert create.call_args.args[0] == "alice"

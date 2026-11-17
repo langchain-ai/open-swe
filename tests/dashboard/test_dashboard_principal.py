@@ -119,7 +119,14 @@ async def test_every_dashboard_session_requires_langsmith(monkeypatch, provider)
 
 @pytest.mark.parametrize(
     "route",
-    ["slack/login", "slack/callback", "slack/desktop/exchange", "notifications/receipt/delivered"],
+    [
+        "slack/login",
+        "slack/callback",
+        "slack/desktop/exchange",
+        "notifications/receipt/delivered",
+        "schedules",
+        "schedules/00000000-0000-0000-0000-000000000002/trigger",
+    ],
 )
 def test_langsmith_only_person_can_use_personal_routes(route):
     principal = DashboardPrincipal("langsmith", "user:00000000-0000-0000-0000-000000000001", None)

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid7
 
 import httpx
 import pytest
@@ -8,6 +9,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.sandboxes import browsers
 from openswe.sandboxes.browsers import LangSmithBrowser, ThreadBrowser
+from openswe.schedules import store as schedules
 from openswe.threads import (
     access,
     blobs,
@@ -19,6 +21,7 @@ from openswe.threads import (
 )
 from openswe.tools import threads as tools
 from openswe.ui_invalidations.topics import Topic
+from openswe.users import User
 from openswe.utils.json_types import ThreadLike
 from tests.conftest import LangSmithUsers, serve_threads_from
 
@@ -108,6 +111,97 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
     assert not summary.thread_is_promptable(metadata, "admin")
     assert summary.thread_is_readable({"source": "dashboard"}, "bob")
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
+
+
+@pytest.mark.parametrize("github_linked", [True, False])
+async def test_personal_automation_owner_can_reply_after_automation_is_deleted(
+    monkeypatch: pytest.MonkeyPatch, langsmith_users: LangSmithUsers, github_linked: bool
+) -> None:
+    owner = langsmith_users.add("alice" if github_linked else "user:owner")
+    langsmith_users.add("bob")
+    login = owner.github_login or f"user:{owner.id}"
+    metadata = {
+        "source": "schedule",
+        "thread_category": "automation",
+        "schedule_id": str(uuid7()),
+        "workspace": "default",
+        "owner_type": "user",
+        "visibility": "private",
+        "owner_login": login,
+        "owner_user_id": str(owner.id),
+        "automation_creator_user_id": str(owner.id),
+    }
+    monkeypatch.setattr(schedules, "get_agent_schedule", AsyncMock(return_value=None))
+    assert summary.thread_is_readable(metadata, login)
+    assert not summary.thread_is_readable(metadata, "bob")
+    await summary.assert_thread_postable(metadata, login)
+    with pytest.raises(HTTPException) as denied:
+        await summary.assert_thread_postable(metadata, "bob")
+    assert denied.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("case", "allowed"),
+    [
+        ("legacy", True),
+        ("snapshot", True),
+        ("deleted", False),
+        ("workspace_mismatch", False),
+        ("creator_mismatch", False),
+        ("malformed_snapshot", False),
+        ("deleted_owner", False),
+        ("system", False),
+    ],
+)
+async def test_automation_replies_resolve_ownership_without_reassigning_orphans(
+    monkeypatch: pytest.MonkeyPatch, langsmith_users: LangSmithUsers, case: str, allowed: bool
+) -> None:
+    owner = langsmith_users.add("alice")
+    other = langsmith_users.add("bob")
+    langsmith_users.add("admin")
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    metadata: dict[str, object] = {
+        "source": "schedule",
+        "thread_category": "automation",
+        "schedule_id": str(uuid7()),
+        "workspace": "default",
+        "created_by": "alice",
+        "visibility": "public",
+    }
+    record: dict[str, object] | None = {
+        "workspace": "default",
+        "created_by": "alice",
+        "created_by_user_id": str(owner.id),
+    }
+    if case == "snapshot":
+        metadata["automation_creator_user_id"] = str(owner.id)
+        record = None
+    elif case == "deleted":
+        record = None
+    elif case == "workspace_mismatch":
+        record["workspace"] = "other-workspace"
+    elif case == "creator_mismatch":
+        record["created_by_user_id"] = str(other.id)
+    elif case == "malformed_snapshot":
+        metadata["automation_creator_user_id"] = "not-a-user-id"
+    elif case == "deleted_owner":
+        metadata["automation_creator_user_id"] = str(uuid7())
+        monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
+    elif case == "system":
+        metadata["automation_system"] = True
+        metadata["automation_creator_user_id"] = str(owner.id)
+    monkeypatch.setattr(schedules, "get_agent_schedule", AsyncMock(return_value=record))
+
+    if allowed:
+        await summary.assert_thread_postable(metadata, "alice")
+    else:
+        with pytest.raises(HTTPException) as denied:
+            await summary.assert_thread_postable(metadata, "alice")
+        assert denied.value.status_code == 403
+    with pytest.raises(HTTPException) as denied:
+        await summary.assert_thread_postable(metadata, "bob")
+    assert denied.value.status_code == 403
+    await summary.assert_thread_postable(metadata, "admin")
 
 
 def test_review_chat_is_hidden_without_hiding_normal_pr_threads():

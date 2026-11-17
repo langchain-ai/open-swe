@@ -33,11 +33,10 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
-import { describeUsage } from "@/features/automations/lib/usage"
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { describeCron } from "@/features/automations/lib/cron"
+import { DEFAULT_CRON, describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
   BranchPatterns,
@@ -124,7 +123,6 @@ export function AutomationEditor({
   // A system automation belongs to the environment and only admins manage it; a
   // personal one, its creator or an admin.
   const [system, setSystem] = useState(schedule?.system ?? false)
-  const usage = schedule ? describeUsage(schedule) : null
   const canManage =
     Boolean(session.data) &&
     (mode === "create" ||
@@ -133,6 +131,15 @@ export function AutomationEditor({
         !!session.data?.user_id &&
         schedule?.ownerId === session.data.user_id))
   const reposQuery = useRepos()
+  // A personal automation's runs act as its creator, so its trigger on a repository
+  // known to be public has to be confirmed; a system automation's never does. The
+  // backend decides the same way on save, and likewise lets through a repository
+  // whose visibility it can't read.
+  const isPublicRepo = (repo: string) =>
+    !system &&
+    reposQuery.data?.repositories.find(
+      (each) => each.full_name.toLowerCase() === repo.toLowerCase()
+    )?.private === false
   const { models, defaultSelection } = useModelOptions()
   const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
 
@@ -203,7 +210,7 @@ export function AutomationEditor({
     workspace !== null &&
     !savedWorkspaceMissing &&
     drafts.length > 0 &&
-    drafts.every((draft) => draftProblem(draft) === null)
+    drafts.every((draft) => draftProblem(draft, isPublicRepo) === null)
 
   const updateDraft = (
     key: string,
@@ -217,7 +224,7 @@ export function AutomationEditor({
   // A preset sets the cron; Custom (null) keeps it and switches to text editing.
   const pickSchedule = (key: string | null, cron: string | null) => {
     if (key === null) {
-      const draft = scheduleDraft(cron ?? "0 9 * * *")
+      const draft = scheduleDraft(cron ?? DEFAULT_CRON)
       setDrafts((current) => [
         ...current,
         cron === null ? { ...draft, custom: true } : draft,
@@ -281,7 +288,7 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          admin_thread: system && adminThread,
+          admin_thread: isAdmin && adminThread,
           model_id: modelId,
           effort,
           workspace,
@@ -304,7 +311,7 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          admin_thread: system && adminThread,
+          admin_thread: isAdmin && adminThread,
           model_id: modelId,
           effort,
           enabled,
@@ -472,7 +479,7 @@ export function AutomationEditor({
         <SectionLabel>Triggers</SectionLabel>
         <div className="flex flex-col gap-space-2">
           {drafts.map((draft) => {
-            const problem = draftProblem(draft)
+            const problem = draftProblem(draft, isPublicRepo)
             const hint = (fallback: string) => (
               <p
                 className={cn(
@@ -503,31 +510,38 @@ export function AutomationEditor({
                         aria-label="Change schedule"
                         className={CARD_ACTION}
                       >
-                        <PencilSimpleIcon size={14} weight="regular" />
+                        <PencilSimpleIcon size={16} weight="regular" />
                       </TriggerMenu>
                     )
                   }
                 >
-                  {draft.custom ? (
-                    <Input
-                      size="md"
-                      debounceMs={0}
-                      value={draft.cron}
-                      onChange={(cron) => set({ cron })}
+                  <div className="-my-0.5 flex items-center gap-space-2">
+                    {draft.custom ? (
+                      <Input
+                        size="md"
+                        debounceMs={0}
+                        value={draft.cron}
+                        onChange={(cron) => set({ cron })}
+                        disabled={!canManage}
+                        placeholder={DEFAULT_CRON}
+                        aria-label="Cron schedule"
+                        className="min-w-0 flex-1"
+                        inputContainerClassName="font-mono border-strong/70 [&:hover:not(:focus-within)]:border-strong"
+                      />
+                    ) : (
+                      <p className="min-w-0 flex-1 text-sm text-primary">
+                        {describeCron(draft.cron, draft.timezone)}{" "}
+                        <span className="font-mono text-xs text-tertiary">
+                          {draft.cron}
+                        </span>
+                      </p>
+                    )}
+                    <TimeZoneToggle
+                      value={draft.timezone}
+                      onChange={(timezone) => set({ timezone })}
                       disabled={!canManage}
-                      placeholder="0 9 * * 1-5"
-                      aria-label="Cron schedule"
-                      className="w-full"
-                      inputContainerClassName="font-mono border-strong/70 [&:hover:not(:focus-within)]:border-strong"
                     />
-                  ) : (
-                    <p className="text-sm text-primary">
-                      {describeCron(draft.cron)}{" "}
-                      <span className="font-mono text-xs text-tertiary">
-                        {draft.cron}
-                      </span>
-                    </p>
-                  )}
+                  </div>
                   {problem && (
                     <p className="mt-space-1 text-xs text-error-secondary">
                       {problem}
@@ -549,7 +563,9 @@ export function AutomationEditor({
                     <RepoSelector
                       repos={reposQuery.data?.repositories}
                       selectedRepo={draft.repo}
-                      onRepoChange={(repo) => set({ repo })}
+                      onRepoChange={(repo) =>
+                        set({ repo, allowPublicRepo: false })
+                      }
                       placeholder="Choose repository"
                       triggerClassName="text-secondary"
                       disabled={!canManage}
@@ -581,6 +597,28 @@ export function AutomationEditor({
                         placeholder={"Any; one per line, e.g.\nmain"}
                         disabled={!canManage}
                       />
+                    </div>
+                  )}
+                  {draft.repo && isPublicRepo(draft.repo) && (
+                    <div className="mt-space-2 rounded-md border border-default px-space-2 py-space-2">
+                      <Checkbox
+                        checked={draft.allowPublicRepo}
+                        onCheckedChange={(checked) =>
+                          set({ allowPublicRepo: checked === true })
+                        }
+                        disabled={!canManage}
+                        label="Allow on this public repository"
+                        labelClassName="text-xs font-medium text-primary"
+                        aria-describedby={`${draft.key}-public-repo`}
+                      />
+                      <p
+                        id={`${draft.key}-public-repo`}
+                        className="mt-0.5 pl-space-5 text-xs text-tertiary"
+                      >
+                        Anyone on the internet can open issues and pull requests
+                        here, and what they write becomes part of this
+                        automation&apos;s prompt. Its runs act as you.
+                      </p>
                     </div>
                   )}
                   {hint(
@@ -742,9 +780,7 @@ export function AutomationEditor({
                 disabled={!canManage}
               />
             ) : (
-              <span className="text-xs text-secondary">
-                {usage ?? "Fast · ~30M tokens per thread / UTC day"}
-              </span>
+              <span className="text-xs text-secondary">Auto</span>
             )}
           </div>
           {isAdmin && (
@@ -761,13 +797,12 @@ export function AutomationEditor({
                 id="automation-system-description"
                 className="mt-0.5 pl-space-5 text-xs text-tertiary"
               >
-                Owned by the environment, not you: only admins manage it, and it
-                has no automation or token limit. Personal automations run on
-                Fast.
+                Owned by the environment, not you: only admins manage it.
+                Personal automations run as you, on Auto.
               </p>
             </div>
           )}
-          {isAdmin && system && (
+          {isAdmin && (
             <div className="mt-space-3 border-t border-subtle pt-space-3">
               <Checkbox
                 checked={adminThread}
@@ -798,8 +833,69 @@ export function AutomationEditor({
   )
 }
 
+// Every action on a trigger's card: one box and one icon size, as tall as the
+// schedule's controls.
 const CARD_ACTION =
-  "rounded-sm p-space-1 text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
+  "size-8 justify-center rounded-md p-0 text-tertiary hover:bg-surface-level-1-hover hover:text-primary [&_svg]:shrink-0"
+
+/**
+ * A schedule runs in UTC or in the viewer's own zone. A zone saved elsewhere, such
+ * as by the agent, stays a third choice so opening the editor never changes it.
+ */
+function TimeZoneToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (timezone: string) => void
+  disabled: boolean
+}) {
+  // The viewer's own IANA time zone; UTC where the browser can't say.
+  const local = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  const zones = [
+    { value: "UTC", label: "UTC", name: "UTC" },
+    ...(local === "UTC"
+      ? []
+      : [{ value: local, label: "Local", name: `Local time (${local})` }]),
+    ...(value === "UTC" || value === local
+      ? []
+      : [{ value, label: value, name: value }]),
+  ]
+  return (
+    <div
+      role="group"
+      aria-label="Time zone"
+      className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-strong/70 p-0.5"
+    >
+      {zones.map((zone) => {
+        const on = zone.value === value
+        return (
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            key={zone.value}
+            type="button"
+            aria-label={zone.name}
+            aria-pressed={on}
+            title={zone.name}
+            onClick={() => onChange(zone.value)}
+            disabled={disabled}
+            className={cn(
+              "h-full min-w-13 rounded-md px-space-2 text-xs font-medium disabled:pointer-events-none",
+              on
+                ? "bg-brand-subtle text-primary hover:bg-brand-subtle disabled:bg-brand-subtle dark:hover:bg-brand-subtle"
+                : "text-secondary hover:bg-surface-level-1-hover hover:text-primary disabled:bg-transparent"
+            )}
+          >
+            {zone.label}
+          </Button>
+        )
+      })}
+    </div>
+  )
+}
 
 function EventChips<E extends string>({
   items,
@@ -926,13 +1022,17 @@ function TriggerCard({
       {canManage && (
         <div className="flex shrink-0 items-center gap-0.5">
           {actions}
-          <IconButton
-            icon={TrashIcon}
-            label={removeLabel}
+          <Button
             color="secondary"
             variant="plain"
+            size="sm"
+            type="button"
+            aria-label={removeLabel}
             onClick={onRemove}
-          />
+            className={CARD_ACTION}
+          >
+            <TrashIcon size={16} weight="regular" />
+          </Button>
         </div>
       )}
     </div>

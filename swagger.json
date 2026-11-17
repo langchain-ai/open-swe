@@ -3274,6 +3274,11 @@
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
+          "allow_public_repo": {
+            "default": false,
+            "title": "Allow Public Repo",
+            "type": "boolean"
+          },
           "base_branches": {
             "items": {
               "maxLength": 200,
@@ -8370,6 +8375,7 @@
       "ScheduleTrigger": {
         "properties": {
           "cron": {
+            "default": "0 9 * * 1",
             "maxLength": 120,
             "minLength": 1,
             "title": "Cron",
@@ -8380,11 +8386,16 @@
             "default": "schedule",
             "title": "Kind",
             "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "description": "IANA time zone for the cron schedule",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
           }
         },
-        "required": [
-          "cron"
-        ],
         "title": "ScheduleTrigger",
         "type": "object"
       },
@@ -24326,7 +24337,7 @@
     },
     "/dashboard/api/schedules": {
       "get": {
-        "description": "The viewer's own automations and system ones; ``all_users`` adds everyone's, for admins.",
+        "description": "The viewer's own automations, plus system ones for admins; ``all_users`` adds everyone's.",
         "operationId": "api_list_schedules_dashboard_api_schedules_get",
         "parameters": [
           {

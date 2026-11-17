@@ -320,7 +320,7 @@ async def find_pr_threads(
         if (metadata.get("unlisted") is True) is not unlisted:
             continue
         try:
-            _assert_thread_postable(metadata, login, email)
+            await _assert_thread_postable(metadata, login, email)
         except HTTPException:
             continue
         candidates[thread_id] = thread
@@ -450,7 +450,7 @@ async def start_pull_request_thread(
         if not intent.dispatches_run:
             return PullRequestThreadRun(thread_id=thread_id)
         current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
+        await _assert_thread_postable(thread_metadata(current), login, email)
         busy = current.get("status") == "busy"
         if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
@@ -465,7 +465,7 @@ async def start_pull_request_thread(
                 },
             )
         current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
+        await _assert_thread_postable(thread_metadata(current), login, email)
         configurable = await _build_dashboard_configurable(
             thread_id,
             login,

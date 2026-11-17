@@ -204,7 +204,7 @@ async def submit_plan_comments(
 ) -> dict[str, str]:
     metadata = await fetch_thread_metadata(thread_id)
     login = session["sub"]
-    _assert_thread_postable(metadata, login, session.get("email"))
+    await _assert_thread_postable(metadata, login, session.get("email"))
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     if not any(comment.get("author_login") == login for comment in comments):
         raise HTTPException(422, "no comments to submit")

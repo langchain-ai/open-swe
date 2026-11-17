@@ -436,7 +436,7 @@ async def test_adaptive_routing_sends_every_auto_thread_through_the_classifier()
     assert cast(dict[str, object], config["metadata"])["model_routing_mode"] == "auto"
 
 
-async def test_a_personal_automation_gets_no_task_subagent(
+async def test_a_personal_automation_runs_on_auto_without_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -445,11 +445,17 @@ async def test_a_personal_automation_gets_no_task_subagent(
     config = _base_config()
     config["configurable"].update(source="schedule", schedule_id="schedule-1")
     with patch("openswe.server.store_thread_settings", new_callable=AsyncMock):
-        agent = await _agent_catalog(config)
+        agent = await _agent_catalog(
+            config,
+            workspace_settings=WorkspaceSettings({**_MODEL_DEFAULTS, "model_routing_split": False}),
+        )
 
     surface = cast(ToolSurface, agent["surface"])
-    # A subagent's spend would escape the thread's daily token budget.
-    assert surface.loop.pinned_model and not surface.subagents and not surface.delegates
+    # It runs as its creator and is billed to them, so like their own threads it is
+    # routed on Auto, may use subagents, and has no token budget of its own.
+    assert not surface.loop.pinned_model
+    assert surface.loop.routing is not None and surface.loop.routing.mode == "auto"
+    assert surface.subagents
 
 
 @pytest.mark.parametrize(
@@ -464,7 +470,7 @@ async def test_an_automated_thread_is_left_out_of_the_experiment(
     configurable: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "performance")
-    # A system automation keeps the workspace default; a personal one is pinned to Fast.
+    # A system automation keeps the workspace default; a personal one runs on Auto.
     monkeypatch.setattr(
         AutomationPolicy, "for_schedule", AsyncMock(return_value=AutomationPolicy(None, True))
     )

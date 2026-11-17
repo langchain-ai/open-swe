@@ -767,6 +767,86 @@ test.describe("threads workspace", () => {
 });
 
 test.describe("automation run history", () => {
+  test("gates the run composer on the viewer's automation capability", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await seedThreads(request, workspaceThreads());
+    await loginAs(page);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    let capability: boolean | undefined = true;
+    let adminThread = false;
+    await page.route(
+      `**/dashboard/api/threads/${THREAD_IDS.ready}`,
+      async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          json: {
+            ...(await response.json()),
+            threadCategory: "automation",
+            automationCanPost: capability,
+            adminThread,
+          },
+        });
+      },
+    );
+
+    await page.goto(`/agents/${THREAD_IDS.ready}`);
+    await dismissOnboardingIfShown(page);
+    const composer = page.getByRole("textbox", {
+      name: "Message",
+      exact: true,
+    });
+    await expect(composer).toBeEditable();
+    await composer.fill("Follow up on this automation run");
+    await expect(
+      page.getByRole("button", { name: "Send message", exact: true }),
+    ).toBeEnabled();
+    const screenshotPath = testInfo.outputPath(
+      "automation-owner-composer-dark.png",
+    );
+    await page.screenshot({ path: screenshotPath });
+    await testInfo.attach("automation-owner-composer-dark-api-fixture", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+
+    capability = false;
+    await page.reload();
+    await expect(composer).not.toBeEditable();
+    await expect(
+      page.getByText("You can't send messages in this thread", { exact: true }),
+    ).toBeVisible();
+
+    capability = undefined;
+    await page.reload();
+    await expect(composer).not.toBeEditable();
+
+    capability = true;
+    adminThread = true;
+    await page.reload();
+    await expect(composer).not.toBeEditable();
+    await expect(
+      page.getByText("Only Robin admins can send messages in this thread", {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    const adminLogin = await page.request.post("/control/login", {
+      data: ADMIN_USER,
+    });
+    expect(adminLogin.ok()).toBeTruthy();
+    capability = false;
+    await page.reload();
+    await expect(composer).not.toBeEditable();
+
+    capability = true;
+    await page.reload();
+    await expect(composer).toBeEditable();
+  });
+
   test("retries failures and scopes global and per-automation runs", async ({
     page,
     request,

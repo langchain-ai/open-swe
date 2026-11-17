@@ -1012,6 +1012,17 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         "params": {
             "metadata": {
                 "owner_login": "attacker",
+                "owner_user_id": "attacker-id",
+                "automation_creator_user_id": "attacker-id",
+                "automation_system": True,
+                "automation_scope": "workspace",
+                "schedule_id": "attacker-schedule",
+                "thread_category": "automation",
+                "source": "schedule",
+                "origin": "schedule",
+                "created_by": "attacker",
+                "admin_thread": True,
+                "workspace": "another-workspace",
                 "owner_type": "system",
                 "visibility": "private",
                 "system_authorization": {
@@ -1052,9 +1063,25 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     assert configurable["source"] == "dashboard"
     assert configurable["invocation_id"] != "stolen"
     assert not (
-        {"owner_login", "owner_type", "visibility", "system_authorization"}
+        {
+            "owner_login",
+            "owner_user_id",
+            "owner_type",
+            "visibility",
+            "system_authorization",
+            "automation_creator_user_id",
+            "automation_system",
+            "automation_scope",
+            "schedule_id",
+            "thread_category",
+            "source",
+            "created_by",
+            "admin_thread",
+            "workspace",
+        }
         & enriched["params"]["metadata"].keys()
     )
+    assert enriched["params"]["metadata"]["origin"] == "dashboard"
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
@@ -1071,6 +1098,22 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     )
     assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
     assert updates[-1]["model_selection"] == "explicit"
+
+    personal_config = await thread_runs._build_dashboard_configurable(
+        "tid",
+        "octocat",
+        {"source": "schedule", "schedule_id": "personal-schedule", "owner_type": "user"},
+    )
+    assert personal_config["schedule_id"] == "personal-schedule"
+    assert personal_config["github_login"] == "octocat"
+
+    system_config = await thread_runs._build_dashboard_configurable(
+        "tid",
+        "octocat",
+        {"source": "schedule", "schedule_id": "system-schedule", "owner_type": "system"},
+    )
+    assert system_config["schedule_id"] == "system-schedule"
+    assert not {"github_login", "user_id", "user_email"} & system_config.keys()
 
 
 @pytest.mark.parametrize("history_available", [True, False])

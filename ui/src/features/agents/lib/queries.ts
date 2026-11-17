@@ -663,9 +663,21 @@ export function useSeedAgentThreadDetails(
       // Seed as already-stale: the detail GET is what marks a thread viewed
       // server-side, so opening a seeded entry must still refetch despite the
       // detail query's `staleTime` (which exists for the optimistic seed).
-      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread, {
-        updatedAt: 0,
-      })
+      const key = agentThreadKeys.detail(thread.id)
+      const detail = queryClient.getQueryData<AgentThread>(key)
+      if (
+        thread.threadCategory === "automation" &&
+        thread.automationCanPost == null &&
+        detail?.automationCanPost != null
+      ) {
+        queryClient.setQueryData(
+          key,
+          { ...thread, automationCanPost: detail.automationCanPost },
+          { updatedAt: 0 }
+        )
+      } else {
+        queryClient.setQueryData(key, thread, { updatedAt: 0 })
+      }
     }
   }, [activeThreadId, queryClient, threads])
 }

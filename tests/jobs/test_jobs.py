@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -87,6 +88,48 @@ async def test_a_cron_job_moves_to_its_next_fire_time_in_its_timezone() -> None:
     [after] = await queue.find({})
     assert after.due_at > datetime.now(UTC)
     assert after.due_at.astimezone(job.next_fire_after(_PAST).tzinfo).hour in {13, 14}
+
+
+@pytest.mark.parametrize(
+    ("timezone", "cron", "start", "expected"),
+    [
+        ("America/New_York", "0 9 * * *", "2026-03-07T14:00:00+00:00", "2026-03-08T13:00:00+00:00"),
+        ("America/New_York", "0 9 * * *", "2026-03-08T13:00:00+00:00", "2026-03-09T13:00:00+00:00"),
+        ("America/New_York", "0 9 * * *", "2026-10-31T13:00:00+00:00", "2026-11-01T14:00:00+00:00"),
+        ("America/New_York", "0 9 * * *", "2026-11-01T14:00:00+00:00", "2026-11-02T14:00:00+00:00"),
+        (
+            "America/New_York",
+            "30 2 * * *",
+            "2026-03-07T07:30:00+00:00",
+            "2026-03-08T07:00:00+00:00",
+        ),
+        (
+            "America/New_York",
+            "30 1 * * *",
+            "2026-11-01T05:30:00+00:00",
+            "2026-11-01T06:30:00+00:00",
+        ),
+        ("UTC", "0 9 * * *", "2026-03-07T09:00:00+00:00", "2026-03-08T09:00:00+00:00"),
+        ("UTC", "0 9 * * *", "2026-10-31T09:00:00+00:00", "2026-11-01T09:00:00+00:00"),
+    ],
+)
+def test_cron_follows_local_time_across_dst(
+    timezone: str, cron: str, start: str, expected: str
+) -> None:
+    moment = datetime.fromisoformat(start)
+    job = Job(
+        id=uuid.uuid4(),
+        kind="probe",
+        payload={},
+        due_at=moment,
+        cron=cron,
+        timezone=timezone,
+        key=None,
+        metadata={},
+        attempts=0,
+        created_at=moment,
+    )
+    assert job.next_fire_after(moment) == datetime.fromisoformat(expected)
 
 
 async def test_a_failing_one_shot_backs_off_then_gives_up() -> None:

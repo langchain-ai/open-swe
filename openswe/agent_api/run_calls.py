@@ -185,7 +185,6 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
     take_stale_boot,
 )
-from openswe.schedules.policy import AutomationPolicy
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
@@ -672,16 +671,7 @@ class TokenRun:
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         """A model a person asked for. MDA now answers this itself from the catalog's
-        models; kept for one release, for MDA deployments that still ask. A member's
-        automation keeps its own model whatever is asked."""
-        schedule_id = self.run.configurable.get("schedule_id")
-        if (
-            isinstance(schedule_id, str)
-            and (await AutomationPolicy.for_schedule(schedule_id)).restricted
-        ):
-            return chosen_model(
-                self.run.settings.model_id or request.model_id, self.run.settings.effort
-            )
+        models; kept for one release, for MDA deployments that still ask."""
         return chosen_model(
             request.model_id, request.effort, fallback_model_id=ENV.LLM_FALLBACK_MODEL_ID.optional()
         )
@@ -770,8 +760,6 @@ class TokenRun:
         await self._reporting(
             request, "run_ended", ended, messages=messages_from_dict(request.replies)
         )
-        if request.automation_usage is not None:
-            await AutomationPolicy.record_usage(self.run.thread_id, request.automation_usage)
         return Done()
 
     async def model_failed(self, request: ModelFailed) -> Done:

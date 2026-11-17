@@ -491,6 +491,7 @@ async def _summarize_thread(
         viewer_login=viewer_login,
         read_states=read_states,
         owner_ids=owner_ids,
+        include_automation_capability=False,
     )
 
 

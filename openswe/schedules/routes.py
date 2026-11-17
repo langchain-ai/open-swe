@@ -25,7 +25,7 @@ async def api_list_schedules(
     all_users: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    """The viewer's own automations and system ones; ``all_users`` adds everyone's, for admins."""
+    """The viewer's own automations, plus system ones for admins; ``all_users`` adds everyone's."""
     return await list_agent_schedules(session["sub"], all_users=all_users)
 
 

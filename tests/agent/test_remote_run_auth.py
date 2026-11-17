@@ -10,7 +10,7 @@ from openswe.threads.identity import ThreadIdentity
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["dashboard", "slack", "web"])
+@pytest.mark.parametrize("source", ["dashboard", "slack", "web", "schedule"])
 async def test_human_github_runs_require_langsmith_before_catalog_resolution(
     monkeypatch: pytest.MonkeyPatch,
     source: str,
@@ -34,7 +34,7 @@ async def test_human_github_runs_require_langsmith_before_catalog_resolution(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["github", "linear", "schedule", None])
+@pytest.mark.parametrize("source", ["github", "linear", None])
 async def test_external_runs_keep_their_existing_authorization_policy(
     monkeypatch: pytest.MonkeyPatch,
     source: str | None,

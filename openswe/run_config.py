@@ -396,12 +396,7 @@ class RunConfig(BaseModel):
         return None
 
     async def automation_creator(self) -> User | None:
-        """Who created the personal automation this run executes on its own thread, to credit
-        its spend to; a system automation's spend is no person's.
-
-        Only for attribution: an automation run never acts as, or with the credentials
-        of, its creator.
-        """
+        """Resolve the saved personal automation creator for spend attribution."""
         from openswe.schedules.store import get_agent_schedule, schedule_thread_metadata
         from openswe.users import User
 

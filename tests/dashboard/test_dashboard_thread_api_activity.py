@@ -245,6 +245,28 @@ class TestThreadReadState:
         detail = await thread_api.get_dashboard_thread("tid", "octocat")
         assert detail["ownerId"] is None
 
+    async def test_automation_capability_is_only_computed_on_detail(self) -> None:
+        owner = await User.for_login("github", "octocat")
+        assert owner is not None
+        self.client.threads.thread["metadata"].update(
+            {
+                "source": "schedule",
+                "thread_category": "automation",
+                "automation_creator_user_id": str(owner.id),
+            }
+        )
+        threads = [{**self.client.threads.thread, "thread_id": f"tid-{i}"} for i in range(25)]
+        with patch.object(User, "get", wraps=User.get) as get_user:
+            summaries = await listing._summarize_threads(
+                self.client, threads, viewer_login="octocat"
+            )
+        assert all(item["automationCanPost"] is None for item in summaries)
+        get_user.assert_not_awaited()
+        assert (await thread_api.get_dashboard_thread("tid", "octocat"))["automationCanPost"]
+        assert not (await thread_api.get_dashboard_thread("tid", "other"))["automationCanPost"]
+        self.client.threads.thread["metadata"]["automation_system"] = True
+        assert not (await thread_api.get_dashboard_thread("tid", "octocat"))["automationCanPost"]
+
     async def test_only_eligible_response_is_unread_in_detail_and_lists(self) -> None:
         await routes.api_set_thread_read_state(
             "tid", routes.ThreadReadState(viewed=True), self.session

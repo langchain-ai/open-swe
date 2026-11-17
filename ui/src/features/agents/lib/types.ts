@@ -296,7 +296,7 @@ export type LinearTriggerEvent =
 
 /** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
-  | { kind: "schedule"; cron: string }
+  | { kind: "schedule"; cron: string; timezone?: string }
   | {
       kind: "github"
       repo: string
@@ -305,6 +305,8 @@ export type AutomationTriggerConfig =
       head_branches_exclude?: Array<string>
       /** Globs the pull request's base branch must match, when any are listed. */
       base_branches?: Array<string>
+      /** Its creator confirmed it may fire on a public repository. */
+      allow_public_repo?: boolean
     }
   | {
       kind: "slack"
@@ -374,13 +376,8 @@ export interface AgentSchedule {
   lastError?: string | null
   lastErrorAt?: string | null
   ownerId?: string | null
-  /** The environment's, not its creator's: only admins manage it, and it is unbounded. */
+  /** The environment's, not its creator's: only admins manage it. */
   system?: boolean
-  /** A personal automation: it runs on Fast within a daily token budget per thread. */
-  restricted?: boolean
-  dailyTokenCap?: number | null
-  /** Its thread that spent the most of today's (UTC) budget. */
-  usageToday?: { threadId: string; tokens: number } | null
   createdBy?: string | null
   updatedBy?: string | null
   createdAt?: string | null
@@ -665,6 +662,7 @@ export interface AgentThread {
   automationId?: string | null
   automationName?: string | null
   automationActionPosted?: boolean
+  automationCanPost?: boolean | null
   status: AgentStatus
   viewed: boolean
   latestRunId?: string | null

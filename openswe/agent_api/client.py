@@ -142,7 +142,7 @@ async def start_remote_run(
         await ThreadIdentity(f"user:{user_id}").authorize()
     elif (
         assistant_id == "agent"
-        and configurable.get("source") in {"dashboard", "slack", "web"}
+        and configurable.get("source") in {"dashboard", "slack", "web", "schedule"}
         and not configurable.get("started_by_id")
         and isinstance(login := configurable.get("github_login"), str)
         and login

@@ -19,15 +19,16 @@ _WRITE = Policy(trusted="automation_management", sole=ack("automation.id"))
 
 async def _identity() -> tuple[str, str | None] | None:
     cfg = configurable()
-    if cfg.source == "schedule":
+    if cfg.source == "schedule" and not cfg.github_login and cfg.github_linked:
         record = await schedules.authorized_admin_schedule(cfg)
         if not record:
             return None
         login = record.get("created_by") or f"system:schedule:{record['id']}"
         return login, record.get("user_email") or None
-    if not cfg.github_login:
+    login = cfg.github_login if cfg.github_linked else cfg.sender_id
+    if not login:
         return None
-    return cfg.github_login, cfg.user_email or None
+    return login, cfg.user_email or None
 
 
 def _error(exc: Exception) -> dict[str, Any]:
@@ -84,7 +85,11 @@ async def create_automation(
             ),
             email=email,
             allow_admin_thread=await actor_is_admin(configurable()),
-            use_workspace_credentials=configurable().source == "schedule",
+            use_workspace_credentials=(
+                configurable().source == "schedule"
+                and not configurable().github_login
+                and configurable().github_linked
+            ),
         )
     except Exception as exc:
         return _error(exc)
@@ -129,7 +134,11 @@ async def update_automation(
             schedules.ScheduleUpdateBody(**values),
             email=identity[1],
             allow_admin_thread=await actor_is_admin(configurable()),
-            use_workspace_credentials=configurable().source == "schedule",
+            use_workspace_credentials=(
+                configurable().source == "schedule"
+                and not configurable().github_login
+                and configurable().github_linked
+            ),
         )
     except Exception as exc:
         return _error(exc)

@@ -512,6 +512,9 @@ async def _build_dashboard_configurable(
                 raise HTTPException(401, "Sign in with LangSmith to use Robin")
             configurable.pop("github_login", None)
             configurable.update(user_id=str(user.id), github_linked=False)
+    schedule_id = metadata.get("schedule_id")
+    if source == "schedule" and isinstance(schedule_id, str) and schedule_id:
+        configurable["schedule_id"] = schedule_id
     repo_config = repo_config_from_metadata(metadata)
     if configurable.get("github_linked") is False:
         configurable["repo_explicitly_none"] = True
@@ -546,6 +549,9 @@ async def _build_dashboard_configurable(
         for key, value in overrides.items():
             if value is not None:
                 configurable[key] = value
+    if source == "schedule" and metadata.get("owner_type") == "system":
+        for key in ("github_login", "user_id", "user_email", "github_linked", "auth_provider"):
+            configurable.pop(key, None)
     return configurable
 
 
@@ -1436,7 +1442,24 @@ async def _enrich_run_start_command(
                 key: value
                 for key, value in run_metadata.items()
                 if key not in TURN_ATTRIBUTION_FIELDS
-                and key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
+                and key
+                not in {
+                    "visibility",
+                    "owner_type",
+                    "owner_login",
+                    "owner_user_id",
+                    "system_authorization",
+                    "automation_creator_user_id",
+                    "automation_system",
+                    "automation_scope",
+                    "schedule_id",
+                    "thread_category",
+                    "source",
+                    "origin",
+                    "created_by",
+                    "admin_thread",
+                    "workspace",
+                }
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -2054,7 +2077,7 @@ async def _enrich_system_run_start_command(
         if sandbox_bridge is not None:
             metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
     else:
-        principal.assert_can_post(metadata)
+        await principal.assert_can_post(metadata)
 
     invocation_id = new_invocation_id()
     structured = build_input_messages(

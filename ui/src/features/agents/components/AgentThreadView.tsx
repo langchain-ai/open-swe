@@ -188,8 +188,9 @@ export function AgentThreadView({
     !mirroredSession &&
     // Whoever posts in a thread on someone's machine runs commands there.
     (!thread.sandboxBridgeClient || ownsThread) &&
-    ((thread.threadCategory !== "automation" && !thread.adminThread) ||
-      session.data?.is_admin === true)
+    (thread.threadCategory !== "automation" ||
+      thread.automationCanPost === true) &&
+    (!thread.adminThread || session.data?.is_admin === true)
   // The bridge outlives a thread view but not the app; serve the checkout
   // again for whatever this thread runs next, wherever that run is started.
   const localBridge = useQuery({
@@ -1167,7 +1168,9 @@ export function AgentThreadView({
                               : hasConversation
                                 ? "Work with Robin"
                                 : "Send the first message"
-                            : "Only Robin admins can send messages in this thread"
+                            : thread.adminThread
+                              ? "Only Robin admins can send messages in this thread"
+                              : "You can't send messages in this thread"
                 }
                 autoFocus={canPost && !embedded}
                 canOffload={!isStreaming}

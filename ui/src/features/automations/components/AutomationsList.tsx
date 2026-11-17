@@ -21,7 +21,6 @@ import type { AgentSchedule } from "@/features/agents/lib/types"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { describeTriggers } from "@/features/automations/lib/triggers"
-import { describeUsage } from "@/features/automations/lib/usage"
 import {
   agentMutationKeys,
   useAgentSchedules,
@@ -52,12 +51,20 @@ const TAB_OPTIONS = [
   { value: "runs", display: "Runs" },
 ] as const
 
-type AutomationsFilter = "mine" | "all"
+export type AutomationsFilter = "mine" | "system" | "all"
 
+// Only admins see system automations and other people's, so only they get views.
 const FILTER_OPTIONS = [
-  { value: "mine", display: "Mine & system" },
-  { value: "all", display: "All users" },
+  { value: "mine", display: "Mine" },
+  { value: "system", display: "System" },
+  { value: "all", display: "All" },
 ] as const
+
+const EMPTY_TITLES: Record<AutomationsFilter, string> = {
+  mine: "No automations yet",
+  system: "No system automations",
+  all: "No automations yet",
+}
 
 export function AutomationsList({
   tab,
@@ -68,12 +75,22 @@ export function AutomationsList({
 }) {
   const session = useSession().data
   const isAdmin = session?.is_admin === true
-  const [filter, setFilter] = useState<AutomationsFilter>("mine")
+  const [chosenFilter, setFilter] = useState<AutomationsFilter>("mine")
+  // A member sees their own automations alone.
+  const filter = isAdmin ? chosenFilter : "mine"
   const schedulesQuery = useAgentSchedules({
     allUsers: isAdmin && filter === "all",
   })
   const canManage = Boolean(session)
-  const schedules = schedulesQuery.data ?? []
+  const schedules = (schedulesQuery.data ?? []).filter((schedule) => {
+    if (filter === "all") return true
+    if (filter === "system") return schedule.system === true
+    return (
+      !schedule.system &&
+      !!session?.user_id &&
+      schedule.ownerId === session.user_id
+    )
+  })
 
   const total = schedules.length
   const active = schedules.filter((schedule) => schedule.enabled).length
@@ -88,10 +105,7 @@ export function AutomationsList({
         </Text>
         <p className="mt-space-1 text-xs text-secondary">
           Run Robin on a schedule or on GitHub, Slack, and Linear events. Each
-          run starts a fresh agent thread. Each user can have up to 3 personal
-          automations, which use Fast with a best-effort 30M-token cap per
-          thread per UTC day. System automations, managed by admins, have no
-          limits.
+          run starts a fresh agent thread. Your automations run as you, on Auto.
         </p>
         {canManage && (
           <Banner intent="neutral" className="mt-space-3">
@@ -149,7 +163,7 @@ export function AutomationsList({
                 <EmptyState
                   className="rounded-xl border border-dashed border-default bg-surface-level-1"
                   icon={LightningIcon}
-                  title="No automations yet"
+                  title={EMPTY_TITLES[filter]}
                   description="Run Robin on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
                   action={canManage && <NewAutomationButton />}
                 />
@@ -234,7 +248,6 @@ function AutomationRow({
   ).some((vars) => vars.scheduleId === schedule.id)
   const isStarting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
-  const usage = describeUsage(schedule)
 
   const onRun = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -302,7 +315,6 @@ function AutomationRow({
                 </span>
               )}
               <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
-              {usage && <span>{usage}</span>}
             </div>
             <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">
               <span>
