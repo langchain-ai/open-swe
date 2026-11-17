@@ -7,6 +7,10 @@ import { queueEntryToTurn } from "@/features/agents/lib/queuedMessages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
 import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
+import {
+  runStartCommand,
+  startRun as postRunStart,
+} from "@/features/agents/lib/transcript/api"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import { runTranscriptBuilt } from "@/lib/perf/streaming"
 import { threadTranscriptBuilt } from "@/lib/perf/threadLoad"
@@ -16,16 +20,11 @@ import { useCancelRun } from "./useCancelRun"
 import type { StreamThreadSource, ThreadRunInput } from "./types"
 
 /** The SDK stream, behind the source interface. */
-export function useAgentStreamSource(
-  threadId: string,
-  generation = 0
-): StreamThreadSource {
-  const { stream, connection, trackRunAcceptance } = useAgentThreadStream(
-    threadId,
-    generation
-  )
-  // `stream.stop()` only cancels server-side when this client dispatched the
-  // run, so the cancel endpoint runs first and this only detaches.
+export function useAgentStreamSource(threadId: string): StreamThreadSource {
+  const { stream, connection, trackRunAcceptance } =
+    useAgentThreadStream(threadId)
+  // The thread's own cancel also stops its workers, so it runs first and this
+  // only stops showing the run.
   const stop = useCancelRun(threadId, stream.disconnect)
   const login = useSession().data?.login
   const { entries: queueEntries, cancel: cancelSubmission } =
@@ -59,6 +58,16 @@ export function useAgentStreamSource(
       onAccepted,
       onRejected,
     }: ThreadRunInput) => {
+      if (!enqueue && stream.isLoading) {
+        // `useStream` sends a message made during a run to the server's queue,
+        // where it waits for the run to end. `/commands` steers it into the run.
+        await postRunStart(
+          threadId,
+          runStartCommand({ threadId, message, configurable })
+        )
+        onAccepted?.()
+        return
+      }
       const config = Object.keys(configurable).length
         ? { configurable }
         : undefined
@@ -99,7 +108,7 @@ export function useAgentStreamSource(
       if (submitError && !acceptance.accepted)
         throw acceptance.refusal ?? submitError
     },
-    [trackRunAcceptance, stream]
+    [threadId, trackRunAcceptance, stream]
   )
 
   const contextUsage = useMemo(

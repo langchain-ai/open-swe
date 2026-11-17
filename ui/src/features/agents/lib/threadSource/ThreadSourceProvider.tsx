@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react"
+import { createContext, useContext } from "react"
 
 import { useStreamPreference } from "@/lib/streamPreference"
 
@@ -10,7 +10,7 @@ import type { ThreadSource } from "./types"
 const ThreadSourceContext = createContext<ThreadSource | null>(null)
 const RefreshThreadSourceContext = createContext<(() => void) | null>(null)
 
-/** Rehydrate after a run is started outside the thread source. */
+/** Read the thread again, and join its run, after one is started outside the thread source. */
 export function useRefreshThreadSource(): (() => void) | null {
   return useContext(RefreshThreadSourceContext)
 }
@@ -34,18 +34,19 @@ export function useOptionalThreadSource(): ThreadSource | null {
 
 function StreamSource({
   threadId,
-  generation,
   children,
 }: {
   threadId: string
-  generation: number
   children: ReactNode
 }) {
-  const source = useAgentStreamSource(threadId, generation)
+  const source = useAgentStreamSource(threadId)
+  const hydrate = source.stream.hydrate
   return (
-    <ThreadSourceContext.Provider value={source}>
-      {children}
-    </ThreadSourceContext.Provider>
+    <RefreshThreadSourceContext.Provider value={() => void hydrate()}>
+      <ThreadSourceContext.Provider value={source}>
+        {children}
+      </ThreadSourceContext.Provider>
+    </RefreshThreadSourceContext.Provider>
   )
 }
 
@@ -81,18 +82,9 @@ export function ThreadSourceProvider({
   children: ReactNode
 }) {
   const preferStream = useStreamPreference()
-  const [generation, setGeneration] = useState(0)
 
   if (!transcript || preferStream) {
-    return (
-      <RefreshThreadSourceContext.Provider
-        value={() => setGeneration((current) => current + 1)}
-      >
-        <StreamSource generation={generation} threadId={threadId}>
-          {children}
-        </StreamSource>
-      </RefreshThreadSourceContext.Provider>
-    )
+    return <StreamSource threadId={threadId}>{children}</StreamSource>
   }
 
   return <TranscriptSource threadId={threadId}>{children}</TranscriptSource>

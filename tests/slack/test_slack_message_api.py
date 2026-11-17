@@ -130,15 +130,6 @@ async def test_thread_status_uses_agent_session_and_falls_back_without_agent_vie
     assert [method for method, _ in slack_api.calls] == ["agents.sessions.setStatus"]
 
 
-async def test_slack_stream_rate_limit_preserves_retry_after(slack_api):
-    slack_api.respond({"ok": False}, status=429, headers={"Retry-After": "30"})
-    with pytest.raises(slack_utils.SlackStreamError) as raised:
-        await slack_utils.append_slack_stream("C1", "1.0", [])
-    assert raised.value.code == "rate_limited"
-    assert raised.value.retry_after == 30
-    assert len(slack_api.calls) == 1
-
-
 async def test_upload_completes_external_upload_without_sending_token(slack_api, monkeypatch):
     slack_api.respond(
         {"ok": True, "upload_url": "https://files.slack.com/upload/v1/test", "file_id": "F1"}

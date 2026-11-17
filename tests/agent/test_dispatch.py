@@ -113,19 +113,18 @@ async def test_create_durable_run_applies_defaults(
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
     assert created["webhook"] == "https://app/webhooks/run-complete"
-    assert created["stream_resumable"] is False
-    # The v3 run shape, so the dashboard gets `tools` events and subagent
-    # namespaces from runs it did not start — exactly what its own `run.start` sends.
+    # Old-format, in the modes a thread view joins any run in, kept for that join.
+    assert created["config"]["configurable"]["__event_streaming_v2"] is False
     assert created["stream_mode"] == [
         "values",
         "updates",
-        "messages",
+        "messages-tuple",
         "custom",
-        "tasks",
-        "checkpoints",
+        "tools",
+        "lifecycle",
     ]
     assert created["stream_subgraphs"] is True
-    assert created["config"]["configurable"]["__event_streaming_v2"] is True
+    assert created["stream_resumable"] is True
     invocation_id = created["config"]["configurable"]["invocation_id"]
     assert (
         created["config"]["metadata"].items()
@@ -151,8 +150,8 @@ async def test_create_durable_run_applies_defaults(
 async def test_a_runs_api_run_streams_as_its_client_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A run the runs routes queue keeps its client's stream, and is never protocol v2:
-    its thread may keep the marker on from an earlier run."""
+    """A run the runs routes queue keeps its client's stream, and its marker is sent off:
+    its thread may keep it on from an earlier run."""
     client = _FakeClient()
     stream = {"stream_mode": ["values", "messages-tuple"], "stream_resumable": True}
 
@@ -165,7 +164,7 @@ async def test_a_runs_api_run_streams_as_its_client_asked(
         config={"configurable": {"thread_id": "thread-1"}},
         client=client,
         multitask_strategy="enqueue",
-        run_format=dispatch.RunFormat.runs_api(stream),
+        run_format=dispatch.RunFormat.of(stream),
     )
 
     [created] = client.runs.created
@@ -550,7 +549,6 @@ async def test_create_durable_run_preserves_existing_prepare_id(
     assert created["config"]["configurable"]["invocation_id"] == "existing"
     assert "prepare_run_id" not in created["config"]["configurable"]
     assert "prepare_run_id" not in created["metadata"]
-    assert created["config"]["configurable"]["__event_streaming_v2"] is True
 
 
 def test_langsmith_system_followup_runs_without_github() -> None:

@@ -934,65 +934,6 @@ async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, 
         raise SlackStreamError(error) from exc
 
 
-async def start_slack_stream(
-    channel_id: str,
-    thread_ts: str,
-    chunks: list[dict[str, Any]],
-    *,
-    recipient_user_id: str = "",
-    recipient_team_id: str = "",
-) -> str:
-    """Start a Slack Thinking Steps stream and return its message timestamp."""
-
-    payload: dict[str, Any] = {
-        "channel": channel_id,
-        "chunks": chunks,
-        "task_display_mode": "plan",
-    }
-    if thread_ts != "0":
-        payload["thread_ts"] = thread_ts
-    if recipient_user_id:
-        payload["recipient_user_id"] = recipient_user_id
-    if recipient_team_id:
-        payload["recipient_team_id"] = recipient_team_id
-    data = await _slack_stream_call("chat.startStream", payload)
-    message_ts = data.get("ts")
-    if not isinstance(message_ts, str) or not message_ts:
-        raise SlackStreamError("missing_message_ts")
-    return message_ts
-
-
-async def append_slack_stream(
-    channel_id: str, message_ts: str, chunks: list[dict[str, Any]]
-) -> None:
-    """Append structured chunks to a Slack stream."""
-    await _slack_stream_call(
-        "chat.appendStream", {"channel": channel_id, "ts": message_ts, "chunks": chunks}
-    )
-
-
-async def stop_slack_stream(
-    channel_id: str,
-    message_ts: str,
-    chunks: list[dict[str, Any]] | None = None,
-    *,
-    session_status: str = "active",
-) -> None:
-    """Finalize a Slack stream."""
-    payload: dict[str, Any] = {
-        "channel": channel_id,
-        "ts": message_ts,
-        "session_status": session_status,
-    }
-    if chunks:
-        payload["chunks"] = chunks
-    try:
-        await _slack_stream_call("chat.stopStream", payload)
-    except SlackStreamError as exc:
-        if exc.code not in {"message_not_in_streaming_state", "stopped_by_user"}:
-            raise
-
-
 _TRANSIENT_SLACK_ERRORS = (
     "rate_limited",
     "http_error",

@@ -12,7 +12,12 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import Config
 from pydantic import JsonValue, TypeAdapter
 
-from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_durable_run, prepare_run_config
+from openswe.dispatch import (
+    COMPLETION_WEBHOOK_URL,
+    SERVER_STREAM,
+    prepare_durable_run,
+    prepare_run_config,
+)
 from openswe.input_messages import RunInput, build_run_input
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -234,6 +239,8 @@ async def run_thread_wakeup(
         metadata=prepared["metadata"],
         multitask_strategy="enqueue",
         webhook=COMPLETION_WEBHOOK_URL or None,
+        # ty does not match the server's stream fields to the SDK's per-keyword types.
+        **SERVER_STREAM.run_fields(),  # ty: ignore[invalid-argument-type]
     )
     return run["run_id"]
 

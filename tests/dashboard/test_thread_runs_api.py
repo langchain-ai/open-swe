@@ -13,8 +13,10 @@ from fastapi import FastAPI
 from pydantic import JsonValue
 
 from openswe.dashboard.oauth import require_session
+from openswe.dispatch import SERVER_STREAM, RunFormat
 from openswe.threads import index, proxy, routes, runtimes
 from openswe.threads.principals import Principal, require_principal
+from openswe.threads.start_request import SentRun
 from openswe.transcript.turns import OpenTurn
 from tests.conftest import patch_thread_module
 
@@ -434,6 +436,42 @@ async def test_a_reader_joining_a_run_never_gets_its_token(mda: Mda, dashboard: 
     ]
 
 
+async def test_a_message_steered_into_someone_elses_run_never_gets_its_token(
+    monkeypatch: pytest.MonkeyPatch, mda: Mda, dashboard: Dashboard
+) -> None:
+    await _thread({**SHARED, "transcript": "v2", "latest_run_id": RUN}, status="busy")
+    mda.answers[("GET", f"/threads/{THREAD}/runs/{RUN}")] = lambda _: httpx2.Response(
+        200,
+        json={
+            "run_id": RUN,
+            "thread_id": THREAD,
+            "status": "running",
+            "kwargs": {"context": {"__run_token": "ada-run-token"}, "stream_mode": ["values"]},
+        },
+    )
+
+    async def steer_target(thread_id: str) -> OpenTurn | None:
+        return OpenTurn(turn_id=uuid.uuid7(), run_id=RUN)
+
+    async def steer(*args: object, **kwargs: object) -> SentRun:
+        return SentRun(run_id=RUN, steered=True)
+
+    monkeypatch.setattr(proxy, "steer_target", steer_target)
+    monkeypatch.setattr(proxy, "steer_running_thread", steer)
+    dashboard.login = "bob"
+
+    response = await dashboard.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        json={"input": {"messages": [{"type": "human", "content": "and"}]}},
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("x-robin-steered") == "true"
+    assert "ada-run-token" not in response.text
+    assert response.json()["kwargs"] == {"stream_mode": ["values"]}
+
+
 async def test_the_runtimes_refusal_is_the_streams_status(mda: Mda, dashboard: Dashboard) -> None:
     await _thread(SHARED)
     mda.answers[("GET", f"/threads/{THREAD}/stream")] = lambda _: httpx2.Response(
@@ -543,13 +581,13 @@ async def test_a_message_on_a_busy_thread_streams_the_run_it_joined_or_waits_for
     async def steer_target(thread_id: str) -> OpenTurn | None:
         return OpenTurn(turn_id=uuid.uuid7(), run_id=RUN) if open_turn else None
 
-    async def steer(*args: object, run_format: object, **kwargs: object) -> dict[str, object]:
+    async def steer(*args: object, run_format: object, **kwargs: object) -> SentRun:
         follow_ups.append(("steered", run_format))
-        return {"type": "success", "result": {"run_id": RUN, "steered": True}}
+        return SentRun(run_id=RUN, steered=True)
 
-    async def queue(*args: object, run_format: object, **kwargs: object) -> dict[str, object]:
+    async def queue(*args: object, run_format: object, **kwargs: object) -> SentRun:
         follow_ups.append(("queued", run_format))
-        return {"type": "success", "result": {"run_id": "queued-run", "queued": True}}
+        return SentRun(run_id="queued-run", queued=True)
 
     monkeypatch.setattr(proxy, "steer_target", steer_target)
     monkeypatch.setattr(proxy, "steer_running_thread", steer)
@@ -570,9 +608,7 @@ async def test_a_message_on_a_busy_thread_streams_the_run_it_joined_or_waits_for
     [(how, run_format)] = follow_ups
     assert how == handled
     # A run started for the message streams as its client asked.
-    assert run_format == proxy.RunFormat.runs_api(
-        {"stream_mode": ["values"], "stream_resumable": True}
-    )
+    assert run_format == RunFormat.of({"stream_mode": ["values"], "stream_resumable": True})
     assert mda.sent("POST", f"/threads/{THREAD}/runs") == []
     [(_, joined)] = mda.sent("GET", f"/threads/{THREAD}/runs/{streamed}/stream")
     # Leaving stops the message's own run, never the one it steered into.
@@ -606,24 +642,55 @@ async def test_an_answer_resumes_the_interrupted_run_in_the_old_format(
     assert len(mda.sent("GET", f"/threads/{THREAD}/runs/{RUN}/stream")) == 1
 
 
-async def test_a_reader_who_may_not_post_is_refused_a_run(mda: Mda, dashboard: Dashboard) -> None:
+# The two ways 2.0 starts a run: streamed, and created to wait in the server's queue.
+RUN_ROUTES = pytest.mark.parametrize("route", ["/runs/stream", "/runs"])
+
+
+@RUN_ROUTES
+@pytest.mark.parametrize(
+    ("metadata", "status"),
+    [
+        pytest.param({**SHARED, "admin_thread": True}, 403, id="reader-who-may-not-post"),
+        pytest.param(PRIVATE, 404, id="not-a-reader"),
+    ],
+)
+async def test_only_who_may_post_to_a_thread_starts_a_run_there(
+    mda: Mda, dashboard: Dashboard, route: str, metadata: dict[str, JsonValue], status: int
+) -> None:
+    await _thread(metadata)
+    dashboard.login = "bob"
+
+    response = await dashboard.request(
+        "POST",
+        f"/threads/{THREAD}{route}",
+        json={"input": {"messages": [{"type": "human", "content": "hi"}]}},
+    )
+
+    assert response.status_code == status
+    assert mda.requests == []
+
+
+async def test_a_reader_who_may_not_post_sends_no_command(mda: Mda, dashboard: Dashboard) -> None:
     await _thread({**SHARED, "admin_thread": True})
     dashboard.login = "bob"
 
     response = await dashboard.request(
         "POST",
-        f"/threads/{THREAD}/runs/stream",
-        json={"input": {"messages": [{"type": "human", "content": "hi"}]}},
+        f"/threads/{THREAD}/commands",
+        json={"id": 1, "method": "input.inject", "params": {}},
     )
 
     assert response.status_code == 403
     assert mda.requests == []
 
 
-async def test_a_run_on_a_missing_thread_creates_nothing(mda: Mda, dashboard: Dashboard) -> None:
+@RUN_ROUTES
+async def test_a_run_on_a_missing_thread_creates_nothing(
+    mda: Mda, dashboard: Dashboard, route: str
+) -> None:
     response = await dashboard.request(
         "POST",
-        f"/threads/{ELSEWHERE}/runs/stream",
+        f"/threads/{ELSEWHERE}{route}",
         json={"input": {"messages": [{"type": "human", "content": "hi"}]}},
     )
 
@@ -632,8 +699,9 @@ async def test_a_run_on_a_missing_thread_creates_nothing(mda: Mda, dashboard: Da
     assert mda.requests == []
 
 
+@RUN_ROUTES
 async def test_the_runtimes_refusal_of_a_run_is_its_status(
-    mda: Mda, dashboard: Dashboard, people: None
+    mda: Mda, dashboard: Dashboard, people: None, route: str
 ) -> None:
     """2.0 retries a run MDA refuses with 422 without the stream modes it may not have."""
     await _thread(SHARED)
@@ -643,7 +711,7 @@ async def test_the_runtimes_refusal_of_a_run_is_its_status(
 
     response = await dashboard.request(
         "POST",
-        f"/threads/{THREAD}/runs/stream",
+        f"/threads/{THREAD}{route}",
         json={
             "input": {"messages": [{"type": "human", "content": "hi"}]},
             "stream_mode": ["lifecycle"],
@@ -709,3 +777,242 @@ async def test_a_prompt_still_starts_a_session(
     assert response.json() == {"thread_id": "new-thread"}
     assert invalid.status_code == 422
     assert await index.get(THREAD) is None
+
+
+async def test_a_command_starts_an_old_format_run_whatever_stream_its_client_asks_for(
+    mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    """A thread view joins any run in the modes it started with, so the server picks them."""
+    await _thread(SHARED)
+    command = {
+        "id": 1,
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {"configurable": {"__event_streaming_v2": True}},
+            "assistant_id": "agent",
+            "stream_mode": ["values"],
+            "stream_resumable": False,
+        },
+    }
+
+    response = await dashboard.request("POST", f"/threads/{THREAD}/commands", json=command)
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 1, "type": "success", "result": {"run_id": RUN}}
+    started = mda.started()
+    assert started["context"]["__event_streaming_v2"] is False
+    stream = SERVER_STREAM.run_fields()
+    assert {key: started[key] for key in stream} == stream
+
+
+async def test_a_command_the_runtime_refuses_keeps_its_reply_shape(
+    mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    await _thread(SHARED)
+    mda.answers[("POST", f"/threads/{THREAD}/runs")] = lambda _: httpx2.Response(
+        422, json={"detail": "Invalid stream mode: lifecycle"}
+    )
+    command = {
+        "id": 4,
+        "method": "run.start",
+        "params": {"input": {"messages": [{"type": "human", "content": "hi"}]}},
+    }
+
+    response = await dashboard.request("POST", f"/threads/{THREAD}/commands", json=command)
+
+    assert response.status_code == 200
+    reply = response.json()
+    assert reply == {
+        "type": "error",
+        "id": 4,
+        "error": "unknown_error",
+        "message": reply["message"],
+    }
+    assert "Invalid stream mode" in reply["message"]
+
+
+async def test_an_answer_by_command_resumes_the_run_through_the_runs_api(
+    mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    await _thread({**SHARED, "latest_run_status": "interrupted"}, status="interrupted")
+    command = {
+        "id": 3,
+        "method": "input.respond",
+        "params": {"interrupt_id": "interrupt-1", "response": {"type": "approve"}},
+    }
+
+    response = await dashboard.request("POST", f"/threads/{THREAD}/commands", json=command)
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 3, "type": "success", "result": {}}
+    started = mda.started()
+    assert started["command"] == {"resume": {"interrupt-1": {"type": "approve"}}}
+    assert started["input"] is None
+    assert started["context"]["__event_streaming_v2"] is False
+    assert started["stream_resumable"] is True
+    assert mda.sent("POST", f"/threads/{THREAD}/commands") == []
+
+
+async def test_a_prompt_starts_its_session_with_an_old_format_run(
+    monkeypatch: pytest.MonkeyPatch, mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    async def create(*args: object, **kwargs: object) -> str:
+        await _thread(SHARED)
+        return THREAD
+
+    monkeypatch.setattr(routes, "create_dashboard_session", create)
+
+    response = await dashboard.request("POST", "/threads", json={"prompt": "Fix login"})
+
+    assert response.status_code == 201
+    assert mda.started()["context"]["__event_streaming_v2"] is False
+
+
+async def test_a_run_created_on_an_idle_thread_starts_old_format_and_answers_unstreamed(
+    mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    await _thread(SHARED)
+
+    response = await dashboard.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        json={
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "stream_mode": ["values", "messages-tuple"],
+            "stream_resumable": False,
+            "multitask_strategy": "rollback",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == RUN
+    # A run begun since the busy check is never stopped: the start is refused, then queued.
+    assert mda.started()["multitask_strategy"] == "reject"
+    assert "x-robin-steered" not in response.headers
+    started = mda.started()
+    assert started["context"]["__event_streaming_v2"] is False
+    assert started["stream_mode"] == ["values", "messages-tuple"]
+    # Joined later, from its first event.
+    assert started["stream_resumable"] is True
+    assert mda.sent("GET", f"/threads/{THREAD}/runs/{RUN}/stream") == []
+
+
+async def test_a_run_created_without_stream_fields_streams_as_the_servers_runs_do(
+    mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    await _thread(SHARED)
+
+    response = await dashboard.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        json={"input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]}},
+    )
+
+    assert response.status_code == 200
+    started = mda.started()
+    assert {key: started.get(key) for key in SERVER_STREAM.fields} == SERVER_STREAM.run_fields()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "handled", "answered"),
+    [
+        pytest.param("enqueue", "queued", "queued-run", id="queues-on-enqueue"),
+        pytest.param(None, "steered", RUN, id="steers-otherwise"),
+    ],
+)
+async def test_a_run_created_on_a_busy_thread_queues_or_steers_as_commands_do(
+    monkeypatch: pytest.MonkeyPatch,
+    mda: Mda,
+    dashboard: Dashboard,
+    strategy: str | None,
+    handled: str,
+    answered: str,
+) -> None:
+    await _thread({**SHARED, "transcript": "v2", "latest_run_id": RUN}, status="busy")
+    mda.answers[("GET", f"/threads/{THREAD}/runs/queued-run")] = lambda _: httpx2.Response(
+        200, json={"run_id": "queued-run", "thread_id": THREAD, "status": "pending"}
+    )
+    follow_ups: list[str] = []
+
+    async def steer_target(thread_id: str) -> OpenTurn | None:
+        return OpenTurn(turn_id=uuid.uuid7(), run_id=RUN)
+
+    async def steer(*args: object, **kwargs: object) -> SentRun:
+        follow_ups.append("steered")
+        return SentRun(run_id=RUN, steered=True)
+
+    async def queue(*args: object, **kwargs: object) -> SentRun:
+        follow_ups.append("queued")
+        return SentRun(run_id="queued-run", queued=True)
+
+    monkeypatch.setattr(proxy, "steer_target", steer_target)
+    monkeypatch.setattr(proxy, "steer_running_thread", steer)
+    monkeypatch.setattr(proxy, "queue_follow_up_run", queue)
+    run: dict[str, JsonValue] = {"input": {"messages": [{"type": "human", "content": "and"}]}}
+    if strategy is not None:
+        run["multitask_strategy"] = strategy
+
+    response = await dashboard.request("POST", f"/threads/{THREAD}/runs", json=run)
+
+    assert response.status_code == 200
+    assert follow_ups == [handled]
+    assert response.json()["run_id"] == answered
+    assert response.headers.get("x-robin-steered") == ("true" if handled == "steered" else None)
+    assert mda.sent("POST", f"/threads/{THREAD}/runs") == []
+
+
+async def test_a_run_created_with_a_command_answers_the_interrupt(
+    mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    await _thread({**SHARED, "latest_run_status": "interrupted"}, status="interrupted")
+
+    response = await dashboard.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        json={"command": {"resume": {"interrupt-1": "yes"}}, "multitask_strategy": "enqueue"},
+    )
+
+    assert response.status_code == 200
+    started = mda.started()
+    assert started["command"] == {"resume": {"interrupt-1": "yes"}}
+    assert started["multitask_strategy"] == "reject"
+    assert started["context"]["__event_streaming_v2"] is False
+
+
+@pytest.mark.parametrize(
+    ("command", "status", "reply"),
+    [
+        pytest.param(
+            {"id": 5, "method": "run.start", "params": {"input": {}}},
+            200,
+            {"type": "error", "id": 5, "error": "invalid_argument"},
+            id="start",
+        ),
+        pytest.param(
+            {"id": 5, "method": "input.respond", "params": {"interrupt_id": "i-1"}},
+            409,
+            {},
+            id="answer",
+        ),
+    ],
+)
+async def test_a_command_on_a_channel_thread_it_cant_act_on_is_refused_as_before(
+    monkeypatch: pytest.MonkeyPatch,
+    mda: Mda,
+    dashboard: Dashboard,
+    people: None,
+    command: dict[str, JsonValue],
+    status: int,
+    reply: dict[str, JsonValue],
+) -> None:
+    """A start's refusal is protocol v2's error, and an answer's an HTTP status."""
+    monkeypatch.delenv("MDA_SERVICE_SECRET", raising=False)
+    await _thread({**SHARED, "channel": "linear", "latest_run_status": "interrupted"})
+
+    response = await dashboard.request("POST", f"/threads/{THREAD}/commands", json=command)
+
+    assert response.status_code == status
+    assert response.json().items() >= reply.items()
+    assert "linear channel" in str(response.json())
+    assert mda.sent("POST", f"/threads/{THREAD}/runs") == []

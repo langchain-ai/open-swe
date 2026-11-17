@@ -13,10 +13,9 @@
  * the agent started". A run joined mid-stream may have missed the message and
  * then carries no `generation_start`.
  *
- * The span also counts protocol events and text deltas, samples the lag between the
- * server's event timestamp and receipt (clock skew included, so read it as a
- * trend rather than an absolute), and, in development builds, accumulates React
- * commit time for the transcript while the run streams.
+ * The span also counts stream events and text chunks, samples the lag between an
+ * event's timestamp and its handling, and, in development builds, accumulates
+ * React commit time for the transcript while the run streams.
  *
  * The stream pool keeps background runs alive, so request and transcript
  * timings are matched to a tracker by thread id and never charged to a
@@ -57,6 +56,24 @@ const openRuns = new Set<RunTracker>()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+/** An assistant message chunk, as the server streams it or the SDK names it. */
+const AI_MESSAGE_TYPES = new Set<unknown>(["ai", "AIMessageChunk"])
+
+/** Whether a message chunk's content carries any text. */
+function hasText(content: unknown): boolean {
+  if (typeof content === "string") return content.length > 0
+  return (
+    Array.isArray(content) &&
+    content.some(
+      (block) =>
+        isRecord(block) &&
+        block["type"] === "text" &&
+        typeof block["text"] === "string" &&
+        block["text"].length > 0
+    )
+  )
 }
 
 function openRunsFor(threadId: string): Array<RunTracker> {
@@ -131,23 +148,16 @@ export class RunTracker {
     this.state?.span.mark("accepted")
   }
 
-  /** A raw protocol event from the `lifecycle` or `messages` channel. */
+  /** An event of the `lifecycle` or `messages` channel, as `useChannelEffect` gives it. */
   event(event: unknown): void {
     if (!isRecord(event) || !isRecord(event["params"])) return
     const params = event["params"]
-    const data = params["data"]
-    if (!isRecord(data)) return
     const method = event["method"]
-    const namespace = params["namespace"]
 
-    if (
-      method === "lifecycle" &&
-      Array.isArray(namespace) &&
-      namespace.length === 0 &&
-      data["event"] === "running"
-    ) {
-      // A run this client did not submit (queued message, another tab, Slack).
-      if (!this.state || this.state.span.ended) this.begin({ joined: true })
+    // A run this client did not submit (queued message, another tab, Slack)
+    // shows first as its output: no event says a run started.
+    if (method === "messages" && (!this.state || this.state.span.ended)) {
+      this.begin({ joined: true })
       this.state?.span.mark("accepted")
     }
 
@@ -166,17 +176,10 @@ export class RunTracker {
     }
 
     if (method !== "messages") return
-
-    if (data["event"] === "message-start") {
-      if (data["role"] === "ai") state.span.mark("generation_start")
-      return
-    }
-
-    if (data["event"] !== "content-block-delta") return
-    const delta = data["delta"]
-    if (!isRecord(delta) || delta["type"] !== "text-delta") return
-    const text = delta["text"]
-    if (typeof text !== "string" || !text) return
+    const [message] = Array.isArray(params["data"]) ? params["data"] : []
+    if (!isRecord(message) || !AI_MESSAGE_TYPES.has(message["type"])) return
+    state.span.mark("generation_start")
+    if (!hasText(message["content"])) return
     state.textDeltas += 1
     state.span.mark("first_text")
   }

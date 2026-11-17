@@ -54,9 +54,9 @@ export function describeSendError(error: unknown): string {
 }
 
 /**
- * Send a user message as a `run.start`. The server starts a run on an idle
- * thread and steers the live run otherwise, so the client never has to know
- * which; holding a message back until a boundary is the queue's job.
+ * Send a user message. The server starts a run on an idle thread and steers
+ * the live run otherwise, so the client never has to know which; holding a
+ * message back until a boundary is the queue's job.
  *
  * The start is not awaited: the SDK stream's promise settles only when the
  * run ends. The optimistic row stands in until the message shows up in the

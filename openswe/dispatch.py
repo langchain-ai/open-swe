@@ -13,20 +13,13 @@ busy-check and the custom store-queue) with one function that uses:
   step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
-- ``stream_resumable=False`` — nothing replays these runs' streams: the dashboard
-  reads a thread from its transcript, so keeping every event in the Agent
-  Server's Redis only costs it memory. A client streaming the thread through the
-  SDK sees a run's events from when it joins.
-- the v3 run shape — the same ``stream_mode`` set, ``stream_subgraphs`` and
-  compatibility marker that ``langgraph_api``'s ``run.start`` command applies
-  when the dashboard submits a run. The server fixes a run's streaming protocol
-  at creation: without the marker a run streams ``values`` only, so the dashboard
-  sees no ``tools`` events or subagent namespaces for externally triggered runs.
+- the server's stream settings (``RunFormat``): every run streams the runs API's
+  events, in the modes a thread view joins any run in, and keeps them for that join.
 """
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Final, Self
@@ -131,7 +124,7 @@ class RunMetadata(BaseModel):
         return metadata
 
 
-# The server's legacy-named compatibility marker selects the v3 stream path.
+# The server's legacy-named marker for the v3 stream path, which every run turns off.
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
@@ -148,51 +141,48 @@ def channel_of(metadata: Mapping[str, object] | None) -> str | None:
     return channel if isinstance(channel, str) and channel else None
 
 
-# The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
-# the REST ``POST /runs`` schema.
-V3_RUN_STREAM_MODES: tuple[str, ...] = (
+# The modes ``@langchain/react`` 2.0's thread view starts its own runs in, which it
+# joins every run in, whoever started it: a join carries only the run's own modes.
+SERVER_STREAM_MODES: Final[tuple[str, ...]] = (
     "values",
     "updates",
-    "messages",
+    "messages-tuple",
     "custom",
-    "tasks",
-    "checkpoints",
+    "tools",
+    "lifecycle",
 )
 
 
 @dataclass(frozen=True)
 class RunFormat:
-    """The events a run streams, fixed by its ``__event_streaming_v2`` marker when it starts.
+    """How a run streams, as the runs API's run-create fields say.
 
-    A protocol v2 run, the format ``/commands`` and its readers take, streams the v3 run
-    shape. Any other run streams as the runs API does, as its client asked: ``fields``
-    are the run-create fields that say how, which only such a run honours. Its marker is
-    sent ``False``, so it never inherits the ``True`` its thread kept from an earlier run.
+    Every run the backend starts streams the runs API's events: its
+    ``__event_streaming_v2`` marker is sent ``False``, so it never inherits the ``True``
+    its thread kept from an earlier run. ``fields`` are the stream fields it starts with:
+    the server's (:data:`SERVER_STREAM`), so any client can join it, unless the client
+    that started it chose its own (:meth:`runs_api`).
     """
 
-    protocol_v2: bool
-    fields: Mapping[str, JsonValue] = field(default_factory=lambda: MappingProxyType({}))
+    fields: Mapping[str, JsonValue]
 
     @classmethod
-    def runs_api(cls, fields: Mapping[str, JsonValue]) -> RunFormat:
-        return cls(protocol_v2=False, fields=MappingProxyType(dict(fields)))
+    def of(cls, fields: Mapping[str, JsonValue]) -> RunFormat:
+        return cls(fields=MappingProxyType(dict(fields)))
 
-    def run_fields(self, *, resumable: bool) -> dict[str, JsonValue]:
-        """The fields a run-create body starts a run in this format with.
-
-        ``resumable`` is whether a protocol v2 run keeps its events for a rejoin; any
-        other run keeps them as its client asked.
-        """
-        if not self.protocol_v2:
-            return dict(self.fields)
-        return {
-            "stream_mode": list(V3_RUN_STREAM_MODES),
-            "stream_subgraphs": True,
-            "stream_resumable": resumable,
-        }
+    def run_fields(self) -> dict[str, JsonValue]:
+        """The fields a run-create body starts a run in this format with."""
+        return dict(self.fields)
 
 
-PROTOCOL_V2: Final = RunFormat(protocol_v2=True)
+SERVER_STREAM: Final = RunFormat.of(
+    {
+        "stream_mode": list(SERVER_STREAM_MODES),
+        "stream_subgraphs": True,
+        # A client joins it from its first event, which only a resumable run keeps.
+        "stream_resumable": True,
+    }
+)
 
 
 async def dispatch_input(
@@ -404,7 +394,6 @@ def prepare_run_config(
     *,
     source: str | None = None,
     origin: str | None = None,
-    run_format: RunFormat = PROTOCOL_V2,
 ) -> LangGraphRunConfig:
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
@@ -429,7 +418,7 @@ def prepare_run_config(
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
     configurable.setdefault("invocation_started_at", started_at)
-    configurable[V3_STREAMING_CONFIG_KEY] = run_format.protocol_v2
+    configurable[V3_STREAMING_CONFIG_KEY] = False
     configurable.setdefault("background_task_completion", False)
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
@@ -487,7 +476,6 @@ async def prepare_durable_run(
     source: str,
     origin: str | None = None,
     as_sender: bool = False,
-    run_format: RunFormat = PROTOCOL_V2,
 ) -> LangGraphRunConfig:
     """The config and metadata a durable run starts with, wherever it is created.
 
@@ -523,9 +511,7 @@ async def prepare_durable_run(
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
-    run_config = prepare_run_config(
-        config, run_metadata, source=source, origin=origin, run_format=run_format
-    )
+    run_config = prepare_run_config(config, run_metadata, source=source, origin=origin)
     if execution_user_id is None:
         configurable = run_config["configurable"]
         if isinstance(configurable, dict):
@@ -550,7 +536,7 @@ async def create_durable_run(
     source_context: SourceContext | None = None,
     origin: str | None = None,
     as_sender: bool = False,
-    run_format: RunFormat = PROTOCOL_V2,
+    run_format: RunFormat = SERVER_STREAM,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
@@ -570,7 +556,6 @@ async def create_durable_run(
         source=source,
         origin=origin,
         as_sender=as_sender,
-        run_format=run_format,
     )
     recorded = RunMetadata.of_run(assistant_id, config)
     create_kwargs: dict[str, Any] = {
@@ -580,7 +565,7 @@ async def create_durable_run(
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
-        **run_format.run_fields(resumable=False),
+        **run_format.run_fields(),
     }
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
@@ -625,7 +610,7 @@ async def dispatch_agent_run(
     source_context: SourceContext | None = None,
     origin: str | None = None,
     as_sender: bool = False,
-    run_format: RunFormat = PROTOCOL_V2,
+    run_format: RunFormat = SERVER_STREAM,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 

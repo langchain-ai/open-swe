@@ -16,7 +16,7 @@ interface StreamOptions {
 
 const mocks = vi.hoisted(() => ({
   streams: [] as Array<StreamOptions>,
-  threadErrors: [] as Array<(error: Error) => void>,
+  error: undefined as Error | undefined,
   onEvent: (_event: unknown) => {},
 }))
 
@@ -34,12 +34,7 @@ vi.mock("@langchain/react", () => ({
     return {
       threadId: options.threadId,
       isLoading: true,
-      getThread: () => ({
-        onError: (listener: (error: Error) => void) => {
-          mocks.threadErrors.push(listener)
-          return () => {}
-        },
-      }),
+      error: mocks.error,
     }
   },
 }))
@@ -66,7 +61,7 @@ function lastStream(): StreamOptions {
 
 beforeEach(() => {
   mocks.streams.length = 0
-  mocks.threadErrors.length = 0
+  mocks.error = undefined
 })
 
 afterEach(() => {
@@ -136,7 +131,8 @@ describe("useAgentThreadStream", () => {
     act(() => vi.advanceTimersByTime(3_000))
     expect(view.result.current.connection.status).toBe("reconnecting")
 
-    act(() => mocks.threadErrors[0]?.(new Error("stream closed")))
+    mocks.error = new Error("stream closed")
+    view.rerender()
     expect(view.result.current.connection).toEqual({ status: "live" })
   })
 })

@@ -1,23 +1,19 @@
 """Pass-through endpoints between the dashboard and the LangGraph HTTP API."""
 
-import asyncio
-import copy
 import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from contextlib import nullcontext
-from typing import Any
 
 import httpx
 import httpx2
 from fastapi import HTTPException
-from langgraph_sdk.errors import NotFoundError
 from pydantic import JsonValue
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import DashboardClient, DashboardRunTimeline, DashboardSendTrace
-from openswe.dispatch import PROTOCOL_V2, RunFormat, channel_of, prepare_durable_run
+from openswe.dispatch import channel_of, prepare_durable_run
 from openswe.plugins.records import PluginChat
 from openswe.threads.access import (
     _authorized_thread_metadata,
@@ -38,14 +34,13 @@ from openswe.threads.runs import (
     _command_prompt_text,
     _enrich_run_start_command,
     _enrich_system_run_start_command,
-    _extract_run_id_from_command_response,
     _SlackWebHandoff,
     offload_requested,
     queue_follow_up_run,
     steer_running_thread,
 )
-from openswe.threads.runtimes import MdaRun
-from openswe.threads.store import ACTING_COMMANDS, POSTING_COMMANDS, THREADS, CommandReply
+from openswe.threads.start_request import RunRefused, SentRun, StartRequest
+from openswe.threads.store import POSTING_COMMANDS, THREADS, CommandReply
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -58,7 +53,6 @@ from openswe.transcript.turns import fail_unstarted_turn, steer_target
 from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
-from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -145,7 +139,10 @@ async def proxy_dashboard_thread_commands(
     client: DashboardClient = DashboardClient.OTHER,
     submitted_at: str | None = None,
 ) -> tuple[int, bytes, str | None]:
-    """Forward one command, enriched for whoever sent it.
+    """Answer one command, enriched for whoever sent it.
+
+    ``run.start`` and ``input.respond`` start an old-format run through
+    :class:`ThreadSend`; the rest are forwarded to the thread's runtime.
 
     ``principal`` is how a machine gets in. Without one the sender is the person
     named by ``login``, which is what the dashboard and the agent's own tools pass.
@@ -163,46 +160,69 @@ async def proxy_dashboard_thread_commands(
         raise HTTPException(400, "command body must be a JSON object")
 
     method = parsed.get("method")
-    if method == "run.start":
-        return await ThreadSend(
-            thread_id,
-            principal,
-            parsed,
-            relayed_from=relayed_from,
-            relayed_origin=relayed_origin,
-            client=client,
-            received_at_ms=received_at_ms,
-            submitted_at=submitted_at,
-        ).start()
+    raw_params = parsed.get("params")
+    params: dict[str, JsonValue] = raw_params if isinstance(raw_params, dict) else {}
+    if method != "run.start":
+        # Input commands on admin threads require an admin; other threads keep
+        # unattributed commands owner-only. Checked before anything is read off them.
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            raise HTTPException(404, "thread not found")
+        metadata = dict(thread.metadata)
+        post_command = method in POSTING_COMMANDS
+        if post_command:
+            await principal.assert_can_post(metadata)
+        else:
+            principal.assert_can_read(metadata)
+        if not (post_command and metadata.get("admin_thread") is True):
+            principal.assert_can_read(metadata)
+        if principal.machine:
+            raise HTTPException(403, "a machine principal may only start runs")
 
-    # Input commands on admin threads require an admin; other threads keep
-    # unattributed commands such as ``input.respond`` owner-only.
-    thread = await THREADS.get(thread_id)
-    if thread is None:
-        raise HTTPException(404, "thread not found")
-    metadata = dict(thread.metadata)
-    post_command = method in POSTING_COMMANDS
-    if post_command:
-        await principal.assert_can_post(metadata)
-    else:
-        principal.assert_can_read(metadata)
-    if not (post_command and metadata.get("admin_thread") is True):
-        principal.assert_can_read(metadata)
-    params = parsed.get("params")
-    if isinstance(params, dict):
-        # Only a ``run.start`` takes these.
-        params.pop(RELAYED_FROM_KEY, None)
-        params.pop("multitask_strategy", None)
-    if principal.machine:
-        raise HTTPException(403, "a machine principal may only start runs")
+    if method in {"run.start", "input.respond"}:
+        command_id = parsed.get("id", 0)
+        try:
+            start = (
+                StartRequest.of_command(params)
+                if method == "run.start"
+                else StartRequest.answering(params)
+            )
+            sent = await ThreadSend(
+                thread_id,
+                principal,
+                start,
+                relayed_from=relayed_from,
+                relayed_origin=relayed_origin,
+                client=client,
+                received_at_ms=received_at_ms,
+                submitted_at=submitted_at,
+            ).send()
+        except RunRefused as refused:
+            if refused.code is None:
+                return CommandReply.json(refused.status_code, {"detail": refused.detail})
+            return CommandReply.json(
+                200,
+                {
+                    "type": "error",
+                    "id": command_id,
+                    "error": refused.code,
+                    "message": refused.detail,
+                },
+            )
+        return CommandReply.json(
+            200,
+            {
+                "id": command_id,
+                "type": "success",
+                "result": sent.reply() if method == "run.start" else {},
+            },
+        )
 
-    sender = (
-        await _sender_user_id(principal, login, metadata)
-        if method in ACTING_COMMANDS and not relayed_from
-        else None
-    )
+    # Only a ``run.start`` takes these.
+    params.pop(RELAYED_FROM_KEY, None)
+    params.pop("multitask_strategy", None)
     try:
-        return await THREADS.command(thread_id, json.dumps(parsed).encode(), user_id=sender)
+        return await THREADS.command(thread_id, json.dumps(parsed).encode())
     except Exception as exc:
         logger.exception(
             "Delivering a thread command failed",
@@ -212,22 +232,19 @@ async def proxy_dashboard_thread_commands(
                 "error_type": type(exc).__name__,
             },
         )
-        return CommandReply(
-            500,
-            json.dumps({"detail": "the command could not be delivered"}).encode(),
-            "application/json",
-        )
+        return CommandReply.json(500, {"detail": "the command could not be delivered"})
 
 
 class ThreadSend:
     """One send to a thread: a message that starts a run, steers into the live one or
     waits behind it as a queued run, or an answer to the thread's interrupt.
 
-    ``/commands`` and the runs routes start every message here, so who may post,
-    enrichment and attribution, steering and queueing, the transcript turn and the
-    run's bookkeeping can't drift apart between them; only the format the run streams
-    in (``run_format``) differs. A thread the client minted the id of is created by its
-    first message, unless ``creates`` is off, which leaves a missing thread a 404.
+    ``/commands``, the runs routes and the backend's own senders start every run here, so
+    who may post, enrichment and attribution, steering and queueing, the transcript turn
+    and the run's bookkeeping can't drift apart between them. Each run is old-format, in
+    the stream ``request`` asks for (:class:`StartRequest`). A thread the client minted the id
+    of is created by its first message, unless ``creates`` is off, which leaves a missing
+    thread a 404.
 
     ``principal`` is who sent it: a person, or a machine. ``relayed_from`` names the
     agent thread that sent the message on a person's behalf. ``client``,
@@ -238,9 +255,8 @@ class ThreadSend:
         self,
         thread_id: str,
         principal: Principal,
-        command: dict[str, JsonValue],
+        request: StartRequest,
         *,
-        run_format: RunFormat = PROTOCOL_V2,
         creates: bool = True,
         relayed_from: str | None = None,
         relayed_origin: RunOrigin | None = None,
@@ -253,8 +269,7 @@ class ThreadSend:
         # A machine has no login; the enrichment that would need one is the person's.
         self.login = principal.login or ""
         self.email = principal.email
-        self.command = command
-        self.run_format = run_format
+        self.request = request
         self.creates = creates
         self.relayed_from = relayed_from
         self.relayed_origin = relayed_origin
@@ -264,8 +279,14 @@ class ThreadSend:
             submitted_at, self.received_at_ms
         )
 
-    async def start(self) -> CommandReply:
-        """Start the message, answered as protocol v2 answers a ``run.start``."""
+    async def send(self) -> SentRun:
+        """Send it, and say which run it ended up in. A run that can't start raises
+        :class:`RunRefused`."""
+        if self.request.command is not None:
+            return await self._answer(self.request.command)
+        return await self._start()
+
+    async def _start(self) -> SentRun:
         # The dashboard mints the thread id client-side and submits straight away,
         # so the very first message may target a thread that doesn't exist yet. It
         # lazily creates + stamps + owns the thread (in ``_enrich_run_start_command``).
@@ -284,30 +305,29 @@ class ThreadSend:
             metadata_run_status = metadata.get("latest_run_status")
             thread_busy = thread.status == "busy" or metadata_run_status in {"pending", "running"}
 
-        params = self._params()
-        # The client's queue-or-steer choice rides the run's multitask strategy.
-        # LangGraph's commands endpoint does not take it, so it is consumed here.
-        enqueue = params.pop("multitask_strategy", None) == "enqueue"
+        message = self.request.as_command(relayed_from=self.relayed_from)
+        params = message["params"]
+        assert isinstance(params, dict)
         mentions = ThreadMentions(
             self.thread_id,
             self.login,
-            _command_message_id(params) or str(self.command.get("id") or uuid.uuid7()),
+            _command_message_id(params) or str(uuid.uuid7()),
             _command_prompt_text(_command_message_content(params))
             if not self.principal.machine and not self.relayed_from
             else "",
         )
         offloading = offload_requested(params)
         if thread_busy:
-            handled = await self._follow_up(metadata, enqueue=enqueue, offloading=offloading)
+            sent = await self._follow_up(
+                message,
+                metadata,
+                enqueue=self.request.multitask_strategy == "enqueue",
+                offloading=offloading,
+            )
             mentions.dispatch()
-            return CommandReply(200, json.dumps(handled).encode(), "application/json")
-        # Enrichment rewrites the command in place; a start that loses the thread
-        # to another run is queued from the command as sent.
-        requeueable = (
-            copy.deepcopy(self.command)
-            if not creating and not self.principal.machine and not offloading
-            else None
-        )
+            return sent
+        # A start that loses the thread to another run is queued as it was sent.
+        requeueable = not creating and not self.principal.machine and not offloading
 
         run_input = params.get("input")
         send_trace = await DashboardSendTrace.open(
@@ -324,53 +344,30 @@ class ThreadSend:
                 else RunOrigin.DASHBOARD
             ),
         )
-        enriched = await self._build(send_trace, metadata, creating=creating)
-        sender = (
-            await _sender_user_id(self.principal, self.login, metadata)
-            if not self.relayed_from
-            else None
-        )
-        reply = await self._deliver(enriched, send_trace, sender=sender)
-
+        built = await self._build(message, send_trace, metadata, creating=creating)
         try:
-            response_payload = json.loads(reply.content) if reply.content else None
-        except json.JSONDecodeError:
-            response_payload = None
-        run_id = _extract_run_id_from_command_response(response_payload)
-        started = (
-            reply.status in {200, 202, 204}
-            and isinstance(response_payload, dict)
-            and response_payload.get("type") == "success"
-            and run_id is not None
-        )
-        # The store answers a start the runtime refused with a 200 carrying an error envelope.
-        refused = reply.status >= 400 or (
-            isinstance(response_payload, dict) and response_payload.get("type") == "error"
-        )
+            run_id = await self._deliver(built, send_trace, sender=await self._sender(metadata))
+        except RunRefused as refused:
+            if send_trace is not None:
+                send_trace.fail(f"The run did not start (HTTP {refused.status_code})")
+            if requeueable:
+                requeued = await self._queue_if_thread_turned_busy()
+                if requeued is not None:
+                    logger.info(
+                        "Queued a start refused for a run begun since the busy check",
+                        extra={"thread_id": self.thread_id, "status_code": refused.status_code},
+                    )
+                    mentions.dispatch()
+                    return requeued
+            await self._fail_requested_turn(built, refused.status_code)
+            raise
         if send_trace is not None:
-            if started:
-                send_trace.end_commands()
-            else:
-                send_trace.fail(f"The run did not start (HTTP {reply.status})")
-        if requeueable is not None and not started:
-            requeued = await self._queue_if_thread_turned_busy(requeueable)
-            if requeued is not None:
-                mentions.dispatch()
-                return CommandReply(200, json.dumps(requeued).encode(), "application/json")
-        if refused:
-            await self._fail_requested_turn(enriched, reply)
-        if not started:
-            return reply
+            send_trace.end_commands()
 
         if not self.principal.machine and chats_beside_plugin(metadata):
             user = await User.for_person(ThreadIdentity(self.login).person)
             if user:
-                params = enriched.get("params")
-                await PluginChat.deliver_input(
-                    self.thread_id,
-                    user.id,
-                    params.get("input") if isinstance(params, dict) else None,
-                )
+                await PluginChat.deliver_input(self.thread_id, user.id, built.input)
         if not creating and not self.relayed_from:
             await _SlackWebHandoff(self.thread_id, metadata).notify()
         mentions.dispatch()
@@ -393,16 +390,14 @@ class ThreadSend:
                 exc_info=True,
                 extra={"thread_id": self.thread_id, "run_id": run_id},
             )
-        return reply
+        return SentRun(run_id=run_id)
 
-    async def answer(self, command: Mapping[str, JsonValue]) -> CommandReply:
-        """Answer the thread's interrupt with a run's ``command``, as an ``input.respond`` on
-        ``/commands`` does, the run in a runs API format.
+    async def _answer(self, command: dict[str, JsonValue]) -> SentRun:
+        """Answer the thread's interrupt with a run's ``command``.
 
-        The same people may answer as there, and no message joins the transcript. The run
-        that resumes the thread is its sender's, made for them as a message's would be.
+        The same people may answer as may post, and no message joins the transcript. The
+        run that resumes the thread is its sender's, made for them as a message's would be.
         """
-        run_format = RunFormat.runs_api({**self.run_format.fields, "command": dict(command)})
         thread = await THREADS.get(self.thread_id)
         if thread is None:
             raise HTTPException(404, "thread not found")
@@ -420,35 +415,33 @@ class ThreadSend:
             agent_version_metadata(),
             source=DASHBOARD_SOURCE,
             as_sender=True,
-            run_format=run_format,
         )
-        start = {
-            "method": "run.start",
-            "params": {
-                "assistant_id": _ASSISTANT_ID,
-                "input": None,
-                "config": config,
-                "metadata": config["metadata"],
-            },
-        }
-        sender = await _sender_user_id(self.principal, self.login, metadata)
-        return await THREADS.start_run(
-            self.thread_id, json.dumps(start).encode(), run_format, user_id=sender
+        run_id = await THREADS.start_run(
+            self.thread_id,
+            StartRequest(
+                configurable=config["configurable"],
+                metadata=config["metadata"],
+                command=command,
+                run_format=self.request.run_format,
+            ),
+            user_id=await self._sender(metadata),
         )
+        return SentRun(run_id=run_id)
 
-    def _params(self) -> dict[str, JsonValue]:
-        """The command's params, naming the relaying thread only when the caller did."""
-        raw = self.command.get("params")
-        params = raw if isinstance(raw, dict) else {}
-        params.pop(RELAYED_FROM_KEY, None)
+    async def _sender(self, metadata: Mapping[str, object]) -> str | None:
+        """The Open SWE user the send acts as on a channel's thread: none when relayed."""
         if self.relayed_from:
-            params[RELAYED_FROM_KEY] = self.relayed_from
-            self.command["params"] = params
-        return params
+            return None
+        return await _sender_user_id(self.principal, self.login, metadata)
 
     async def _follow_up(
-        self, metadata: dict[str, JsonValue], *, enqueue: bool, offloading: bool
-    ) -> dict[str, JsonValue]:
+        self,
+        message: dict[str, JsonValue],
+        metadata: dict[str, JsonValue],
+        *,
+        enqueue: bool,
+        offloading: bool,
+    ) -> SentRun:
         """Steer a message sent while a run is live into it, or queue it behind it."""
         if offloading:
             raise HTTPException(409, "offloading requires an idle conversation")
@@ -467,38 +460,39 @@ class ThreadSend:
             return await steer_running_thread(
                 self.thread_id,
                 self.login,
-                self.command,
+                message,
                 metadata=metadata,
                 turn=turn,
                 email=self.email,
                 relayed_origin=self.relayed_origin,
-                run_format=self.run_format,
+                run_format=self.request.run_format,
             )
         return await queue_follow_up_run(
             self.thread_id,
             self.login,
-            self.command,
+            message,
             metadata=metadata,
             email=self.email,
             relayed_origin=self.relayed_origin,
-            run_format=self.run_format,
+            run_format=self.request.run_format,
         )
 
     async def _build(
         self,
+        message: dict[str, JsonValue],
         send_trace: DashboardSendTrace | None,
         metadata: dict[str, JsonValue],
         *,
         creating: bool,
-    ) -> dict[str, JsonValue]:
-        """The command enriched for whoever sent it, with what times the send."""
+    ) -> StartRequest:
+        """The run built for whoever sent the message, with what times the send."""
         try:
             with send_trace.stage("build_run") if send_trace is not None else nullcontext():
                 if self.principal.machine:
                     enriched = await _enrich_system_run_start_command(
                         self.thread_id,
                         self.principal,
-                        self.command,
+                        message,
                         metadata=metadata,
                         creating=creating,
                     )
@@ -506,7 +500,7 @@ class ThreadSend:
                     enriched = await _enrich_run_start_command(
                         self.thread_id,
                         self.login,
-                        self.command,
+                        message,
                         metadata=metadata,
                         creating=creating,
                         email=self.email,
@@ -516,42 +510,34 @@ class ThreadSend:
             if send_trace is not None:
                 send_trace.fail(f"The run could not be built ({type(exc).__name__})")
             raise
-        params = enriched.get("params")
-        if isinstance(params, dict):
-            run_metadata = params.get("metadata")
-            if not isinstance(run_metadata, dict):
-                run_metadata = {}
-                params["metadata"] = run_metadata
-            # The run's completion times the send from these (``DashboardRunTimeline``).
-            run_metadata[DashboardRunTimeline.RECEIVED_AT_KEY] = self.received_at_ms
-            run_metadata[DashboardRunTimeline.CLIENT_KEY] = self.client.value
-            if self.submitted_at_ms is not None:
-                run_metadata[DashboardRunTimeline.SUBMITTED_AT_KEY] = self.submitted_at_ms
-            if send_trace is not None:
-                invocation_id = run_metadata.get("invocation_id")
-                await send_trace.adopt(
-                    thread_id=self.thread_id,
-                    invocation_id=invocation_id if isinstance(invocation_id, str) else None,
-                )
-                run_metadata.update(send_trace.run_metadata())
-        return enriched
+        built = self.request.built_from(enriched)
+        # The run's completion times the send from these (``DashboardRunTimeline``).
+        built.metadata[DashboardRunTimeline.RECEIVED_AT_KEY] = self.received_at_ms
+        built.metadata[DashboardRunTimeline.CLIENT_KEY] = self.client.value
+        if self.submitted_at_ms is not None:
+            built.metadata[DashboardRunTimeline.SUBMITTED_AT_KEY] = self.submitted_at_ms
+        if send_trace is not None:
+            invocation_id = built.metadata.get("invocation_id")
+            await send_trace.adopt(
+                thread_id=self.thread_id,
+                invocation_id=invocation_id if isinstance(invocation_id, str) else None,
+            )
+            built.metadata.update(send_trace.run_metadata())
+        return built
 
     async def _deliver(
-        self,
-        enriched: dict[str, JsonValue],
-        send_trace: DashboardSendTrace | None,
-        *,
-        sender: str | None,
-    ) -> CommandReply:
+        self, built: StartRequest, send_trace: DashboardSendTrace | None, *, sender: str | None
+    ) -> str:
         try:
             with send_trace.stage("start_run") if send_trace is not None else nullcontext():
                 return await THREADS.start_run(
                     self.thread_id,
-                    json.dumps(enriched).encode(),
-                    self.run_format,
+                    built,
                     user_id=sender,
                     trace_headers=send_trace.headers() if send_trace is not None else None,
                 )
+        except RunRefused:
+            raise
         except Exception as exc:
             logger.exception(
                 "Delivering a thread command failed",
@@ -561,23 +547,14 @@ class ThreadSend:
                     "error_type": type(exc).__name__,
                 },
             )
-            return CommandReply(
+            raise RunRefused(
                 500,
-                json.dumps(
-                    {
-                        "detail": (
-                            "No connection was available to start the message. Try sending it again."
-                            if isinstance(exc, (httpx.PoolTimeout, httpx2.PoolTimeout))
-                            else "the command could not be delivered"
-                        )
-                    }
-                ).encode(),
-                "application/json",
-            )
+                "No connection was available to start the message. Try sending it again."
+                if isinstance(exc, (httpx.PoolTimeout, httpx2.PoolTimeout))
+                else "the command could not be delivered",
+            ) from exc
 
-    async def _queue_if_thread_turned_busy(
-        self, command: dict[str, JsonValue]
-    ) -> dict[str, JsonValue] | None:
+    async def _queue_if_thread_turned_busy(self) -> SentRun | None:
         """Queue a start that a run begun after the busy check made LangGraph refuse.
 
         The completion hook starts a run for follow-ups steered into a run that was
@@ -597,27 +574,22 @@ class ThreadSend:
         return await queue_follow_up_run(
             self.thread_id,
             self.login,
-            command,
+            self.request.as_command(relayed_from=self.relayed_from),
             metadata=dict(thread.metadata),
             email=self.email,
             relayed_origin=self.relayed_origin,
-            run_format=self.run_format,
+            run_format=self.request.run_format,
         )
 
-    async def _fail_requested_turn(
-        self, enriched: dict[str, JsonValue], reply: CommandReply
-    ) -> None:
+    async def _fail_requested_turn(self, built: StartRequest, status: int) -> None:
         """Record a failed start and close its turn so later follow-ups cannot join it."""
-        params = enriched.get("params")
-        config = params.get("config") if isinstance(params, dict) else None
-        configurable = config.get("configurable") if isinstance(config, dict) else None
-        turn_id = configurable.get("transcript_turn_id") if isinstance(configurable, dict) else None
+        turn_id = built.configurable.get("transcript_turn_id")
         logger.warning(
             "Dashboard run start failed",
             extra={
                 "thread_id": self.thread_id,
                 "turn_id": turn_id,
-                "status_code": reply.status,
+                "status_code": status,
             },
         )
         if not isinstance(turn_id, str):
@@ -684,93 +656,6 @@ async def proxy_dashboard_thread_history(
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
-
-
-async def _get_thread_tolerating_create_race(client: Any, thread_id: str) -> dict[str, Any] | None:
-    """Fetch a thread, tolerating the brief window where a concurrent
-    ``run.start`` on this same thread is still lazily creating it.
-
-    The SDK's queue adapter only enqueues once the client believes a run is
-    already active on ``thread_id`` — meaning a ``run.start`` dispatch for
-    that very thread just went out. On a brand-new thread, that dispatch is
-    what creates the thread row; a fast enough follow-up can reach here
-    before it lands. Retry briefly rather than 404 what should resolve
-    within one HTTP round trip.
-
-    Only retries a genuine ``NotFoundError`` (404). Anything else — an
-    outage, a timeout, an auth failure — is a real error, not "not found
-    yet", and must propagate instead of being silently retried and then
-    reported as a 404.
-    """
-    for delay in (0.0, 0.15, 0.3, 0.6):
-        if delay:
-            await asyncio.sleep(delay)
-        try:
-            return await client.threads.get(thread_id)
-        except NotFoundError:
-            continue
-    return None
-
-
-async def proxy_dashboard_thread_run_enqueue(
-    thread_id: str,
-    login: str,
-    body: bytes,
-    *,
-    email: str | None = None,
-    content_type: str = "application/json",
-) -> dict[str, Any]:
-    """Create a durable, attributed ``multitask_strategy="enqueue"`` run.
-
-    Backs the "stream"-kind `ThreadSource`'s `AgentServerQueueAdapter.enqueue()`,
-    which calls the raw ``client.runs.create()`` REST endpoint directly
-    instead of the ``commands`` protocol. Reshapes that call into a
-    ``run.start`` command and hands it to ``queue_follow_up_run`` — the same
-    function the ``commands`` proxy's queue branch uses — so a queued
-    follow-up here gets identical attribution, dedup, and transcript
-    bookkeeping. Always enqueues: the raw runs API has no "steer" concept,
-    and the client's own ``multitask_strategy`` (if any) is ignored — this
-    endpoint must not become a backdoor around ``commands``'s busy-conflict
-    check.
-    """
-    require_json_content_type(content_type)
-    try:
-        body_dict = json.loads(body)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(400, "run body must be a JSON object") from exc
-    if not isinstance(body_dict, dict):
-        raise HTTPException(400, "run body must be a JSON object")
-
-    client = langgraph_client()
-    thread = await _get_thread_tolerating_create_race(client, thread_id)
-    if thread is None:
-        raise HTTPException(404, "thread not found")
-    metadata = thread_metadata(thread)
-    await _assert_thread_postable(metadata, login, email)
-
-    command = {
-        "method": "run.start",
-        "params": {
-            "input": body_dict.get("input"),
-            "config": body_dict.get("config"),
-            "metadata": body_dict.get("metadata"),
-        },
-    }
-    mentions = ThreadMentions(
-        thread_id,
-        login,
-        _command_message_id(command["params"]) or str(uuid.uuid7()),
-        _command_prompt_text(_command_message_content(command["params"])),
-    )
-    queued = await queue_follow_up_run(thread_id, login, command, metadata=metadata, email=email)
-    run_id = queued.get("result", {}).get("run_id") if isinstance(queued, dict) else None
-    if not isinstance(run_id, str) or not run_id:
-        raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
-    mentions.dispatch()
-    # The raw runs REST caller expects a `Run` object back, not the
-    # `commands` protocol's `{id, type, result}` envelope `queue_follow_up_run`
-    # returns — re-fetch the run it just created to answer in that shape.
-    return MdaRun.client_view(await client.runs.get(thread_id, run_id))
 
 
 async def proxy_dashboard_thread_run_cancel(

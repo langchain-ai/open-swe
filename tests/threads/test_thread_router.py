@@ -20,6 +20,7 @@ from openswe.threads import index, proxy, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
 from openswe.threads.local_writes import LocalAgentServerWriteError
 from openswe.threads.principals import Principal
+from openswe.threads.start_request import StartRequest
 from openswe.users.models import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -380,39 +381,32 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     assert sent["if_not_exists"] == "create"
 
 
-@pytest.mark.parametrize(
-    ("path", "body"),
-    [
-        ("/runs", {"assistant_id": "agent"}),
-        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
-    ],
-)
+@pytest.mark.parametrize("backend", [False, True], ids=["rest", "backend"])
 async def test_a_stop_while_a_run_starts_interrupts_it_once_mda_has_it(
-    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: dict[str, JsonValue]
+    monkeypatch: pytest.MonkeyPatch, secret: None, backend: bool
 ) -> None:
     # Working out the run takes a while, and a stop meanwhile finds no run to cancel.
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
     harness.while_starting = lambda: index.update(THREAD, {index.STOPPED_AT_KEY: runtimes.now_ms()})
 
-    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
+    if backend:
+        await store.THREADS.start_run(THREAD, StartRequest(input={}))
+    else:
+        status, _ = await harness.request(
+            "POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"}
+        )
+        assert status == 200
 
-    assert status == 200
     assert [path for path, _ in harness.forwarded] == [
         f"/threads/{THREAD}/runs",
         f"/threads/{THREAD}/runs/remote-run/cancel",
     ]
 
 
-@pytest.mark.parametrize(
-    ("path", "body"),
-    [
-        ("/runs", {"assistant_id": "agent"}),
-        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
-    ],
-)
+@pytest.mark.parametrize("backend", [False, True], ids=["rest", "backend"])
 async def test_a_run_is_created_once_metadata_written_while_it_starts_reached_mda(
-    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: dict[str, JsonValue]
+    monkeypatch: pytest.MonkeyPatch, secret: None, backend: bool
 ) -> None:
     # MDA's run create updates the thread's row, and waits only briefly for a copy holding it.
     harness = _Harness(monkeypatch)
@@ -427,9 +421,14 @@ async def test_a_run_is_created_once_metadata_written_while_it_starts_reached_md
     monkeypatch.setattr(harness.runtimes.mda, "update", slow_copy)
     harness.while_starting = lambda: store.THREADS.update(THREAD, {"thread_settings": {}})
 
-    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
+    if backend:
+        await store.THREADS.start_run(THREAD, StartRequest(input={}))
+    else:
+        status, _ = await harness.request(
+            "POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"}
+        )
+        assert status == 200
 
-    assert status == 200
     assert harness.metadata_at_create == [{"thread_settings": {}}]
 
 
@@ -438,8 +437,6 @@ async def test_a_run_is_created_once_metadata_written_while_it_starts_reached_md
     [
         ("/runs", {"assistant_id": "agent"}),
         ("/runs/crons", {"assistant_id": "agent", "schedule": "* * * * *"}),
-        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
-        ("/commands", {"id": 1, "method": "input.respond", "params": {}}),
         ("/copy", {}),
     ],
 )
@@ -538,12 +535,11 @@ async def test_a_new_thread_runs_on_mda(
     }
 
 
-@pytest.mark.parametrize("command", [False, True], ids=["rest", "command"])
 @pytest.mark.parametrize(
     "permalink", ["https://langchain.slack.com/archives/C123/p1234567890000000", ""]
 )
 async def test_runs_include_the_current_slack_thread_link(
-    monkeypatch: pytest.MonkeyPatch, secret: None, command: bool, permalink: str
+    monkeypatch: pytest.MonkeyPatch, secret: None, permalink: str
 ) -> None:
     harness = _Harness(monkeypatch)
     await harness.request("POST", "/threads", {"thread_id": THREAD})
@@ -558,14 +554,7 @@ async def test_runs_include_the_current_slack_thread_link(
         "metadata": {"kind": "follow_up"},
         "config": {"metadata": {"invocation_id": "turn-1"}},
     }
-    if command:
-        status, _ = await harness.request(
-            "POST",
-            f"/threads/{THREAD}/commands",
-            {"id": 1, "method": "run.start", "params": params},
-        )
-    else:
-        status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
+    status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
 
     assert status == 200
     [(_, sent)] = harness.forwarded
@@ -651,10 +640,9 @@ async def _channel_thread(harness: _Harness) -> None:
     [
         ("/runs", {"assistant_id": "agent", "input": {}}),
         ("/runs/run-1/cancel", None),
-        ("/commands", {"id": 1, "method": "input.respond", "params": {}}),
     ],
 )
-async def test_a_channel_thread_takes_runs_stops_and_answers_as_its_conversation(
+async def test_a_channel_thread_takes_runs_and_stops_as_its_conversation(
     monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: JsonValue
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
@@ -751,23 +739,31 @@ async def test_no_handler_thread_is_made_without_the_service_secret(
     assert harness.forwarded == []
 
 
-async def test_a_channel_thread_takes_a_run_started_by_command(
+async def test_a_channel_thread_takes_a_backend_run_as_its_conversation(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
-    command = {"id": 7, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
 
-    status, reply = await harness.request("POST", f"/threads/{THREAD}/commands", command)
+    run_id = await store.THREADS.start_run(THREAD, StartRequest(input={}))
 
-    assert (status, reply) == (
-        200,
-        {"type": "success", "id": 7, "result": {"run_id": "remote-run"}},
-    )
+    assert run_id == "remote-run"
     assert harness.acted_as == [AS_THE_CONVERSATION]
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "busy"
+
+
+async def test_the_v3_commands_route_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing in the backend sends its commands; forwarded, they would reach MDA's v3."""
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
+
+    status, _ = await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    assert status == 404
+    assert harness.forwarded == [] and harness.reached_here == []
 
 
 Resolved = list[tuple[str | None, str | None, ResolvePrincipalIdentity]]
@@ -839,25 +835,20 @@ async def test_a_persons_run_on_a_channel_thread_acts_as_them(
 
 
 @pytest.mark.parametrize(
-    "command",
-    [
-        {"id": 7, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}},
-        {"id": 7, "method": "input.respond", "params": {}},
-    ],
+    "start",
+    [StartRequest(input={}), StartRequest(command={"resume": {"interrupt-1": "yes"}})],
+    ids=["message", "answer"],
 )
-async def test_a_persons_command_on_a_channel_thread_acts_as_them(
-    monkeypatch: pytest.MonkeyPatch,
-    secret: None,
-    agent_auth: Resolved,
-    command: dict[str, JsonValue],
+async def test_a_persons_send_on_a_channel_thread_acts_as_them(
+    monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved, start: StartRequest
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
 
-    reply = await store.THREADS.command(THREAD, json.dumps(command).encode(), user_id=USER_ID)
+    run_id = await store.THREADS.start_run(THREAD, start, user_id=USER_ID)
 
-    assert reply.status == 200
+    assert run_id == "remote-run"
     assert harness.acted_as == [AS_THE_PERSON]
 
 
@@ -885,9 +876,9 @@ async def test_a_run_attributed_to_a_person_they_did_not_start_is_the_channels_o
     assert agent_auth == []
 
 
-@pytest.mark.parametrize("command", [False, True], ids=["rest", "command"])
+@pytest.mark.parametrize("backend", [False, True], ids=["rest", "backend"])
 async def test_without_their_principal_a_persons_run_is_the_channels_own(
-    monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved, command: bool
+    monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved, backend: bool
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
@@ -908,16 +899,18 @@ async def test_without_their_principal_a_persons_run_is_the_channels_own(
         },
     }
 
-    if command:
-        start = {"id": 7, "method": "run.start", "params": params}
-        reply = await store.THREADS.command(THREAD, json.dumps(start).encode(), user_id=USER_ID)
-        status = reply.status
+    if backend:
+        metadata = params["metadata"]
+        assert isinstance(metadata, dict)
+        await store.THREADS.start_run(
+            THREAD, StartRequest(input={}, metadata=dict(metadata)), user_id=USER_ID
+        )
     else:
         status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
+        assert status == 200
 
     # Never the user's id unresolved, which MDA would take for another person, and
     # never a token that names their connections for the channel's principal.
-    assert status == 200
     assert harness.acted_as == [AS_THE_CONVERSATION]
     assert _acts_as(harness) is None
     # Their own message started it, so its model calls still bill them.
@@ -980,8 +973,6 @@ async def test_stopping_every_run_on_a_channel_thread_acts_as_its_conversation(
     [
         ("POST", "/state", {"values": {"messages": []}}),
         ("DELETE", "/runs/run-1", None),
-        ("POST", "/commands", {"id": 1, "method": "input.inject", "params": {}}),
-        ("POST", "/commands", {"id": 1, "method": "state.fork", "params": {}}),
     ],
 )
 async def test_a_channel_thread_refuses_other_writes_without_acting_as_its_conversation(
@@ -1020,12 +1011,6 @@ async def test_without_the_service_secret_a_channel_thread_refuses_writes(
         ("GET", "/state", None, False),
         ("GET", "/runs", None, False),
         ("POST", "/history", {"limit": 10}, False),
-        (
-            "POST",
-            "/commands",
-            {"id": 1, "method": "subscription.subscribe", "params": {}},
-            False,
-        ),
         # Held open while someone watches, so kept off the pool runs start and stop on.
         ("GET", "/runs/run-1/join", None, True),
         ("POST", "/stream/events", {"channels": ["lifecycle"]}, True),
@@ -1094,7 +1079,7 @@ async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPa
 
 
 @_GRAPHS
-async def test_a_run_started_by_command_on_mda_settles_through_the_completion_webhook(
+async def test_a_backend_run_on_mda_settles_through_the_completion_webhook(
     monkeypatch: pytest.MonkeyPatch, secret: None, metadata: dict[str, JsonValue], graph: str
 ) -> None:
     from openswe import dispatch
@@ -1104,9 +1089,8 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     )
     harness = _Harness(monkeypatch)
     await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": metadata})
-    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
 
-    await harness.request("POST", f"/threads/{THREAD}/commands", command)
+    await store.THREADS.start_run(THREAD, StartRequest(input={}))
 
     indexed = await index.get(THREAD)
     assert indexed is not None and (indexed.runtime, indexed.status) == ("mda", "busy")
@@ -1114,24 +1098,6 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     assert path == f"/threads/{THREAD}/runs"
     assert sent["assistant_id"] == graph
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
-
-
-@pytest.mark.parametrize(
-    ("params", "resumable"),
-    [({}, True), ({"stream_resumable": False}, False)],
-    ids=["streaming-client", "transcript-reader"],
-)
-async def test_a_run_started_by_command_keeps_its_stream_unless_the_client_opts_out(
-    monkeypatch: pytest.MonkeyPatch, secret: None, params: dict[str, JsonValue], resumable: bool
-) -> None:
-    harness = _Harness(monkeypatch)
-    await harness.request("POST", "/threads", {"thread_id": THREAD})
-    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", **params}}
-
-    await harness.request("POST", f"/threads/{THREAD}/commands", command)
-
-    [(_, sent)] = harness.forwarded
-    assert sent["stream_resumable"] is resumable
 
 
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:

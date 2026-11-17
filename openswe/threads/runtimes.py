@@ -48,6 +48,7 @@ from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.threads.start_request import RunRefused, StartRequest
 from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
@@ -668,66 +669,56 @@ class MdaRuntime:
         return _object.validate_python(rewritten)
 
     @staticmethod
-    def command_run(
-        thread_id: str,
-        params: Mapping[str, JsonValue],
-        *,
-        write: ChannelWrite,
-        run_format: dispatch.RunFormat,
+    def run_body(
+        thread_id: str, start: StartRequest, *, write: ChannelWrite
     ) -> dict[str, JsonValue]:
-        """The run a ``run.start`` asks for, streaming in ``run_format``, as
-        :meth:`run_payload` takes it.
+        """The runs API body ``start`` asks for, as :meth:`run_payload` takes it.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token,
-        so the backend creates the run itself (:meth:`create_command_run`).
+        so the backend builds the body and creates the run itself (:meth:`create_run`).
         """
-        config = params.get("config")
-        configurable = config.get("configurable") if isinstance(config, dict) else None
-        run_config: dict[str, JsonValue] = {
-            **(config if isinstance(config, dict) else {}),
-            "configurable": {
-                **(configurable if isinstance(configurable, dict) else {}),
-                dispatch.V3_STREAMING_CONFIG_KEY: run_format.protocol_v2,
-                "thread_id": thread_id,
-            },
-        }
-        strategy = params.get("multitaskStrategy") or params.get("multitask_strategy")
-        metadata = params.get("metadata")
         payload: dict[str, JsonValue] = {
-            "assistant_id": params["assistant_id"],
-            "input": params.get("input"),
-            "config": run_config,
-            "metadata": write.acting(metadata if isinstance(metadata, dict) else {}),
-            # A client that reads the transcript instead of this stream opts out.
-            **run_format.run_fields(resumable=params.get("stream_resumable") is not False),
+            "assistant_id": "agent",
+            "input": start.input,
+            "config": {
+                "configurable": {
+                    **start.configurable,
+                    dispatch.V3_STREAMING_CONFIG_KEY: False,
+                    "thread_id": thread_id,
+                },
+                "metadata": start.metadata,
+            },
+            "metadata": write.acting(start.metadata),
+            **start.run_format.run_fields(),
             "on_completion": "keep",
             "if_not_exists": "create",
-            "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
+            # A run begun since the caller found the thread idle is never stopped or
+            # queued behind here: the start is refused, and the caller steers or queues.
+            "multitask_strategy": "reject",
         }
+        if start.command is not None:
+            payload["command"] = start.command
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
         return payload
 
-    async def create_command_run(
+    async def create_run(
         self,
         thread_id: str,
-        command: Mapping[str, JsonValue],
         run: Mapping[str, JsonValue],
         *,
         starting_ms: int,
         write: ChannelWrite,
-        run_format: dispatch.RunFormat,
         trace_headers: Mapping[str, str] | None = None,
-    ) -> dict[str, JsonValue]:
-        """Answer a ``run.start`` by creating ``run``, rewritten by :meth:`run_payload`.
+    ) -> str:
+        """Create ``run``, rewritten by :meth:`run_payload`, and return its id.
 
         On a channel's thread, ``write`` (:meth:`channel_write`) starts the run in its
         conversation, as the person it names; without one the run is the backend's own.
         ``starting_ms`` is when the start was asked for, which a stop since then interrupts.
-        ``trace_headers`` name the LangSmith trace the run nests in. The answer has protocol
-        v2's shape for any ``run_format``, which only decides whether a refusal carries
-        MDA's status.
+        ``trace_headers`` name the LangSmith trace the run nests in. A run MDA refuses
+        raises :class:`RunRefused` with MDA's status.
         """
         async with self.http as client:
             response = await client.post(
@@ -740,24 +731,13 @@ class MdaRuntime:
                 "Starting an MDA run failed",
                 extra={"thread_id": thread_id, "status_code": response.status_code},
             )
-            refusal: dict[str, JsonValue] = {
-                "type": "error",
-                "id": command.get("id", 0),
-                "error": "unknown_error",
-                "message": response.text[:500],
-            }
-            if not run_format.protocol_v2:
-                # A runs API client reacts to the status, such as a 422 for a stream mode.
-                refusal["status"] = response.status_code
-            return refusal
-        run = _object.validate_python(response.json())
-        run_id = str(run.get("run_id") or "")
+            raise RunRefused(response.status_code, response.text[:500], code="unknown_error")
+        created = _object.validate_python(response.json())
+        run_id = created.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise RunRefused(502, "the runtime started no run", code="unknown_error")
         await self.interrupt_if_stopped(thread_id, run_id, starting_ms=starting_ms)
-        return {
-            "type": "success",
-            "id": command.get("id", 0),
-            "result": {"run_id": run_id},
-        }
+        return run_id
 
 
 class _MdaThreads(_SdkThreads):

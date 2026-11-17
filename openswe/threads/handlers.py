@@ -27,7 +27,7 @@ from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
 from openswe.threads.identity import ThreadIdentity
-from openswe.threads.index import STOPPED_AT_KEY, IndexedThread
+from openswe.threads.index import STOPPED_AT_KEY
 from openswe.threads.listing import (
     attach_task_workers,
     list_unresolved_dashboard_threads,
@@ -747,22 +747,5 @@ async def get_dashboard_thread_state(
     else:
         assert_thread_readable(thread.metadata, login, email)
 
-    async def latest_run() -> IndexedThread:
-        with phase(record, "runs_list"):
-            return await THREADS.with_latest_run(thread)
-
-    async def state() -> dict[str, JsonValue]:
-        with phase(record, "get_state"):
-            return await THREADS.state_of(thread, select=select)
-
-    current, result = await asyncio.gather(latest_run(), state())
-    run_status = current.metadata.get("latest_run_status")
-    # The SDK's `useStream` opens its live event subscription only when the
-    # hydrated `getState()` looks active (`next` non-empty / absent). When a
-    # run was just started out-of-band (our REST run-create), the latest
-    # checkpoint can still be the previous finished one with `next == []`,
-    # which the SDK reads as idle and never opens the stream. Drop `next`
-    # while a run is pending/running so the SDK treats the thread as active.
-    if thread.status == "busy" or run_status in {"pending", "running"}:
-        result.pop("next", None)
-    return result
+    with phase(record, "get_state"):
+        return await THREADS.state_of(thread, select=select)

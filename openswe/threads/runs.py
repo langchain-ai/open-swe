@@ -38,7 +38,7 @@ from openswe.dashboard.workspace_settings import (
 )
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
-    PROTOCOL_V2,
+    SERVER_STREAM,
     TURN_ATTRIBUTION_FIELDS,
     RunFormat,
     _run_user_metadata,
@@ -80,6 +80,7 @@ from openswe.threads.creation import create_thread
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
+from openswe.threads.start_request import SentRun
 from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
@@ -128,16 +129,6 @@ logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "agent"
 API_SOURCE = "api"
-# Modes required for the v3 event-stream protocol (`POST …/stream/events`).
-DASHBOARD_STREAM_MODES: tuple[str, ...] = (
-    "values",
-    "updates",
-    "messages",
-    "messages-tuple",
-    "tools",
-    "checkpoints",
-    "events",
-)
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _OPAQUE_FILE_MIME_TYPE = "application/octet-stream"
 _SUPPORTED_FILE_MIME_TYPES = frozenset(
@@ -740,20 +731,6 @@ async def start_run_with_tool_results(
             as_sender=as_sender,
         )
     return str(run["run_id"])
-
-
-def _extract_run_id_from_command_response(payload: Any) -> str | None:
-    if not isinstance(payload, dict):
-        return None
-    for candidate in (
-        payload.get("run_id"),
-        payload.get("result", {}).get("run_id")
-        if isinstance(payload.get("result"), dict)
-        else None,
-    ):
-        if isinstance(candidate, str) and candidate:
-            return candidate
-    return None
 
 
 def _command_message_content(params: dict[str, Any]) -> Any:
@@ -1480,8 +1457,6 @@ async def _enrich_run_start_command(
         params["input"] = {}
 
     params["assistant_id"] = _ASSISTANT_ID
-    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
-    params.setdefault("stream_resumable", True)
     run_metadata.update(
         await _run_user_metadata({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
     )
@@ -1531,15 +1506,14 @@ async def steer_running_thread(
     turn: OpenTurn | None,
     email: str | None = None,
     relayed_origin: RunOrigin | None = None,
-    run_format: RunFormat = PROTOCOL_V2,
-) -> dict[str, Any]:
+    run_format: RunFormat = SERVER_STREAM,
+) -> SentRun:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
     The message joins ``turn`` instead of opening a new one: it is recorded on
     the transcript right away and left for the run to pick up before its next
-    model call. The reply mirrors the protocol's success envelope so the caller
-    cannot tell a steer from a start. A run started for the message because the
-    live one ended meanwhile streams in ``run_format``.
+    model call. A run started for the message because the live one ended meanwhile
+    streams in ``run_format``.
     """
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1663,16 +1637,7 @@ async def steer_running_thread(
     )
     if not relayed_from:
         await _SlackWebHandoff(thread_id, metadata).notify()
-    return {
-        "id": command.get("id"),
-        "type": "success",
-        "result": {
-            "thread_id": thread_id,
-            "run_id": live_run_id,
-            "message_id": message_id,
-            "steered": True,
-        },
-    }
+    return SentRun(thread_id=thread_id, run_id=live_run_id, message_id=message_id, steered=True)
 
 
 async def _run_is_live(client: Any, thread_id: str, run_id: str | None) -> bool:
@@ -1707,8 +1672,8 @@ async def queue_follow_up_run(
     metadata: dict[str, Any],
     email: str | None = None,
     relayed_origin: RunOrigin | None = None,
-    run_format: RunFormat = PROTOCOL_V2,
-) -> dict[str, Any]:
+    run_format: RunFormat = SERVER_STREAM,
+) -> SentRun:
     """Hold a ``run.start`` sent while a run is live until that run ends.
 
     The message gets its own run, created with LangGraph's ``enqueue`` strategy
@@ -1816,11 +1781,7 @@ async def queue_follow_up_run(
             )
     if not relayed:
         await handoff.notify()
-    return {
-        "id": command.get("id"),
-        "type": "success",
-        "result": {"thread_id": thread_id, "run_id": run_id, "queued": True},
-    }
+    return SentRun(thread_id=thread_id, run_id=run_id, queued=True)
 
 
 async def dispatch_pending_follow_ups(
@@ -1830,7 +1791,7 @@ async def dispatch_pending_follow_ups(
     *,
     client: Any,
     multitask_strategy: str = "interrupt",
-    run_format: RunFormat = PROTOCOL_V2,
+    run_format: RunFormat = SERVER_STREAM,
 ) -> str | None:
     """Start a run for follow-ups a finished run never got to.
 
@@ -2124,8 +2085,6 @@ async def _enrich_system_run_start_command(
         configurable["repo"] = repo_config
 
     params["assistant_id"] = _ASSISTANT_ID
-    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
-    params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": configurable}
     params["metadata"] = with_invocation_id(
         {**agent_version_metadata(), "origin": API_SOURCE}, invocation_id

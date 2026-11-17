@@ -10,10 +10,11 @@ keeps working unchanged:
 - A new thread is created on Managed Deep Agents (``mda``) only; this deployment's
   Agent Server never gets a copy, and refuses every create
   (``openswe.threads.local_writes``). A thread's runs,
-  state, history, commands and streams go to its runtime: MDA, or for ``local``
+  state, history and streams go to its runtime: MDA, or for ``local``
   threads made before that, this deployment's Agent Server, which logs a
-  warning for each. Local threads are read-only: starting a run, cron or
-  posting command there, or copying one, is refused. A run started on MDA
+  warning for each. Local threads are read-only: starting a run or cron there,
+  or copying one, is refused. The v3 protocol's ``/commands`` is refused for
+  every thread. A run started on MDA
   marks the thread busy; the run-complete webhook and a reconcile job settle it.
 - Reads reach MDA as LangSmith Studio's, which may read every thread; writes stay
   scoped to the threads the backend owns. A thread an MDA channel owns (its index
@@ -64,7 +65,7 @@ from openswe.threads.runtimes import (
     ChannelWrite,
     now_ms,
 )
-from openswe.threads.store import READ_COMMANDS, READ_ONLY, THREADS, channel_write_refusal, for_mda
+from openswe.threads.store import READ_ONLY, THREADS, channel_write_refusal, for_mda
 
 logger = logging.getLogger(__name__)
 
@@ -182,18 +183,13 @@ def channel_run_metadata(metadata: Mapping[str, JsonValue]) -> dict[str, JsonVal
     }
 
 
-def _reads(method: str, rest: str, body: bytes) -> bool:
+def _reads(method: str, rest: str) -> bool:
     """Whether a call to a thread's runtime only reads it."""
     if method in {"GET", "HEAD"}:
         return True
     if method != "POST":
         return False
-    if rest in _POST_READS:
-        return True
-    if rest == "/commands":
-        command = json_body(body) or {}
-        return command.get("method") in READ_COMMANDS
-    return False
+    return rest in _POST_READS
 
 
 def _stops_run(method: str, path: str, rest: str) -> bool:
@@ -305,7 +301,11 @@ class ThreadRouter:
                     scope, replayed, send, body, thread_id, cron=rest == _CREATE_CRON
                 )
             elif method == "POST" and rest == "/commands":
-                await self._command(send, body, thread_id)
+                # The v3 protocol's commands, which no backend code sends: refused, not
+                # forwarded to MDA's.
+                await send_json(
+                    send, 404, {"detail": f"Start runs with POST /threads/{thread_id}/runs"}
+                )
             elif method == "POST" and rest == "/copy":
                 await self._copy(scope, send, thread_id)
             else:
@@ -454,12 +454,6 @@ class ThreadRouter:
                 client, scope, recorder, json.dumps(rewritten).encode(), headers=write.headers
             )
 
-    async def _command(self, send: Send, body: bytes, thread_id: str) -> None:
-        reply = await THREADS.command(thread_id, body)
-        headers = [(b"content-type", reply.media_type.encode())] if reply.media_type else []
-        await send({"type": "http.response.start", "status": reply.status, "headers": headers})
-        await send({"type": "http.response.body", "body": reply.content})
-
     async def _copy(self, scope: Scope, send: Send, thread_id: str) -> None:
         """Copy a thread on its runtime, and index the copy as the source is."""
         thread = await THREADS.get(thread_id)
@@ -493,7 +487,7 @@ class ThreadRouter:
         if thread is not None and thread.runtime == "mda":
             match = _THREAD.match(scope["path"])
             rest = (match["rest"] or "") if match else ""
-            reads = _reads(scope["method"], rest, body)
+            reads = _reads(scope["method"], rest)
             if reads:
                 write: ChannelWrite | None = ChannelWrite()
             elif _stops_run(scope["method"], scope["path"], rest):

@@ -26,11 +26,12 @@ from openswe.agent_api.client import (
     RUNTIME_METADATA_KEY,
     mda_graph_for,
 )
-from openswe.dispatch import PROTOCOL_V2, RunFormat, channel_of
+from openswe.dispatch import channel_of
 from openswe.tasks.store import sidebar_memberships
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite, now_ms
+from openswe.threads.start_request import RunRefused, StartRequest
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
@@ -48,8 +49,6 @@ READ_COMMANDS: Final = frozenset(
         "subscription.reconnect",
     }
 )
-# Commands the backend sends in a channel's conversation; it refuses the others there.
-ACTING_COMMANDS: Final = frozenset({"run.start", "input.respond"})
 READ_ONLY: Final = (
     "This thread predates Managed Deep Agents and is read-only. Start a new thread to continue."
 )
@@ -79,9 +78,9 @@ class CommandReply(NamedTuple):
     content: bytes
     media_type: str | None
 
-
-def _json_reply(status: int, payload: object) -> CommandReply:
-    return CommandReply(status, json.dumps(payload).encode(), "application/json")
+    @classmethod
+    def json(cls, status: int, payload: object) -> CommandReply:
+        return cls(status, json.dumps(payload).encode(), "application/json")
 
 
 class _MetadataCopies:
@@ -309,92 +308,17 @@ class ThreadStore:
         await runtime.create(thread.thread_id, for_mda(thread.metadata))
         return await runtime.state(thread.thread_id, select=select)
 
-    async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
-        """The thread with its latest run's id and status in its metadata, as its runtime reports them.
+    async def command(self, thread_id: str, body: bytes) -> CommandReply:
+        """Answer one of protocol v2's other commands as the thread's runtime does: neither
+        a run's start nor an answer, which :meth:`start_run` starts.
 
-        A changed run is recorded in the index too. When the runtime can't be read, the
-        thread comes back as the index has it.
+        On a thread an MDA channel owns, it reads as Studio reads, and a write is refused.
         """
-        try:
-            run = await RUNTIMES.runs_on(thread.runtime).latest_run(thread.thread_id)
-        except Exception:
-            logger.warning(
-                "Could not read a thread's latest run",
-                extra={"thread_id": thread.thread_id},
-                exc_info=True,
-            )
-            return thread
-        if run is None:
-            return thread
-        latest: dict[str, JsonValue] = {
-            "latest_run_id": run.run_id,
-            "latest_run_status": run.status,
-        }
-        if all(thread.metadata.get(key) == value for key, value in latest.items()):
-            return thread
-        try:
-            await self.update(thread.thread_id, latest)
-        except Exception:
-            # The run read still decides how the thread reads.
-            logger.warning(
-                "Could not record a thread's latest run",
-                extra={"thread_id": thread.thread_id},
-                exc_info=True,
-            )
-        return thread.model_copy(update={"metadata": {**thread.metadata, **latest}})
-
-    async def command(
-        self,
-        thread_id: str,
-        body: bytes,
-        *,
-        user_id: str | None = None,
-        trace_headers: Mapping[str, str] | None = None,
-    ) -> CommandReply:
-        """Answer one protocol v2 command as the thread's runtime does.
-
-        ``user_id`` is the Open SWE user who sent it, which a run or an answer on a
-        channel's thread acts as; without one it is the channel's own, for no person.
-        ``trace_headers`` name a LangSmith trace a ``run.start``'s run nests in.
-        """
-        return await self._answer(
-            thread_id, body, PROTOCOL_V2, user_id=user_id, trace_headers=trace_headers
-        )
-
-    async def start_run(
-        self,
-        thread_id: str,
-        body: bytes,
-        run_format: RunFormat,
-        *,
-        user_id: str | None = None,
-        trace_headers: Mapping[str, str] | None = None,
-    ) -> CommandReply:
-        """Answer a ``run.start`` command as :meth:`command` does, its run in ``run_format``.
-
-        A protocol v2 run is the command's own.
-        """
-        if run_format.protocol_v2:
-            return await self.command(thread_id, body, user_id=user_id, trace_headers=trace_headers)
-        return await self._answer(
-            thread_id, body, run_format, user_id=user_id, trace_headers=trace_headers
-        )
-
-    async def _answer(
-        self,
-        thread_id: str,
-        body: bytes,
-        run_format: RunFormat,
-        *,
-        user_id: str | None,
-        trace_headers: Mapping[str, str] | None,
-    ) -> CommandReply:
         try:
             command = _object.validate_json(body)
         except ValueError:
             command = {}
         method = command.get("method")
-        params = command.get("params")
         thread = await self.get(thread_id)
         if thread is not None and thread.runtime == "local":
             # Only threads made before every new one started on MDA are still ``local``.
@@ -404,13 +328,57 @@ class ThreadStore:
             )
             if method in POSTING_COMMANDS:
                 # Not 409, which callers read as "a run is already going" and retry or skip.
-                return _json_reply(410, {"detail": READ_ONLY})
+                return CommandReply.json(410, {"detail": READ_ONLY})
         refusal = channel_write_refusal(thread) if thread is not None else None
+        if refusal is not None and method not in READ_COMMANDS:
+            return CommandReply.json(409, {"detail": refusal})
+        if thread is not None and thread.runtime == "mda":
+            mda = RUNTIMES.mda_runtime
+            if refusal is None:
+                await mda.ensure_remote_thread(thread_id)
+            # A channel's thread: read as Studio reads it.
+            http = mda.read_http if refusal is not None else mda.http
+        else:
+            http = RUNTIMES.local.client.http.client
+        async with http if isinstance(http, httpx2.AsyncClient) else nullcontext(http):
+            response = await http.post(
+                f"/threads/{thread_id}/commands",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+        return CommandReply(
+            response.status_code, response.content, response.headers.get("content-type")
+        )
+
+    async def start_run(
+        self,
+        thread_id: str,
+        start: StartRequest,
+        *,
+        user_id: str | None = None,
+        trace_headers: Mapping[str, str] | None = None,
+    ) -> str:
+        """Start ``start`` on the thread's runtime, and return its run's id.
+
+        ``user_id`` is the Open SWE user who sent it, which a run on a channel's thread
+        acts as; without one it is the channel's own, for no person. ``trace_headers`` name
+        a LangSmith trace the run nests in. A run that can't start raises
+        :class:`RunRefused`.
+        """
+        thread = await self.get(thread_id)
+        if thread is None:
+            raise RunRefused(404, "thread not found")
+        if thread.runtime == "local":
+            # Only threads made before every new one started on MDA are still ``local``.
+            logger.warning(
+                "Served a command on a thread that is not on Managed Deep Agents",
+                extra={"thread_id": thread_id, "command_method": "run.start"},
+            )
+            # Not 409, which callers read as "a run is already going" and retry or skip.
+            raise RunRefused(410, READ_ONLY)
         write = ChannelWrite()
-        if refusal is not None and method not in READ_COMMANDS | ACTING_COMMANDS:
-            return _json_reply(409, {"detail": refusal})
-        if refusal is not None and method in ACTING_COMMANDS:
-            # A run or an answer on a channel's thread: as its sender, in its conversation.
+        if (refusal := channel_write_refusal(thread)) is not None:
+            # A run on a channel's thread: as its sender, in its conversation.
             try:
                 write = await RUNTIMES.mda_runtime.channel_write(thread_id, user_id=user_id)
             except ChannelThreadError, httpx2.HTTPError:
@@ -419,65 +387,34 @@ class ThreadStore:
                     extra={"thread_id": thread_id},
                     exc_info=True,
                 )
-                if method == "run.start":
-                    return _json_reply(
-                        200,
-                        {
-                            "type": "error",
-                            "id": command.get("id", 0),
-                            "error": "invalid_argument",
-                            "message": refusal,
-                        },
-                    )
-                return _json_reply(409, {"detail": refusal})
-        if thread is not None and method == "run.start" and isinstance(params, dict):
-            mda = RUNTIMES.mda_runtime
-            starting_ms = now_ms()
-            run = await self.run_payload(
-                thread_id,
-                mda.command_run(thread_id, params, write=write, run_format=run_format),
-                thread_metadata=thread.metadata,
-                graph_id=mda_graph_for(thread.metadata),
-            )
-            reply = await mda.create_command_run(
-                thread_id,
-                command,
-                run,
-                starting_ms=starting_ms,
-                write=write,
-                trace_headers=trace_headers,
-                run_format=run_format,
-            )
-            if reply.get("type") == "success":
-                try:
-                    await index.set_status(thread_id, "busy")
-                except Exception:
-                    # The run exists; its completion webhook and the reconcile job settle the status.
-                    logger.warning(
-                        "Marking a thread busy after starting its run failed",
-                        extra={"thread_id": thread_id},
-                        exc_info=True,
-                    )
-            return _json_reply(200, reply)
-        if thread is not None and thread.runtime == "mda":
-            mda = RUNTIMES.mda_runtime
-            if refusal is not None:
-                # A channel's thread: read as Studio reads it, written as its conversation.
-                http = mda.http if write.headers else mda.read_http
-            else:
-                await mda.ensure_remote_thread(thread_id)
-                http = mda.http
-        else:
-            http = RUNTIMES.local.client.http.client
-        async with http if isinstance(http, httpx2.AsyncClient) else nullcontext(http):
-            response = await http.post(
-                f"/threads/{thread_id}/commands",
-                content=body,
-                headers={"Content-Type": "application/json", **write.headers},
-            )
-        return CommandReply(
-            response.status_code, response.content, response.headers.get("content-type")
+                # Protocol v2 refused a start with its error, and an answer with a status.
+                code = None if start.command is not None else "invalid_argument"
+                raise RunRefused(409, refusal, code=code) from None
+        mda = RUNTIMES.mda_runtime
+        starting_ms = now_ms()
+        run = await self.run_payload(
+            thread_id,
+            mda.run_body(thread_id, start, write=write),
+            thread_metadata=thread.metadata,
+            graph_id=mda_graph_for(thread.metadata),
         )
+        run_id = await mda.create_run(
+            thread_id,
+            run,
+            starting_ms=starting_ms,
+            write=write,
+            trace_headers=trace_headers,
+        )
+        try:
+            await index.set_status(thread_id, "busy")
+        except Exception:
+            # The run exists; its completion webhook and the reconcile job settle the status.
+            logger.warning(
+                "Marking a thread busy after starting its run failed",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+        return run_id
 
 
 THREADS: Final = ThreadStore()

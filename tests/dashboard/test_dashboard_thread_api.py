@@ -4,7 +4,6 @@ import contextlib
 import json
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import AsyncMock
@@ -39,7 +38,8 @@ from openswe.threads import runs as thread_runs
 from openswe.threads import store as thread_store
 from openswe.threads.index import Runtime
 from openswe.threads.principals import STARTED_BY_ID, Principal, require_principal
-from openswe.threads.runtimes import RUNTIMES, MdaRun
+from openswe.threads.runtimes import RUNTIMES
+from openswe.threads.start_request import RunRefused, SentRun, StartRequest
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.trace_metadata import RunOrigin
 from openswe.transcript.engine import AppendResult
@@ -791,16 +791,17 @@ async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
             thread.status = "idle" if race and gets == 1 else "busy"
             return thread
 
-        async def command(
+        async def start_run(
             self,
             thread_id: str,
-            body: bytes,
+            start: StartRequest,
             *,
             user_id: str | None = None,
             trace_headers: Mapping[str, str] | None = None,
-        ) -> thread_proxy.CommandReply:
-            assert json.loads(body)["params"]["metadata"]["origin"] == origin
-            return thread_proxy.CommandReply(200, _REFUSED_START, "application/json")
+        ) -> str:
+            assert start.metadata["origin"] == origin
+            # The run begun since the busy check holds the thread.
+            raise RunRefused(409, "thread is busy", code="unknown_error")
 
     patch_thread_module(monkeypatch, "THREADS", Threads())
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
@@ -827,6 +828,8 @@ async def test_queued_web_follow_up_notifies_slack_only_for_a_person(
     assert status == 200
     assert json.loads(body)["result"]["queued"] is True
     run = create.await_args.kwargs
+    queued = str(run["input"]["messages"][-1]["content"])
+    assert queued.count("Also fix this") == 1 and "&lt;input-message" not in queued, queued
     assert run["metadata"]["origin"] == origin
     assert run["config"]["metadata"]["origin"] == origin
     assert run["config"]["configurable"]["origin"] == origin
@@ -1225,47 +1228,38 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
     assert exc_info.value is error
 
 
-_REFUSED_START = json.dumps(
-    {"type": "error", "id": 0, "error": "unknown_error", "message": "failed to create run"}
-).encode()
-
-
 @pytest.mark.parametrize(
-    ("refusal", "status_code"),
+    ("refusal", "status_code", "refused_with"),
     [
-        pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
-        pytest.param(httpx.PoolTimeout(""), 500, id="pool-exhausted"),
-        pytest.param(httpx2.ConnectError("MDA unreachable"), 500, id="mda-undeliverable"),
-        pytest.param(httpx2.PoolTimeout(""), 500, id="mda-pool-exhausted"),
+        pytest.param(httpx.ConnectError("MDA unreachable"), 500, 500, id="undeliverable"),
+        pytest.param(httpx.PoolTimeout(""), 500, 500, id="pool-exhausted"),
+        pytest.param(httpx2.ConnectError("MDA unreachable"), 500, 500, id="mda-undeliverable"),
+        pytest.param(httpx2.PoolTimeout(""), 500, 500, id="mda-pool-exhausted"),
+        pytest.param(RunRefused(410, "runtime unavailable"), 410, 410, id="http-refused"),
+        # The runtime's own refusal is /commands' error envelope, its status only logged.
         pytest.param(
-            thread_proxy.CommandReply(503, b'{"detail":"runtime unavailable"}', "application/json"),
-            503,
-            id="http-refused",
-        ),
-        pytest.param(
-            thread_proxy.CommandReply(200, _REFUSED_START, "application/json"),
+            RunRefused(422, "failed to create run", code="unknown_error"),
             200,
+            422,
             id="runtime-refused",
         ),
     ],
 )
 async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
-    monkeypatch, caplog, refusal: Exception | thread_proxy.CommandReply, status_code: int
+    monkeypatch, caplog, refusal: Exception, status_code: int, refused_with: int
 ) -> None:
     turn_id = uuid7()
 
     class UndeliverableThreads(ThreadStoreOverClient):
-        async def command(
+        async def start_run(
             self,
             thread_id: str,
-            body: bytes,
+            start: StartRequest,
             *,
             user_id: str | None = None,
             trace_headers: Mapping[str, str] | None = None,
-        ) -> thread_proxy.CommandReply:
-            if isinstance(refusal, Exception):
-                raise refusal
-            return refusal
+        ) -> str:
+            raise refusal
 
     class IdleThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -1303,8 +1297,20 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
     record = next(r for r in caplog.records if r.message == "Dashboard run start failed")
     assert record.thread_id == "tid"
     assert record.turn_id == str(turn_id)
-    assert record.status_code == status_code
-    if isinstance(refusal, Exception):
+    assert record.status_code == refused_with
+    if isinstance(refusal, RunRefused):
+        assert refusal.detail not in caplog.text
+        reply = json.loads(body)
+        if refusal.code is None:
+            assert reply == {"detail": refusal.detail}
+        else:
+            assert reply == {
+                "type": "error",
+                "id": 0,
+                "error": refusal.code,
+                "message": refusal.detail,
+            }
+    else:
         delivery = next(
             r for r in caplog.records if r.message == "Delivering a thread command failed"
         )
@@ -1312,9 +1318,6 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
         assert delivery.command_method == "run.start"
         if isinstance(refusal, (httpx.PoolTimeout, httpx2.PoolTimeout)):
             assert "No connection was available" in json.loads(body)["detail"]
-    else:
-        payload = json.loads(refusal.content)
-        assert (payload.get("message") or payload.get("detail")) not in caplog.text
     notify.assert_not_awaited()
 
 
@@ -1377,7 +1380,7 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
 
     status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
-        "tid", "another-admin", b'{"method": "input.respond"}'
+        "tid", "another-admin", b'{"method": "input.inject"}'
     )
 
     assert status_code == 200
@@ -1389,7 +1392,7 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
 
     assert status_code == 200
     assert posted == [
-        b'{"method": "input.respond"}',
+        b'{"method": "input.inject"}',
         b'{"method": "agent.getTree"}',
     ]
 
@@ -1422,13 +1425,13 @@ async def test_proxy_commands_steers_into_the_open_turn_or_waits_for_an_ending_r
     async def fake_steer_target(thread_id: str) -> OpenTurn | None:
         return turn
 
-    async def fake_steer(*args: object, turn: OpenTurn | None, **kwargs: object) -> dict[str, str]:
+    async def fake_steer(*args: object, turn: OpenTurn | None, **kwargs: object) -> SentRun:
         handled.append(("steer", turn))
-        return {}
+        return SentRun(run_id="run-1", steered=True)
 
-    async def fake_queue(*args: object, **kwargs: object) -> dict[str, str]:
+    async def fake_queue(*args: object, **kwargs: object) -> SentRun:
         handled.append(("queue", None))
-        return {}
+        return SentRun(run_id="run-2", queued=True)
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: BusyClient())
     monkeypatch.setattr(thread_proxy, "steer_target", fake_steer_target)
@@ -1469,41 +1472,6 @@ async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monke
         await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-2", "teammate")
     assert exc_info.value.status_code == 403
     assert "sender" in exc_info.value.detail
-
-
-async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
-    class FakeThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            return {
-                "thread_id": thread_id,
-                "status": "idle",
-                "metadata": {
-                    "source": "dashboard",
-                    "github_login": "owner",
-                    "latest_run_status": "success",
-                },
-            }
-
-        async def update(self, **kwargs: object) -> None:
-            pass
-
-        async def get_state(self, thread_id: str) -> dict[str, object]:
-            return {"values": {"messages": []}, "next": []}
-
-    class FakeClient:
-        threads = FakeThreads()
-
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
-    running = MdaRun(run_id="run-1", status="running", created_at=datetime.now(UTC))
-    monkeypatch.setattr(
-        RUNTIMES,
-        "runs_on",
-        lambda _runtime: SimpleNamespace(latest_run=AsyncMock(return_value=running)),
-    )
-
-    state = await handlers.get_dashboard_thread_state("tid", "owner")
-
-    assert "next" not in state
 
 
 async def _read_thread_state(
@@ -2310,15 +2278,11 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
         relayed_origin=relayed_origin,
     )
 
-    assert result == {
-        "id": 7,
-        "type": "success",
-        "result": {
-            "thread_id": "tid",
-            "run_id": "run-1",
-            "message_id": "msg-1",
-            "steered": True,
-        },
+    assert result.reply() == {
+        "thread_id": "tid",
+        "run_id": "run-1",
+        "message_id": "msg-1",
+        "steered": True,
     }
     # The running agent finds the message before its next model call.
     [queued] = await QueuedMessage.for_thread("tid")
@@ -2365,24 +2329,20 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
 
 
 async def test_proxy_commands_leaves_a_sends_timing_for_the_run_it_started(monkeypatch) -> None:
-    sent: list[dict[str, object]] = []
+    sent: list[StartRequest] = []
     updates: list[Mapping[str, object]] = []
 
     class StartingThreads(ThreadStoreOverClient):
-        async def command(
+        async def start_run(
             self,
             thread_id: str,
-            body: bytes,
+            start: StartRequest,
             *,
             user_id: str | None = None,
             trace_headers: Mapping[str, str] | None = None,
-        ) -> thread_proxy.CommandReply:
-            sent.append(json.loads(body))
-            return thread_proxy.CommandReply(
-                200,
-                json.dumps({"type": "success", "id": 1, "result": {"run_id": "run-1"}}).encode(),
-                "application/json",
-            )
+        ) -> str:
+            sent.append(start)
+            return "run-1"
 
         async def update(self, thread_id: str, metadata: Mapping[str, object]) -> None:
             updates.append(metadata)
@@ -2412,8 +2372,8 @@ async def test_proxy_commands_leaves_a_sends_timing_for_the_run_it_started(monke
     )
 
     assert status == 200
-    (command,) = sent
-    assert command["params"]["metadata"] == {  # type: ignore[index]
+    (start,) = sent
+    assert start.metadata == {
         "dashboard_ttft_started_at_ms": 1_000_000,
         "dashboard_client": "web",
         "dashboard_submitted_at_ms": 999_700,

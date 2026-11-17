@@ -10,8 +10,10 @@ import {
   useRefreshThreadSource,
 } from "./ThreadSourceProvider"
 
+const hydrate = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+
 vi.mock("./useAgentStreamSource", () => ({
-  useAgentStreamSource: () => ({ kind: "stream" }),
+  useAgentStreamSource: () => ({ kind: "stream", stream: { hydrate } }),
 }))
 vi.mock("./useTranscriptSource", () => ({
   useTranscriptSource: () => ({ kind: "transcript" }),
@@ -20,9 +22,10 @@ vi.mock("./useTranscriptSource", () => ({
 afterEach(() => {
   cleanup()
   window.localStorage.clear()
+  hydrate.mockClear()
 })
 
-it("preserves submitted review state when refreshing a stream source", () => {
+it("reads a stream source's thread again in place when refreshed", () => {
   function Review() {
     const [submitted, setSubmitted] = useState(false)
     const refresh = useRefreshThreadSource()
@@ -48,6 +51,7 @@ it("preserves submitted review state when refreshing a stream source", () => {
     (screen.getByRole("button", { name: "Submitted" }) as HTMLButtonElement)
       .disabled
   ).toBe(true)
+  expect(hydrate).toHaveBeenCalledOnce()
 })
 
 it("switches a recorded thread to SDK streaming and back without changing its UI", () => {

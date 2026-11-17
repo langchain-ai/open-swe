@@ -19,12 +19,13 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
 from openswe.dashboard.ttft import SUBMITTED_AT_HEADER, DashboardClient
-from openswe.dispatch import RunFormat
+from openswe.dispatch import SERVER_STREAM, RunFormat
 from openswe.threads.index import IndexedThread
 from openswe.threads.principals import Principal
 from openswe.threads.proxy import ThreadSend, langgraph_proxy_headers
 from openswe.threads.runtimes import RUNTIMES, MdaRun
-from openswe.threads.store import THREADS, CommandReply
+from openswe.threads.start_request import MultitaskStrategy, SentRun, StartRequest
+from openswe.threads.store import THREADS
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.thread_ops import langgraph_url
 
@@ -160,34 +161,35 @@ class SdkRun(BaseModel):
     stream_subgraphs: bool | None = None
     stream_resumable: bool | None = None
     on_disconnect: Literal["cancel", "continue"] | None = None
-    multitask_strategy: Literal["reject", "interrupt", "rollback", "enqueue"] | None = None
+    multitask_strategy: MultitaskStrategy | None = None
     checkpoint: dict[str, JsonValue] | None = None
     durability: Literal["sync", "async", "exit"] | None = None
 
     def run_format(self) -> RunFormat:
-        """The runs API format the run streams in, as the client asked, except that it is
-        always resumable: the stream joins the run after starting it, and only a resumable
-        run keeps the events it sent before that for the join to replay."""
-        return RunFormat.runs_api(
+        """The runs API format the run streams in: as the client asked, or the server's
+        (:data:`SERVER_STREAM`) when it asked for no stream fields, so any client can join
+        it. It is always resumable: the stream joins the run after starting it, and only a
+        resumable run keeps the events it sent before that for the join to replay."""
+        asked = self.model_dump(include={"stream_mode", "stream_subgraphs"}, exclude_none=True)
+        return RunFormat.of(
             {
-                **self.model_dump(
-                    include={"stream_mode", "stream_subgraphs", "checkpoint", "durability"},
-                    exclude_none=True,
-                ),
+                **(asked or SERVER_STREAM.fields),
+                **self.model_dump(include={"checkpoint", "durability"}, exclude_none=True),
                 "stream_resumable": True,
             }
         )
 
-    def start_command(self) -> dict[str, JsonValue]:
-        """The run as the ``run.start`` command ``/commands`` would have been sent."""
-        params: dict[str, JsonValue] = {"input": self.input}
-        if self.config is not None and self.config.configurable is not None:
-            params["config"] = {"configurable": self.config.configurable}
-        if self.metadata is not None:
-            params["metadata"] = self.metadata
-        if self.multitask_strategy is not None:
-            params["multitask_strategy"] = self.multitask_strategy
-        return {"method": "run.start", "params": params}
+    def start(self) -> StartRequest:
+        """The run as the backend starts it."""
+        configurable = self.config.configurable if self.config is not None else None
+        return StartRequest(
+            input=self.input,
+            configurable=dict(configurable or {}),
+            metadata=dict(self.metadata or {}),
+            multitask_strategy=self.multitask_strategy,
+            command=self.command.model_dump(exclude_none=True) if self.command else None,
+            run_format=self.run_format(),
+        )
 
     async def stream(self, thread_id: str, principal: Principal, request: Request) -> Response:
         """Send the run as ``/commands`` sends a message, and stream the run it ended up
@@ -195,34 +197,19 @@ class SdkRun(BaseModel):
 
         A missing thread is 404: the client creates it with ``POST /threads`` first.
         """
-        start = ThreadSend(
-            thread_id,
-            principal,
-            self.start_command(),
-            run_format=self.run_format(),
-            creates=False,
-            client=DashboardClient.of_user_agent(request.headers.get("user-agent")),
-            submitted_at=request.headers.get(SUBMITTED_AT_HEADER),
-        )
-        reply = (
-            await start.answer(self.command.model_dump(exclude_none=True))
-            if self.command is not None
-            else await start.start()
-        )
-        started = self._started(reply)
-        if isinstance(started, Response):
-            return started
-        run_id, steered = started
+        sent = await self._send(thread_id, principal, request)
         thread = await ThreadOnRuntime.readable(thread_id, principal)
-        if run_id is None:
+        if sent.run_id is None:
             # Steered into a run nobody recorded: delivered, with nothing to join.
-            return StreamingResponse(iter(()), media_type="text/event-stream")
+            return StreamingResponse(
+                iter(()), media_type="text/event-stream", headers={STEERED_HEADER: "true"}
+            )
         namespaces: list[tuple[str, str | int | float | None]] = [
             ("namespace", value) for value in request.query_params.getlist("namespace")
         ]
-        run_path = f"/threads/{thread_id}/runs/{run_id}"
+        run_path = f"/threads/{thread_id}/runs/{sent.run_id}"
         # A run the message steered into is someone else's to stop.
-        cancel = "1" if self.on_disconnect == "cancel" and not steered else "0"
+        cancel = "1" if self.on_disconnect == "cancel" and not sent.steered else "0"
         # Joined from its first event, which a resumable run keeps for a join.
         joined = await thread.stream(
             f"{run_path}/stream",
@@ -235,38 +222,38 @@ class SdkRun(BaseModel):
         reconnect = httpx2.QueryParams(namespaces)
         joined.headers["location"] = f"{run_path}/stream" + (f"?{reconnect}" if reconnect else "")
         joined.headers["content-location"] = run_path
-        if steered:
+        if sent.steered:
             joined.headers[STEERED_HEADER] = "true"
         return joined
 
-    @staticmethod
-    def _started(reply: CommandReply) -> tuple[str | None, bool] | Response:
-        """From ``run.start``'s protocol v2 answer, the run the message is in and whether
-        it was steered there, or the error a runs API client gets as an HTTP status."""
-        if reply.status >= 400:
-            return Response(reply.content, status_code=reply.status, media_type=reply.media_type)
-        try:
-            answer = json.loads(reply.content)
-        except json.JSONDecodeError, UnicodeDecodeError:
-            logger.warning(
-                "A run start answered with something other than JSON",
-                exc_info=True,
-                extra={"start": {"status_code": reply.status}},
-            )
-            answer = None
-        if not isinstance(answer, dict):
-            return JSONResponse({"detail": "the run could not be started"}, status_code=502)
-        if answer.get("type") == "error":
-            status = answer.get("status")
-            if not isinstance(status, int):
-                # A channel's thread that can't be written to, or the runtime refused.
-                status = 409 if answer.get("error") == "invalid_argument" else 502
-            return JSONResponse({"detail": answer.get("message")}, status_code=status)
-        result = answer.get("result")
-        result = result if isinstance(result, dict) else {}
-        run_id = result.get("run_id")
-        steered = result.get("steered") is True
-        return (run_id if isinstance(run_id, str) and run_id else None), steered
+    async def create(self, thread_id: str, principal: Principal, request: Request) -> Response:
+        """Send the run as ``/commands`` sends a message, and answer with the run it ended
+        up in, unstreamed: a new run on an idle thread, and on a busy one the queued run
+        with ``enqueue`` or the live run it steered into without.
+
+        A missing thread is 404, and nothing creates it.
+        """
+        sent = await self._send(thread_id, principal, request)
+        thread = await ThreadOnRuntime.readable(thread_id, principal)
+        if sent.run_id is None:
+            # Steered into a run nobody recorded: delivered, with no run to answer with.
+            return Response(status_code=202, headers={STEERED_HEADER: "true"})
+        run = await thread.runs(f"/threads/{thread_id}/runs/{sent.run_id}")
+        if sent.steered:
+            run.headers[STEERED_HEADER] = "true"
+        return run
+
+    async def _send(self, thread_id: str, principal: Principal, request: Request) -> SentRun:
+        """The run the message ended up in. A refusal (:class:`RunRefused`) reaches the
+        client as its HTTP status: the runtime's own when it refused."""
+        return await ThreadSend(
+            thread_id,
+            principal,
+            self.start(),
+            creates=False,
+            client=DashboardClient.of_user_agent(request.headers.get("user-agent")),
+            submitted_at=request.headers.get(SUBMITTED_AT_HEADER),
+        ).send()
 
 
 class ThreadOnRuntime:

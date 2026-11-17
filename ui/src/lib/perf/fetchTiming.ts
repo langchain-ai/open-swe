@@ -46,6 +46,8 @@ const KINDS_BY_SUFFIX: Record<string, TimedRequestKind> = {
   "/transcript": "thread_transcript",
   "/stream/events": "stream_events",
   "/commands": "command",
+  // `@langchain/react` 2.0 starts a run and streams it in one request.
+  "/runs/stream": "command",
 }
 
 export function classifyDashboardRequest(

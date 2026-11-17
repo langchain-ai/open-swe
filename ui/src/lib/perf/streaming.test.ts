@@ -10,36 +10,23 @@ import { clearPerfSpans, getPerfSpans } from "./trace"
 
 function lifecycle(event: string, timestamp: number) {
   return {
-    type: "event",
     method: "lifecycle",
     params: { namespace: [], timestamp, data: { event } },
   }
 }
 
-function messageStart(role: string, timestamp: number) {
+/** A message chunk as `@langchain/react` 2.0's `messages` channel gives it. */
+function chunk(
+  type: string,
+  content: string | Array<Record<string, unknown>>,
+  timestamp: number
+) {
   return {
-    type: "event",
     method: "messages",
     params: {
       namespace: [],
       timestamp,
-      data: { event: "message-start", role, id: "msg-1" },
-    },
-  }
-}
-
-function textDelta(text: string, timestamp: number) {
-  return {
-    type: "event",
-    method: "messages",
-    params: {
-      namespace: [],
-      timestamp,
-      data: {
-        event: "content-block-delta",
-        id: "msg-1",
-        delta: { type: "text-delta", text },
-      },
+      data: [{ type, id: "msg-1", content }, { langgraph_node: "model" }],
     },
   }
 }
@@ -73,11 +60,12 @@ describe("agent run span", () => {
       ttfbMs: 120,
       serverTiming: [],
     })
-    tracker.event(lifecycle("running", 9_900))
-    tracker.event(messageStart("ai", 9_950))
-    tracker.event(textDelta("", 9_960))
-    tracker.event(textDelta("Hello", 9_970))
-    tracker.event(textDelta(" world", 9_980))
+    tracker.event(chunk("AIMessageChunk", "", 9_900))
+    tracker.event(chunk("AIMessageChunk", "Hello", 9_950))
+    tracker.event(
+      chunk("AIMessageChunk", [{ type: "text", text: " world" }], 10_000)
+    )
+    tracker.event(lifecycle("completed", 10_000))
     runTranscriptBuilt(THREAD_A, 2.5)
     runTranscriptCommitted(THREAD_A, 4)
     runTranscriptCommitted(THREAD_A, 9)
@@ -97,11 +85,11 @@ describe("agent run span", () => {
       command_ttfb_ms: 88,
       stream_ttfb_ms: 120,
       reason: "success",
-      events: 5,
+      events: 4,
       text_deltas: 2,
       builds: 1,
       build_ms: 3,
-      lag_avg_ms: 48,
+      lag_avg_ms: 38,
       lag_max_ms: 100,
       commits: 2,
       commit_ms: 13,
@@ -114,8 +102,8 @@ describe("agent run span", () => {
     const tracker = new RunTracker({ threadId: THREAD_A })
 
     tracker.submitted()
-    tracker.event(lifecycle("running", 9_900))
-    tracker.event(messageStart("ai", 9_950))
+    tracker.created()
+    tracker.event(chunk("ai", [{ type: "tool_call_chunk", name: "ls" }], 9_950))
     tracker.completed("success")
 
     const [span] = getPerfSpans()
@@ -127,12 +115,12 @@ describe("agent run span", () => {
     expect(span?.attributes).toMatchObject({ text_deltas: 0 })
   })
 
-  it("ignores a non-assistant message start for generation_start", () => {
+  it("ignores a non-assistant message for generation_start", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
     const tracker = new RunTracker({ threadId: THREAD_A })
 
     tracker.submitted()
-    tracker.event(messageStart("tool", 9_950))
+    tracker.event(chunk("tool", "3 files", 9_950))
     tracker.completed("success")
 
     const [span] = getPerfSpans()
@@ -205,13 +193,16 @@ describe("agent run span", () => {
     expect(submitted?.attributes).toMatchObject({ text_deltas: 1 })
   })
 
-  it("opens a joined span when a run starts that this client did not submit", () => {
+  it("opens a joined span when a run this client did not submit streams", () => {
     const tracker = new RunTracker({ threadId: THREAD_A })
 
-    tracker.event(lifecycle("running", Date.now()))
+    // A run that ended before this page watched it opens nothing.
+    tracker.event(lifecycle("completed", Date.now()))
+    tracker.event(chunk("ai", "Hi", Date.now()))
     tracker.completed("interrupt")
 
     const [span] = getPerfSpans()
+    expect(getPerfSpans()).toHaveLength(1)
     expect(span?.attributes).toMatchObject({
       joined: true,
       reason: "interrupt",
@@ -219,6 +210,8 @@ describe("agent run span", () => {
     expect(span?.steps.map((step) => step.name)).toEqual([
       "accepted",
       "first_event",
+      "generation_start",
+      "first_text",
     ])
   })
 

@@ -32,6 +32,8 @@ minimumReleaseAgeExclude:
   - '@langchain/macaw-cli@1.7.2'
   - '@langchain/macaw-components@1.7.2'
   - '@langchain/macaw-tokens@1.7.2'
+  - '@langchain/langgraph-sdk@1.17.1-rc.0'
+  - '@langchain/react@2.0.0-rc.0'
 
 # One @types/react for every package: with two, the hoisted copy hands
 # dependencies of ui or mobile the other app's React types.

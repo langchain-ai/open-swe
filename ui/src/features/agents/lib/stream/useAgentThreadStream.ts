@@ -29,30 +29,22 @@ export interface AgentThreadStream {
 }
 
 /**
- * The SDK stream serving one thread page. Unmounting only detaches this
- * client — the run keeps going server-side and is picked up again from the
- * thread's history on the next visit — so nothing needs to outlive the page.
+ * The SDK stream serving one thread page, which must already exist: the thread's
+ * first message, which creates it, goes through `/commands`. Unmounting only
+ * detaches this client — the run keeps going server-side and is joined again on
+ * the next visit — so nothing needs to outlive the page.
  */
-export function useAgentThreadStream(
-  threadId: string,
-  generation = 0
-): AgentThreadStream {
+export function useAgentThreadStream(threadId: string): AgentThreadStream {
   const queryClient = useQueryClient()
   const [runAcceptance] = useState(() =>
     createRunAcceptanceTracker(dashboardFetch)
   )
-  // HACK: useStream recreates and hydrates its controller when the client changes.
-  // Renew only the client so rejoining preserves the review's submission state.
-  // Ideally, client should expose a method for joining an existing stream
-  const client = useMemo(
-    () =>
-      createDashboardClient(
-        agentsApi.langGraphApiUrl,
-        orderRunStarts(runAcceptance.fetch)
-      ),
-    // force recreation of client on generation change
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [runAcceptance, generation]
+  // Every request of the hook, run starts included, goes through the client's fetch.
+  const [client] = useState(() =>
+    createDashboardClient(
+      agentsApi.langGraphApiUrl,
+      orderRunStarts(runAcceptance.fetch)
+    )
   )
   const { connection, onReconnect, onConnected } = useReconnectNotice()
   const [runTracker] = useState(() => new RunTracker({ threadId }))
@@ -64,9 +56,7 @@ export function useAgentThreadStream(
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId,
-    fetch: runAcceptance.fetch,
-    // Only affects "stream"-kind threads; transcript threads never call
-    // useStream() at all.
+    // A message sent during a run waits in the server's queue as a run of its own.
     queue: "server",
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
@@ -91,10 +81,11 @@ export function useAgentThreadStream(
     onEvent: (event) => {
       if (event.method !== "custom" || event.params.namespace.length) return
       const payload = event.params.data.payload
-      if (payload?.type === "conversation_offloading") {
+      if (!isRecord(payload)) return
+      if (payload.type === "conversation_offloading") {
         setIsOffloading(payload.status === "started")
       }
-      if (payload?.type === "model_routed") {
+      if (payload.type === "model_routed") {
         setRouted({
           route: typeof payload.route === "string" ? payload.route : undefined,
           modelId:
@@ -122,11 +113,11 @@ export function useAgentThreadStream(
     if (!isLoading) onConnected()
   }, [isLoading, onConnected])
 
+  // A stream that gives up reconnecting fails with an error; there is nothing left to wait for.
+  const failed = stream.error != null
   useEffect(() => {
-    const thread = stream.getThread()
-    if (!thread) return
-    return thread.onError(onConnected)
-  }, [onConnected, stream])
+    if (failed) onConnected()
+  }, [failed, onConnected])
 
   return useMemo(
     () => ({
@@ -136,4 +127,8 @@ export function useAgentThreadStream(
     }),
     [connection, isOffloading, routed, runAcceptance, stream, submit]
   )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }

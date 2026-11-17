@@ -84,7 +84,6 @@ from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
-    proxy_dashboard_thread_run_enqueue,
     proxy_dashboard_thread_stream_events,
 )
 from openswe.threads.read_state import THREAD_READ_STATES
@@ -692,17 +691,12 @@ async def api_list_thread_runs(
 @audit_endpoint
 async def api_create_thread_run(
     thread_id: str,
+    body: SdkRun,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    body = await request.body()
-    return await proxy_dashboard_thread_run_enqueue(
-        thread_id,
-        session["sub"],
-        body,
-        email=session.get("email"),
-        content_type=request.headers.get("content-type", "application/json"),
-    )
+    principal: PrincipalDep,
+) -> Response:
+    """Start a run as ``/commands`` starts a message, answered with the run, unstreamed."""
+    return await body.create(thread_id, principal, request)
 
 
 @router.get("/info")
