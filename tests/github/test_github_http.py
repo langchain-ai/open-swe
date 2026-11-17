@@ -678,3 +678,160 @@ async def test_a_file_path_never_leaves_its_repository(path: str) -> None:
         with pytest.raises(github_http.UnsafeRepoPath):
             GitHubClient(http).repo("..", "users")
     assert sent == ["https://api.github.com/repos/me/shared/contents/docs/a%20b.png?ref=main"]
+
+
+class TestThreadParticipants:
+    @staticmethod
+    def author(login: str, kind: str = "User") -> dict[str, str]:
+        return {"login": login, "__typename": kind}
+
+    @staticmethod
+    def page(nodes: list[dict[str, object]], cursor: str | None = None) -> dict[str, object]:
+        return {
+            "nodes": nodes,
+            "pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor},
+        }
+
+    @staticmethod
+    def response(thread: dict[str, object]) -> dict[str, object]:
+        return {"repository": {"issueOrPullRequest": thread}}
+
+    @staticmethod
+    async def fetch() -> set[str] | None:
+        from openswe.github.comments import fetch_github_thread_participants
+
+        return await fetch_github_thread_participants(
+            {"owner": "acme", "name": "widgets"}, 42, token="supplied-token"
+        )
+
+    async def test_authors_include_reviews_and_replies_but_not_bots(self) -> None:
+        thread = {
+            "__typename": "PullRequest",
+            "author": self.author(" Alice "),
+            "comments": self.page(
+                [
+                    {"author": self.author("Alice")},
+                    {"author": self.author("service", "Bot")},
+                    {"author": self.author("service[bot]")},
+                    {"author": None},
+                ]
+            ),
+            "reviews": self.page(
+                [
+                    {
+                        "id": "review-1",
+                        "author": self.author("reviewer"),
+                        "comments": self.page(
+                            [{"author": self.author("inline")}, {"author": self.author("reply")}]
+                        ),
+                    }
+                ]
+            ),
+        }
+        with patch.object(
+            GitHubClient, "graphql", AsyncMock(return_value=self.response(thread))
+        ) as query:
+            assert await self.fetch() == {"Alice", "reviewer", "inline", "reply"}
+        assert query.await_count == 1
+
+    async def test_paginates_each_source_and_nested_review_comments(self) -> None:
+        first = self.response(
+            {
+                "__typename": "PullRequest",
+                "author": self.author("owner"),
+                "comments": self.page([{"author": self.author("top-1")}], "top-next"),
+                "reviews": self.page(
+                    [
+                        {
+                            "id": "review-1",
+                            "author": self.author("reviewer-1"),
+                            "comments": self.page(
+                                [{"author": self.author("inline")}], "inline-next"
+                            ),
+                        }
+                    ],
+                    "reviews-next",
+                ),
+            }
+        )
+        second = self.response(
+            {
+                "__typename": "PullRequest",
+                "author": self.author("owner"),
+                "comments": self.page([{"author": self.author("top-2")}]),
+                "reviews": self.page(
+                    [
+                        {
+                            "id": "review-2",
+                            "author": self.author("reviewer-2"),
+                            "comments": self.page([]),
+                        }
+                    ],
+                    "reviews-last",
+                ),
+            }
+        )
+        third = self.response(
+            {
+                "__typename": "PullRequest",
+                "author": self.author("owner"),
+                "reviews": self.page([]),
+            }
+        )
+        fourth = {"node": {"comments": self.page([{"author": self.author("late-reply")}])}}
+        with patch.object(
+            GitHubClient, "graphql", AsyncMock(side_effect=[first, second, third, fourth])
+        ) as query:
+            assert await self.fetch() == {
+                "owner",
+                "top-1",
+                "top-2",
+                "reviewer-1",
+                "reviewer-2",
+                "inline",
+                "late-reply",
+            }
+        assert query.await_args_list[1].args[1]["commentsCursor"] == "top-next"
+        assert query.await_args_list[1].args[1]["reviewsCursor"] == "reviews-next"
+        assert query.await_args_list[2].args[1]["commentsActive"] is False
+        assert query.await_args_list[3].args[1] == {"id": "review-1", "cursor": "inline-next"}
+
+    async def test_issue_does_not_require_review_connections(self) -> None:
+        thread = {
+            "__typename": "Issue",
+            "author": None,
+            "comments": self.page([{"author": self.author("commenter")}]),
+        }
+        with patch.object(GitHubClient, "graphql", AsyncMock(return_value=self.response(thread))):
+            assert await self.fetch() == {"commenter"}
+
+    @pytest.mark.parametrize(
+        "fault", ["missing_thread", "missing_page", "bad_author", "loop", "limit", "error"]
+    )
+    async def test_incomplete_evidence_is_unknown(self, fault: str) -> None:
+        thread: dict[str, object] = {
+            "__typename": "Issue",
+            "author": self.author("owner"),
+            "comments": self.page([{"author": self.author("commenter")}], "next"),
+        }
+        if fault == "missing_page":
+            thread["comments"] = {"nodes": []}
+        elif fault == "bad_author":
+            thread["author"] = {"login": "owner"}
+        response = self.response(thread) if fault != "missing_thread" else {"repository": None}
+        with (
+            patch.object(
+                github_http, "_THREAD_PARTICIPANT_MAX_REQUESTS", 1 if fault == "limit" else 100
+            ),
+            patch.object(
+                GitHubClient,
+                "graphql",
+                AsyncMock(
+                    side_effect=github_http.GraphQLError([{"message": "denied"}])
+                    if fault == "error"
+                    else None,
+                    return_value=response,
+                ),
+            ),
+        ):
+            assert await self.fetch() is None

@@ -87,6 +87,60 @@ class _History(BaseModel):
     nodes: list[_HistoryCommit]
 
 
+_THREAD_PARTICIPANT_MAX_REQUESTS = 100
+_THREAD_PARTICIPANTS_QUERY = """
+query ThreadParticipants(
+  $owner: String!, $repo: String!, $number: Int!,
+  $commentsCursor: String, $reviewsCursor: String,
+  $commentsActive: Boolean!, $reviewsActive: Boolean!
+) {
+  repository(owner: $owner, name: $repo) {
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on Issue {
+        author { login __typename }
+        comments(first: 100, after: $commentsCursor) @include(if: $commentsActive) {
+          ...ParticipantComments
+        }
+      }
+      ... on PullRequest {
+        author { login __typename }
+        comments(first: 100, after: $commentsCursor) @include(if: $commentsActive) {
+          ...ParticipantComments
+        }
+        reviews(first: 20, after: $reviewsCursor) @include(if: $reviewsActive) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id
+            author { login __typename }
+            comments(first: 50) {
+              pageInfo { hasNextPage endCursor }
+              nodes { author { login __typename } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+fragment ParticipantComments on IssueCommentConnection {
+  pageInfo { hasNextPage endCursor }
+  nodes { author { login __typename } }
+}
+"""
+_REVIEW_PARTICIPANTS_QUERY = """
+query ReviewParticipants($id: ID!, $cursor: String!) {
+  node(id: $id) {
+    ... on PullRequestReview {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { author { login __typename } }
+      }
+    }
+  }
+}
+"""
+
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
 _IDEMPOTENT_RETRYABLE_STATUS = frozenset({502, 504})
 _SECONDARY_RATE_LIMIT_MARKERS = ("secondary rate limit", "rate limit")
@@ -677,6 +731,113 @@ class RepoClient:
         return await self.github.graphql(
             query, {"owner": self.owner, "repo": self.name, **(variables or {})}
         )
+
+    @staticmethod
+    def _participant_page(
+        connection: object, seen: set[str]
+    ) -> tuple[list[dict[str, object]], str | None]:
+        if not isinstance(connection, dict) or not isinstance(connection.get("nodes"), list):
+            raise ValueError("GitHub answered participants without a list")
+        nodes = connection["nodes"]
+        if any(not isinstance(node, dict) or "author" not in node for node in nodes):
+            raise ValueError("GitHub answered participants without authors")
+        page = connection.get("pageInfo")
+        if not isinstance(page, dict) or not isinstance(page.get("hasNextPage"), bool):
+            raise ValueError("GitHub answered participants without pagination")
+        if not page["hasNextPage"]:
+            return nodes, None
+        cursor = page.get("endCursor")
+        if not isinstance(cursor, str) or not cursor or cursor in seen:
+            raise ValueError("GitHub answered participants with an invalid cursor")
+        seen.add(cursor)
+        return nodes, cursor
+
+    @staticmethod
+    def _participant_author(author: object, logins: set[str]) -> None:
+        if author is None:
+            return
+        if (
+            not isinstance(author, dict)
+            or not isinstance(login := author.get("login"), str)
+            or not isinstance(kind := author.get("__typename"), str)
+        ):
+            raise ValueError("GitHub answered participants with an invalid author")
+        if kind != "Bot" and login.strip() and not login.lower().endswith("[bot]"):
+            logins.add(login.strip())
+
+    async def thread_participants(self, number: int) -> set[str]:
+        """Issue/PR authors and review replies, raising when the bounded read is incomplete."""
+        logins: set[str] = set()
+        comments_cursor: str | None = None
+        reviews_cursor: str | None = None
+        comments_seen: set[str] = set()
+        reviews_seen: set[str] = set()
+        comments_active = reviews_active = True
+        pending: list[tuple[str, str, set[str]]] = []
+        for _ in range(_THREAD_PARTICIPANT_MAX_REQUESTS):
+            if comments_active or reviews_active:
+                data = await self.graphql(
+                    _THREAD_PARTICIPANTS_QUERY,
+                    {
+                        "number": number,
+                        "commentsCursor": comments_cursor,
+                        "reviewsCursor": reviews_cursor,
+                        "commentsActive": comments_active,
+                        "reviewsActive": reviews_active,
+                    },
+                )
+                repository = data.get("repository")
+                thread = (
+                    repository.get("issueOrPullRequest")
+                    if isinstance(repository, Mapping)
+                    else None
+                )
+                if not isinstance(thread, Mapping) or "author" not in thread:
+                    raise ValueError("GitHub answered participants without a thread")
+                self._participant_author(thread["author"], logins)
+                if comments_active:
+                    comments, comments_cursor = self._participant_page(
+                        thread.get("comments"), comments_seen
+                    )
+                    for comment in comments:
+                        self._participant_author(comment["author"], logins)
+                    comments_active = comments_cursor is not None
+                if thread.get("__typename") == "Issue":
+                    reviews_active = False
+                elif thread.get("__typename") != "PullRequest":
+                    raise ValueError("GitHub answered participants with an invalid thread type")
+                elif reviews_active:
+                    reviews, reviews_cursor = self._participant_page(
+                        thread.get("reviews"), reviews_seen
+                    )
+                    for review in reviews:
+                        self._participant_author(review["author"], logins)
+                        seen: set[str] = set()
+                        comments, cursor = self._participant_page(review.get("comments"), seen)
+                        for comment in comments:
+                            self._participant_author(comment["author"], logins)
+                        if cursor is not None:
+                            review_id = review.get("id")
+                            if not isinstance(review_id, str) or not review_id:
+                                raise ValueError("GitHub answered participants without a review ID")
+                            pending.append((review_id, cursor, seen))
+                    reviews_active = reviews_cursor is not None
+            else:
+                review_id, cursor, seen = pending.pop()
+                data = await self.github.graphql(
+                    _REVIEW_PARTICIPANTS_QUERY, {"id": review_id, "cursor": cursor}
+                )
+                review = data.get("node")
+                if not isinstance(review, Mapping):
+                    raise ValueError("GitHub answered participants without a review")
+                comments, cursor = self._participant_page(review.get("comments"), seen)
+                for comment in comments:
+                    self._participant_author(comment["author"], logins)
+                if cursor is not None:
+                    pending.append((review_id, cursor, seen))
+            if not comments_active and not reviews_active and not pending:
+                return logins
+        raise ValueError("GitHub participant pagination exceeded its request limit")
 
     async def read_file(
         self, path: str, ref: str | None, *, max_chars: int, strict: bool = False
