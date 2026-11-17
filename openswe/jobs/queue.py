@@ -75,8 +75,23 @@ class Job(BaseModel):
     def next_fire_after(self, moment: datetime) -> datetime:
         if self.cron is None:
             raise ValueError("A one-shot job has no next fire time")
+        # Explicit equal ranges preserve croniter 6's full-cycle meaning of max/step.
+        fields = self.cron.lower().split()
+        for index, (field, maximum) in enumerate(
+            zip(fields, (59, 23, 31, 12, 6, 59, 2099), strict=False)
+        ):
+            segments = []
+            for segment in field.split(","):
+                start, slash, step = segment.partition("/")
+                if slash and (
+                    (start.isdigit() and int(start) == maximum)
+                    or (index, start) in ((3, "dec"), (4, "sat"))
+                ):
+                    segment = f"{maximum}-{maximum}/{step}"
+                segments.append(segment)
+            fields[index] = ",".join(segments)
         local = moment.astimezone(ZoneInfo(self.timezone))
-        return croniter(self.cron, local).get_next(datetime).astimezone(UTC)
+        return croniter(" ".join(fields), local).get_next(datetime).astimezone(UTC)
 
     async def hold(self) -> Hold:
         """Renew this run's claim, unless the job was replaced or cancelled meanwhile."""

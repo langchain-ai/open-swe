@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
@@ -9,8 +10,6 @@ from openswe.database.postgres import transaction
 from openswe.jobs import queue
 from openswe.jobs.queue import Hold, Job
 from openswe.jobs.worker import JobWorker
-
-pytestmark = pytest.mark.usefixtures("registry_db")
 
 _PAST = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -35,6 +34,7 @@ def _worker(ran: list[Job], *, fail: bool = False) -> JobWorker:
     return worker
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
     ran: list[Job] = []
     unrelated = await queue.schedule("other", due_at=_PAST - timedelta(seconds=1))
@@ -52,6 +52,7 @@ async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
     assert await queue.find({}) == []
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_reclaimed_wakeup_does_not_launch_a_second_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -79,6 +80,7 @@ async def test_a_reclaimed_wakeup_does_not_launch_a_second_run(
     assert await queue.find({}) == []
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_cron_job_moves_to_its_next_fire_time_in_its_timezone() -> None:
     job = await queue.schedule("probe", cron="0 9 * * *", timezone="America/New_York")
     await _due_now(job)
@@ -87,12 +89,22 @@ async def test_a_cron_job_moves_to_its_next_fire_time_in_its_timezone() -> None:
 
     [after] = await queue.find({})
     assert after.due_at > datetime.now(UTC)
-    assert after.due_at.astimezone(job.next_fire_after(_PAST).tzinfo).hour in {13, 14}
+    assert after.due_at.astimezone(ZoneInfo(job.timezone)).hour == 9
+    assert after.claim_token is None
 
 
 @pytest.mark.parametrize(
     ("timezone", "cron", "start", "expected"),
     [
+        ("America/New_York", "59/15 * * * *", _PAST.isoformat(), "2026-01-01T00:15:00+00:00"),
+        ("America/New_York", "0 23/6 * * *", _PAST.isoformat(), "2026-01-01T05:00:00+00:00"),
+        ("America/New_York", "0 0 31/5 2 *", _PAST.isoformat(), "2026-02-01T05:00:00+00:00"),
+        ("America/New_York", "0 0 * 12/3 *", _PAST.isoformat(), "2026-01-01T05:00:00+00:00"),
+        ("America/New_York", "0 0 * DEC/3 *", _PAST.isoformat(), "2026-01-01T05:00:00+00:00"),
+        ("America/New_York", "0 9 * * 6/1", _PAST.isoformat(), "2026-01-01T14:00:00+00:00"),
+        ("America/New_York", "0 9 * * SAT/1", _PAST.isoformat(), "2026-01-01T14:00:00+00:00"),
+        ("America/New_York", "0 9 * * 7/1", _PAST.isoformat(), "2026-01-01T14:00:00+00:00"),
+        ("America/New_York", "0,59/15 * * * *", _PAST.isoformat(), "2026-01-01T00:15:00+00:00"),
         ("America/New_York", "0 9 * * *", "2026-03-07T14:00:00+00:00", "2026-03-08T13:00:00+00:00"),
         ("America/New_York", "0 9 * * *", "2026-03-08T13:00:00+00:00", "2026-03-09T13:00:00+00:00"),
         ("America/New_York", "0 9 * * *", "2026-10-31T13:00:00+00:00", "2026-11-01T14:00:00+00:00"),
@@ -113,9 +125,7 @@ async def test_a_cron_job_moves_to_its_next_fire_time_in_its_timezone() -> None:
         ("UTC", "0 9 * * *", "2026-10-31T09:00:00+00:00", "2026-11-01T09:00:00+00:00"),
     ],
 )
-def test_cron_follows_local_time_across_dst(
-    timezone: str, cron: str, start: str, expected: str
-) -> None:
+def test_cron_next_fire_time(timezone: str, cron: str, start: str, expected: str) -> None:
     moment = datetime.fromisoformat(start)
     job = Job(
         id=uuid.uuid4(),
@@ -132,6 +142,7 @@ def test_cron_follows_local_time_across_dst(
     assert job.next_fire_after(moment) == datetime.fromisoformat(expected)
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_failing_one_shot_backs_off_then_gives_up() -> None:
     job = await queue.schedule("probe", due_at=_PAST)
     ran: list[Job] = []
@@ -148,6 +159,7 @@ async def test_a_failing_one_shot_backs_off_then_gives_up() -> None:
     assert len(ran) == queue.MAX_ATTEMPTS
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_key_replaces_the_job_queued_under_it() -> None:
     await queue.schedule("probe", {"v": 1}, due_at=_PAST, key="probe:a")
     await queue.schedule("probe", {"v": 2}, cron="*/5 * * * *", key="probe:a")
@@ -156,6 +168,7 @@ async def test_a_key_replaces_the_job_queued_under_it() -> None:
     assert (job.payload, job.cron) == ({"v": 2}, "*/5 * * * *")
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_job_replaced_while_it_runs_keeps_its_replacement() -> None:
     worker = JobWorker()
 
@@ -172,6 +185,7 @@ async def test_a_job_replaced_while_it_runs_keeps_its_replacement() -> None:
     assert job.payload == {"v": "new"}
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_a_run_that_ends_after_its_job_was_replaced_and_reclaimed_leaves_it_alone() -> None:
     await queue.schedule("probe", {"v": "old"}, due_at=_PAST, key="probe:c")
     [first] = await queue.claim_due(1)
@@ -186,6 +200,7 @@ async def test_a_run_that_ends_after_its_job_was_replaced_and_reclaimed_leaves_i
     assert job.payload == {"v": "new"}
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_coalesced_work_shares_a_waiting_run_and_follows_a_running_one() -> None:
     later = datetime.now(UTC) + timedelta(hours=1)
     await queue.coalesce("probe", {"v": 1}, key="probe:d", due_at=later)
@@ -207,6 +222,7 @@ async def test_coalesced_work_shares_a_waiting_run_and_follows_a_running_one() -
     assert await queue.find({}) == []
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_jobs_are_found_and_cancelled_by_metadata() -> None:
     await queue.schedule("probe", metadata={"thread_id": "t1", "kind": "wake"}, due_at=_PAST)
     await queue.schedule("probe", metadata={"thread_id": "t2", "kind": "wake"}, due_at=_PAST)
@@ -216,6 +232,7 @@ async def test_jobs_are_found_and_cancelled_by_metadata() -> None:
     assert [job.metadata["thread_id"] for job in await queue.find({"kind": "wake"})] == ["t2"]
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_cancelling_a_running_job_stops_its_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     from openswe.jobs import worker as worker_module
 
@@ -240,7 +257,7 @@ async def test_cancelling_a_running_job_stops_its_handler(monkeypatch: pytest.Mo
     assert finished == []
 
 
-@pytest.mark.usefixtures("memory_event_claims")
+@pytest.mark.usefixtures("registry_db", "memory_event_claims")
 async def test_an_automation_fire_claimed_again_after_a_crash_launches_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
