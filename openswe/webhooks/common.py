@@ -737,19 +737,6 @@ async def upsert_agent_thread_metadata(
                     )
                 ):
                     return False
-        elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
-            # A person is continuing the thread, so PR-driven resolution or the
-            # "PRs closed" mark no longer applies. Only the PR webhook sets those,
-            # and only on PR-linked threads, so take its lock for any such thread
-            # and derive the reset from a fresh read rather than the pre-lock one.
-            async with agent_thread_pr_state_lock(thread_id):
-                current = as_thread_dict(await langgraph_client.threads.get(thread_id))
-                current_meta = (
-                    current["metadata"] if isinstance(current.get("metadata"), dict) else {}
-                )
-                metadata.update(_pr_state_reset_for_user_activity(current_meta))
-                await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
-                await mirror_thread_metadata(thread_id, metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
             await mirror_thread_metadata(thread_id, metadata)
@@ -1093,24 +1080,7 @@ GH_PR_AGENT_STATE_ACTIONS = frozenset(
     ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
-_PRS_CLOSED_ATTENTION_REASON = "prs_closed"
 PR_MERGED_FEEDBACK_KEY = "pr_merged"
-
-
-def _pr_linked(metadata: Mapping[str, Any]) -> bool:
-    return any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
-
-
-def _pr_state_reset_for_user_activity(metadata: Mapping[str, Any]) -> dict[str, Any]:
-    """Metadata that a new user message invalidates: PR-driven resolution and attention."""
-    reset: dict[str, Any] = {}
-    if metadata.get("attention_reason"):
-        reset["attention_reason"] = None
-    if metadata.get("auto_resolved_by_prs") is True:
-        reset["resolved"] = False
-        reset["resolved_at_ms"] = None
-        reset["auto_resolved_by_prs"] = False
-    return reset
 
 
 SUPPORTED_GH_COMMENT_ACTIONS = {
@@ -1615,12 +1585,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     falls back to a one-time scan of ``pr_url`` thread metadata. Reviewer
     threads are skipped.
 
-    A thread auto-resolves only when every tracked PR is merged or closed and the
-    agent opened at least one of them with ``resolves_thread=True``, archiving its
-    task workers with it. Without that flag the thread is instead marked
-    ``attention_reason="prs_closed"`` so a person decides whether to resolve it;
-    any PR reopening clears the mark.
-
     The PR's counts, outcome and merge are recorded once, on the thread that
     opened it, when Robin did.
     """
@@ -1665,8 +1629,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     for thread_id in thread_ids:
         metadata: dict[str, Any] | None = None
         newly_merged = False
-        archive: JsonObject | None = None
-        archived = False
         try:
             async with agent_thread_pr_state_lock(thread_id):
                 current = await langgraph_client.threads.get(thread_id)
@@ -1719,31 +1681,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 all_merged = bool(tracked_states) and all(
                     state == "merged" for state in tracked_states
                 )
-                all_terminal = bool(tracked_states) and all(
-                    state in _TERMINAL_PR_STATES for state in tracked_states
-                )
-                resolves_thread = any(
-                    record.get("resolves_thread") is True for record in updated_pull_requests
-                )
-                needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
-                if all_terminal:
-                    if state_changed and metadata.get("resolved") is not True:
-                        if resolves_thread:
-                            archive = {
-                                "resolved": True,
-                                "resolved_at_ms": int(datetime.now(UTC).timestamp() * 1000),
-                                "auto_resolved_by_prs": True,
-                            }
-                            metadata_update.update(archive)
-                        elif not needs_attention:
-                            metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
-                else:
-                    if metadata.get("auto_resolved_by_prs") is True:
-                        metadata_update["resolved"] = False
-                        metadata_update["resolved_at_ms"] = None
-                        metadata_update["auto_resolved_by_prs"] = False
-                    if needs_attention:
-                        metadata_update["attention_reason"] = None
                 if newly_merged:
                     merge_sha = remembered_merge_sha(event.pull_request.merge_commit_sha or "")
                     if merge_sha and any(
@@ -1763,7 +1700,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update
                     )
-                    archived = archive is not None
                 location = SourceContext.from_metadata(metadata).slack_location
                 if (
                     was_all_merged != all_merged
@@ -1780,12 +1716,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
-        finally:
-            if archived and archive is not None:
-                # Workers' own PRs must not reopen them, so they aren't marked as resolved by PRs.
-                await THREADS.archive_task_workers(
-                    thread_id, {**archive, "auto_resolved_by_prs": False}
-                )
         if new_state == "merged":
             from openswe.analytics.emitter import task_marked_complete
 

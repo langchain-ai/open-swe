@@ -253,7 +253,6 @@ function sampleThreads(): AgentThread[] {
       repoFullName: repo,
       status: "error",
       viewed: true,
-      attentionReason: "The run failed",
       createdAt: ago(600),
       updatedAt: ago(500),
       pr: pr(9, "Review INC-1026", "closed", "open-swe/review-inc-1026"),

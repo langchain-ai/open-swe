@@ -139,8 +139,6 @@ async def test_archive_cascades_only_to_readable_task_workers(
     assert {key for key, value in state.items() if value["resolved"]} == expected
     if resolved and thread_id == "parent" and failure != "lookup":
         assert state["worker"]["resolved_at_ms"] == state["parent"]["resolved_at_ms"]
-        assert state["worker"]["auto_resolved_by_prs"] is False
-        assert state["worker"]["attention_reason"] is None
 
 
 @pytest.mark.parametrize("start", [True, False])

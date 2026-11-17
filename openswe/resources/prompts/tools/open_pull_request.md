@@ -24,10 +24,6 @@ Args:
   The authenticated user's dashboard preference overrides this value for newly created PRs; existing PRs are returned unchanged.
 - retitle_thread: Retitle this thread to the new PR's title by default, unless a person has renamed it.
   Set False to preserve its title; returning an existing PR does not retitle the thread.
-- resolves_thread: Set True when merging or closing this PR finishes the thread's work, so the thread auto-resolves once every PR it opened is merged or closed.
-  Prefer True.
-  Use False only when you know more PRs are coming for this thread (a stacked PR, a follow-up you still plan to open) and set True on the last one instead.
-  Threads whose PRs never set this stay open until someone resolves them by hand.
 
 Returns: On success: {"success": True, "created": bool, "url": str, "number": int, "author": str}.
 ``created`` is False when an open PR already existed.

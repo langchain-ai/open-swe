@@ -129,7 +129,6 @@ export interface AgentThread {
   status: AgentStatus
   viewed: boolean
   resolved: boolean
-  attentionReason?: string
   createdAt: Date
   updatedAt: Date
   source?: string
@@ -187,7 +186,6 @@ export function decodeThread(value: unknown): AgentThread {
     status,
     viewed: typeof value.viewed === "boolean" ? value.viewed : true,
     resolved: value.resolved === true,
-    attentionReason: stringAt(value, "attentionReason"),
     createdAt: dateFromMilliseconds(value.createdAt),
     updatedAt: dateFromMilliseconds(value.updatedAt),
     source: stringAt(value, "source"),
@@ -229,7 +227,6 @@ export function threadCategory(thread: AgentThread): InboxCategory {
     return "inReview"
   if (
     !thread.viewed ||
-    thread.attentionReason ||
     thread.status === "error" ||
     thread.status === "interrupted"
   ) {

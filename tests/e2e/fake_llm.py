@@ -1603,7 +1603,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "title": EXPEDITE_PR_TITLE,
                 "body": "Restores the single exclamation mark in the greeting.",
                 "draft": True,
-                "resolves_thread": True,
             },
             "call-expedite-pr",
         ),

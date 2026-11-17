@@ -23,7 +23,6 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
 import { Icon } from "@langchain/macaw-components/Icon"
-import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import type {
@@ -938,22 +937,6 @@ export function AgentThreadView({
                 details={{ Thread: thread.id, Trace: thread.traceUrl }}
                 className="-my-space-1 align-middle"
               />
-            </Banner>
-          </div>
-        )}
-        {thread.attentionReason === "prs_closed" && !thread.resolved && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
-            <Banner
-              intent="info"
-              icon={
-                <Icon
-                  icon={GitMergeIcon}
-                  size="md"
-                  className="text-icon-brand"
-                />
-              }
-            >
-              Every pull request from this thread is merged or closed.
             </Banner>
           </div>
         )}

@@ -16,7 +16,7 @@ second primary impossible.
 
 Two kinds of write, by who knows what. ``save`` is for callers holding the PR
 as GitHub describes it (the opener, lifecycle webhooks): it writes the
-GitHub-owned columns and can set, never clear, ``resolves_thread``.
+GitHub-owned columns.
 ``link_thread`` and ``link_review`` are for callers that only know the PR's
 identity: they create the row if it is missing and touch no other column.
 
@@ -44,7 +44,6 @@ from sqlalchemy import (
     desc,
     func,
     inspect,
-    or_,
     select,
     text,
     tuple_,
@@ -196,7 +195,6 @@ class PullRequest(Base):
     author_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
-    resolves_thread: Mapped[bool] = mapped_column(default=False)
     # The head Robin's auto-approval last approved, which stands in for a second person.
     auto_approved_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
     # Opened by Robin as itself before requesters were kept, with no requester ever found.
@@ -409,10 +407,10 @@ class PullRequest(Base):
     async def save(self, *, repository_private: bool | None = None) -> Self:
         """Write the PR as GitHub describes it and register its repository.
 
-        Overwrites the GitHub-owned columns; ``resolves_thread`` can only be set,
-        never cleared. Queued ``threads``/``reviews`` are linked as well. The
-        author is linked to a registered user when one matches their GitHub id
-        or, failing that, their login; an unregistered author leaves it unset.
+        Overwrites the GitHub-owned columns. Queued ``threads``/``reviews`` are
+        linked as well. The author is linked to a registered user when one
+        matches their GitHub id or, failing that, their login; an unregistered
+        author leaves it unset.
         """
         return await self._write(overwrite=True, repository_private=repository_private)
 
@@ -679,7 +677,6 @@ class PullRequest(Base):
             **{column: getattr(self, column) for column in _WRITE_ONCE_COLUMNS},
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
-            resolves_thread=self.resolves_thread,
             **{column: getattr(self, column) for column in _DIFF_COLUMNS},
             legacy_threads_discovered_at=func.clock_timestamp() if legacy_discovered else None,
         )
@@ -699,7 +696,6 @@ class PullRequest(Base):
                     upsert.excluded.author_github_id, cls.author_github_id
                 ),
                 "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
-                "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
                 **{
                     column: func.coalesce(getattr(upsert.excluded, column), getattr(cls, column))
                     for column in _DIFF_COLUMNS

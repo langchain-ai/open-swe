@@ -694,7 +694,6 @@ async def _thread_summary(
         "viewed": read_position.viewed,
         "viewedAt": int(viewed_at) if isinstance(viewed_at, (int, float)) else None,
         "resolved": _is_thread_resolved(metadata),
-        "attentionReason": _metadata_string(metadata, "attention_reason"),
         "resolvedAt": (
             int(metadata["resolved_at_ms"])
             if isinstance(metadata.get("resolved_at_ms"), (int, float))

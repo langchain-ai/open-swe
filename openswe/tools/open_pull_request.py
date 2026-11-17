@@ -675,7 +675,6 @@ async def _record_pr_telemetry(
     head: str,
     base: str,
     pr: dict[str, Any],
-    resolves_thread: bool = False,
     retitle_thread: bool = True,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
@@ -815,7 +814,6 @@ async def _record_pr_telemetry(
                     else ""
                 ),
                 "diff_stats": diff_stats,
-                "resolves_thread": resolves_thread,
             }
             run_id = config.get("run_id") or cfg.run_id
             pull_requests = upsert_pull_request_record(
@@ -879,7 +877,6 @@ async def _record_pr_telemetry(
                     ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
-                    resolves_thread=resolves_thread,
                     additions=additions,
                     deletions=deletions,
                     changed_files=changed_files,
@@ -1043,7 +1040,6 @@ async def _open_pull_request(
     title: str,
     body: str,
     draft: bool,
-    resolves_thread: bool = False,
     retitle_thread: bool = True,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1147,7 +1143,6 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=pr,
-                    resolves_thread=resolves_thread,
                     retitle_thread=retitle_thread,
                     creation_response=pr,
                     run_state=state,
@@ -1207,7 +1202,6 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=existing,
-                    resolves_thread=resolves_thread,
                     retitle_thread=retitle_thread,
                     record_opening=False,
                     run_state=state,
@@ -1281,7 +1275,6 @@ async def open_pull_request(
     title: str,
     body: str,
     draft: bool = True,
-    resolves_thread: bool = False,
     retitle_thread: bool = True,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
@@ -1294,7 +1287,6 @@ async def open_pull_request(
         title=title,
         body=body,
         draft=draft,
-        resolves_thread=resolves_thread,
         retitle_thread=retitle_thread,
         state=state,
     )
@@ -1307,7 +1299,7 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
 
 
 @audit_tool()
-async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
+async def link_pull_request(pr_url: str) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread and is_concierge_thread(
@@ -1341,7 +1333,6 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
             head=_ref_name(pr, "head"),
             base=_ref_name(pr, "base"),
             pr=pr,
-            resolves_thread=resolves_thread,
             record_opening=False,
         )
     return {"success": True, "url": pr.get("html_url"), "number": ref.number}

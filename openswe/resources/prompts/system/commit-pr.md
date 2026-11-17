@@ -22,11 +22,9 @@ Steps, in order:
 2. **Push & open/update the PR.**
    Commit locally and `git push origin <branch>`.
    - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the thread's owner.
-     Pass `resolves_thread=true` unless you know more PRs are coming for this thread (a stack, a planned follow-up); then set it only on the last one.
-     It lets the thread auto-resolve once its PRs are merged or closed.
    - **Update an existing PR** (edit body, etc.; never mark a draft ready) with `gh pr edit`.
      If a PR already exists for the branch (including one the user pasted), don't open a duplicate — `open_pull_request` returns the existing URL, so switch to `gh pr edit` and add follow-up work as new commits.
-     When working on an existing PR the user gave you, call `link_pull_request` with its URL once so the thread tracks it, passing `resolves_thread=true` on the same terms as `open_pull_request`.
+     When working on an existing PR the user gave you, call `link_pull_request` with its URL once so the thread tracks it.
 
     Follow the repository's PR title and description conventions.
     Inspect `AGENTS.md`, PR templates, `.changelog/README.md`, and nearby docs before choosing the format.

@@ -59,19 +59,13 @@ async def test_linking_never_overwrites_what_save_wrote() -> None:
     )
 
 
-async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_thread() -> None:
-    await PullRequest(
-        owner="lc", repo="repo", number=7, title="Add widget", resolves_thread=True
-    ).save()
+async def test_save_from_a_later_event_updates_github_fields() -> None:
+    await PullRequest(owner="lc", repo="repo", number=7, title="Add widget").save()
     saved = await PullRequest(
         owner="lc", repo="repo", number=7, state="merged", title="Add widget (final)"
     ).save()
 
-    assert (saved.state, saved.title, saved.resolves_thread) == (
-        "merged",
-        "Add widget (final)",
-        True,
-    )
+    assert (saved.state, saved.title) == ("merged", "Add widget (final)")
     assert saved.created_at is not None and saved.updated_at is not None
 
 

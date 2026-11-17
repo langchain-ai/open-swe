@@ -599,8 +599,6 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
                 metadata={
                     "resolved": True,
                     "resolved_at_ms": now_ms,
-                    "auto_resolved_by_prs": False,
-                    "attention_reason": None,
                 },
             )
 
@@ -620,8 +618,6 @@ async def resolve_dashboard_thread(
             metadata_update: JsonObject = {
                 "resolved": resolved,
                 "resolved_at_ms": _now_ms() if resolved else None,
-                "auto_resolved_by_prs": False,
-                "attention_reason": None,
             }
             await THREADS.update(thread_id, metadata_update)
             if resolved:

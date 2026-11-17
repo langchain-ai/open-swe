@@ -460,7 +460,6 @@ async def start_pull_request_thread(
                 metadata={
                     "resolved": False,
                     "resolved_at_ms": None,
-                    "auto_resolved_by_prs": False,
                     **({"review_chat": False} if not isinstance(intent, MessageIntent) else {}),
                 },
             )

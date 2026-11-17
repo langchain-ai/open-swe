@@ -3,12 +3,11 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from openswe.github import pull_requests
-from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads.index import IndexedThread
 from openswe.threads.store import THREADS
 from openswe.webhooks import common as webhook_common
@@ -41,58 +40,7 @@ def _pr_payload(
 
 
 @pytest.mark.asyncio
-async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> None:
-    closing_pr = {
-        "repo_full_name": "lc/repo",
-        "number": 7,
-        "url": "https://github.com/lc/repo/pull/7",
-        "state": "open",
-    }
-    merged_pr = {
-        "repo_full_name": "lc/other",
-        "number": 9,
-        "url": "https://github.com/lc/other/pull/9",
-        "state": "merged",
-        "resolves_thread": True,
-    }
-    thread = {
-        "thread_id": "t1",
-        "metadata": {
-            "kind": "agent",
-            "pr_url": merged_pr["url"],
-            "pr_state": "merged",
-            "pr_urls": [closing_pr["url"], merged_pr["url"]],
-            "pull_requests": [closing_pr, merged_pr],
-        },
-    }
-    fake_client = MagicMock()
-    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
-    fake_client.threads.get = AsyncMock(return_value=thread)
-    fake_client.threads.update = AsyncMock()
-    worker_update = AsyncMock()
-
-    with (
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
-        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.threads.store.agent_thread_pr_state_lock", _unlocked),
-        patch(
-            "openswe.threads.store.sidebar_memberships",
-            AsyncMock(return_value={"w1": SidebarTaskMembership("w1", "task", "worker", "t1")}),
-        ),
-        patch.object(THREADS, "update", worker_update),
-    ):
-        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
-
-    archive = {"resolved": True, "resolved_at_ms": ANY, "auto_resolved_by_prs": True}
-    fake_client.threads.update.assert_awaited_once_with(
-        thread_id="t1",
-        metadata={"pull_requests": [{**closing_pr, "state": "closed"}, merged_pr], **archive},
-    )
-    worker_update.assert_awaited_once_with("w1", {**archive, "auto_resolved_by_prs": False})
-
-
-@pytest.mark.asyncio
-async def test_update_agent_thread_pr_state_skips_resolution_without_resolves_thread() -> None:
+async def test_update_agent_thread_pr_state_records_closed_pr() -> None:
     closing_pr = {
         "repo_full_name": "lc/repo",
         "number": 7,
@@ -128,21 +76,17 @@ async def test_update_agent_thread_pr_state_skips_resolution_without_resolves_th
 
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="t1",
-        metadata={
-            "pull_requests": [{**closing_pr, "state": "closed"}, merged_pr],
-            "attention_reason": "prs_closed",
-        },
+        metadata={"pull_requests": [{**closing_pr, "state": "closed"}, merged_pr]},
     )
 
 
 @pytest.mark.asyncio
-async def test_update_agent_thread_pr_state_waits_for_open_prs_when_flagged() -> None:
+async def test_update_agent_thread_pr_state_waits_for_open_prs() -> None:
     merging_pr = {
         "repo_full_name": "lc/repo",
         "number": 7,
         "url": "https://github.com/lc/repo/pull/7",
         "state": "open",
-        "resolves_thread": True,
     }
     open_pr = {
         "repo_full_name": "lc/other",
@@ -182,53 +126,6 @@ async def test_update_agent_thread_pr_state_waits_for_open_prs_when_flagged() ->
 
 
 @pytest.mark.asyncio
-async def test_update_agent_thread_pr_state_reopens_auto_resolved_thread() -> None:
-    closed_pr = {
-        "repo_full_name": "lc/repo",
-        "number": 7,
-        "url": "https://github.com/lc/repo/pull/7",
-        "state": "closed",
-    }
-    fake_client = MagicMock()
-    fake_client.threads.search = AsyncMock(
-        return_value=[
-            {
-                "thread_id": "t1",
-                "metadata": {
-                    "kind": "agent",
-                    "pr_url": closed_pr["url"],
-                    "pr_state": "closed",
-                    "pr_urls": [closed_pr["url"]],
-                    "pull_requests": [closed_pr],
-                    "resolved": True,
-                    "resolved_at_ms": 123,
-                    "auto_resolved_by_prs": True,
-                },
-            }
-        ]
-    )
-    fake_client.threads.get = AsyncMock(return_value=fake_client.threads.search.return_value[0])
-    fake_client.threads.update = AsyncMock()
-
-    with (
-        patch("openswe.webhooks.common.get_client", return_value=fake_client),
-        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-    ):
-        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="open"))
-
-    fake_client.threads.update.assert_awaited_once_with(
-        thread_id="t1",
-        metadata={
-            "pull_requests": [{**closed_pr, "state": "open"}],
-            "pr_state": "open",
-            "resolved": False,
-            "resolved_at_ms": None,
-            "auto_resolved_by_prs": False,
-        },
-    )
-
-
-@pytest.mark.asyncio
 async def test_update_agent_thread_pr_state_paginates_all_matching_threads() -> None:
     first_page = [
         {"thread_id": f"reviewer-{index}", "metadata": {"kind": "reviewer"}} for index in range(50)
@@ -259,7 +156,7 @@ async def test_update_agent_thread_pr_state_paginates_all_matching_threads() -> 
     ]
     fake_client.threads.update.assert_awaited_once_with(
         thread_id="t51",
-        metadata={"pr_state": "closed", "attention_reason": "prs_closed"},
+        metadata={"pr_state": "closed"},
     )
 
 
@@ -273,7 +170,6 @@ async def test_duplicate_terminal_state_preserves_manual_unresolve() -> None:
             "pr_url": "https://github.com/lc/repo/pull/7",
             "pr_state": "closed",
             "resolved": False,
-            "auto_resolved_by_prs": False,
         },
     }
     fake_client.threads.search = AsyncMock(return_value=[thread])
@@ -302,7 +198,6 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
         "number": 9,
         "url": "https://github.com/lc/other/pull/9",
         "state": "open",
-        "resolves_thread": True,
     }
     stale_thread = {
         "thread_id": "t1",
@@ -334,9 +229,6 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
                 {**first_pr, "state": "closed"},
                 {**second_pr, "state": "closed"},
             ],
-            "resolved": True,
-            "resolved_at_ms": ANY,
-            "auto_resolved_by_prs": True,
         },
     )
 
@@ -445,13 +337,11 @@ async def test_upsert_agent_thread_metadata_keeps_manual_resolution() -> None:
                 "created_at_ms": 1,
                 "resolved": True,
                 "resolved_at_ms": 5,
-                "auto_resolved_by_prs": False,
             }
         )
     )
 
     assert "resolved" not in metadata
-    assert "attention_reason" not in metadata
 
 
 _MERGE_SHA = "d" * 40
