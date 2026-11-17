@@ -15,14 +15,16 @@ const AGENTS_HOME_RE = /^\/agents\/?$/
  * wrong parameter costs a whole duplicate request.
  */
 function warmApiRequests(
-  urls: Array<string>,
+  sdkUrls: Array<string>,
+  dashboardUrls: Array<string>,
   sidebarPath: string | null,
   prefsKey: string,
   pageSize: number
 ) {
   if (document.readyState !== "loading") return
 
-  const targets = urls.slice()
+  const targets = sdkUrls.map((url) => ({ url, dashboard: false }))
+  for (const url of dashboardUrls) targets.push({ url, dashboard: true })
   if (sidebarPath) {
     let includeAutomations = false
     let includeResolved = false
@@ -63,7 +65,10 @@ function warmApiRequests(
     if (!includeClaudeCode) search.append("exclude_source", "claude_code")
     if (!includeSlack) search.append("exclude_source", "slack")
     search.set("sort_by", sortByActivity ? "updated_at" : "created_at")
-    targets.push(sidebarPath + "?" + search.toString())
+    targets.push({
+      url: sidebarPath + "?" + search.toString(),
+      dashboard: true,
+    })
   }
 
   // A request matches a warmed one whatever order its query keys come in.
@@ -81,13 +86,24 @@ function warmApiRequests(
       timing: { startedAt?: number; endedAt?: number }
     }
   >()
-  for (const url of targets) {
-    const href = new URL(url, location.href).href
+  for (const target of targets) {
+    const href = new URL(target.url, location.href).href
     const timing: { startedAt?: number; endedAt?: number } = {}
     try {
       timing.startedAt = performance.now()
     } catch {}
-    const request = fetch(href, { credentials: "include" })
+    const init: RequestInit = { credentials: "include" }
+    if (target.dashboard) {
+      // What `agentsRequest` sends. The server tags its trace with the request id.
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      try {
+        headers["X-Request-ID"] = "req_" + crypto.randomUUID()
+      } catch {}
+      init.headers = headers
+    }
+    const request = fetch(href, init)
     request.then(
       () => {
         try {
@@ -171,6 +187,11 @@ function threadStateUrl(threadId: string): string {
   return `${agentsLangGraphApiUrl}/threads/${threadId}/state?${search}`
 }
 
+/** What `agentsApi.getThread` requests. The thread page waits on it to show the thread. */
+function threadSummaryUrl(threadId: string): string {
+  return `${agentsLangGraphApiUrl}/threads/${threadId}`
+}
+
 /** The sidebar page endpoint; the script appends the preference-dependent query. */
 function sidebarPageEndpoint(): string {
   return `${agentsLangGraphApiUrl}/threads/page`
@@ -187,9 +208,9 @@ export function apiWarmupScript(pathname: string): string | null {
   const isAgentsHome = AGENTS_HOME_RE.test(pathname)
   if (!threadId && !isAgentsHome) return null
 
-  const urls = threadId ? [threadStateUrl(threadId)] : []
   const args = [
-    JSON.stringify(urls),
+    JSON.stringify(threadId ? [threadStateUrl(threadId)] : []),
+    JSON.stringify(threadId ? [threadSummaryUrl(threadId)] : []),
     JSON.stringify(sidebarPageEndpoint()),
     JSON.stringify(SIDEBAR_PREFS_STORAGE_KEY),
     JSON.stringify(SIDEBAR_PAGE_SIZE),

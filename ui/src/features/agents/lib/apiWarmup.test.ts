@@ -14,7 +14,9 @@ import type { ChatSort } from "./sidebarPrefs"
 import type { ReactNode } from "react"
 
 const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
-const STATE_PATH = `/dashboard/api/threads/${THREAD_ID}/state`
+const SUMMARY_PATH = `/dashboard/api/threads/${THREAD_ID}`
+const STATE_PATH = `${SUMMARY_PATH}/state`
+const SIDEBAR_PATH = "/dashboard/api/threads/page"
 
 function setReadyState(value: DocumentReadyState) {
   Object.defineProperty(document, "readyState", { value, configurable: true })
@@ -65,10 +67,28 @@ function mountThreadStream() {
   })
 }
 
-function stateRequests(fetch: ReturnType<typeof stubAgentServer>) {
+function requestsTo(
+  fetch: ReturnType<typeof stubFetch>,
+  path: string
+): Array<Parameters<typeof window.fetch>> {
   return fetch.mock.calls.filter(
-    ([input]) => new URL(requestUrl(input)).pathname === STATE_PATH
+    ([input]) => new URL(requestUrl(input)).pathname === path
   )
+}
+
+function asSent([input, init]: Parameters<typeof window.fetch>) {
+  const headers = new Headers(init?.headers)
+  const requestId = headers.get("x-request-id")
+  if (requestId)
+    headers.set(
+      "x-request-id",
+      requestId.replace(/^req_[0-9a-f-]{36}$/, "req_<uuid>")
+    )
+  return {
+    url: requestUrl(input),
+    credentials: init?.credentials,
+    headers: Object.fromEntries(headers),
+  }
 }
 
 /** The sidebar's first page, requested the way the app does: through the real api client. */
@@ -141,24 +161,37 @@ describe("apiWarmupScript", () => {
     expect(String(original.mock.calls[0]?.[0])).toContain("/threads/page")
   })
 
-  it("warms both state and sidebar on a thread route, and hands each over once", async () => {
+  it("warms the state, the summary and the sidebar on a thread route, and hands each over once", async () => {
     setReadyState("loading")
     const original = stubFetch()
 
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
-    expect(original).toHaveBeenCalledTimes(2)
+    expect(original).toHaveBeenCalledTimes(3)
 
-    const warmedUrl = (path: string) =>
-      String(original.mock.calls.find((c) => String(c[0]).includes(path))?.[0])
-    const warmedState = await window.fetch(warmedUrl(STATE_PATH))
-    const warmedSidebar = await window.fetch(warmedUrl("/threads/page"))
+    for (const path of [STATE_PATH, SUMMARY_PATH, SIDEBAR_PATH]) {
+      const [warmed] = requestsTo(original, path)
+      expect(await window.fetch(requestUrl(warmed![0]))).toBeInstanceOf(
+        Response
+      )
+    }
 
-    expect(warmedState).toBeInstanceOf(Response)
-    expect(warmedSidebar).toBeInstanceOf(Response)
-    // Both served from the warm pool, so no extra network calls.
-    expect(original).toHaveBeenCalledTimes(2)
-    // Pool drained → the patch removes itself.
+    expect(original).toHaveBeenCalledTimes(3)
     expect(window.fetch).toBe(original)
+  })
+
+  it("warms the summary as the thread page requests it, and hands it to that request", async () => {
+    const own = stubFetch()
+    await agentsApi.getThread(THREAD_ID)
+
+    setReadyState("loading")
+    const network = stubFetch()
+    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    const warmed = requestsTo(network, SUMMARY_PATH)
+    expect(warmed).toHaveLength(1)
+    await agentsApi.getThread(THREAD_ID)
+
+    expect(requestsTo(network, SUMMARY_PATH)).toEqual(warmed)
+    expect(asSent(warmed[0]!)).toEqual(asSent(own.mock.calls[0]!))
   })
 
   // The state URL comes from the SDK (its `select` list follows `stateKeys`), so
@@ -178,7 +211,7 @@ describe("apiWarmupScript", () => {
       ).toBe(true)
     )
 
-    expect(stateRequests(original)).toHaveLength(1)
+    expect(requestsTo(original, STATE_PATH)).toHaveLength(1)
   })
 
   it("times a completed warmup from its start to its response, not its later handoff", async () => {
