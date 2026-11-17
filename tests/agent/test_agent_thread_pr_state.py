@@ -475,7 +475,6 @@ async def test_merged_pr_subscribes_when_a_rollout_check_was_requested() -> None
     with (
         patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
         patch(
             "openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock
         ) as subscribe,
@@ -505,7 +504,6 @@ async def test_merged_pr_asks_to_monitor_when_no_rollout_check_was_requested() -
     with (
         patch("openswe.webhooks.common.get_client", return_value=client),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
         patch(
             "openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock
         ) as subscribe,
@@ -537,11 +535,21 @@ async def test_merged_pr_still_asks_to_monitor_when_feedback_cannot_be_written()
         **_pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA),
         "action": "closed",
     }
+    await pull_requests.PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        opening_head_sha="a" * 40,
+        threads=[
+            pull_requests.ThreadLink(thread_id="t1", source=pull_requests.AGENT_OPENED_LINK_SOURCE)
+        ],
+    ).save()
     feedback = AsyncMock(side_effect=RuntimeError("LangSmith unavailable"))
     with (
         patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("openswe.webhooks.common.create_langsmith_thread_feedback", feedback),
+        patch("openswe.github.pull_requests.create_langsmith_thread_feedback", feedback),
         patch("openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock),
         patch("openswe.webhooks.common.ask_to_monitor_rollout", new_callable=AsyncMock) as ask,
     ):
@@ -568,7 +576,6 @@ async def test_merged_pr_keeps_its_sha_off_a_different_pull_request() -> None:
     with (
         patch("openswe.webhooks.common.get_client", return_value=client),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
         patch("openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock),
         patch("openswe.webhooks.common.ask_to_monitor_rollout", new_callable=AsyncMock) as ask,
     ):
@@ -595,7 +602,6 @@ async def test_merged_pr_without_a_merge_commit_does_not_subscribe() -> None:
     with (
         patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
         patch(
             "openswe.webhooks.common.subscribe_merged_thread", new_callable=AsyncMock
         ) as subscribe,

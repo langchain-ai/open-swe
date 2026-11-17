@@ -211,29 +211,38 @@ async def test_opened_pr_records_its_counts_on_the_thread_that_opened_it(
 
 
 @pytest.mark.usefixtures("robin_pr")
-async def test_merged_pr_records_its_merge_on_every_thread_and_counts_on_the_opener(
-    written: Rows,
+async def test_merged_pr_records_its_merge_and_counts_only_on_the_thread_that_opened_it(
+    written: Rows, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    completed = AsyncMock()
+    monkeypatch.setattr(emitter, "task_marked_complete", completed)
+
     await _deliver(_payload("closed", merged=True, sender={"login": "carol", "id": 33}))
 
     assert written[OPENER].keys() == MERGE_KEYS | COUNT_KEYS | ACTIVITY_KEYS | {"pr_closed"}
     assert written[OPENER]["pr_closed"]["value"] == "merged"
     assert _stats(written[OPENER])["pr_review_comments"] == 5.0
-    assert written[FIX].keys() == MERGE_KEYS
+    assert FIX not in written
+    threads = webhook_common.get_client(url="").threads
+    for thread_id in (OPENER, FIX):
+        assert (await threads.get(thread_id))["metadata"]["pr_state"] == "merged"
+    assert {call.args[0] for call in completed.await_args_list} == {OPENER, FIX}
 
 
-async def test_thread_linked_to_a_pr_robin_did_not_open_gets_only_the_merge(
+async def test_thread_linked_to_a_pr_robin_did_not_open_gets_no_pr_feedback(
     written: Rows, link: Callable[..., None]
 ) -> None:
     link(ThreadLink(thread_id=FIX), opened_by_robin=False)
+    alice = {"login": "alice", "id": 11}
 
-    await _deliver(_payload("opened", sender={"login": "alice", "id": 11}))
-    await _deliver(_payload("closed", sender={"login": "alice", "id": 11}))
-    assert FIX not in written
+    await _deliver(_payload("opened", sender=alice))
+    await _deliver(_payload("closed", sender=alice))
+    await _deliver(_payload("reopened", sender=alice))
+    await _deliver(_payload("closed", merged=True, sender=alice))
 
-    await _deliver(_payload("reopened", sender={"login": "alice", "id": 11}))
-    await _deliver(_payload("closed", merged=True, sender={"login": "alice", "id": 11}))
-    assert written[FIX].keys() == MERGE_KEYS
+    assert written == {}
+    threads = webhook_common.get_client(url="").threads
+    assert (await threads.get(FIX))["metadata"]["pr_state"] == "merged"
 
 
 @pytest.mark.usefixtures("robin_pr")
@@ -250,7 +259,7 @@ async def test_reopening_and_merging_replace_an_earlier_close(written: Rows) -> 
     await _deliver(_payload("closed", merged=True, sender={"login": "carol", "id": 33}))
     assert written[OPENER]["pr_closed"]["value"] == "merged"
     assert written[OPENER]["pr_closed"]["score"] is None
-    assert "pr_closed" not in written[FIX]
+    assert FIX not in written
 
 
 @pytest.mark.parametrize(
@@ -460,16 +469,17 @@ async def test_a_rejected_save_records_counts_on_the_opener_the_stored_row_names
     assert FIX not in written
 
 
+@pytest.mark.parametrize(("merged", "state"), [(False, "closed"), (True, "merged")])
 @pytest.mark.usefixtures("robin_pr")
 async def test_an_unreachable_registry_records_no_pr_feedback_but_still_closes_threads(
-    written: Rows, monkeypatch: pytest.MonkeyPatch
+    written: Rows, monkeypatch: pytest.MonkeyPatch, merged: bool, state: str
 ) -> None:
     _reject_saves(monkeypatch)
     monkeypatch.setattr(PullRequest, "get", AsyncMock(side_effect=RuntimeError("unreachable")))
 
-    await _deliver(_payload("closed", sender={"login": "alice", "id": 11}))
+    await _deliver(_payload("closed", merged=merged, sender={"login": "alice", "id": 11}))
 
     assert written == {}
     threads = webhook_common.get_client(url="").threads
     for thread_id in (OPENER, FIX):
-        assert (await threads.get(thread_id))["metadata"]["pr_state"] == "closed"
+        assert (await threads.get(thread_id))["metadata"]["pr_state"] == state

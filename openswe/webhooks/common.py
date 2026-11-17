@@ -1544,8 +1544,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     ``attention_reason="prs_closed"`` so a person decides whether to resolve it;
     any PR reopening clears the mark.
 
-    A merge is recorded as feedback on every such thread. The PR's counts and
-    outcome are recorded once, on the thread that opened it, when Robin did.
+    The PR's counts, outcome and merge are recorded once, on the thread that
+    opened it, when Robin did.
     """
     event = PullRequestEvent.parse(payload)
     pull_request = event.to_pull_request() if event is not None else None
@@ -1582,6 +1582,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     opener = stored.agent_thread_id if stored is not None else None
     if opener is not None:
         await event.record_feedback(opener)
+        if new_state == "merged":
+            await _record_pr_merge_feedback(opener, pr_url=pr_url)
 
     for thread_id in thread_ids:
         metadata: dict[str, Any] | None = None
@@ -1711,7 +1713,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_marked_complete
 
             await task_marked_complete(thread_id, source="github", auto=True)
-            await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from openswe.analytics.emitter import task_rework
 
