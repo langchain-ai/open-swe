@@ -188,8 +188,8 @@ async def mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
         )
         if started_at is not None:
             dates.add(started_at.astimezone(UTC).date())
-    for family in families:
-        for partition_date in dates:
+    for family in sorted(families):
+        for partition_date in sorted(dates):
             await conn.execute(
                 text(
                     "INSERT INTO dirty_summary_partitions (workspace_id, summary_version, family, "
