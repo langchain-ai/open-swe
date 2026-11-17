@@ -116,5 +116,5 @@ class ManagedSandbox(BaseModel):
                 or carries_checkout
                 or slack_files_pending(raw)
             )
-            and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=False),
+            and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=True),
         )

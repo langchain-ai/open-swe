@@ -139,7 +139,6 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
     monkeypatch.setattr("openswe.sandboxes.providers.langsmith.sandbox_exists", exists)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
-    monkeypatch.setenv("MDA_BIND_SANDBOX_AFTER_PREPARE", "true")
 
     sandbox = await ManagedSandbox.for_thread("thread-1", None, prepare_reaches_sandbox=False)
 
@@ -162,9 +161,9 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
     assert sandbox.bind_after_prepare is (
         owner == "own" and not {"sandbox_handoff_from", "slack_files_pending"} & set(metadata)
     )
-    # A review prepares in its sandbox, and the late report is off unless the deployment turns it on.
+    # A review prepares in its sandbox, and the deployment can turn the late report off.
     review = await ManagedSandbox.for_thread("thread-1", None)
-    monkeypatch.delenv("MDA_BIND_SANDBOX_AFTER_PREPARE")
+    monkeypatch.setenv("MDA_BIND_SANDBOX_AFTER_PREPARE", "false")
     disabled = await ManagedSandbox.for_thread("thread-1", None, prepare_reaches_sandbox=False)
     assert review is not None and not review.bind_after_prepare
     assert disabled is not None and not disabled.bind_after_prepare
