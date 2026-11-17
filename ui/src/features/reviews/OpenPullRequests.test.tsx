@@ -319,43 +319,53 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("merges in the background and keeps the merged card in place", async () => {
-    vi.mocked(api.openPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
-    })
-    let finish!: (result: PullRequestActionResult) => void
-    vi.mocked(api.mergePullRequest).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve
-        })
-    )
-    mount()
-    const card = (await screen.findByText("Change 1")).closest("li")!
-    await chooseMergeMethod(1, "Squash merge")
-    fireEvent.click(
-      within(card).getByRole("button", {
-        name: "Squash and merge",
+  it.each([null, pull(1, { state: "closed" })])(
+    "keeps a locally merged card after its live status becomes %j",
+    async (status) => {
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
       })
-    )
-    expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
-    expect(screen.getByText("Change 1")).toBeTruthy()
-    expect(api.mergePullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
-      "squash",
-      false,
-      false
-    )
-    finish({ action: "merge", done: true })
-    await waitFor(() =>
-      expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
-    )
-    expect(titles()).toEqual(["Change 1", "Change 2"])
-    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
-    expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
-    expect(navigate).not.toHaveBeenCalled()
-  })
+      let finish!: (result: PullRequestActionResult) => void
+      vi.mocked(api.mergePullRequest).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+      const client = makeQueryClient()
+      mount(client)
+      const card = (await screen.findByText("Change 1")).closest("li")!
+      await chooseMergeMethod(1, "Squash merge")
+      fireEvent.click(
+        within(card).getByRole("button", {
+          name: "Squash and merge",
+        })
+      )
+      expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
+      expect(screen.getByText("Change 1")).toBeTruthy()
+      expect(api.mergePullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
+        "squash",
+        false,
+        false
+      )
+      finish({ action: "merge", done: true })
+      await act(async () => {
+        client.setQueryData(
+          pullRequestStatusQuery("octocat", pull(1)).queryKey,
+          status
+        )
+      })
+      await waitFor(() =>
+        expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
+      )
+      expect(titles()).toEqual(["Change 1", "Change 2"])
+      expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
+      expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
+      expect(navigate).not.toHaveBeenCalled()
+    }
+  )
 
   it.each(["clean", "blocked"] as const)(
     "keeps merging available with unknown conversation rules (%s)",

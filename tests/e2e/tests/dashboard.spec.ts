@@ -240,12 +240,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       releaseStart = resolve;
     });
     let threadId = "";
-    let listedBeforeAcceptance = false;
-    page.on("response", async (response) => {
-      if (!new URL(response.url()).pathname.endsWith("/threads/page")) return;
+    const listedBeforeAcceptance = page.waitForResponse(async (response) => {
+      if (!new URL(response.url()).pathname.endsWith("/threads/page"))
+        return false;
       const body = (await response.json()) as { items?: Array<{ id: string }> };
-      if (body.items?.some((thread) => thread.id === threadId))
-        listedBeforeAcceptance = true;
+      return body.items?.some((thread) => thread.id === threadId) ?? false;
     });
     const prematureRequests: string[] = [];
     const recordRequest = (request: import("@playwright/test").Request) => {
@@ -327,7 +326,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       await expect(
         runningSection.locator(`a[href="/agents/${threadId}"]`),
       ).toBeVisible();
-      await expect.poll(() => listedBeforeAcceptance).toBe(true);
+      await listedBeforeAcceptance;
       await expect(
         pendingChat.getByRole("img", { name: "Starting chat" }),
       ).toBeVisible();
@@ -907,6 +906,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       await route.continue();
     });
     try {
+      await expect(
+        page.getByRole("heading", { name: "What should we work on?" }),
+      ).toBeVisible();
       await typeIntoComposer(
         page,
         "Keep this pinned chat safe before acceptance.",

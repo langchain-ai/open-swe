@@ -132,6 +132,7 @@ export function OpenPullRequests({
   const [settled, setSettled] = useState<
     Partial<Record<string, PullRequestOutcome>>
   >({})
+  const retained = new Set(Object.keys(settled).filter((key) => settled[key]))
   const pages = query.data?.pages ?? []
   const latest = pages.at(-1)
   const rows = pages.flatMap((loaded) => loaded.pullRequests)
@@ -165,6 +166,7 @@ export function OpenPullRequests({
     })
     .filter(
       (pr) =>
+        retained.has(pullRequestKey(pr)) ||
         !leftOpenList(
           queryClient.getQueryData(pullRequestStatusQuery(login, pr).queryKey)
         )
@@ -184,7 +186,8 @@ export function OpenPullRequests({
   const { all, detailsLoading } = usePullRequestDetails(
     login,
     matchingRows,
-    requestedRows
+    requestedRows,
+    retained
   )
   const filtered = all.filter(
     (pr) =>

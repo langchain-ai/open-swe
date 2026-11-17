@@ -4,18 +4,20 @@ import type { OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 
 import { leftOpenList, pullRequestStatusQuery } from "./cache"
+import { pullRequestKey } from "./status"
 
 /**
  * Fill in the lightweight listing rows with their per-PR detail reads.
  *
  * `requested` is the window actually on screen, so only those rows cost a
  * request; a row whose detail read comes back null has been closed or merged
- * elsewhere and drops out of the list entirely.
+ * elsewhere drops out unless a local action retains its row until refresh.
  */
 export function usePullRequestDetails(
   login: string,
   rows: OpenPullRequest[],
-  requested: OpenPullRequest[]
+  requested: OpenPullRequest[],
+  retained: ReadonlySet<string>
 ) {
   const detailQueries = useQueries({
     queries: requested.map((pr) => ({
@@ -32,7 +34,8 @@ export function usePullRequestDetails(
       (row) => row.repo === pr.repo && row.number === pr.number
     )
     const detail = detailQueries[index]
-    if (leftOpenList(detail?.data)) return []
+    if (leftOpenList(detail?.data) && !retained.has(pullRequestKey(pr)))
+      return []
     if (detail?.data)
       return [
         {
