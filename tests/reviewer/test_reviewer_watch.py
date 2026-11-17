@@ -633,27 +633,92 @@ async def test_pr_reopened_re_enables_watch() -> None:
     assert captured and captured[0][1]["watch"] is True
 
 
+_PATCH_HEADER = (
+    "diff --git a/jobs.py b/jobs.py\nindex {index} 100644\n--- a/jobs.py\n+++ b/jobs.py\n"
+)
+_REVIEWED_HUNK = (
+    "@@ -10,8 +10,8 @@ class Jobs:\n"
+    "     def can_retry(self):\n"
+    "         if self.attempts > 3:\n"
+    "-            return False\n"
+    "+            return True\n"
+    "         log(self)\n"
+    "         if self.locked:\n"
+    "-            return None\n"
+    "+            return False\n"
+)
+_REPATCHED = _PATCH_HEADER.format(index="3333333..4444444")
+
+
 @pytest.mark.parametrize(
-    "base_ref,previous_base,new_line,unchanged",
+    "base_ref,previous_base,new_diff,unchanged",
     [
-        ("parent", "parent-before-force-push", "+child change", True),
-        ("main", "main-before-rebase", "+child change", True),
-        ("parent", "parent-before-force-push", "+different change", False),
-        ("main", "", "+child change", True),
+        pytest.param(
+            "main",
+            "main-before-rebase",
+            _REPATCHED + _REVIEWED_HUNK.replace("-10,8 +10,8", "-40,8 +40,8"),
+            True,
+            id="lines-shifted",
+        ),
+        pytest.param(
+            "parent",
+            "parent-before-force-push",
+            _REPATCHED
+            + _REVIEWED_HUNK.replace("-10,8 +10,8", "-40,8 +40,8").replace(
+                "can_retry(self):", "can_retry(self) -> bool:"
+            ),
+            True,
+            id="base-changed-non-adjacent-context",
+        ),
+        pytest.param(
+            "main",
+            "",
+            _REPATCHED + "@@ -40,6 +40,6 @@ class Jobs:\n"
+            "     def can_retry(self):\n"
+            "         if self.attempts > 3:\n"
+            "-            return False\n"
+            "+            return True\n"
+            "         log(self)\n"
+            "         audit(self)\n"
+            "@@ -53,4 +53,4 @@ class Jobs:\n"
+            "         audit(self)\n"
+            "         if self.locked:\n"
+            "-            return None\n"
+            "+            return False\n",
+            True,
+            id="base-split-the-hunk",
+        ),
+        pytest.param(
+            "main",
+            "main-before-rebase",
+            _REPATCHED
+            + _REVIEWED_HUNK.replace("can_retry", "can_delete").replace(
+                "self.attempts > 3", "self.owner"
+            ),
+            False,
+            id="same-edit-moved-to-another-method",
+        ),
+        pytest.param(
+            "main",
+            "main-before-rebase",
+            _REPATCHED + _REVIEWED_HUNK.replace("class Jobs:", "class Admin:"),
+            False,
+            id="same-edit-moved-to-another-class",
+        ),
+        pytest.param(
+            "parent",
+            "parent-before-force-push",
+            _REPATCHED + _REVIEWED_HUNK.replace("return True", "return self.ok"),
+            False,
+            id="different-edit",
+        ),
     ],
 )
 async def test_rebased_patch_comparison(
-    base_ref: str, previous_base: str, new_line: str, unchanged: bool
+    base_ref: str, previous_base: str, new_diff: str, unchanged: bool
 ) -> None:
     common = github_webhooks.common
-    old_diff = (
-        "diff --git a/file.py b/file.py\nindex 1111111..2222222 100644\n"
-        "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@ def child():\n-old\n+child change\n"
-    )
-    new_diff = (
-        "diff --git a/file.py b/file.py\nindex 3333333..4444444 100644\n"
-        f"--- a/file.py\n+++ b/file.py\n@@ -21 +21 @@ def child():\n-old\n{new_line}\n"
-    )
+    old_diff = _PATCH_HEADER.format(index="1111111..2222222") + _REVIEWED_HUNK
     with patch.object(
         common, "_fetch_compare_diff", AsyncMock(side_effect=[old_diff, new_diff])
     ) as fetch:

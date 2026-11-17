@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -1410,19 +1410,96 @@ async def fetch_open_pr_for_branch(
         ).open_pull_for_branch(head_ref)
 
 
-def _normalized_diff_hash(diff_text: str) -> str | None:
-    lines: list[str] = []
-    for section in re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE):
-        binary = "\nBinary files " in section or "\nGIT binary patch" in section
-        if binary and not re.search(
-            r"^index [0-9a-f]{40}\.\.[0-9a-f]{40}(?: |$)", section, re.MULTILINE
-        ):
-            return None
-        for line in section.split("\n"):
-            if not binary and line.startswith("index "):
+class PatchFingerprint:
+    """A PR patch's identity that survives a restack onto a moved base.
+
+    Each run of added/removed lines is keyed by its enclosing section and its
+    nearest non-blank neighbours, not by line numbers or git's hunk boundaries:
+    base edits elsewhere keep the fingerprint, while the same edit applied at a
+    different place changes it.
+    """
+
+    _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$")
+    # git's default funcname rule, which picks a hunk header's section text.
+    _SECTION_LINE = re.compile(r"^[A-Za-z_$]")
+    # git keeps at most 80 bytes of a section line.
+    _SECTION_WIDTH = 80
+    _ANCHOR_REACH = 3
+
+    def __init__(self) -> None:
+        self._records: list[str | list[str | list[str]]] = []
+
+    @classmethod
+    def of(cls, diff_text: str) -> str | None:
+        """Return the fingerprint, or None when the diff can't be compared safely."""
+        fingerprint = cls()
+        for file_diff in re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE):
+            if not fingerprint._add_file(file_diff):
+                return None
+        encoded = json.dumps(fingerprint._records, ensure_ascii=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _add_file(self, file_diff: str) -> bool:
+        binary = "\nBinary files " in file_diff or "\nGIT binary patch" in file_diff
+        if binary:
+            if not re.search(
+                r"^index [0-9a-f]{40}\.\.[0-9a-f]{40}(?: |$)", file_diff, re.MULTILINE
+            ):
+                return False
+            self._records.extend(file_diff.split("\n"))
+            return True
+        hunk: list[str] | None = None
+        section = ""
+        for line in file_diff.split("\n"):
+            if line.startswith("@@"):
+                header = self._HUNK_HEADER.match(line)
+                if header is None:
+                    return False
+                if hunk is not None:
+                    self._add_hunk(hunk, section)
+                hunk, section = [], header.group(1).rstrip()
+            elif hunk is not None:
+                if line and not line.startswith((" ", "+", "-", "\\")):
+                    return False
+                hunk.append(line)
+            elif not line.startswith("index "):
+                self._records.append(line)
+        if hunk is not None:
+            self._add_hunk(hunk, section)
+        return True
+
+    def _add_hunk(self, hunk: list[str], section: str) -> None:
+        i = 0
+        while i < len(hunk):
+            if not hunk[i].startswith(("+", "-")):
+                section = self._section_after(hunk[i], section)
+                i += 1
                 continue
-            lines.append(re.sub(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", "@@", line))
-    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+            start = i
+            while i < len(hunk) and hunk[i].startswith(("+", "-", "\\")):
+                i += 1
+            change = hunk[start:i]
+            before = self._anchor(reversed(hunk[max(0, start - self._ANCHOR_REACH) : start]))
+            after = self._anchor(hunk[i : i + self._ANCHOR_REACH])
+            self._records.append([section, before, change, after])
+            for line in change:
+                section = self._section_after(line, section)
+
+    @classmethod
+    def _section_after(cls, line: str, section: str) -> str:
+        """Track git's section text across pre-image lines, so it doesn't depend on hunk splits."""
+        if line.startswith((" ", "-")) and cls._SECTION_LINE.match(line[1:]):
+            return line[1 : 1 + cls._SECTION_WIDTH].rstrip()
+        return section
+
+    @staticmethod
+    def _anchor(context: Iterable[str]) -> str:
+        for line in context:
+            if line.startswith(("+", "-")):
+                break
+            if not line.startswith("\\") and line[1:].strip():
+                return line[1:]
+        return ""
 
 
 async def _fetch_compare_diff(
@@ -1475,8 +1552,8 @@ async def is_pr_diff_unchanged_since_last_review(
     )
     if previous_diff is None or current_diff is None:
         return False
-    previous_hash = _normalized_diff_hash(previous_diff)
-    return previous_hash is not None and previous_hash == _normalized_diff_hash(current_diff)
+    previous_hash = PatchFingerprint.of(previous_diff)
+    return previous_hash is not None and previous_hash == PatchFingerprint.of(current_diff)
 
 
 async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
