@@ -9,8 +9,12 @@ It keeps the last complete UI on disk, including lazy routes, for offline use.
 No dashboard is embedded in the installer.
 First launch requires connectivity to download the UI; failure shows a retry screen.
 
-Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project.
-The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
+Cloud-first desktop is on by default for users who have not saved a choice; saved choices are preserved.
+With it on, new threads run in the cloud, and optional actions on your Mac each require native approval in a desktop app that supports them.
+Turn off **Cloud-first desktop** in **Settings → Experiments** to choose **This Mac** in the new-task composer and run an agent over a selected local project.
+Existing This Mac threads keep working regardless of the personal experiment.
+Admins can still require cloud-first mode for a workspace with `cloud_first_desktop_enabled`.
+A This Mac thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
 The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back.
 This is the same bridge `robin run` uses, from the shared `bridge-client` package.
 

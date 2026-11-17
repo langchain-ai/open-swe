@@ -57,7 +57,7 @@ async def _go_quiet(bridge_id: str, seconds: int = 600) -> None:
 async def test_local_access_requires_an_enabled_private_owner_cloud_run(
     registry_db: None, langsmith_users: LangSmithUsers
 ) -> None:
-    langsmith_users.add(OWNER)
+    langsmith_users.add(OWNER).preferences = {"experimental_cloud_first_desktop": False}
     langsmith_users.add(OTHER)
     bridge = await BridgeStore.register(
         owner_id=OWNER,
@@ -101,7 +101,7 @@ async def test_local_access_requires_an_enabled_private_owner_cloud_run(
 async def test_a_run_drops_local_access_it_cannot_have_rather_than_failing(
     registry_db: None, langsmith_users: LangSmithUsers
 ) -> None:
-    langsmith_users.add(OWNER)
+    langsmith_users.add(OWNER).preferences = {"experimental_cloud_first_desktop": False}
     bridge = await BridgeStore.register(
         owner_id=OWNER,
         client="desktop",
@@ -296,7 +296,7 @@ async def test_rotation_drops_request_days_no_waiter_can_still_be_reading(
     }
 
 
-async def test_a_persons_experiment_opts_them_into_local_access_without_the_workspace(
+async def test_cloud_first_defaults_on_and_respects_personal_opt_out_without_the_workspace(
     registry_db: None, langsmith_users: LangSmithUsers
 ) -> None:
     owner = langsmith_users.add(OWNER)
@@ -310,6 +310,11 @@ async def test_a_persons_experiment_opts_them_into_local_access_without_the_work
     )
     assert bridge is not None
     metadata: dict[str, object] = {"owner_login": OWNER, "visibility": "private"}
+    assert (
+        await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
+        == bridge.bridge_id
+    )
+    owner.preferences = {"experimental_cloud_first_desktop": False}
     with pytest.raises(HTTPException, match="disabled"):
         await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
     owner.preferences = {"experimental_cloud_first_desktop": True}

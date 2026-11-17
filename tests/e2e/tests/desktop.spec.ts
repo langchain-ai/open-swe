@@ -44,7 +44,7 @@ async function typeIntoComposer(
   await editor.press("Enter");
 }
 
-test("Desktop runs a This Mac thread on the cloud agent through its bridge", async ({
+test("Desktop defaults cloud-first, allows opting out, and keeps This Mac threads", async ({
   request,
 }, testInfo) => {
   mkdirSync(e2eTmp, { recursive: true });
@@ -127,7 +127,29 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     );
 
     await page.goto("open-swe://app/agents");
-    // New threads default to Cloud; this test drives a This Mac thread.
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "This Mac", exact: true }),
+    ).toHaveCount(0);
+    await page.goto("open-swe://app/my-settings/experiments");
+    const cloudFirst = page.getByRole("switch", {
+      name: "Cloud-first desktop",
+      exact: true,
+    });
+    await expect(cloudFirst).toBeEnabled();
+    await expect(cloudFirst).toBeChecked();
+    const savedOff = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/profile") &&
+        response.request().method() === "PUT",
+    );
+    await cloudFirst.click();
+    expect((await savedOff).ok()).toBeTruthy();
+    await expect(cloudFirst).not.toBeChecked();
+    await page.reload();
+    await expect(cloudFirst).toBeEnabled();
+    await expect(cloudFirst).not.toBeChecked();
+    await page.goto("open-swe://app/agents");
     await page.evaluate(() =>
       window.localStorage.setItem(
         "open-swe.agents.desktop-thread-source",
@@ -189,12 +211,12 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
       /open-swe:\/\/app\/agents\/[0-9a-f]{8}-[0-9a-f]{4}-/,
     );
     await expect(page.getByText(/Done! I added/)).toBeVisible();
+    const threadUrl = page.url();
+    const threadId = new URL(threadUrl).pathname.split("/").pop();
     await expect(
-      sidebar.getByRole("link", {
-        name: /E2E_DESKTOP_LOCAL please add a greet\(\) helper and open a PR/,
-      }),
+      sidebar.locator(`a[href="/agents/${threadId}"]`),
     ).toBeVisible();
-    const prLink = page.getByRole("link", {
+    const prLink = page.getByRole("main").getByRole("link", {
       name: "Add greet() helper",
       exact: true,
     });
@@ -225,6 +247,25 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
       ]);
 
     // The agent ran in the checkout on this machine, through the bridge.
+    await expect(
+      page.getByText("This Mac", { exact: true }).first(),
+    ).toBeVisible();
+
+    await page.goto("open-swe://app/my-settings/experiments");
+    await expect(cloudFirst).toBeEnabled();
+    await expect(cloudFirst).not.toBeChecked();
+    const savedOn = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/profile") &&
+        response.request().method() === "PUT",
+    );
+    await cloudFirst.click();
+    expect((await savedOn).ok()).toBeTruthy();
+    await page.reload();
+    await expect(cloudFirst).toBeEnabled();
+    await expect(cloudFirst).toBeChecked();
+    await page.goto(threadUrl);
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(
       page.getByText("This Mac", { exact: true }).first(),
     ).toBeVisible();

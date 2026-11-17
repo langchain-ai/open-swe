@@ -397,6 +397,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.off("request", recordRequest);
       releaseStart();
       releaseSidebar();
+      await page.removeAllListeners("response", { behavior: "wait" });
     }
   });
 

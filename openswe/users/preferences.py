@@ -49,7 +49,7 @@ class UserPreferences(BaseModel):
     # Cloud-first desktop for this person, ahead of their workspace's
     # ``cloud_first_desktop_enabled``: new desktop threads run in the cloud, with
     # individually approved local actions (``openswe/bridge/local_access.py``).
-    experimental_cloud_first_desktop: bool = False
+    experimental_cloud_first_desktop: bool = True
 
 
 class UserPreferencesPatch(KitchenChannelPreference):

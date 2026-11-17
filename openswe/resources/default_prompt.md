@@ -10,9 +10,6 @@ Dashboard paths are relative to the active deployment's base URL shown in **Dash
 Default agent model and reasoning effort come from workspace settings, changed by a workspace admin.
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
 Admins can enable the thread composer model picker under **Model Routing** in **Defaults** (`/admin`), override it per workspace, or use `manage_feature_flags` (`model_selection_enabled`); it is off by default.
-Admins can enable cloud-first desktop mode with `manage_feature_flags` (`cloud_first_desktop_enabled`), off by default.
-New desktop threads then use cloud sandboxes; optional local actions require individual native approval and an updated desktop app.
-Existing local histories remain available.
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_shadow`.
 Apps in reviews have reviews of private repositories also do an app's review step, such as saving screenshots of a frontend pull request's preview to Design QA; an admin adds them under **Defaults** (`/admin`), overrides them on a workspace's page, or uses `manage_review_apps`.
 Their **Preview checks**, set in the same places or with `manage_review_apps` (`set_preview_checks`), are the checks whose success means a pull request's preview serves its head commit: when one passes, Robin does the apps' review steps against that preview, publishing only problems that work turns up.
