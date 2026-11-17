@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 RETIRED_PROFILE_KEYS = frozenset(
     {
         "experimental_live_activity",
+        "experimental_local_auto_mode",
         "create_prs",
         "dm_session_enabled",
         "default_model",
@@ -93,7 +94,6 @@ class ProfileUpdate(KitchenChannelPreference):
     concierge_mode: bool | None = None
     experimental_classify: bool | None = None
     experimental_force_code_mode: bool | None = None
-    experimental_local_auto_mode: bool | None = None
     experimental_cloud_first_desktop: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -413,7 +413,6 @@ async def put_my_profile(
                 concierge_mode=update.concierge_mode,
                 experimental_classify=update.experimental_classify,
                 experimental_force_code_mode=update.experimental_force_code_mode,
-                experimental_local_auto_mode=update.experimental_local_auto_mode,
                 experimental_cloud_first_desktop=update.experimental_cloud_first_desktop,
             ),
         )
@@ -424,7 +423,6 @@ async def put_my_profile(
         or update.concierge_mode
         or update.experimental_classify
         or update.experimental_force_code_mode
-        or update.experimental_local_auto_mode
         or update.experimental_cloud_first_desktop
     ):
         raise HTTPException(status_code=409, detail="No Robin user record for this login yet")

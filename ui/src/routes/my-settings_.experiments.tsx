@@ -38,11 +38,6 @@ function ExperimentsPage() {
           description="In threads you create, call every code-compatible tool through eval, including file, shell, and search tools. Synchronous subagents are excluded. Replies, browser, and state-changing controls stay direct. Off by default."
         />
         <ProfileSwitchRow
-          field="experimental_local_auto_mode"
-          label="Auto mode on This Mac"
-          description="In threads that run on your Mac, a classifier reviews each command and file change before it runs. Routine work inside the project goes ahead; anything that touches credentials, sends data away, deletes outside the project or sets up background jobs is blocked, and Robin carries on without it."
-        />
-        <ProfileSwitchRow
           field="experimental_cloud_first_desktop"
           label="Cloud-first desktop"
           description="In the desktop app, new threads run in the cloud instead of on This Mac. In your private threads, Robin can ask to read, write or copy in a file, or run a command, on your Mac, and each action needs your approval in a native dialog. Existing This Mac threads keep working. Needs a desktop app with this feature."

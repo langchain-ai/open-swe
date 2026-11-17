@@ -5630,17 +5630,6 @@
             ],
             "title": "Experimental Force Code Mode"
           },
-          "experimental_local_auto_mode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Local Auto Mode"
-          },
           "personal_kitchen_channel_id": {
             "anyOf": [
               {

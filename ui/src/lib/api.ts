@@ -398,7 +398,6 @@ export interface Profile {
   concierge_mode?: boolean
   experimental_classify?: boolean
   experimental_force_code_mode?: boolean
-  experimental_local_auto_mode?: boolean
   experimental_cloud_first_desktop?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -418,7 +417,6 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   experimental_classify?: boolean
   experimental_force_code_mode?: boolean
-  experimental_local_auto_mode?: boolean
   experimental_cloud_first_desktop?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

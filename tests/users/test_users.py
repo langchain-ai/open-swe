@@ -146,7 +146,11 @@ async def test_concurrent_first_sign_ins_settle_on_one_user() -> None:
 @pytest.mark.parametrize("cloud_first", [None, False, True])
 async def test_preference_patches_merge_and_skip_unset_fields(cloud_first: bool | None) -> None:
     await User.sign_in("github", "8", login="bob")
-    preferences: dict[str, object] = {"concierge_mode": True, "future": "kept"}
+    preferences: dict[str, object] = {
+        "concierge_mode": True,
+        "future": "kept",
+        "experimental_local_auto_mode": True,
+    }
     if cloud_first is not None:
         preferences["experimental_cloud_first_desktop"] = cloud_first
     async with postgres.session() as session:

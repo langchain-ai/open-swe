@@ -43,9 +43,6 @@ class UserPreferences(BaseModel):
     # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
     experimental_classify: bool = False
     experimental_force_code_mode: bool = False
-    # Threads this person runs on their own machine review each file and shell call with
-    # Jev before it runs, instead of running it unasked (``mda/rt/auto_review.py``).
-    experimental_local_auto_mode: bool = False
     # Cloud-first desktop for this person, ahead of their workspace's
     # ``cloud_first_desktop_enabled``: new desktop threads run in the cloud, with
     # individually approved local actions (``openswe/bridge/local_access.py``).
@@ -58,9 +55,6 @@ class UserPreferencesPatch(KitchenChannelPreference):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_force_code_mode: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    experimental_local_auto_mode: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_cloud_first_desktop: bool | None = Field(

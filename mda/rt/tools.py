@@ -324,19 +324,16 @@ async def run_operation(
     reads of the connections it names."""
     local_review: LocalReview | None = None
     if spec.name in LOCAL_TOOLS:
-        review = await AutoReview.local(backend.run, spec.name, arguments, runtime.state)
-        refusal = review if isinstance(review, str) else None
-        local_review = review if isinstance(review, LocalReview) else None
-    else:
-        refusal = await AutoReview.screen(backend.run, spec.name, arguments, runtime.state)
-    if refusal:
+        review = await AutoReview.local(spec.name, arguments, runtime.state)
+        if isinstance(review, str):
 
-        async def refused(tool_call_id: str) -> ToolMessage:
-            return ToolMessage(
-                content=refusal, tool_call_id=tool_call_id, name=spec.name, status="error"
-            )
+            async def refused(tool_call_id: str) -> ToolMessage:
+                return ToolMessage(
+                    content=review, tool_call_id=tool_call_id, name=spec.name, status="error"
+                )
 
-        return await called(backend, spec.name, arguments, runtime, refused)
+            return await called(backend, spec.name, arguments, runtime, refused)
+        local_review = review
     # Read before code mode reports the call: a pause for a grant runs the code again,
     # which reports the call under a new id, so a report made first would never finish.
     try:
