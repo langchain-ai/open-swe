@@ -21,7 +21,9 @@ import type { ThreadRunInput, TranscriptThreadSource } from "./types"
 
 /** The append-only transcript log, behind the source interface. */
 export function useTranscriptSource(threadId: string): TranscriptThreadSource {
-  const [runTracker] = useState(() => new RunTracker({ threadId }))
+  const [runTracker] = useState(
+    () => new RunTracker({ threadId, threadSource: "transcript" })
+  )
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const transcript = useThreadTranscript(threadId, { runTracker })
   const stop = useCancelRun(threadId)

@@ -47,7 +47,9 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
     )
   )
   const { connection, onReconnect, onConnected } = useReconnectNotice()
-  const [runTracker] = useState(() => new RunTracker({ threadId }))
+  const [runTracker] = useState(
+    () => new RunTracker({ threadId, threadSource: "stream" })
+  )
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)
   const [routed, setRouted] = useState<RoutedModel | null>(null)

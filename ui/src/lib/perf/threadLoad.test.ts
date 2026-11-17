@@ -38,7 +38,11 @@ describe("thread load span", () => {
     threadHydrated(THREAD_A)
     threadTranscriptBuilt(THREAD_A, 3.2)
     threadTranscriptBuilt(THREAD_A, 1.1)
-    threadTranscriptPainted(THREAD_A, { messages: 7, chunks: 21 })
+    threadTranscriptPainted(THREAD_A, {
+      messages: 7,
+      chunks: 21,
+      threadSource: "transcript",
+    })
 
     const [span] = getPerfSpans()
     expect(span?.status).toBe("ended")
@@ -58,6 +62,7 @@ describe("thread load span", () => {
       build_ms: 4,
       messages: 7,
       chunks: 21,
+      thread_source: "transcript",
     })
     expect(getPerfSpans()).toHaveLength(1)
   })
@@ -66,10 +71,18 @@ describe("thread load span", () => {
     onRouterNavigation(`/assistant/${THREAD_A}`, "/assistant")
     ensureThreadLoad(THREAD_A, "assistant")
     threadHydrated(THREAD_A)
-    threadTranscriptPainted(THREAD_A, { messages: 1, chunks: 1 })
+    threadTranscriptPainted(THREAD_A, {
+      messages: 1,
+      chunks: 1,
+      threadSource: "stream",
+    })
     onRouterNavigation(`/agents/${THREAD_B}`, `/assistant/${THREAD_A}`)
     ensureThreadLoad(THREAD_B)
-    threadTranscriptPainted(THREAD_B, { messages: 1, chunks: 1 })
+    threadTranscriptPainted(THREAD_B, {
+      messages: 1,
+      chunks: 1,
+      threadSource: "stream",
+    })
 
     expect(getPerfSpans().map((span) => span.attributes.ui)).toEqual([
       "assistant",
@@ -98,7 +111,11 @@ describe("thread load span", () => {
     onRouterNavigation(`/agents/${THREAD_A}`, "/agents")
     threadHydrated(THREAD_B)
     threadHydrationFailed(THREAD_B)
-    threadTranscriptPainted(THREAD_B, { messages: 3, chunks: 3 })
+    threadTranscriptPainted(THREAD_B, {
+      messages: 3,
+      chunks: 3,
+      threadSource: "stream",
+    })
 
     const [span] = getPerfSpans()
     expect(span?.status).toBe("open")

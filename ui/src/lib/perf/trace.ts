@@ -17,6 +17,8 @@ export type PerfSpanName =
   | "thread_list_request"
   | "agent_run"
 export type PerfSpanStatus = "open" | "ended" | "abandoned"
+/** The backend that served a thread (`ThreadSource.kind`), as the `thread_source` span attribute. */
+export type PerfThreadSource = "transcript" | "stream"
 
 export interface PerfStep {
   name: string

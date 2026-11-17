@@ -350,6 +350,9 @@ Compare cold and warm loads separately (`cold`, `detail_cached`), and reload a f
 With Datadog RUM configured, ended spans are sent as custom duration vitals named `thread_load`, `thread_list_load`, and `agent_run`, attributes in the vital context and `client` (`web` or `desktop`) in the global context.
 Use `@type:vital @vital.name:thread_list_load @context.client:desktop` for desktop list loading, and replace the vital name with `thread_load` for opening an individual thread.
 Filter list measurements by `@context.outcome:success` and compare each `@context.scope` separately.
+`thread_load` and `agent_run` carry `thread_source`, the backend that actually served the thread: `transcript` (the transcript event log) or `stream` (the SDK's `useStream`).
+Threads without transcript metadata always use `stream`, whatever the stored preference.
+Use `@type:vital @vital.name:thread_load @context.thread_source:stream` for useStream loads, and swap in `transcript` to compare.
 Spans completed before RUM finishes initializing are replayed from the bounded local buffer.
 Desktop RUM sessions use local storage because the `open-swe://app` origin cannot use ordinary browser session cookies; web sessions retain the SDK's cookie default.
 Abandoned spans (navigated away, hydration failed) stay local only.

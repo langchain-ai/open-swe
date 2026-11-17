@@ -24,7 +24,7 @@
 
 import { subscribeRequestTimings } from "./fetchTiming"
 import { startSpan } from "./trace"
-import type { PerfAttributes, SpanHandle } from "./trace"
+import type { PerfAttributes, PerfThreadSource, SpanHandle } from "./trace"
 
 export type RunEndReason = "success" | "error" | "interrupt" | "stopped"
 
@@ -96,12 +96,16 @@ subscribeRequestTimings((timing) => {
 export class RunTracker {
   state: RunState | null = null
   threadId: string | null
+  private readonly threadSource: PerfThreadSource
 
   constructor(options: {
     /** `null` until a lazily created thread has an id; see `bindThread`. */
     threadId: string | null
+    /** The backend whose runs this tracker times, sent as `thread_source`. */
+    threadSource: PerfThreadSource
   }) {
     this.threadId = options.threadId?.toLowerCase() ?? null
+    this.threadSource = options.threadSource
   }
 
   private begin(
@@ -112,7 +116,10 @@ export class RunTracker {
       this.state.span.abandon("superseded")
     }
     this.state = {
-      span: startSpan("agent_run", extra),
+      span: startSpan("agent_run", {
+        ...extra,
+        thread_source: this.threadSource,
+      }),
       turnId: null,
       ...submission,
       events: 0,

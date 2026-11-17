@@ -836,10 +836,14 @@ export function AgentThreadView({
     const chunks = visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0)
     const frame = requestAnimationFrame(() => {
       paintedThreadId.current = thread.id
-      threadTranscriptPainted(thread.id, { messages, chunks })
+      threadTranscriptPainted(thread.id, {
+        messages,
+        chunks,
+        threadSource: source.kind,
+      })
     })
     return () => cancelAnimationFrame(frame)
-  }, [isHydrating, thread.id, visibleMessages])
+  }, [isHydrating, source.kind, thread.id, visibleMessages])
 
   return (
     <div className="flex min-w-0 flex-1">

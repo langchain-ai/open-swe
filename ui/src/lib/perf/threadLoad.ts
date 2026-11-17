@@ -13,7 +13,7 @@
 import { subscribeRequestTimings } from "./fetchTiming"
 import type { RequestTiming } from "./fetchTiming"
 import { startSpan } from "./trace"
-import type { PerfAttributes, SpanHandle } from "./trace"
+import type { PerfAttributes, PerfThreadSource, SpanHandle } from "./trace"
 
 const THREAD_PATH_RE =
   /^\/(agents|assistant)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
@@ -147,12 +147,20 @@ export function threadTranscriptBuilt(
 
 export function threadTranscriptPainted(
   threadId: string,
-  attributes: { messages: number; chunks: number }
+  attributes: {
+    messages: number
+    chunks: number
+    threadSource: PerfThreadSource
+  }
 ): void {
   const span = current(threadId)
   if (!span) return
   span.mark("paint")
-  span.end({ messages: attributes.messages, chunks: attributes.chunks })
+  span.end({
+    messages: attributes.messages,
+    chunks: attributes.chunks,
+    thread_source: attributes.threadSource,
+  })
   active = null
 }
 

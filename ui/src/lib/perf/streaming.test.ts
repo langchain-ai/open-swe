@@ -42,7 +42,10 @@ afterEach(() => {
 describe("agent run span", () => {
   it("tracks a submitted run from send to completion", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = new RunTracker({ threadId: THREAD_A })
+    const tracker = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "stream",
+    })
 
     tracker.submitted()
     recordRequestTiming({
@@ -82,6 +85,7 @@ describe("agent run span", () => {
     ])
     expect(span?.attributes).toMatchObject({
       joined: false,
+      thread_source: "stream",
       command_ttfb_ms: 88,
       stream_ttfb_ms: 120,
       reason: "success",
@@ -99,7 +103,10 @@ describe("agent run span", () => {
 
   it("marks generation_start for a run that never streams assistant text", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = new RunTracker({ threadId: THREAD_A })
+    const tracker = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "stream",
+    })
 
     tracker.submitted()
     tracker.created()
@@ -117,7 +124,10 @@ describe("agent run span", () => {
 
   it("ignores a non-assistant message for generation_start", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = new RunTracker({ threadId: THREAD_A })
+    const tracker = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "stream",
+    })
 
     tracker.submitted()
     tracker.event(chunk("tool", "3 files", 9_950))
@@ -128,7 +138,10 @@ describe("agent run span", () => {
   })
 
   it("marks first_text for prose that arrives only in its completed message", () => {
-    const tracker = new RunTracker({ threadId: THREAD_A })
+    const tracker = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "transcript",
+    })
 
     tracker.transcriptEvent({ turnId: "turn-1", opensRun: true })
     tracker.transcriptEvent({ turnId: "turn-1", text: "message" })
@@ -140,7 +153,10 @@ describe("agent run span", () => {
       "first_event",
       "first_text",
     ])
-    expect(span?.attributes).toMatchObject({ text_deltas: 0 })
+    expect(span?.attributes).toMatchObject({
+      text_deltas: 0,
+      thread_source: "transcript",
+    })
   })
 
   it.each([
@@ -160,7 +176,10 @@ describe("agent run span", () => {
       own: "turn-a",
     },
   ])("times only the turn that records $case", ({ requested, own }) => {
-    const tracker = new RunTracker({ threadId: THREAD_A })
+    const tracker = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "transcript",
+    })
     tracker.transcriptEvent({ turnId: "turn-a", opensRun: true })
     tracker.submitted({ messageId: "msg-c", runningTurnId: "turn-a" })
 
@@ -194,7 +213,10 @@ describe("agent run span", () => {
   })
 
   it("opens a joined span when a run this client did not submit streams", () => {
-    const tracker = new RunTracker({ threadId: THREAD_A })
+    const tracker = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "stream",
+    })
 
     // A run that ended before this page watched it opens nothing.
     tracker.event(lifecycle("completed", Date.now()))
@@ -205,6 +227,7 @@ describe("agent run span", () => {
     expect(getPerfSpans()).toHaveLength(1)
     expect(span?.attributes).toMatchObject({
       joined: true,
+      thread_source: "stream",
       reason: "interrupt",
     })
     expect(span?.steps.map((step) => step.name)).toEqual([
@@ -216,8 +239,11 @@ describe("agent run span", () => {
   })
 
   it("keeps request and transcript timings on the stream that owns the thread", () => {
-    const runA = new RunTracker({ threadId: THREAD_A })
-    const runB = new RunTracker({ threadId: null })
+    const runA = new RunTracker({
+      threadId: THREAD_A,
+      threadSource: "stream",
+    })
+    const runB = new RunTracker({ threadId: null, threadSource: "stream" })
     runA.submitted()
     runB.bindThread(THREAD_B.toUpperCase())
     runB.submitted()
