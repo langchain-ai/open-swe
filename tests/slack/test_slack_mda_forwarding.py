@@ -231,7 +231,7 @@ async def test_every_other_conversation_stays_on_the_backend() -> None:
 
 
 async def _hand_back(
-    event: dict[str, JsonValue], webhook_id: str = "msg_1"
+    event: dict[str, JsonValue], webhook_id: str = "msg_1", *, automation_only: bool = False
 ) -> tuple[object, _FakeBackgroundTasks]:
     """A message MDA's Slack channel hands back, as ``act_on_slack_message`` gets it."""
     tasks = _FakeBackgroundTasks()
@@ -239,7 +239,9 @@ async def _hand_back(
         request=cast(Request, _FakeRequest({}, {"webhook-id": webhook_id})),
         background=cast(BackgroundTasks, tasks),
     )
-    message = ActOnSlackMessage(team_id="T1", app_id="A1", delivery_id="d-1", event=event)
+    message = ActOnSlackMessage(
+        team_id="T1", app_id="A1", delivery_id="d-1", event=event, automation_only=automation_only
+    )
     return await slack_channel.act_on_slack_message(call, message), tasks
 
 
@@ -464,6 +466,7 @@ async def test_the_channel_api_answers_only_mda(monkeypatch: pytest.MonkeyPatch)
 def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
     """Open SWE's records as ``slack_message_facts`` reads them: a plain public channel."""
     lookups: dict[str, AsyncMock | Mock] = {
+        "watched": AsyncMock(return_value=False),
         "kitchen": AsyncMock(return_value=False),
         "concierge": AsyncMock(return_value=False),
         "bot": AsyncMock(return_value=None),
@@ -474,6 +477,7 @@ def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
         "indexed": AsyncMock(return_value=None),
         "workspace": AsyncMock(return_value=None),
     }
+    monkeypatch.setattr(slack_channel, "slack_channel_watched", lookups["watched"])
     monkeypatch.setattr(slack_channel, "is_kitchen_channel", lookups["kitchen"])
     monkeypatch.setattr(slack_channel.User, "concierge_mode_for_slack", lookups["concierge"])
     monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", lookups["bot"])
@@ -502,6 +506,7 @@ async def test_facts_of_a_mention_in_a_plain_channel(
         "channel": "ok",
         "dm": False,
         "kitchen_channel": False,
+        "automation_channel": False,
         "concierge": False,
         "allowed_bot": False,
         "bot_name": "",
@@ -2056,3 +2061,32 @@ async def test_the_summon_reaction_tags_open_swe_and_any_other_does_nothing(
         app, _reaction("tada"), signed=False, path="/mda/slack/reactions"
     )
     assert unsigned.status_code == 401
+
+
+async def test_watched_channel_fact_does_not_change_conversation_routing(
+    monkeypatch: pytest.MonkeyPatch, facts: dict[str, AsyncMock | Mock]
+) -> None:
+    facts["watched"].return_value = True
+    facts["owned"].return_value = _MDA_THREAD
+    app = _api(monkeypatch)
+    answered = await _facts(app)
+    assert answered.json()["automation_channel"] is True
+    assert answered.json()["conversation"] == "mda"
+    reply = await _facts(app, reply_thread_ts="1.0")
+    assert reply.json()["automation_channel"] is False
+
+
+async def test_automation_delivery_does_not_consume_the_normal_slack_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = cast(dict[str, JsonValue], _mention(type="message")["event"])
+    launch = AsyncMock()
+    monkeypatch.setattr("openswe.schedules.store.launch_slack_automations", launch)
+    acted, tasks = await _hand_back(event, "automation_1", automation_only=True)
+    assert acted.acted
+    [(task, args)] = tasks.tasks
+    await cast(Callable[..., Awaitable[None]], task)(*args)
+    assert launch.await_args.args[0].event.ts == event["ts"]
+    normal, normal_tasks = await _hand_back(event, "msg_1")
+    assert normal.acted
+    assert any(task is slack_service.process_slack_mention for task, _args in normal_tasks.tasks)

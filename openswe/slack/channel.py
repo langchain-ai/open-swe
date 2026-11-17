@@ -42,6 +42,7 @@ from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
+from openswe.schedules.store import slack_channel_watched
 from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
@@ -52,7 +53,7 @@ from openswe.slack.breakout_links import notify_web_breakout
 from openswe.slack.client import SlackThreadMappingError
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
-from openswe.slack.payloads import SlackChannelContext, SlackInteraction
+from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope, SlackInteraction
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
@@ -161,6 +162,9 @@ async def slack_message_facts(
         kitchen = solo_followup = False
     return SlackMessageFacts(
         dm=dm,
+        automation_channel=not dm
+        and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
+        and await slack_channel_watched(message.channel_id),
         kitchen_channel=kitchen,
         concierge=concierge,
         allowed_bot=allowed_bot is not None,
@@ -576,7 +580,7 @@ async def act_on_slack_click(call: ChannelCall, click: ActOnSlackClick) -> Slack
 
 
 async def act_on_slack_message(call: ChannelCall, message: ActOnSlackMessage) -> SlackMessageActed:
-    """Answer a message MDA's Slack channel handed back, as ``/webhooks/slack`` always has.
+    """Deliver a verified Slack event to automations or the backend conversation.
 
     Its conversation is the backend's, which MDA's channel
     doesn't take; Slack's Events URL points at Trigger Server, so this is how the backend
@@ -598,9 +602,21 @@ async def act_on_slack_message(call: ChannelCall, message: ActOnSlackMessage) ->
     from openswe.slack.routes import SlackEventsDelivery  # noqa: PLC0415 - routes imports this
 
     try:
-        await SlackEventsDelivery.handle(
-            call.request, json.dumps(envelope).encode(), call.background, from_mda=True
-        )
+        if message.automation_only:
+            parsed = SlackEventEnvelope.parse(envelope)
+            if parsed is None or parsed.event is None:
+                return SlackMessageActed(acted=False)
+            channel = await common.resolve_slack_channel_context(
+                parsed.event.resolve_channel_id(), use_cache=False
+            )
+            if not channel.allows_operations:
+                _refused(channel, channel.id)
+                return SlackMessageActed(acted=False)
+            call.background.add_task(SlackEventsDelivery.launch_automations, parsed, channel)
+        else:
+            await SlackEventsDelivery.handle(
+                call.request, json.dumps(envelope).encode(), call.background, from_mda=True
+            )
     except BaseException:
         # Nothing was acted on (a 503 while Slack can't confirm the channel, say): MDA
         # sends the call again under the same webhook ID, which must run it then.

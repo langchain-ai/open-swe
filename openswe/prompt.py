@@ -181,6 +181,7 @@ class TurnContext:
     working_folder: bool = False
     source: str = "dashboard"
     slack_context: bool = False
+    automation_slack_reply: bool = False
     slack_ask: bool = False
     slack_breakout: bool = False
     slack_by_the_way: bool = False
@@ -238,7 +239,10 @@ class TurnContext:
             name = "generic"
         if name in {"slack", "schedule"}:
             guidance = prompt(
-                f"system/source-{name}", breakout=self.slack_breakout, slack=self.slack_context
+                f"system/source-{name}",
+                breakout=self.slack_breakout,
+                slack=self.slack_context,
+                automation_slack_reply=self.automation_slack_reply,
             )
         else:
             guidance = prompt(f"system/source-{name}")

@@ -57,7 +57,7 @@ from openswe.input_messages import InputMessageContext, SystemIdentity, build_ru
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
+from openswe.run_config import AutomationSlackReply, RunConfig
 from openswe.schedules.policy import AutomationPolicy
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
@@ -1253,6 +1253,7 @@ async def _launch_agent_schedule_record(
     prompt: str | None = None,
     token_repositories: list[str] | None = None,
     origin: str = "schedule",
+    slack_reply: AutomationSlackReply | None = None,
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -1308,6 +1309,9 @@ async def _launch_agent_schedule_record(
             "error": exc.detail,
             "status_code": exc.status_code,
         }
+    if slack_reply is not None:
+        metadata["automation_slack_reply"] = slack_reply.model_dump(mode="json")
+        run_config["configurable"]["automation_slack_reply"] = slack_reply.model_dump(mode="json")
     if token_repositories is not None:
         metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
     if admin_thread:
@@ -1772,6 +1776,7 @@ async def launch_slack_automations(
                 repo=None,
                 prompt=_slack_event_prompt(record, channel, event, text),
                 origin="slack",
+                slack_reply=AutomationSlackReply(channel_id=channel_id, thread_ts=event.ts),
             )
         except Exception:
             logger.exception(

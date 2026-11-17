@@ -106,6 +106,15 @@ class PluginChatConfig(BaseModel):
 type ReviewDestination = Literal["github", "eval", "shadow"]
 
 
+class AutomationSlackReply(BaseModel):
+    """The immutable reply destination of a verified Slack automation event."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    channel_id: str = Field(pattern=r"^[CG][A-Z0-9]{8,}$", max_length=40)
+    thread_ts: str = Field(pattern=r"^[0-9]+\.[0-9]+$", max_length=40)
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -216,6 +225,7 @@ class RunConfig(BaseModel):
     # Background jobs
     watch_key: str | None = None
     schedule_id: str | None = None
+    automation_slack_reply: AutomationSlackReply | None = None
     background_task_completion: bool | None = None
 
     @model_validator(mode="before")

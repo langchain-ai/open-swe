@@ -7,14 +7,13 @@ dashboard so the rest of the conversation has somewhere to go.
 
 import logging
 
-from langgraph_sdk.client import LangGraphClient
-
 from openswe.slack.client import SLACK_DETACHED_AT_KEY, SLACK_DETACHED_FROM_KEY
 from openswe.slack.records import delete_slack_thread_associations
 from openswe.source_context import SourceContext
+from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.utils.dashboard_links import dashboard_thread_url
-from openswe.utils.json_types import JsonObject, thread_metadata
+from openswe.utils.json_types import JsonObject
 from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,6 @@ def slack_thread_detached(metadata: JsonObject) -> bool:
 
 
 async def move_thread_to_dashboard(
-    langgraph_client: LangGraphClient,
     thread_id: str,
     channel_id: str,
     thread_ts: str,
@@ -36,10 +34,12 @@ async def move_thread_to_dashboard(
     """Detach an agent thread from its Slack thread and keep it in the dashboard."""
     try:
         await delete_slack_thread_associations(channel_id, thread_ts, expected_thread_id=thread_id)
-        thread = await langgraph_client.threads.get(thread_id)
-        context = SourceContext.from_metadata(thread_metadata(thread)).dump()
+        thread = await THREADS.get(thread_id)
+        if thread is None:
+            raise LookupError(thread_id)
+        context = SourceContext.from_metadata(thread.metadata).dump()
         context.pop("slack_thread", None)
-        await langgraph_client.threads.update(
+        updated = await THREADS.update(
             thread_id=thread_id,
             metadata={
                 "source": DASHBOARD_SOURCE,
@@ -48,6 +48,8 @@ async def move_thread_to_dashboard(
                 SLACK_DETACHED_FROM_KEY: {"channel_id": channel_id, "thread_ts": thread_ts},
             },
         )
+        if updated is None:
+            raise LookupError(thread_id)
     except Exception:
         logger.exception(
             "Could not move thread off its deleted Slack thread",

@@ -98,6 +98,7 @@ class _Backend:
         self.asked_facts: list[SlackMessageFactsRequest] = []
         self.turns: list[StartSlackTurn] = []
         self.handed_back: list[ActOnSlackMessage] = []
+        self.automation_error: Exception | None = None
 
     async def __call__(
         self, endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
@@ -107,8 +108,14 @@ class _Backend:
             self.asked_facts.append(cast(SlackMessageFactsRequest, request))
             return self.facts
         if endpoint is ACT_ON_SLACK_MESSAGE:
-            assert msg_id == "msg_delivery-1"
+            assert msg_id == (
+                "automation_delivery-1"
+                if cast(ActOnSlackMessage, request).automation_only
+                else "msg_delivery-1"
+            )
             self.handed_back.append(cast(ActOnSlackMessage, request))
+            if cast(ActOnSlackMessage, request).automation_only and self.automation_error:
+                raise self.automation_error
             return SlackMessageActed()
         assert endpoint is START_SLACK_TURN
         assert msg_id == "msg_delivery-1"
@@ -887,3 +894,78 @@ def test_an_edit_of_a_message_the_agent_never_got_starts_nothing(
     assert asyncio.run(slack.start_edit(_edit(), _thread())) is None
     assert asyncio.run(slack.start_edit(_edit(), _thread({"messages": []}))) is None
     assert backend.turns == []
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "unmentioned",
+        "bot",
+        "mention",
+        "kitchen",
+        "mention-failed",
+        "kitchen-failed",
+        "backend",
+        "reply",
+        "own-user",
+        "own-app",
+        "app-mention",
+    ],
+)
+@pytest.mark.usefixtures("slack_reads")
+def test_watched_posts_reach_automations_without_taking_the_normal_turn(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    payload = {"type": "message", "channel": "C1", "ts": "171.2", "text": "where should I ask?"}
+    user = "U1"
+    if mode == "bot":
+        payload.update({"bot_id": "B9", "app_id": "A9", "subtype": "bot_message"})
+        user = ""
+    elif mode == "own-user":
+        user = "UBOT"
+    elif mode == "own-app":
+        payload.update({"bot_id": "B1", "app_id": "A1", "subtype": "bot_message"})
+        user = ""
+    elif mode == "reply":
+        payload["thread_ts"] = "171.1"
+    elif mode == "app-mention":
+        payload["type"] = "app_mention"
+    facts = SlackMessageFacts(
+        automation_channel=True,
+        kitchen_channel=mode.startswith("kitchen"),
+        conversation="backend" if mode == "backend" else "mda",
+    )
+    backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
+    if mode.endswith("-failed"):
+        backend.automation_error = RuntimeError("Automation delivery unavailable")
+    event = _event(
+        payload["text"],
+        key="mention"
+        if mode in {"mention", "mention-failed", "backend", "app-mention"}
+        else "message",
+        payload=payload,
+        user_id=user,
+        thread_ts="171.2",
+    )
+
+    result = asyncio.run(slack.start_turn(event, _thread()))
+
+    continues = mode in {"mention", "kitchen", "mention-failed", "kitchen-failed", "app-mention"}
+    assert bool(result) is continues
+    assert len(backend.turns) == int(continues)
+    assert len(backend.handed_back) == int(
+        mode
+        in {
+            "unmentioned",
+            "bot",
+            "mention",
+            "kitchen",
+            "mention-failed",
+            "kitchen-failed",
+            "backend",
+        }
+    )
+    if backend.handed_back:
+        [handed] = backend.handed_back
+        assert handed.event == payload
+        assert handed.automation_only is (mode != "backend")

@@ -205,21 +205,6 @@ async def _slack_channel_watched(channel_id: str) -> bool:
     return await slack_channel_watched(channel_id)
 
 
-async def _launch_slack_automations(
-    envelope: SlackEventEnvelope, channel_context: SlackChannelContext
-) -> None:
-    from openswe.schedules.store import launch_slack_automations
-
-    try:
-        await launch_slack_automations(
-            envelope, channel_context, envelope.bot_user_id(common.SLACK_BOT_USER_ID)
-        )
-    except Exception:
-        common.logger.exception(
-            "Slack automations failed for an event", extra={"slack_event_id": envelope.event_id}
-        )
-
-
 async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
     event = envelope.event
     if event is None or event.type not in {"message", "app_mention"}:
@@ -285,6 +270,23 @@ class SlackEventsDelivery:
     back by MDA's Slack channel (``act_on_slack_message``) because the backend answers
     them. Slack's Events URL points at Trigger Server, so the backend hears those only
     from MDA."""
+
+    @classmethod
+    async def launch_automations(
+        cls, envelope: SlackEventEnvelope, channel_context: SlackChannelContext
+    ) -> None:
+        """Deliver an event to automations without taking its Slack conversation."""
+        from openswe.schedules.store import launch_slack_automations
+
+        try:
+            await launch_slack_automations(
+                envelope, channel_context, envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+            )
+        except Exception:
+            common.logger.exception(
+                "Slack automations failed for an event",
+                extra={"slack_event_id": envelope.event_id},
+            )
 
     @classmethod
     async def handle(
@@ -449,7 +451,7 @@ class SlackEventsDelivery:
         if event.type == "message" and channel_id and channel_context is not None and watched:
             # Independent of the handling below: a watched channel's messages fire
             # automations whether or not they address Open SWE.
-            background_tasks.add_task(_launch_slack_automations, envelope, channel_context)
+            background_tasks.add_task(cls.launch_automations, envelope, channel_context)
 
         if event.type == "reaction_added":
             if event.reaction in common.FEEDBACK_REACTIONS:

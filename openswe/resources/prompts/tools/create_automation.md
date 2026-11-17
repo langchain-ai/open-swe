@@ -8,7 +8,7 @@ Its spend is credited to no person.
 Args:
 - prompt: Complete instructions for every run.
   Runs post nowhere on their own; say in the prompt if a run should report to a Slack channel.
-  Runs act as the automation, not as you: they can read public threads, including their own earlier runs, but cannot message threads, start threads, or see private conversations.
+  Runs act as the automation, not as you: they can read public threads, including their own earlier runs, but cannot message or start other agent conversations or see private conversations.
   For anything they report, name a channel, or say to send it to you: a run can DM its result to the automation's creator, and only to them.
 - workspace: Slug of the workspace every run launches in, with its settings and sandbox image.
   Required; ask which workspace when it is not clear.
@@ -24,6 +24,8 @@ Args:
     Set it only after the user confirms they want that, never by yourself.
     Optional pull request filters, as case-sensitive globs such as ``"actions/*"``: ``head_branches_exclude`` (a pull request whose head branch matches any is skipped) and ``base_branches`` (when listed, the base branch must match one); issue events ignore them.
   - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}`` runs on new top-level messages in a Slack channel Robin is a member of, passed to the run as untrusted context.
+    These runs can answer beneath the triggering post with `slack_reply`, using a server-fixed destination without binding the channel.
+    Options and automatic continuation on later human replies are not supported.
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
   - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created", "issue.labeled" (a label was added), and "issue.accepted" (the issue's first `triagedAt` timestamp is set, with a non-canceled, non-duplicate destination state).
     Acceptance ignores creation outside Triage, rejection, and later status edits; deliveries are deduplicated for 24 hours.

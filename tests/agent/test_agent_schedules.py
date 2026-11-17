@@ -553,6 +553,9 @@ async def test_each_trigger_runs_in_its_own_repository(
     # A schedule names no repository; a GitHub event runs in its own.
     assert [run["config"]["configurable"].get("repo") for run in fake_client.runs.created] == [None]
     assert _configurable(watched)["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert "automation_slack_reply" not in _configurable(watched)
+    assert "automation_slack_reply" not in fake_client.runs.created[0]["config"]["configurable"]
+    assert "automation_slack_reply" not in fake_client.threads.created[0]["metadata"]
 
 
 async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
@@ -1118,15 +1121,18 @@ def _slack_post(ts: str, text: str, **event: object) -> SlackEventEnvelope:
     return envelope
 
 
+@pytest.mark.parametrize("system", [False, True])
 async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit(
-    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch, system: bool
 ) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(schedules, "_require_watchable_slack_channel", AsyncMock())
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
             workspace="default",
             prompt="Investigate the alert",
+            system=system,
             triggers=[
                 SlackTrigger(
                     channel=_ALERTS.lower(),
@@ -1163,6 +1169,26 @@ async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit
     assert await launch(_slack_post("8.0", "FIRING: cache", **bot)) == []
 
     assert len(fake_client.runs.created) == 2
+    for run, timestamp in zip(fake_client.runs.created, ("6.0", "7.0"), strict=True):
+        destination = {"channel_id": _ALERTS, "thread_ts": timestamp}
+        config = run["config"]["configurable"]
+        assert config["automation_slack_reply"] == destination
+        assert config["source"] == "schedule" and config["schedule_id"] == created["id"]
+        assert "slack_thread" not in config
+        saved = await fake_client.threads.get(run["thread_id"])
+        assert saved["metadata"]["automation_slack_reply"] == destination
+        if system:
+            assert not {"github_login", "user_email"}.intersection(config)
+            assert saved["metadata"]["owner_type"] == "system"
+            assert saved["metadata"]["visibility"] == "public"
+        else:
+            owner = await User.for_login("github", "alice")
+            assert owner is not None
+            assert config["github_login"] == "alice"
+            assert config["user_email"] == "alice@example.com"
+            assert saved["metadata"]["owner_type"] == "user"
+            assert saved["metadata"]["visibility"] == "private"
+            assert saved["metadata"]["owner_user_id"] == str(owner.id)
     prompt = fake_client.runs.created[0]["input"]["messages"][-1]["content"]
     assert "#alerts" in prompt and "[FIRING] api latency" in prompt
 

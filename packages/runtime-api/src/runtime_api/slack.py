@@ -117,6 +117,7 @@ class SlackMessageFacts(BaseModel):
     # A direct message with the app.
     dm: bool = False
     kitchen_channel: bool = False
+    automation_channel: bool = False
     # The sender turned concierge mode on: their DM is one conversation.
     concierge: bool = False
     # A bot's message: whether the bot is on Open SWE's allow-list, and its name there.
@@ -311,6 +312,7 @@ class ActOnSlackMessage(BaseModel):
     delivery_id: str = Field(min_length=1, max_length=128)
     # Slack's event, as the Events API sent it.
     event: dict[str, JsonValue]
+    automation_only: bool = False
 
 
 class SlackMessageActed(BaseModel):

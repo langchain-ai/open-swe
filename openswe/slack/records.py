@@ -46,6 +46,7 @@ from openswe.slack.client import (
     normalize_slack_location,
     parse_slack_thread_url,
     slack_error,
+    slack_thread_mutation_lock,
 )
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
@@ -455,7 +456,10 @@ async def bind_slack_thread_id(
     movable = SlackThread.thread_id.is_(None) | (SlackThread.thread_id == upsert.excluded.thread_id)
     if replacing:
         movable |= SlackThread.thread_id == replacing
-    async with postgres.session() as session:
+    async with (
+        slack_thread_mutation_lock(channel, timestamp, purpose="ownership"),
+        postgres.session() as session,
+    ):
         await SlackChannel.ensure(session, channel)
         bound = await session.scalar(
             upsert.on_conflict_do_update(

@@ -1525,6 +1525,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             working_folder=cfg.repo_explicitly_none is True,
             source="background_task" if cfg.background_task_completion else self._source,
             slack_context=cfg.slack_context,
+            automation_slack_reply=cfg.source == "schedule"
+            and cfg.automation_slack_reply is not None,
             slack_ask=cfg.slack_ask_mode,
             slack_by_the_way=cfg.slack_ask_mode and bool(cfg.slack_by_the_way_thread_ts),
             slack_breakout=cfg.slack_breakout is True,
@@ -2039,13 +2041,13 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
     if not cfg.slack_context:
-        # An automation run has no Slack thread, but its prompt may ask it to
-        # report to a channel.
         kept = (
             (slack_list_channels, slack_post_message, slack_search_channel_directory)
             if cfg.source == "schedule"
             else ()
         )
+        if cfg.source == "schedule" and cfg.automation_slack_reply is not None:
+            kept = (*kept, slack_reply)
         static_tools = [tool for tool in static_tools if tool not in slack_tools or tool in kept]
     elif _slack_concierge_run(cfg):
         static_tools = [

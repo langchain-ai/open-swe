@@ -180,6 +180,8 @@ async def test_a_watched_channel_message_checks_automations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(slack_routes, "_slack_channel_watched", AsyncMock(return_value=True))
+    launch = AsyncMock()
+    monkeypatch.setattr("openswe.schedules.store.launch_slack_automations", launch)
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
@@ -189,7 +191,9 @@ async def test_a_watched_channel_message_checks_automations(
 
     # Ignored as a conversation, still checked against Slack automations.
     assert response["status"] == "ignored"
-    assert [task for task, _ in background_tasks.tasks] == [slack_routes._launch_slack_automations]
+    [(task, args)] = background_tasks.tasks
+    await task(*args)
+    assert launch.await_args.args[0].event.text == "deploy failed"
 
 
 @pytest.mark.parametrize("reply", [False, True])

@@ -201,6 +201,33 @@ async def start_turn(
     )
     facts_ended = datetime.now(UTC)
     decided = _decide(message, facts, parsed, bot_user_id, is_message=_is_message(raw))
+    if (
+        decided is not BACKEND
+        and facts.channel == "ok"
+        and facts.automation_channel
+        and _is_message(raw)
+        and message.subtype in {"", "bot_message", "file_share"}
+        and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
+        and bool(message.user_id or message.bot_id)
+        and not (bot_user_id and message.user_id == bot_user_id)
+        and message.bot_app_id != message.app_id
+    ):
+        try:
+            await ask_backend(
+                ACT_ON_SLACK_MESSAGE,
+                ActOnSlackMessage(
+                    team_id=message.team_id,
+                    app_id=message.app_id,
+                    delivery_id=event.delivery_id,
+                    event=raw,
+                    automation_only=True,
+                ),
+                msg_id=f"automation_{event.delivery_id}",
+            )
+        except Exception:
+            logger.exception(
+                "Slack automation delivery failed", extra={"delivery_id": event.delivery_id}
+            )
     if isinstance(decided, str):
         return reply(decided)
     if decided is BACKEND:

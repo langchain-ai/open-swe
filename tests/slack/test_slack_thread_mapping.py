@@ -80,20 +80,27 @@ async def test_thread_mutation_lock_returns_active_thread() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
-async def test_thread_mutation_lock_serializes_same_thread() -> None:
+@pytest.mark.parametrize("binding", [False, True])
+async def test_thread_mutation_lock_serializes_same_thread(binding: bool) -> None:
     first_entered = asyncio.Event()
     release_first = asyncio.Event()
     second_entered = asyncio.Event()
 
     async def first() -> None:
-        async with slack_thread_mutation_lock("C1", "1.0"):
+        async with slack_thread_mutation_lock(
+            "C1", "1.0", purpose="ownership" if binding else None
+        ):
             first_entered.set()
             await release_first.wait()
 
     async def second() -> None:
         await first_entered.wait()
-        async with slack_thread_mutation_lock("C1", "1.0"):
+        if binding:
+            await bind_slack_thread_id("C1", "1.0", "agent-thread")
             second_entered.set()
+        else:
+            async with slack_thread_mutation_lock("C1", "1.0"):
+                second_entered.set()
 
     first_task = asyncio.create_task(first())
     second_task = asyncio.create_task(second())

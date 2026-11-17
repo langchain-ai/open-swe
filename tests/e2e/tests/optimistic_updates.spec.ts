@@ -275,7 +275,9 @@ async function holdOnce(
     }
     seen.count += 1;
     await gate.promise;
+    const response = page.waitForResponse((res) => res.request() === request);
     await answer(route);
+    expect(await (await response).finished()).toBeNull();
     settled.resolve();
   });
   return { release: gate.resolve, seen, settled: settled.promise };

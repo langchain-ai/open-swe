@@ -402,12 +402,16 @@ async def test_watched_bot_messages_still_verify_and_launch_automations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(slack_routes, "_slack_channel_watched", AsyncMock(return_value=True))
+    launch = AsyncMock()
+    monkeypatch.setattr("openswe.schedules.store.launch_slack_automations", launch)
     payload = _bot_payload()
     payload["event"]["text"] = "deployment status"
     tasks = _FakeBackgroundTasks()
     assert (await _post(payload, tasks))["status"] == "ignored"
     assert len(tasks.tasks) == 1
-    assert tasks.tasks[0][0] == slack_routes._launch_slack_automations
+    task, args = tasks.tasks[0]
+    await task(*args)
+    assert launch.await_args.args[0].event.ts == payload["event"]["ts"]
 
 
 async def test_already_handled_delivery_skips_live_channel_check(

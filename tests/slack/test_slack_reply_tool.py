@@ -1,11 +1,16 @@
 import importlib
 import json
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock
 
 import pytest
 
+from openswe.schedules import delivery
+from openswe.schedules import store as schedules
+from openswe.slack import orphan
+from openswe.slack.client import SLACK_DETACHED_AT_KEY
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import SlackThread
 
@@ -15,22 +20,12 @@ slack_reply_tool = importlib.import_module("openswe.slack.tools.reply")
 @pytest.fixture(autouse=True)
 def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     @asynccontextmanager
-    async def mutation_lock(*_args: Any):
+    async def mutation_lock(*_args: object, **_kwargs: object):
         yield
 
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
     monkeypatch.setattr(slack_reply_tool, "get_slack_permalink", AsyncMock(return_value=None))
-
-
-class _Threads:
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        raise LookupError(thread_id)
-
-
-class _Client:
-    def __init__(self) -> None:
-        self.threads = _Threads()
 
 
 def _config() -> dict[str, Any]:
@@ -50,8 +45,6 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
     monkeypatch: pytest.MonkeyPatch,
     breakout: bool,
 ) -> None:
-    client = _Client()
-    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_reply_tool,
         "get_config",
@@ -107,9 +100,7 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
 async def test_kickoff_delete_failure_does_not_interrupt_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _Client()
     await SlackThread.record_kickoff("C1", "1.0", "1.1")
-    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(
         slack_reply_tool,
         "get_config",
@@ -212,7 +203,7 @@ async def test_slack_reply_holds_mutation_lock_while_posting(
     lock_held = False
 
     @asynccontextmanager
-    async def mutation_lock(*_args: Any):
+    async def mutation_lock(*_args: object, **_kwargs: object):
         nonlocal lock_held
         lock_held = True
         try:
@@ -500,14 +491,30 @@ async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_
         "post_slack_thread_reply_with_ts",
         AsyncMock(side_effect=SlackRequestError("thread_not_found")),
     )
-    moved = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
+    monkeypatch.setattr(
+        orphan.THREADS,
+        "get",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                metadata={
+                    "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}
+                }
+            )
+        ),
+    )
+    update = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(orphan.THREADS, "update", update)
+    monkeypatch.setattr(orphan, "delete_slack_thread_associations", AsyncMock())
 
     result = await slack_reply_tool.slack_reply("The answer", "final")
 
     assert result["moved_to_dashboard"] is True
     assert result["retry"] is False
-    assert moved.await_args.args[1:] == ("T1", "C1", "1.0")
+    metadata = update.await_args.kwargs["metadata"]
+    assert update.await_args.kwargs["thread_id"] == "T1"
+    assert metadata["source"] == "dashboard"
+    assert metadata[SLACK_DETACHED_AT_KEY]
+    assert "slack_thread" not in metadata["source_context"]
 
 
 async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
@@ -525,7 +532,9 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
     )
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        slack_reply_tool, "_already_moved_to_dashboard", AsyncMock(return_value=True)
+        slack_reply_tool.THREADS,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(metadata={SLACK_DETACHED_AT_KEY: "now"})),
     )
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
@@ -534,8 +543,10 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
     post.assert_not_awaited()
 
 
+@pytest.mark.parametrize("missing", ["read", "write"])
 async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
     monkeypatch: pytest.MonkeyPatch,
+    missing: str,
 ) -> None:
     monkeypatch.setattr(
         slack_reply_tool,
@@ -557,9 +568,160 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
         "post_slack_thread_reply_with_ts",
         AsyncMock(side_effect=SlackRequestError("thread_not_found")),
     )
-    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
+    monkeypatch.setattr(orphan, "delete_slack_thread_associations", AsyncMock())
+    monkeypatch.setattr(
+        orphan.THREADS,
+        "get",
+        AsyncMock(return_value=None if missing == "read" else SimpleNamespace(metadata={})),
+    )
+    monkeypatch.setattr(orphan.THREADS, "update", AsyncMock(return_value=None))
 
     result = await slack_reply_tool.slack_reply("The answer", "final")
 
     assert result["moved_to_dashboard"] is False
     assert result["retry"] is True
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        None,
+        "missing",
+        "malformed",
+        "ask",
+        "redirected",
+        "owned",
+        "external",
+        "unverified",
+        "not-member",
+        "deleted",
+        "human",
+    ],
+)
+async def test_automation_reply_is_pinned_to_the_verified_event(
+    monkeypatch: pytest.MonkeyPatch, refusal: str | None
+) -> None:
+    route = {"channel_id": "C0ALERTS01", "thread_ts": "171.1"}
+    metadata = {
+        "owner_type": "system",
+        "visibility": "public",
+        "schedule_id": "automation-1",
+        "automation_slack_reply": route,
+        "source_context": {"slack_thread": {"channel_id": "COTHER001", "thread_ts": "9.0"}},
+    }
+    config: dict[str, object] = {
+        "source": "schedule",
+        "schedule_id": "automation-1",
+        "thread_id": "automation-thread",
+        "automation_slack_reply": route,
+        "slack_thread": {"channel_id": "COTHER001", "thread_ts": "9.0"},
+    }
+    if refusal in {"missing", "ask"}:
+        config.pop("automation_slack_reply")
+        if refusal == "ask":
+            config.update(slack_ask=True, slack_by_the_way_thread_ts="9.0")
+    elif refusal == "malformed":
+        config["automation_slack_reply"] = {"channel_id": "DOTHER001", "thread_ts": "9.0"}
+    elif refusal == "redirected":
+        config["automation_slack_reply"] = {"channel_id": "COTHER001", "thread_ts": "9.0"}
+    elif refusal == "human":
+        config["github_login"] = "alice"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: {"configurable": config})
+    monkeypatch.setattr(
+        schedules.THREADS, "get", AsyncMock(return_value=SimpleNamespace(metadata=metadata))
+    )
+    monkeypatch.setattr(
+        schedules,
+        "get_agent_schedule",
+        AsyncMock(return_value=None if refusal == "deleted" else {"id": "automation-1"}),
+    )
+    channel = delivery.SlackChannel.from_payload(
+        {
+            "id": route["channel_id"],
+            "is_member": refusal != "not-member",
+            "is_ext_shared": refusal == "external",
+            "is_pending_ext_shared": False,
+        }
+    )
+    load = AsyncMock(return_value=None if refusal == "unverified" else channel)
+    monkeypatch.setattr(delivery.SlackChannel, "load", load)
+    monkeypatch.setattr(
+        delivery,
+        "lookup_slack_thread_id",
+        AsyncMock(return_value="someone-else" if refusal == "owned" else None),
+    )
+    generic = AsyncMock(side_effect=AssertionError("Automation must not use mutable Slack routing"))
+    monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", generic)
+    mapping = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", mapping)
+    post = AsyncMock(return_value="171.2")
+    monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
+
+    result = await slack_reply_tool.slack_reply("Answer", "final")
+
+    assert result["success"] is (refusal is None)
+    generic.assert_not_awaited()
+    mapping.assert_not_awaited()
+    slack_reply_tool.restore_slack_thinking_status.assert_not_awaited()
+    if refusal is not None:
+        post.assert_not_awaited()
+    else:
+        assert post.await_args.args == ("C0ALERTS01", "171.1", "Answer")
+        assert post.await_args.kwargs["agent_thread_id"] == "automation-thread"
+        assert slack_reply_tool.SlackNotice.marks({"blocks": post.await_args.kwargs["blocks"]})
+        load.assert_awaited_once_with("C0ALERTS01", use_cache=False)
+
+
+@pytest.mark.parametrize(
+    "kind", ["options", "nested-button", "long", "empty-blocks", "oversized", "deleted-parent"]
+)
+async def test_automation_reply_preserves_notice_and_never_offers_continuation(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    route = {"channel_id": "C0ALERTS01", "thread_ts": "171.1"}
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "source": "schedule",
+                "thread_id": "automation-thread",
+                "automation_slack_reply": route,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        delivery.AutomationThreadDelivery,
+        "for_run",
+        AsyncMock(return_value=delivery.AutomationThreadDelivery(**route)),
+    )
+    post = AsyncMock(
+        return_value="171.2",
+        side_effect=SlackRequestError("thread_not_found") if kind == "deleted-parent" else None,
+    )
+    move = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", move)
+    message = "x" * 12_000 + "\n```\nx = 1\n```\n" * 60 if kind == "long" else "answer"
+    if kind == "oversized":
+        message = "x" * 40_001
+    result = await slack_reply_tool.slack_reply(
+        message,
+        "final",
+        options=["Continue"] if kind == "options" else None,
+        blocks=[{"type": "section", "accessory": {"type": "button", "action_id": "continue"}}]
+        if kind == "nested-button"
+        else []
+        if kind == "empty-blocks"
+        else None,
+    )
+    assert result["success"] is (kind in {"long", "empty-blocks"})
+    move.assert_not_awaited()
+    if kind in {"long", "empty-blocks"}:
+        posted_blocks = post.await_args.kwargs["blocks"]
+        assert slack_reply_tool.SlackNotice.marks({"blocks": posted_blocks})
+        assert len(posted_blocks) < slack_reply_tool.MESSAGE_MAX_BLOCKS
+        visible = "\n".join(block["text"]["text"] for block in posted_blocks[:-1])
+        assert "".join(visible.split()) == "".join(message.split())
+    elif kind != "deleted-parent":
+        post.assert_not_awaited()

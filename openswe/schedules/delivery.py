@@ -1,10 +1,4 @@
-"""Deliver an automation run's result to the person who created the automation, and nobody else.
-
-The destination comes from the automation's record, never from the run: a run
-can only reach its own creator, through the bot's DM with them, which also
-reaches their concierge conversation. The creator must still pass the login
-gate each time a run delivers.
-"""
+"""Authorize automation delivery to server-recorded Slack destinations."""
 
 import logging
 from dataclasses import dataclass
@@ -13,12 +7,18 @@ from typing import Final, Self
 from fastapi import HTTPException
 
 from openswe.dashboard.oauth import enforce_github_login_gate
-from openswe.run_config import RunConfig
-from openswe.schedules.store import authorized_schedule_run, record_run_error
+from openswe.run_config import AutomationSlackReply, RunConfig
+from openswe.schedules.store import (
+    authorized_schedule_run,
+    record_run_error,
+    schedule_thread_metadata,
+)
 from openswe.slack.blocks import MESSAGE_MAX_BLOCKS, block_payload, context, escape
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import convert_mentions_to_slack_format
 from openswe.slack.dm import post_dm
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 
@@ -28,12 +28,38 @@ _SLACK_TEXT_MAX_CHARS: Final = 40_000
 
 
 class DeliveryRefused(Exception):
-    """Why this run cannot deliver to its automation's creator, worded for the model."""
+    """Why this automation run cannot deliver, worded for the model."""
+
+
+class AutomationThreadDelivery(AutomationSlackReply):
+    """Authorize replies only to the automation event's saved Slack destination."""
+
+    @classmethod
+    async def for_run(cls, cfg: RunConfig) -> Self:
+        route = cfg.automation_slack_reply
+        metadata = await schedule_thread_metadata(cfg)
+        if (
+            route is None
+            or metadata is None
+            or metadata.get("schedule_id") != cfg.schedule_id
+            or metadata.get("automation_slack_reply") != route.model_dump(mode="json")
+            or await authorized_schedule_run(cfg) is None
+        ):
+            raise DeliveryRefused("This run has no authorized Slack automation reply destination.")
+        channel = await SlackChannel.load(route.channel_id, use_cache=False)
+        if channel is None or channel.id != route.channel_id or not channel.can_be_kitchen:
+            raise DeliveryRefused(
+                "The triggering Slack channel is no longer verified and readable."
+            )
+        owner = await lookup_slack_thread_id(route.channel_id, route.thread_ts)
+        if owner is not None and owner != cfg.thread_id:
+            raise DeliveryRefused("Another Robin conversation owns the triggering Slack thread.")
+        return cls.model_validate(route.model_dump())
 
 
 @dataclass(frozen=True)
 class CreatorDelivery:
-    """The one place an automation run may send its result: a DM to the automation's creator."""
+    """An automation result delivered only to its creator through their DM."""
 
     schedule_id: str
     schedule_name: str

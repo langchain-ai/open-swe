@@ -18,6 +18,8 @@ Use `list_automations`, `create_automation`, `update_automation`, `trigger_autom
 Everyone in the workspace can inspect their setup and runs, but only admins can change or test them.
 Read the current automation before updating it, pass only fields that should change, and confirm before deleting.
 An automation fires on any of its `triggers`, each with its own filters: `{"kind": "schedule", "cron": ...}` runs on five UTC cron fields, `{"kind": "github", "repo": ..., "events": [...]}` runs on issue and pull request events in that repo (optional `head_branches_exclude` and `base_branches` globs on a pull request's branches), `{"kind": "slack", "channel": ..., "events": ["message.posted"]}` runs on new messages in a Slack channel Robin is in (optional `senders`, `match` regex, `max_runs_per_hour`), and `{"kind": "linear", "team": ..., "events": ["issue.created", "issue.labeled", "issue.accepted"]}` runs on issue events in a Linear team (optional `labels`, `project`, `max_runs_per_hour`).
+Slack-triggered runs can answer the original triggering post with `slack_reply`; the server fixes its destination without binding the channel.
+Options and automatic continuation on later human replies are not supported.
 Only GitHub triggers name a repository; say in the prompt which repository other runs should work in.
 An automation keeps the GitHub identity of the admin who created it for repository access; `admin_thread` capabilities remain active only while that creator is still a configured admin.
 
