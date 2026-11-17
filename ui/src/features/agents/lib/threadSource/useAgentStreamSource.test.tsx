@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, renderHook } from "@testing-library/react"
+import { AIMessage, HumanMessage } from "@langchain/core/messages"
+import type { BaseMessage } from "@langchain/core/messages"
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { AgentsApiError } from "@/features/agents/lib/api"
 import type { AgentStream } from "@/features/agents/lib/stream/connection"
@@ -10,9 +12,10 @@ import { useAgentStreamSource } from "./useAgentStreamSource"
 
 const accepted = vi.fn<() => Promise<RunAcceptance>>()
 const stream = {
-  messages: [],
+  messages: [] as Array<BaseMessage>,
   toolCalls: [],
   isLoading: false,
+  isThreadLoading: false,
   submit: vi.fn<AgentStream["submit"]>(),
 }
 
@@ -38,6 +41,7 @@ vi.mock("@/features/agents/lib/transcript/api", async (importOriginal) => ({
 beforeEach(() => {
   accepted.mockReset()
   stream.submit.mockReset()
+  stream.messages = []
   stream.isLoading = false
   vi.mocked(postRunStart).mockReset()
 })
@@ -133,3 +137,44 @@ it.each([
     expect(stream.submit.mock.calls[0]?.[1]?.multitaskStrategy).toBe(strategy)
   }
 )
+
+const turns = (count: number, thread = "a") =>
+  Array.from({ length: count }, (_, turn) => [
+    new HumanMessage({ id: `${thread}-ask-${turn}`, content: `Ask ${turn}` }),
+    new AIMessage({
+      id: `${thread}-answer-${turn}`,
+      content: `Answer ${turn}`,
+    }),
+  ]).flat()
+
+function renderWindow() {
+  const hook = renderHook(() => useAgentStreamSource("thread-1"))
+  const shown = () => {
+    const source = hook.result.current
+    const rows = source.messages.slice(source.shownFrom)
+    return [rows[0]?.id, rows.at(-1)?.id, source.hasOlder]
+  }
+  return { ...hook, shown }
+}
+
+it("shows the newest 40 turns, grows as turns arrive, and reveals 40 older at a time", () => {
+  stream.messages = turns(90)
+  const { result, rerender, shown } = renderWindow()
+  expect(shown()).toEqual(["a-ask-50", "a-answer-89", true])
+
+  stream.messages = turns(91)
+  rerender()
+  expect(shown()).toEqual(["a-ask-50", "a-answer-90", true])
+
+  act(() => result.current.loadOlder())
+  expect(shown()).toEqual(["a-ask-10", "a-answer-90", true])
+  act(() => result.current.loadOlder())
+  expect(shown()).toEqual(["a-ask-0", "a-answer-90", false])
+})
+
+it("shows every turn at once when asked, as find does", () => {
+  stream.messages = turns(90)
+  const { result, shown } = renderWindow()
+  act(() => result.current.loadAllOlder?.())
+  expect(shown()).toEqual(["a-ask-0", "a-answer-89", false])
+})

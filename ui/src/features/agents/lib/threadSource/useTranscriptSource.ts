@@ -79,6 +79,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       settledRunId,
       threadId,
       messages: transcript.messages,
+      shownFrom: 0,
       queued: transcript.queued,
       isRunning: transcript.isRunning,
       isHydrating: transcript.isHydrating,

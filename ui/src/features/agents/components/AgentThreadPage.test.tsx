@@ -16,7 +16,11 @@ import type { Message } from "@/features/agents/lib/types"
 import { setUseStreamPreference } from "@/lib/streamPreference"
 
 const messageLoad = vi.hoisted(() => ({ failed: false }))
-const stream = vi.hoisted(() => ({ messages: [] as Array<Message>, mounts: 0 }))
+const stream = vi.hoisted(() => ({
+  messages: [] as Array<Message>,
+  shownFrom: 0,
+  mounts: 0,
+}))
 
 vi.mock("@/features/agents/components/AgentThreadView", () => ({
   ConversationLoading: () => (
@@ -61,6 +65,7 @@ vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", async () => {
     useThreadSource: () => ({
       kind: "stream",
       messages: stream.messages,
+      shownFrom: stream.shownFrom,
       isHydrating: false,
       isRunning: false,
     }),
@@ -102,6 +107,7 @@ afterEach(() => {
   client.clear()
   messageLoad.failed = false
   stream.messages = []
+  stream.shownFrom = 0
   stream.mounts = 0
   window.localStorage.clear()
   document.title = "Robin"
@@ -224,6 +230,24 @@ describe("AgentThreadPage", () => {
 
     expect(screen.getByText("Fix web title")).toBeTruthy()
     expect(stream.mounts).toBe(1)
+  })
+
+  it("shows only the newest turns the stream source shows while the summary loads", () => {
+    setUseStreamPreference(true)
+    vi.mocked(useAgentThread).mockReturnValue(awaitingSummary as never)
+    stream.messages = [
+      {
+        ...answer,
+        id: "older",
+        chunks: [{ kind: "text", text: "Older turn" }],
+      },
+      answer,
+    ]
+    stream.shownFrom = 1
+    render(<AgentThreadPage threadId="thread-1" />, { wrapper })
+
+    expect(screen.getByText("The title now updates on rename.")).toBeTruthy()
+    expect(screen.queryByText("Older turn")).toBeNull()
   })
 
   it("keeps reading the thread when a subagent opens before the summary arrives", () => {

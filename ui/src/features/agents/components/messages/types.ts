@@ -16,6 +16,8 @@ export interface ApprovalCallbacks {
 export interface LoadEarlier {
   loading: boolean
   onLoadEarlier: () => void
+  /** Shows every earlier turn at once, so find and a remembered position reach them. Only when they're already loaded. */
+  onLoadAll?: () => void
 }
 
 export type MessagesScrollControl = {
@@ -26,6 +28,8 @@ export type MessagesScrollControl = {
 
 export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
+  /** The whole thread when `messages` holds only its newest turns, for what must see every turn: review drafts and approval cards. */
+  transcript?: Array<Message>
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
   /** Identity for remembering the scroll position across navigation. */

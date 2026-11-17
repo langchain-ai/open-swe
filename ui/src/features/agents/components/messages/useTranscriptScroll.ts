@@ -62,6 +62,14 @@ function messageElement(
   )
 }
 
+/** The first message rendered, which changes once an older page lands. */
+function oldestMessageId(scroller: HTMLElement): string | null {
+  return (
+    scroller.querySelector<HTMLElement>("[data-message-id]")?.dataset
+      .messageId ?? null
+  )
+}
+
 /** The offset that puts a message at the top, as far down as the first one sits. */
 function pinTarget(scroller: HTMLElement, message: HTMLElement): number {
   const gap =
@@ -116,7 +124,11 @@ interface ScrollState {
    * Geometry captured when an older page was asked for, so the content the
    * user is reading can be put back under their eyes once it prepends.
    */
-  prependAnchor: { scrollHeight: number; scrollTop: number } | null
+  prependAnchor: {
+    scrollHeight: number
+    scrollTop: number
+    oldest: string | null
+  } | null
   /**
    * The message the user last sent that has rendered. Space is reserved below
    * it so it can sit at the top of the viewport while the reply fills in.
@@ -335,17 +347,18 @@ export function useTranscriptScroll({
 
   /**
    * Put the reader back where they were after an older page prepended: the
-   * content above them grew by exactly the difference in scroll height, so
-   * adding it to their offset leaves the same pixels on screen.
+   * content above them changed by exactly the difference in scroll height, so
+   * adding it to their offset leaves the same pixels on screen. The page has
+   * landed when the oldest message changes, even if it only grew a folded
+   * stretch and the height didn't change; waiting for growth instead would
+   * apply this to whatever grows next.
    */
   const restoreAfterPrepend = useCallback(
     (el: HTMLElement): boolean => {
       const anchor = state.current.prependAnchor
-      if (!anchor) return false
-      const grown = el.scrollHeight - anchor.scrollHeight
-      if (grown <= 0) return false
+      if (!anchor || oldestMessageId(el) === anchor.oldest) return false
       state.current.prependAnchor = null
-      el.scrollTop = anchor.scrollTop + grown
+      el.scrollTop = anchor.scrollTop + el.scrollHeight - anchor.scrollHeight
       settle(el, el.scrollTop)
       state.current.readingPosition = transcriptPositions.capture(el, false)
       return true
@@ -369,15 +382,17 @@ export function useTranscriptScroll({
     [settle]
   )
 
-  /** Ask for an older page while it may still hold the remembered message. */
+  /**
+   * Ask for an older page while it may still hold the remembered message, or
+   * for every older turn when the source already holds them.
+   */
   const awaitHistory = useCallback(
     (el: HTMLElement, position: TranscriptPosition): boolean => {
       if (!loadEarlier || transcriptPositions.target(el, position) !== null)
         return false
       if (loadEarlier.loading) return true
       const restore = history.current
-      const oldest =
-        el.querySelector<HTMLElement>("[data-message-id]")?.dataset.messageId
+      const oldest = oldestMessageId(el)
       if (
         !oldest ||
         oldest === restore.from ||
@@ -387,7 +402,8 @@ export function useTranscriptScroll({
       restore.from = oldest
       restore.pages += 1
       if (restore.baseHeight === null) restore.baseHeight = el.scrollHeight
-      loadEarlier.onLoadEarlier()
+      const load = loadEarlier.onLoadAll ?? loadEarlier.onLoadEarlier
+      load()
       return true
     },
     [loadEarlier]
@@ -460,6 +476,7 @@ export function useTranscriptScroll({
     state.current.prependAnchor = {
       scrollHeight: el.scrollHeight,
       scrollTop: el.scrollTop,
+      oldest: oldestMessageId(el),
     }
   }, [])
 

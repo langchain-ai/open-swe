@@ -35,8 +35,13 @@ export interface ThreadRunInput {
 
 interface ThreadSourceShared {
   threadId: string
-  /** The transcript, as rows the message renderers understand. */
+  /** The transcript this client holds, as rows the message renderers understand. */
   messages: Array<Message>
+  /**
+   * The view renders `messages` from this index on. A source that holds a long
+   * thread whole paints only its newest turns; `loadOlder` moves this back.
+   */
+  shownFrom: number
   /**
    * Follow-ups queued behind the live run, oldest first. Server truth: they
    * survive a reload and show in every tab. Empty for sources without a queue.
@@ -63,14 +68,16 @@ interface ThreadSourceShared {
   /** Cancel the live run. Resolves with whether the server accepted it. */
   stop: () => Promise<boolean>
   /**
-   * The thread has turns older than the window that is loaded. Sources that
-   * always hold the whole thread report false and a `loadOlder` that does
-   * nothing, so a reader never has to branch on `kind`.
+   * The thread has turns older than the ones shown. Sources that always show
+   * the whole thread report false and a `loadOlder` that does nothing, so a
+   * reader never has to branch on `kind`.
    */
   hasOlder: boolean
   isLoadingOlder: boolean
-  /** Load the next page of older turns. A no-op while one is in flight. */
+  /** Show the next page of older turns. A no-op while one is in flight. */
   loadOlder: () => void
+  /** Show every older turn at once, offered only by a source that holds them all. */
+  loadAllOlder?: () => void
 }
 
 /** The thread is served by the SDK's `useStream`. */

@@ -229,12 +229,13 @@ function AgentThreadContent({
 function AgentThreadAwaitingSummary({ threadId }: { threadId: string }) {
   const embedded = useContext(EmbeddedThreadContext)
   const source = useThreadSource()
-  const shown = source.messages.length > 0 ? source.messages : null
+  const shown =
+    source.messages.length > 0 ? source.messages.slice(source.shownFrom) : null
 
   useEffect(() => {
     if (!source.isHydrating) threadHydrated(threadId)
   }, [source.isHydrating, threadId])
-  useThreadTranscriptPaint(threadId, shown, source.kind)
+  useThreadTranscriptPaint(threadId, shown, source.kind, source.hasOlder)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -249,10 +250,20 @@ function AgentThreadAwaitingSummary({ threadId }: { threadId: string }) {
         {shown ? (
           <Messages
             messages={shown}
+            transcript={source.messages}
             threadId={threadId}
             scrollKey={threadId}
             isStreaming={source.isRunning}
             contentWidthClass="max-w-3xl"
+            loadEarlier={
+              source.hasOlder
+                ? {
+                    loading: source.isLoadingOlder,
+                    onLoadEarlier: source.loadOlder,
+                    onLoadAll: source.loadAllOlder,
+                  }
+                : null
+            }
           />
         ) : (
           <ConversationLoading />

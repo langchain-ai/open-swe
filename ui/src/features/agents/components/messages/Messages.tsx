@@ -125,6 +125,7 @@ function quietStretchTriggers(stretch: QuietStretch): string | undefined {
 
 export const Messages = memo(function MessagesComponent({
   messages,
+  transcript = messages,
   threadId,
   scrollKey,
   showPlanArtifact = false,
@@ -167,9 +168,14 @@ export const Messages = memo(function MessagesComponent({
   } = useTranscriptScroll({ scrollKey, messages, isStreaming, loadEarlier })
 
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const loadAll = loadEarlier?.onLoadAll
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
+  )
+  const visibleTranscript = useMemo(
+    () => transcript.filter((message) => !message.hidden),
+    [transcript]
   )
   const renderableMessageIds = new Set(
     visibleMessages
@@ -304,6 +310,14 @@ export const Messages = memo(function MessagesComponent({
           key={scrollKey ?? threadId}
           root={transcriptRef}
           hasEarlier={Boolean(loadEarlier)}
+          onOpen={
+            loadAll
+              ? () => {
+                  capturePrependAnchor()
+                  loadAll()
+                }
+              : undefined
+          }
         />
         <div
           data-transcript-scroll
@@ -378,7 +392,7 @@ export const Messages = memo(function MessagesComponent({
                 )
               })}
             </div>
-            <ReviewChatActions messages={visibleMessages} />
+            <ReviewChatActions messages={visibleTranscript} />
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} onOpen={onOpenArtifact} />
             )}
@@ -387,7 +401,7 @@ export const Messages = memo(function MessagesComponent({
                 threadId={threadId}
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
                 latestUserMessageAt={
-                  visibleMessages.findLast(
+                  visibleTranscript.findLast(
                     (message) =>
                       message.author === "user" &&
                       message.structuredSenderKind !== "system" &&

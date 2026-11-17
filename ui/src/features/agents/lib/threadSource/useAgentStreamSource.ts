@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useSubmissionQueue } from "@langchain/react"
 
 import { latestContextUsage } from "@/features/agents/lib/contextUsage"
@@ -18,6 +18,9 @@ import { perfNow } from "@/lib/perf/trace"
 import { useSession } from "@/lib/session"
 import { useCancelRun } from "./useCancelRun"
 import type { StreamThreadSource, ThreadRunInput } from "./types"
+
+/** Turns a long thread paints at first and per "Load earlier", as the transcript view pages them. */
+const TURN_PAGE_SIZE = 40
 
 /** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
@@ -116,14 +119,42 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     [stream.messages]
   )
 
-  // `useStream` hydrates the whole thread in one go; there is no older page.
-  const loadOlder = useCallback(() => {}, [])
+  // `useStream` holds the whole thread, but rendering every row is what makes a
+  // long thread slow to open, so the view starts at the newest turns. Once the
+  // thread has loaded, the window is pinned to its first row (null: the
+  // thread's start), so it grows as turns arrive instead of sliding away from
+  // the reader.
+  const [firstRow, setFirstRow] = useState<string | null>()
+  // A turn is the prompts since the last answer, then the answer.
+  const turnStarts = messages.flatMap((message, index) =>
+    index === 0 ||
+    (message.author !== "agent" && messages[index - 1]?.author === "agent")
+      ? [index]
+      : []
+  )
+  const pinned =
+    firstRow === undefined
+      ? -1
+      : firstRow === null
+        ? 0
+        : messages.findIndex((message) => message.id === firstRow)
+  const shownFrom = pinned >= 0 ? pinned : (turnStarts.at(-TURN_PAGE_SIZE) ?? 0)
+  const showFrom = (index: number) =>
+    setFirstRow(index > 0 ? (messages[index]?.id ?? null) : null)
+  if (pinned < 0 && !stream.isThreadLoading && messages.length > 0)
+    showFrom(shownFrom)
+  const loadOlder = () =>
+    showFrom(
+      turnStarts.filter((index) => index < shownFrom).at(-TURN_PAGE_SIZE) ?? 0
+    )
+  const loadAllOlder = useCallback(() => setFirstRow(null), [])
 
   return {
     kind: "stream",
     stream,
     threadId,
     messages,
+    shownFrom,
     queued,
     cancelQueued: cancelSubmission,
     isRunning: stream.isLoading,
@@ -136,8 +167,9 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     contextUsage,
     startRun,
     stop,
-    hasOlder: false,
+    hasOlder: shownFrom > 0,
     isLoadingOlder: false,
     loadOlder,
+    loadAllOlder,
   }
 }

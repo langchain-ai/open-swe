@@ -730,6 +730,10 @@ export function AgentThreadView({
     () => [...baseMessages, ...pendingMessages],
     [baseMessages, pendingMessages]
   )
+  const shownMessages = useMemo(
+    () => visibleMessages.slice(source.shownFrom),
+    [source.shownFrom, visibleMessages]
+  )
   // An optimistic row has done its job once the transcript or the queue holds
   // its id. Dropping it then keeps a withdrawn queued turn from resurfacing it
   // as "Sending" after the transcript hides that turn.
@@ -802,9 +806,18 @@ export function AgentThreadView({
   const loadEarlier = useMemo<LoadEarlier | null>(
     () =>
       source.hasOlder
-        ? { loading: source.isLoadingOlder, onLoadEarlier: source.loadOlder }
+        ? {
+            loading: source.isLoadingOlder,
+            onLoadEarlier: source.loadOlder,
+            onLoadAll: source.loadAllOlder,
+          }
         : null,
-    [source.hasOlder, source.isLoadingOlder, source.loadOlder]
+    [
+      source.hasOlder,
+      source.isLoadingOlder,
+      source.loadOlder,
+      source.loadAllOlder,
+    ]
   )
   const isThinking = sourceRunning
   const settingUpSandbox = source.isRunning && baseMessages.length === 0
@@ -838,8 +851,9 @@ export function AgentThreadView({
 
   useThreadTranscriptPaint(
     thread.id,
-    isHydrating ? null : visibleMessages,
-    source.kind
+    isHydrating ? null : shownMessages,
+    source.kind,
+    source.hasOlder
   )
 
   return (
@@ -999,7 +1013,8 @@ export function AgentThreadView({
                   }
                 >
                   <Messages
-                    messages={visibleMessages}
+                    messages={shownMessages}
+                    transcript={visibleMessages}
                     threadId={thread.id}
                     scrollKey={thread.id}
                     showPlanArtifact={Boolean(thread.planStatus)}

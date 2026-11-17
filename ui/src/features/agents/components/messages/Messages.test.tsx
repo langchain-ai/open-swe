@@ -34,8 +34,19 @@ vi.stubGlobal(
 )
 
 vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
-  WorkflowApprovalCard: ({ threadId }: { threadId: string }) => (
-    <div data-testid="workflow-approval-card">Approval for {threadId}</div>
+  WorkflowApprovalCard: ({
+    threadId,
+    latestUserMessageAt,
+  }: {
+    threadId: string
+    latestUserMessageAt?: string
+  }) => (
+    <div
+      data-testid="workflow-approval-card"
+      data-latest-user-message-at={latestUserMessageAt}
+    >
+      Approval for {threadId}
+    </div>
   ),
 }))
 
@@ -1447,5 +1458,32 @@ describe("Messages", () => {
     expect(screen.getByTestId("workflow-approval-card").textContent).toBe(
       "Approval for thread-1"
     )
+  })
+
+  it("dates approval cards by the thread's newest user message, also when it's older than the turns shown", () => {
+    const ask: Message = {
+      id: "ask",
+      author: "user",
+      timestamp: "2026-11-17T10:00:00Z",
+      chunks: [{ kind: "text", text: "Ship it" }],
+    }
+    const answer: Message = {
+      id: "answer",
+      author: "agent",
+      timestamp: "2026-11-17T10:05:00Z",
+      chunks: [{ kind: "text", text: "Done" }],
+    }
+    render(
+      <Messages
+        threadId="thread-1"
+        messages={[answer]}
+        transcript={[ask, answer]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    expect(
+      screen.getByTestId("workflow-approval-card").dataset.latestUserMessageAt
+    ).toBe("2026-11-17T10:00:00Z")
   })
 })

@@ -41,6 +41,7 @@ describe("thread load span", () => {
     threadTranscriptPainted(THREAD_A, {
       messages: 7,
       chunks: 21,
+      hasOlder: false,
       threadSource: "transcript",
     })
 
@@ -74,6 +75,7 @@ describe("thread load span", () => {
     threadTranscriptPainted(THREAD_A, {
       messages: 1,
       chunks: 1,
+      hasOlder: false,
       threadSource: "stream",
     })
     onRouterNavigation(`/agents/${THREAD_B}`, `/assistant/${THREAD_A}`)
@@ -81,6 +83,7 @@ describe("thread load span", () => {
     threadTranscriptPainted(THREAD_B, {
       messages: 1,
       chunks: 1,
+      hasOlder: false,
       threadSource: "stream",
     })
 
@@ -114,6 +117,7 @@ describe("thread load span", () => {
     threadTranscriptPainted(THREAD_B, {
       messages: 3,
       chunks: 3,
+      hasOlder: false,
       threadSource: "stream",
     })
 

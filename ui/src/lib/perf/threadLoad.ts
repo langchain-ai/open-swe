@@ -158,8 +158,11 @@ export function threadTranscriptBuilt(
 export function threadTranscriptPainted(
   threadId: string,
   attributes: {
+    /** Rows and chunks painted, which on a long thread are its newest turns only. */
     messages: number
     chunks: number
+    /** The thread has turns older than those painted: the long threads, in either view. */
+    hasOlder: boolean
     threadSource: PerfThreadSource
   }
 ): void {
@@ -169,6 +172,7 @@ export function threadTranscriptPainted(
   span.end({
     messages: attributes.messages,
     chunks: attributes.chunks,
+    has_older: attributes.hasOlder,
     thread_source: attributes.threadSource,
   })
   active = null
@@ -178,12 +182,14 @@ export function threadTranscriptPainted(
  * Ends the span on the transcript's first frame: one rAF after the commit that
  * put `shown` on screen. A commit before the frame fires cancels and
  * reschedules it, so the frame recorded is the one that actually reached the
- * screen. `shown` is null until there is a transcript to show.
+ * screen. `shown` is null until there is a transcript to show, and `hasOlder`
+ * says the thread has turns before it.
  */
 export function useThreadTranscriptPaint(
   threadId: string,
   shown: ReadonlyArray<{ chunks: ReadonlyArray<unknown> }> | null,
-  threadSource: PerfThreadSource
+  threadSource: PerfThreadSource,
+  hasOlder: boolean
 ): void {
   const paintedThreadId = useRef<string | null>(null)
   useLayoutEffect(() => {
@@ -192,10 +198,15 @@ export function useThreadTranscriptPaint(
     const chunks = shown.reduce((sum, m) => sum + m.chunks.length, 0)
     const frame = requestAnimationFrame(() => {
       paintedThreadId.current = threadId
-      threadTranscriptPainted(threadId, { messages, chunks, threadSource })
+      threadTranscriptPainted(threadId, {
+        messages,
+        chunks,
+        hasOlder,
+        threadSource,
+      })
     })
     return () => cancelAnimationFrame(frame)
-  }, [shown, threadId, threadSource])
+  }, [hasOlder, shown, threadId, threadSource])
 }
 
 /** Test hook. */
